@@ -25,23 +25,28 @@ import service
 
 ATT_VERSION = 5
 
+
 class pcInfo(ctypes.Structure):
-    _fields_ = [
-        ("addr", c_uint64),
-        ("marker_id", c_uint64)
-    ]
+    _fields_ = [("addr", c_uint64), ("marker_id", c_uint64)]
+
     def to_v2_pc(self):
         if self.marker_id == 0:
             return self.addr
-        return self.addr | (self.marker_id<<service.ID_OFFSET) | (1<<service.HEADER_OFFSET)
+        return (
+            self.addr
+            | (self.marker_id << service.ID_OFFSET)
+            | (1 << service.HEADER_OFFSET)
+        )
+
 
 class TraceData(ctypes.Structure):
     _fields_ = [
         ("type", c_uint64, 8),
         ("hitcount", c_uint64, 56),
         ("latency", c_uint64),
-        ("pc", pcInfo)
+        ("pc", pcInfo),
     ]
+
 
 class TraceDataTranslated:
     def __init__(self, inst):
@@ -51,10 +56,14 @@ class TraceDataTranslated:
         if self.type == stitch.PCINFO:
             self.cycles = inst.pc.to_v2_pc()
 
+
 class Trace:
     def __init__(self, traceid, tracesize, instructions_array):
-        self.instructions = [TraceDataTranslated(instructions_array[k]) for k in range(tracesize)]
+        self.instructions = [
+            TraceDataTranslated(instructions_array[k]) for k in range(tracesize)
+        ]
         self.traceid = traceid
+
 
 class PerfEvent(ctypes.Structure):
     _fields_ = [
@@ -80,41 +89,43 @@ class PerfEvent(ctypes.Structure):
 
 
 class CodeWrapped(ctypes.Structure):
-    """ Matches CodeWrapped on the python side """
-    _fields_ = [('line', ctypes.c_char_p),
-                ('loc', ctypes.c_char_p),
-                ('to_line', ctypes.c_int),
-                ('value', ctypes.c_int),
-                ('index', ctypes.c_int),
-                ('line_num', ctypes.c_int),
-                ('addr', ctypes.c_int64)]
+    """Matches CodeWrapped on the python side"""
+
+    _fields_ = [
+        ("line", ctypes.c_char_p),
+        ("loc", ctypes.c_char_p),
+        ("to_line", ctypes.c_int),
+        ("value", ctypes.c_int),
+        ("index", ctypes.c_int),
+        ("line_num", ctypes.c_int),
+        ("addr", ctypes.c_int64),
+    ]
 
 
 class KvPair(ctypes.Structure):
-    """ Matches pair<int, int> = (key, value) on the python side """
-    _fields_ = [('key', ctypes.c_int),
-               ('value', ctypes.c_int)]
+    """Matches pair<int, int> = (key, value) on the python side"""
+
+    _fields_ = [("key", ctypes.c_int), ("value", ctypes.c_int)]
 
 
 class ReturnAssemblyInfo(ctypes.Structure):
-    """ Matches ReturnAssemblyInfo on the python side """
-    _fields_ = [('code', POINTER(CodeWrapped)),
-                ('jumps', POINTER(KvPair)),
-                ('code_len', ctypes.c_int),
-                ('jumps_len', ctypes.c_int)]
+    """Matches ReturnAssemblyInfo on the python side"""
+
+    _fields_ = [
+        ("code", POINTER(CodeWrapped)),
+        ("jumps", POINTER(KvPair)),
+        ("code_len", ctypes.c_int),
+        ("jumps_len", ctypes.c_int),
+    ]
 
 
 class WaveState(ctypes.Structure):
-    _fields_ = [
-        ("type", c_int32),
-        ("duration", c_int32)
-    ]
+    _fields_ = [("type", c_int32), ("duration", c_int32)]
+
 
 class WaveInstruction(ctypes.Structure):
-    _fields_ = [
-        ("time", c_int64),
-        ("duration", c_int64)
-    ]
+    _fields_ = [("time", c_int64), ("duration", c_int64)]
+
 
 class Wave(ctypes.Structure):
     _fields_ = [
@@ -122,7 +133,6 @@ class Wave(ctypes.Structure):
         ("wave_id", ctypes.c_uint8),
         ("trap_status", ctypes.c_uint8),
         ("reserved", ctypes.c_uint8),
-
         # total VMEM/FLAT/LDS/SMEM instructions issued
         # VMEM Pipeline: instrs and stalls
         ("num_vmem_instrs", ctypes.c_int),
@@ -142,7 +152,6 @@ class Wave(ctypes.Structure):
         ("num_branch_instrs", ctypes.c_int),
         ("num_branch_taken_instrs", ctypes.c_int),
         ("num_branch_stalls", ctypes.c_int),
-
         # total issued memory instructions
         ("num_mem_instrs", ctypes.c_int),
         # total valus insts and stalls
@@ -154,7 +163,6 @@ class Wave(ctypes.Structure):
         ("begin_time", ctypes.c_int64),
         ("end_time", ctypes.c_int64),
         ("traceid", ctypes.c_int64),
-
         ("timeline_size", ctypes.c_size_t),
         ("instructions_size", ctypes.c_size_t),
         ("timeline_array", POINTER(WaveState)),
@@ -171,13 +179,19 @@ class PythonWave:
                 pass
 
         self.timeline = [
-            (int(sourcew.timeline_array[k].type), int(sourcew.timeline_array[k].duration))
+            (
+                int(sourcew.timeline_array[k].type),
+                int(sourcew.timeline_array[k].duration),
+            )
             for k in range(self.timeline_size)
         ]
         self.timeline_array = None
 
         self.instructions = [
-            (int(sourcew.instructions_array[k].time), int(sourcew.instructions_array[k].duration))
+            (
+                int(sourcew.instructions_array[k].time),
+                int(sourcew.instructions_array[k].duration),
+            )
             for k in range(self.instructions_size)
         ]
         self.instructions_array = None
@@ -191,14 +205,12 @@ class ReturnInfo(ctypes.Structure):
         ("tracesizes", POINTER(ctypes.c_uint64)),
         ("traceIDs", POINTER(ctypes.c_int64)),
         ("tracedata", POINTER(POINTER(TraceData))),
-
         ("num_events", ctypes.c_uint64),
         ("perfevents", POINTER(PerfEvent)),
         ("occupancy", POINTER(ctypes.c_uint64)),
         ("num_occupancy", ctypes.c_uint64),
         ("kernel_id_addr", POINTER(pcInfo)),
         ("num_kernel_ids", ctypes.c_uint64),
-
         ("wavedata", POINTER(Wave)),
         ("num_waves", ctypes.c_uint64),
     ]
@@ -218,6 +230,7 @@ SO.AnalyseBinary.argtypes = [ctypes.c_char_p]
 SO.wrapped_parse_binary.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 SO.wrapped_parse_binary.restype = ReturnAssemblyInfo
 SO.FreeBinary.argtypes = [ctypes.c_uint64]
+
 
 def parse_binary(filename, kernel=None):
     if kernel is None or kernel == "":
@@ -241,8 +254,19 @@ def parse_binary(filename, kernel=None):
         loc = loc if len(loc) > 0 else None
 
         # asm, inst_type, addr, loc, index, line_num, hitcount, cycles
-        code.append([line, int(code_entry.value), to_line, loc, int(code_entry.index),
-                    int(code_entry.line_num), int(code_entry.addr), 0, 0])
+        code.append(
+            [
+                line,
+                int(code_entry.value),
+                to_line,
+                loc,
+                int(code_entry.index),
+                int(code_entry.line_num),
+                int(code_entry.addr),
+                0,
+                0,
+            ]
+        )
 
     jumps = {}
     for k in range(info.jumps_len):
@@ -257,14 +281,16 @@ def getWaves_binary(name):
 
     isValid = info.flags & 0x1
     if isValid == 0:
-        print('Invalid trace ', name)
+        print("Invalid trace ", name)
         return ([], [], [], [], None, [])
     flags = "navi" if (info.flags & 0x2) else "vega"
-    kernel_addr = [info.kernel_id_addr[k].to_v2_pc() for k in range(info.num_kernel_ids)]
+    kernel_addr = [
+        info.kernel_id_addr[k].to_v2_pc() for k in range(info.num_kernel_ids)
+    ]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
 
-    assert(((info.flags >> 3) & 0x1FFF == ATT_VERSION)) # Check ATT parser version
+    assert (info.flags >> 3) & 0x1FFF == ATT_VERSION  # Check ATT parser version
 
     traces_python = {}
     for T in range(info.num_traces):
@@ -279,15 +305,27 @@ def getWaves_binary(name):
 
     SO.FreeBinary(info.binaryID)
 
-    return (traces_python, waves_python, events, occupancy, flags, kernel_addr, info.flags & 0x4)
+    return (
+        traces_python,
+        waves_python,
+        events,
+        occupancy,
+        flags,
+        kernel_addr,
+        info.flags & 0x4,
+    )
 
 
-def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto, codeobjservice):
+def getWaves_stitch(
+    traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto, codeobjservice
+):
     for id in traces.keys():
-        traces[id].instructions = stitch.stitch(traces[id].instructions, code, jumps, flags, bIsAuto, codeobjservice)
+        traces[id].instructions = stitch.stitch(
+            traces[id].instructions, code, jumps, flags, bIsAuto, codeobjservice
+        )
         if len(code) > hitcount_map.size:
-            hitcount_map = np.pad(hitcount_map, [0,len(code)-hitcount_map.size])
-            latency_map = np.pad(latency_map, [0,len(code)-latency_map.size])
+            hitcount_map = np.pad(hitcount_map, [0, len(code) - hitcount_map.size])
+            latency_map = np.pad(latency_map, [0, len(code) - latency_map.size])
         if traces[id].instructions is not None:
             for inst in traces[id].instructions[0]:
                 hitcount_map[inst.asmline] += inst.num_waves
@@ -345,7 +383,7 @@ def persist(trace_file, SIMD, traces):
                 insts.append((t[0], v.type, 0, t[1], v.asmline))
                 cc += 1
         except:
-            pass # Incomplete waves
+            pass  # Incomplete waves
         instructions.append((insts,) + traces[wave.traceid].instructions[1:-1])
 
     df = {
@@ -438,24 +476,26 @@ def insert_waitcnt(flight_count, assembly_code):
 
 
 def gen_timelines(DBFILES):
-    TIMELINES = [np.zeros(int(1E6), dtype=np.float32) for k in range(5)]
+    TIMELINES = [np.zeros(int(1e6), dtype=np.float32) for k in range(5)]
     TIME_RESOLUTION = 16
     for df in DBFILES:
         for T in range(len(df["timeline"])):
             timeline = df["timeline"][T]
             time_acc = 0
-            tuples3 = [(0, df["begin_time"][T])] + [(int(t[0]), int(t[1])) for t in timeline]
+            tuples3 = [(0, df["begin_time"][T])] + [
+                (int(t[0]), int(t[1])) for t in timeline
+            ]
 
             for state in tuples3:
-                t_end = (time_acc + state[1])//TIME_RESOLUTION
-                if t_end > 1E8:
+                t_end = (time_acc + state[1]) // TIME_RESOLUTION
+                if t_end > 1e8:
                     print("Warning: Time limit reached for ", state[0], state[1])
                     break
                 elif t_end > TIMELINES[state[0]].size:
                     TIMELINES[state[0]] = np.hstack(
                         [TIMELINES[state[0]], np.zeros_like(TIMELINES[state[0]])]
                     )
-                TIMELINES[state[0]][time_acc//TIME_RESOLUTION : t_end] += 1
+                TIMELINES[state[0]][time_acc // TIME_RESOLUTION : t_end] += 1
                 time_acc += state[1]
     return TIMELINES
 
@@ -472,9 +512,14 @@ if __name__ == "__main__":
         "--trace_file", help="Filter for trace files", default=None, type=str
     )
     parser.add_argument(
-        "--att_kernel", help="Kernel file", type=str, default=os.path.join(pathenv, "*_kernel.txt")
+        "--att_kernel",
+        help="Kernel file",
+        type=str,
+        default=os.path.join(pathenv, "*_kernel.txt"),
     )
-    parser.add_argument("--ports", help="Server and websocket ports, default: 8000,18000")
+    parser.add_argument(
+        "--ports", help="Server and websocket ports, default: 8000,18000"
+    )
     parser.add_argument(
         "--mode",
         help="""ATT analysis modes:\n
@@ -484,13 +529,13 @@ if __name__ == "__main__":
         default="off",
     )
     args = parser.parse_args()
-    args.mode = args.mode.lower().split(',')
+    args.mode = args.mode.lower().split(",")
 
     CSV_MODE = False
     FILE_MODE = False
-    if 'csv' in args.mode:
+    if "csv" in args.mode:
         CSV_MODE = True
-    if 'file' in args.mode:
+    if "file" in args.mode:
         FILE_MODE = True
 
     if not CSV_MODE and not FILE_MODE:
@@ -517,34 +562,42 @@ if __name__ == "__main__":
         quit()
 
     for att_kernel in att_kernel_list:
-        print('Parsing:', att_kernel)
+        print("Parsing:", att_kernel)
         att_kernel_f = []
-        with open(att_kernel, 'r') as f:
+        with open(att_kernel, "r") as f:
             for line in f:
-                att_kernel_f.append(line.split('\n')[0])
+                att_kernel_f.append(line.split("\n")[0])
 
         # returns element index of the file:// or memory:// filepath in the string
-        get_path_loc = lambda x: np.sum([len(m) for m in x.split(' ')[:3]])+3
+        get_path_loc = lambda x: np.sum([len(m) for m in x.split(" ")[:3]]) + 3
         # adds the OUTPUT_PATH env variable to a filepath if necessary
-        add_pathnv = lambda x: x[:get_path_loc(x)] + os.path.join(pathenv, x[get_path_loc(x):])
+        add_pathnv = lambda x: x[: get_path_loc(x)] + os.path.join(
+            pathenv, x[get_path_loc(x) :]
+        )
         # returns the memory address in the string
-        get_addr = lambda x: int(x.split(' ')[0][2:], 16)
+        get_addr = lambda x: int(x.split(" ")[0][2:], 16)
         # Sets a preference for 'file' paths to be added before 'memory' paths. Sorts by addr.
-        get_addr_preference = lambda x: [0 if 'file' in x[get_path_loc(x):] else 1<<60][0]
+        get_addr_preference = lambda x: [
+            0 if "file" in x[get_path_loc(x) :] else 1 << 60
+        ][0]
 
         # Get the GPU id in the string
-        gpu_id = int(att_kernel_f[0].split(' ')[2].split('GPU[')[1].split(']')[0])
+        gpu_id = int(att_kernel_f[0].split(" ")[2].split("GPU[")[1].split("]")[0])
         # Eliminame first line in the att_kernel txt file and adds the OUTPUT_PATH as needed
-        att_kernel_f = [add_pathnv(p) if '.out' == p[-4:] else p for p in att_kernel_f[1:]]
+        att_kernel_f = [
+            add_pathnv(p) if ".out" == p[-4:] else p for p in att_kernel_f[1:]
+        ]
         # Sorts the list of codeobj by address, with 'file' given preference
-        att_kernel_f = sorted(att_kernel_f, key=lambda x: get_addr(x)+get_addr_preference(x))
+        att_kernel_f = sorted(
+            att_kernel_f, key=lambda x: get_addr(x) + get_addr_preference(x)
+        )
         assembly_code = deepcopy(args.assembly_code)
 
         # Assembly parsing
         bIsAuto = False
-        if assembly_code.lower().strip() == 'auto':
+        if assembly_code.lower().strip() == "auto":
             bIsAuto = True
-            code = [['; Begin ATT ASM', 100, 0, '', 0, 0, 0, 0, 0]]
+            code = [["; Begin ATT ASM", 100, 0, "", 0, 0, 0, 0, 0]]
             jumps = []
         elif not Path(assembly_code).is_file():
             print("Invalid assembly_code('{0}')!".format(assembly_code))
@@ -563,7 +616,7 @@ if __name__ == "__main__":
             print("Could not find trace files for", att_kernel)
             continue
 
-        print('Att kernel:', att_kernel)
+        print("Att kernel:", att_kernel)
 
         DBFILES = []
         EVENTS = []
@@ -578,32 +631,45 @@ if __name__ == "__main__":
 
         gc.collect()
         if bIsAuto:
-            codeservice = service.CodeobjService(gpu_id, att_kernel_f, SO.classify_asm_line)
+            codeservice = service.CodeobjService(
+                gpu_id, att_kernel_f, SO.classify_asm_line
+            )
         else:
             codeservice = None
 
         for name in filenames:
-            traces, waves, perfevents, occupancy, gfxv, addrs, ftrace = getWaves_binary(name)
+            traces, waves, perfevents, occupancy, gfxv, addrs, ftrace = getWaves_binary(
+                name
+            )
             if gfxv is None:
                 continue
             if CSV_MODE == False and ftrace == 0:
-                print('Generating occupancy information')
+                print("Generating occupancy information")
 
             for id, addr in enumerate(addrs):
                 kernel_addr[id] = addr
             if len(occupancy) > 1:
-                OCCUPANCY.append( occupancy )
+                OCCUPANCY.append(occupancy)
                 occupancy_filenames.append(name)
 
-            if np.sum([0]+[len(s.instructions) for id, s in traces.items()]) == 0:
+            if np.sum([0] + [len(s.instructions) for id, s in traces.items()]) == 0:
                 print("No traces from", name)
                 continue
 
-            hitcount_map, latency_map = getWaves_stitch(traces, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto, codeservice)
+            hitcount_map, latency_map = getWaves_stitch(
+                traces,
+                code,
+                jumps,
+                gfxv,
+                latency_map,
+                hitcount_map,
+                bIsAuto,
+                codeservice,
+            )
 
             analysed_filenames.append(name)
             EVENTS.append(perfevents)
-            DBFILES.append( persist(name, waves, traces) )
+            DBFILES.append(persist(name, waves, traces))
             GFXV.append(gfxv)
 
         gc.collect()
@@ -614,25 +680,31 @@ if __name__ == "__main__":
                 code[k][-3] = codeservice.ToRawPC(code[k][-3])
             except:
                 pass
-            if k > 0 and code[k-1][-3] == 0:
-                code[k-1][-3] = code[k][-3]
+            if k > 0 and code[k - 1][-3] == 0:
+                code[k - 1][-3] = code[k][-3]
 
         if CSV_MODE:
             from att_to_csv import dump_csv
+
             dump_csv(code, trace_instance_name, bIsAuto)
 
         if FILE_MODE:
             try:
-                dispatchNames = {id: codeservice.getSymbolName(addr) for id, addr in kernel_addr.items()}
+                dispatchNames = {
+                    id: codeservice.getSymbolName(addr)
+                    for id, addr in kernel_addr.items()
+                }
             except:
-                dispatchNames = {id: "#addr"+str(addr) for id, addr in kernel_addr.items()}
+                dispatchNames = {
+                    id: "#addr" + str(addr) for id, addr in kernel_addr.items()
+                }
             drawinfo = {
                 "TIMELINES": gen_timelines(DBFILES),
                 "EVENTS": EVENTS,
                 "EVENT_NAMES": EVENT_NAMES,
                 "OCCUPANCY": OCCUPANCY,
                 "ShaderNames": occupancy_filenames,
-                "DispatchNames": dispatchNames
+                "DispatchNames": dispatchNames,
             }
             view_trace(
                 code,
@@ -641,5 +713,5 @@ if __name__ == "__main__":
                 0,
                 gfxv,
                 drawinfo,
-                trace_instance_name
+                trace_instance_name,
             )

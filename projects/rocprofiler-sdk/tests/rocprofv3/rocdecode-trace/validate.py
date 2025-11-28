@@ -81,7 +81,9 @@ def test_csv_data(csv_data):
     api_calls = []
 
     for row in csv_data:
-        assert "Domain" in row, "'Domain' was not present in csv data for rocdecode-trace"
+        assert (
+            "Domain" in row
+        ), "'Domain' was not present in csv data for rocdecode-trace"
         assert (
             "Function" in row
         ), "'Function' was not present in csv data for rocdecode-trace"

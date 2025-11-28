@@ -110,7 +110,7 @@ class RegisterWatchList:
 
     def setpc(self, line, inst_num):
         try:
-            src = line.split(' ')[1].strip()
+            src = line.split(" ")[1].strip()
             return deepcopy(self.registers[self.range(src)[0]])
         except:
             return -1
@@ -142,18 +142,26 @@ class RegisterWatchList:
         tokens = self.tokenize(line)
         try:
             if "v_readlane" in tokens[0]:
-                self.registers[tokens[1]] = deepcopy(self.registers[tokens[2]][int(tokens[3])])
+                self.registers[tokens[1]] = deepcopy(
+                    self.registers[tokens[2]][int(tokens[3])]
+                )
             elif "v_writelane" in tokens[0]:
-                self.registers[tokens[1]][int(tokens[3])] = deepcopy(self.registers[tokens[2]])
+                self.registers[tokens[1]][int(tokens[3])] = deepcopy(
+                    self.registers[tokens[2]]
+                )
         except:
             pass
 
     # Matches tokens in reverse order
     def try_match_swapped(self, i, line, increment):
         try:
-            return self.insts[i + 1].type == self.code[line][1] and self.insts[i].type == self.code[line + 1][1]
+            return (
+                self.insts[i + 1].type == self.code[line][1]
+                and self.insts[i].type == self.code[line + 1][1]
+            )
         except:
             return False
+
 
 # Translates PC values to instructions, for auto captured ISA
 class PCTranslator:
@@ -161,12 +169,16 @@ class PCTranslator:
         self.codeservice = codeservice
 
         self.insts = insts
-        self.addrmap = {c[-3] : (c, self.codeservice.GetInstruction(c[-3])[3]) for c in code if c[-3] > 0}
+        self.addrmap = {
+            c[-3]: (c, self.codeservice.GetInstruction(c[-3])[3])
+            for c in code
+            if c[-3] > 0
+        }
 
         self.code = code
         self.raw_code = raw_code
         self.reverse_map = reverse_map
-        self.jump_map = {c[-3] : self.getjump_loc(c) for c in code if c[1] == BRANCH}
+        self.jump_map = {c[-3]: self.getjump_loc(c) for c in code if c[1] == BRANCH}
 
     def jump(self, as_line):
         return self.jump_map[as_line[-3]]
@@ -180,7 +192,17 @@ class PCTranslator:
             symbol = "Unkown symbol at 0x" + hex(addr)
 
         last_line = self.raw_code[-1]
-        newline = ['; ' + symbol, DONT_KNOW, last_line[2], '', last_line[4], last_line[5], 0, 0, 0]
+        newline = [
+            "; " + symbol,
+            DONT_KNOW,
+            last_line[2],
+            "",
+            last_line[4],
+            last_line[5],
+            0,
+            0,
+            0,
+        ]
         self.raw_code.append(newline)
 
     def getcode(self, addr):
@@ -188,9 +210,19 @@ class PCTranslator:
             return self.addrmap[addr]
         except Exception as ex:
             new_inst = self.codeservice.GetInstruction(addr)
-            if new_inst and new_inst[3]: # Check returned size > 0
+            if new_inst and new_inst[3]:  # Check returned size > 0
                 last_line = self.raw_code[-1]
-                newline = [new_inst[1], new_inst[0], len(self.raw_code), new_inst[2], last_line[4]+1, last_line[5]+1, addr, 0, 0]
+                newline = [
+                    new_inst[1],
+                    new_inst[0],
+                    len(self.raw_code),
+                    new_inst[2],
+                    last_line[4] + 1,
+                    last_line[5] + 1,
+                    addr,
+                    0,
+                    0,
+                ]
                 if new_inst[0] == BRANCH:
                     self.jump_map[addr] = self.getjump_loc(newline)
                 self.addrmap[addr] = (newline, new_inst[3])
@@ -213,9 +245,10 @@ class PCTranslator:
 
     def getjump_loc(self, asm_line):
         try:
-            dest = int(asm_line[0].split(' ')[-1])
-            if dest >= 32768: dest -= 65536
-            return asm_line[-3] + 4*dest+4
+            dest = int(asm_line[0].split(" ")[-1])
+            if dest >= 32768:
+                dest -= 65536
+            return asm_line[-3] + 4 * dest + 4
         except:
             return -1
 
@@ -224,48 +257,58 @@ class PCTranslator:
 
     def try_translate(self, tok):
         pass
+
     def range(self, r):
         pass
+
     def tokenize(self, line):
         pass
+
     def getpc(self, line, next_line):
         pass
+
     def swappc(self, line, line_num, inst_index):
         try:
-            inst_pos = inst_index+1
+            inst_pos = inst_index + 1
             while self.insts[inst_pos].type != PCINFO:
                 inst_pos += 1
             return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
-            print('SWAPPC warning: Could not find addr for', inst_index, line)
+            print("SWAPPC warning: Could not find addr for", inst_index, line)
             return -1
+
     def setpc(self, line, inst_index):
         try:
-            inst_pos = inst_index+1
+            inst_pos = inst_index + 1
             while self.insts[inst_pos].type != PCINFO:
                 inst_pos += 1
             return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
-            print('SETPC warning: Could not find addr for', inst_index, line)
+            print("SETPC warning: Could not find addr for", inst_index, line)
             return -1
+
     def scratch(self, line):
         pass
+
     def move(self, line):
         pass
+
     def updatelane(self, line):
         pass
 
     # Matches tokens in reverse order
     def try_match_swapped(self, i, addr, increment):
         try:
-            return  self.insts[i + 1].type == self.getcode(addr)[0][1] and \
-                    self.insts[i].type == self.getcode(addr + increment)[0][1]
+            return (
+                self.insts[i + 1].type == self.getcode(addr)[0][1]
+                and self.insts[i].type == self.getcode(addr + increment)[0][1]
+            )
         except Exception as e:
             return False
 
 
 def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
-    bGFX9 = gfxv == 'vega'
+    bGFX9 = gfxv == "vega"
 
     result, i, loopCount = [], 0, defaultdict(int)
 
@@ -325,10 +368,10 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             firstinst = insts[0]
 
             if firstinst.type != PCINFO:
-                print('Warning: Waves without PCINFO')
+                print("Warning: Waves without PCINFO")
                 return None
             elif firstinst.cycles == 0:
-                print('Info: Some waves started before the trace')
+                print("Info: Some waves started before the trace")
                 return None
 
             watchlist = PCTranslator(insts, code, raw_code, reverse_map, codeservice)
@@ -336,17 +379,27 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             line = firstinst.cycles
             lineincrement = watchlist.getincrement(line)
         except KeyError as e:
-            print('Warning: Waves from addr', hex(e.args[0]), 'have no codeobj info.')
+            print("Warning: Waves from addr", hex(e.args[0]), "have no codeobj info.")
             for i in range(len(insts)):
                 insts[i].asmline = 0
-            return [i for k, i in enumerate(insts) if i.type != PCINFO], [], [], [], 1, 0, [k for k, i in enumerate(insts) if i.type == PCINFO]
+            return (
+                [i for k, i in enumerate(insts) if i.type != PCINFO],
+                [],
+                [],
+                [],
+                1,
+                0,
+                [k for k, i in enumerate(insts) if i.type == PCINFO],
+            )
         except Exception as e:
-            print('Unknown error', e)
+            print("Unknown error", e)
             return None
     else:
         line = 0
         lineincrement = 1
-        watchlist = RegisterWatchList(labels=labels, code=code, jump_map=jump_map, insts=insts)
+        watchlist = RegisterWatchList(
+            labels=labels, code=code, jump_map=jump_map, insts=insts
+        )
 
     N = len(insts)
 
@@ -367,9 +420,9 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         next = line + lineincrement
 
         if not bIsAuto:
-            if '_mov_' in as_line[0]:
+            if "_mov_" in as_line[0]:
                 watchlist.move(as_line[0])
-            elif 'scratch_' in as_line[0]:
+            elif "scratch_" in as_line[0]:
                 watchlist.scratch(as_line[0])
 
         if as_line[1] == DONT_KNOW or (as_line[1] == SKIP and not bGFX9):
@@ -388,30 +441,30 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             matched = inst.type in [SALU, JUMP]
             i += 1
             pcskip.append(i)
-            while bIsAuto and next < 0 and i+1 < len(insts):
+            while bIsAuto and next < 0 and i + 1 < len(insts):
                 i += 1
                 if insts[i].type == PCINFO:
                     pcskip.append(i)
-                    next = watchlist.setpc(as_line[0], i-1)
+                    next = watchlist.setpc(as_line[0], i - 1)
                 else:
                     inst.cycles += insts[i].cycles
             if next < 0:
-                print('Jump to unknown location in line', as_line[0])
+                print("Jump to unknown location in line", as_line[0])
                 break
         elif as_line[1] == SWAPPC:
             matched = inst.type in [SALU, JUMP]
             next = watchlist.swappc(as_line[0], line, i)
             i += 1
             pcskip.append(i)
-            while bIsAuto and next < 0 and i+1 < len(insts):
+            while bIsAuto and next < 0 and i + 1 < len(insts):
                 i += 1
                 if insts[i].type == PCINFO:
-                    next = watchlist.swappc(as_line[0], line, i-1)
+                    next = watchlist.swappc(as_line[0], line, i - 1)
                     pcskip.append(i)
                 else:
                     inst.cycles += insts[i].cycles
             if next < 0:
-                print('Jump to unknown location in line', as_line[0])
+                print("Jump to unknown location in line", as_line[0])
                 break
         elif inst.type == as_line[1]:
             if line in jumps:
@@ -443,8 +496,16 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 vsmem_ordering = 1
                 FLAT_INST.append([reverse_map[line], num_inflight])
                 NUM_FLAT += 1
-            elif inst.type == IMMED and "s_wait" in as_line[0] and not "s_wait_alu" in as_line[0]:
-                if "lgkmcnt" in as_line[0] or "dscnt" in as_line[0] or "kmcnt" in as_line[0]:
+            elif (
+                inst.type == IMMED
+                and "s_wait" in as_line[0]
+                and not "s_wait_alu" in as_line[0]
+            ):
+                if (
+                    "lgkmcnt" in as_line[0]
+                    or "dscnt" in as_line[0]
+                    or "kmcnt" in as_line[0]
+                ):
                     try:
                         wait_N = int(as_line[0].split("lgkmcnt(")[1].split(")")[0])
                     except:
@@ -488,12 +549,16 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                         NUM_FLAT = min(max(wait_N - NUM_VLMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
-                if "vscnt" in as_line[0] or (bGFX9 and "vmcnt" in as_line[0]) or "storecnt" in as_line[0]:
+                if (
+                    "vscnt" in as_line[0]
+                    or (bGFX9 and "vmcnt" in as_line[0])
+                    or "storecnt" in as_line[0]
+                ):
                     try:
-                        wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
+                        wait_N = int(as_line[0].split("vscnt(")[1].split(")")[0])
                     except:
                         try:
-                            wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
+                            wait_N = int(as_line[0].split("vmcnt(")[1].split(")")[0])
                         except:
                             wait_N = 0
                     flight_count.append([as_line[5], num_inflight, wait_N])
@@ -533,8 +598,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                     if skipped_immed > 0 and hasWait:
                         matched = True
                         skipped_immed -= 1
-                    elif 's_waitcnt' in as_line[0] and 'scratch_' not in as_line[0]:
-                        print('WARNING: Parsing terminated at:', as_line)
+                    elif "s_waitcnt" in as_line[0] and "scratch_" not in as_line[0]:
+                        print("WARNING: Parsing terminated at:", as_line)
                         break
 
         if matched or as_line[1] != DONT_KNOW:
@@ -543,11 +608,13 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 result.append(inst)
                 i += 1
                 num_failed_stitches = 0
-            elif not bGFX9 and inst.type == IMMED and line != next and as_line[1] != SKIP:
+            elif (
+                not bGFX9 and inst.type == IMMED and line != next and as_line[1] != SKIP
+            ):
                 skipped_immed += 1
                 inst.asmline = reverse_map[line]
                 result.append(inst)
-                if 's_barrier' in as_line[0]:
+                if "s_barrier" in as_line[0]:
                     next = line + lineincrement
                 i += 1
             else:
@@ -557,10 +624,12 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         line = next
 
     N = max(N, 1)
-    if i != N and (insts[i].type == WAVE_ENDED or i == N-1):
-        print('Warning - Wave ended.')
+    if i != N and (insts[i].type == WAVE_ENDED or i == N - 1):
+        print("Warning - Wave ended.")
     elif i < N:
-        print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched', i, ' of ', N)
+        print(
+            "Warning - Stitching rate: " + str(i * 100 / N) + "% matched", i, " of ", N
+        )
         try:
             print(line, code[line])
         except:
@@ -573,6 +642,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 )
                 break
             line += 1
-        print('Success: Parsed', i, 'tokens')
+        print("Success: Parsed", i, "tokens")
 
     return result, loopCount, mem_unroll, flight_count, maxline, len(result), pcskip

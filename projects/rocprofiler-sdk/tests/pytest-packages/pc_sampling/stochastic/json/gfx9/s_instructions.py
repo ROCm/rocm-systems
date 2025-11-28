@@ -49,7 +49,9 @@ def validate_waitcnt(sample_records):
         ]
     )
     for record in sample_records:
-        assert record["inst"].startswith("s_waitcnt"), "Waitcnt must start with s_waitcn"
+        assert record["inst"].startswith(
+            "s_waitcnt"
+        ), "Waitcnt must start with s_waitcn"
         assert record["wave_issued"] == 0, "Waitcnt should not be issued to EX"
         assert (
             record["snapshot"]["stall_reason"] in allowed_stall_reasons
@@ -196,7 +198,8 @@ def validate_barrier_instructions(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             assert (
-                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BARRIER"
+                record["inst_type"]
+                == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BARRIER"
             ), "Invalid barrier instruction type"
             assert (
                 snapshot["arb_state_issue_misc"] == 1

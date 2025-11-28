@@ -30,7 +30,9 @@ def validate_matrix_instructions_issued(samples_issued):
         samples_issued["Instruction_Type"]
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MATRIX"
     ]
-    assert issued_type_matrix["Instruction"].apply(lambda x: x.startswith("v_mfma")).all()
+    assert (
+        issued_type_matrix["Instruction"].apply(lambda x: x.startswith("v_mfma")).all()
+    )
     # v_mfma_f32 goes through Matrix (MAI) arbiter, while v_mfma_f64 goes through the VALU arbiter
 
     # SGEMM goes through Matrix (MAI arbiter)

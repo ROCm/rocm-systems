@@ -455,52 +455,77 @@ __ushort2half_rz
 __ushort_as_half
 """
 # The dictionary is to place description of each device function. Expand it to all the device functions
-deviceFuncDesc = {'acosf': "This function returns floating point of arc cosine from a floating point input"}
+deviceFuncDesc = {
+    "acosf": "This function returns floating point of arc cosine from a floating point input"
+}
 
-fnames = ["../../include/hip/amd_detail/math_functions.h","../../include/hip/amd_detail/device_functions.h","../../include/hip/amd_detail/hip_fp16.h"]
+fnames = [
+    "../../include/hip/amd_detail/math_functions.h",
+    "../../include/hip/amd_detail/device_functions.h",
+    "../../include/hip/amd_detail/hip_fp16.h",
+]
 markdownFileName = "./hip-math-api.md"
 
-preamble = "# HIP MATH APIs Documentation \n"+\
-"HIP supports most of the device functions supported by CUDA. Way to find the unsupported one is to search for the function and check its description\n" + \
-"Note: This document is not human generated. Any changes to this file will be discarded. Please make changes to Python3 script docs/markdown/device_md_gen.py\n\n" + \
-"## For Developers \n" + \
-"If you add or fixed a device function, make sure to add a signature of the function and definition later.\n" + \
-"For example, if you want to add `__device__ float __dotf(float4, float4)`, which does a dot product on 4 float vector components \n" + \
-"The way to add to the header is, \n" + \
-"```cpp \n" + \
-"__device__ static float __dotf(float4, float4); \n" + \
-"/*Way down in the file....*/\n" + \
-"__device__ static inline float __dotf(float4 x, float4 y) { \n" + \
-" /*implementation*/\n}\n" + \
-"```\n\n" + \
-"This helps python script to add the device function newly declared into markdown documentation (as it looks at functions with `;` at the end and `__device__` at the beginning)\n\n" + \
-"The next step would be to add Description to  `deviceFuncDesc` dictionary in python script.\n" + \
-"From the above example, it can be writtern as,\n`deviceFuncDesc['__dotf'] = 'This functions takes 2 4 component float vector and outputs dot product across them'`\n\n"
+preamble = (
+    "# HIP MATH APIs Documentation \n"
+    + "HIP supports most of the device functions supported by CUDA. Way to find the unsupported one is to search for the function and check its description\n"
+    + "Note: This document is not human generated. Any changes to this file will be discarded. Please make changes to Python3 script docs/markdown/device_md_gen.py\n\n"
+    + "## For Developers \n"
+    + "If you add or fixed a device function, make sure to add a signature of the function and definition later.\n"
+    + "For example, if you want to add `__device__ float __dotf(float4, float4)`, which does a dot product on 4 float vector components \n"
+    + "The way to add to the header is, \n"
+    + "```cpp \n"
+    + "__device__ static float __dotf(float4, float4); \n"
+    + "/*Way down in the file....*/\n"
+    + "__device__ static inline float __dotf(float4 x, float4 y) { \n"
+    + " /*implementation*/\n}\n"
+    + "```\n\n"
+    + "This helps python script to add the device function newly declared into markdown documentation (as it looks at functions with `;` at the end and `__device__` at the beginning)\n\n"
+    + "The next step would be to add Description to  `deviceFuncDesc` dictionary in python script.\n"
+    + "From the above example, it can be writtern as,\n`deviceFuncDesc['__dotf'] = 'This functions takes 2 4 component float vector and outputs dot product across them'`\n\n"
+)
+
 
 def generateSnippet(name, description, signature):
-    return "### " + name + "\n" + \
-    "```cpp \n" + signature + "\n```\n" + \
-    "**Description:**  " + description + "\n\n\n"
+    return (
+        "### "
+        + name
+        + "\n"
+        + "```cpp \n"
+        + signature
+        + "\n```\n"
+        + "**Description:**  "
+        + description
+        + "\n\n\n"
+    )
+
 
 def getName(line):
-    l1 = line.split('(')
-    l2 = l1[0].split(' ')
+    l1 = line.split("(")
+    l2 = l1[0].split(" ")
     return l2[-1]
 
-with open(markdownFileName, 'w') as mdfd:
+
+with open(markdownFileName, "w") as mdfd:
     mdfd.truncate()
     mdfd.write(preamble)
     for fname in fnames:
         with open(fname) as fd:
             lines = fd.readlines()
             for line in lines:
-                if line.find('HIP_FAST_MATH') != -1:
-                    break;
-                if line.find('__device__') != -1 and line.find(';') != -1 and line.find('hip') == -1:
+                if line.find("HIP_FAST_MATH") != -1:
+                    break
+                if (
+                    line.find("__device__") != -1
+                    and line.find(";") != -1
+                    and line.find("hip") == -1
+                ):
                     name = getName(line)
-                    if line.find('//') == -1:
+                    if line.find("//") == -1:
                         if name in deviceFuncDesc:
-                            mdfd.write(generateSnippet(name, deviceFuncDesc[name], line))
+                            mdfd.write(
+                                generateSnippet(name, deviceFuncDesc[name], line)
+                            )
                         else:
                             mdfd.write(generateSnippet(name, "Supported", line))
                     else:

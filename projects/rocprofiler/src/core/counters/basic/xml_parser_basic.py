@@ -12,15 +12,9 @@ if __name__ == "__main__":
     cpp_content = ""
     cpp_content += "/* Copyright (c) 2022 Advanced Micro Devices, Inc.\n"
     cpp_content += "\n"
-    cpp_content += (
-        " Permission is hereby granted, free of charge, to any person obtaining a copy\n"
-    )
-    cpp_content += (
-        ' of this software and associated documentation files (the "Software"), to deal\n'
-    )
-    cpp_content += (
-        " in the Software without restriction, including without limitation the rights\n"
-    )
+    cpp_content += " Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+    cpp_content += ' of this software and associated documentation files (the "Software"), to deal\n'
+    cpp_content += " in the Software without restriction, including without limitation the rights\n"
     cpp_content += (
         " to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
     )
@@ -46,9 +40,7 @@ if __name__ == "__main__":
     cpp_content += (
         " AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
     )
-    cpp_content += (
-        " LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
-    )
+    cpp_content += " LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
     cpp_content += (
         " OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n"
     )
@@ -66,7 +58,9 @@ if __name__ == "__main__":
     cpp_content += '#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"\n'
     cpp_content += "namespace Counter {\n"
     cpp_content += "\n"
-    cpp_content += "BasicCounter::BasicCounter(uint64_t event_id, std::string block_id,\n"
+    cpp_content += (
+        "BasicCounter::BasicCounter(uint64_t event_id, std::string block_id,\n"
+    )
     cpp_content += (
         "                           std::string name, std::string description,\n"
     )
@@ -85,7 +79,9 @@ if __name__ == "__main__":
     cpp_content += "\n"
     cpp_content += "uint64_t BasicCounter::GetEventId() { return event_id_; }\n"
     cpp_content += "std::string BasicCounter::GetBlockId() { return block_id_; }\n"
-    cpp_content += "std::string BasicCounter::GetName() { return Counter::GetName(); }\n"
+    cpp_content += (
+        "std::string BasicCounter::GetName() { return Counter::GetName(); }\n"
+    )
     cpp_content += "\n"
     cpp_content += (
         "bool BasicCounter::GetValue(uint64_t* value, int64_t instance_id = -1) {\n"
@@ -214,7 +210,9 @@ if __name__ == "__main__":
     cpp_content += "  return number ^ value;\n"
     cpp_content += "}\n"
     cpp_content += "\n"
-    cpp_content += "uint64_t operator+(BasicCounter counter1, BasicCounter counter2) {\n"
+    cpp_content += (
+        "uint64_t operator+(BasicCounter counter1, BasicCounter counter2) {\n"
+    )
     cpp_content += "  [[maybe_unused]] uint64_t value1 = 0;\n"
     cpp_content += (
         '  ASSERTM(counter1.GetValue(&value1), "Error: Counter has no value!");\n'
@@ -225,7 +223,9 @@ if __name__ == "__main__":
     )
     cpp_content += "  return value1 + value2;\n"
     cpp_content += "}\n"
-    cpp_content += "uint64_t operator-(BasicCounter counter1, BasicCounter counter2) {\n"
+    cpp_content += (
+        "uint64_t operator-(BasicCounter counter1, BasicCounter counter2) {\n"
+    )
     cpp_content += "  [[maybe_unused]] uint64_t value1 = 0;\n"
     cpp_content += (
         '  ASSERTM(counter1.GetValue(&value1), "Error: Counter has no value!");\n'
@@ -236,7 +236,9 @@ if __name__ == "__main__":
     )
     cpp_content += "  return value1 - value2;\n"
     cpp_content += "}\n"
-    cpp_content += "uint64_t operator*(BasicCounter counter1, BasicCounter counter2) {\n"
+    cpp_content += (
+        "uint64_t operator*(BasicCounter counter1, BasicCounter counter2) {\n"
+    )
     cpp_content += "  [[maybe_unused]] uint64_t value1 = 0;\n"
     cpp_content += (
         '  ASSERTM(counter1.GetValue(&value1), "Error: Counter has no value!");\n'
@@ -247,7 +249,9 @@ if __name__ == "__main__":
     )
     cpp_content += "  return value1 * value2;\n"
     cpp_content += "}\n"
-    cpp_content += "uint64_t operator/(BasicCounter counter1, BasicCounter counter2) {\n"
+    cpp_content += (
+        "uint64_t operator/(BasicCounter counter1, BasicCounter counter2) {\n"
+    )
     cpp_content += "  [[maybe_unused]] uint64_t value1 = 0;\n"
     cpp_content += (
         '  ASSERTM(counter1.GetValue( & value1), "Error: Counter has no value!");\n'
@@ -258,7 +262,9 @@ if __name__ == "__main__":
     )
     cpp_content += " return value1 / value2;\n"
     cpp_content += "}\n"
-    cpp_content += "uint64_t operator^(BasicCounter counter1, BasicCounter counter2) {\n"
+    cpp_content += (
+        "uint64_t operator^(BasicCounter counter1, BasicCounter counter2) {\n"
+    )
     cpp_content += "  [[maybe_unused]] uint64_t value1 = 0;\n"
     cpp_content += (
         '  ASSERTM(counter1.GetValue(&value1), "Error: Counter has no value!");\n'
@@ -285,14 +291,18 @@ if __name__ == "__main__":
     cpp_content += " *\n"
     cpp_content += " * @{\n"
     cpp_content += " */\n"
-    cpp_content += "uint64_t GetBasicCounter(const char* name, const char* gpu_name) {\n"
+    cpp_content += (
+        "uint64_t GetBasicCounter(const char* name, const char* gpu_name) {\n"
+    )
     cpp_content += "  std::string gpu;\n"
     parser = etree.XMLParser(recover=True, encoding="utf-8")
     xml_file = ET.parse(sys.argv[1] + "/gfx_metrics.xml", parser=parser)
     root = xml_file.getroot()
     for gpu in root:
         cpp_content += (
-            "\n\t/**\n\t * @brief Basic " + gpu.tag + " counters\n\t *\n\t * @{\n\t */\n"
+            "\n\t/**\n\t * @brief Basic "
+            + gpu.tag
+            + " counters\n\t *\n\t * @{\n\t */\n"
         )
         cpp_content += '\tgpu = "' + gpu.tag + '";\n\n'
         cpp_content += "\tif (strncmp(gpu_name, gpu.c_str(), gpu.length())==0) {\n"

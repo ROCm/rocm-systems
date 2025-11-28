@@ -166,7 +166,9 @@ class pc_config:
             [
                 "   {:20}:\t{}".format(
                     key,
-                    itr if key == "Method" or key == "Unit" else self.get_value(key, itr),
+                    itr
+                    if key == "Method" or key == "Unit"
+                    else self.get_value(key, itr),
                 )
                 for key, itr in self.get_as_dict().items()
             ]

@@ -96,7 +96,9 @@ class function:
         )
 
     def dlsym_function(self):
-        return '    ROCPROFSYS_DLSYM({0}_f, m_omnihandle, "{0}");'.format(self.func_name)
+        return '    ROCPROFSYS_DLSYM({0}_f, m_omnihandle, "{0}");'.format(
+            self.func_name
+        )
 
     def call_dlsym_function(self):
         _param_names = ", ".join(self.param_names)

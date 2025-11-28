@@ -431,7 +431,9 @@ def test_memory_copy_trace(
 
         src_agent = get_agent(row["Source_Agent_Id"].split(" ")[-1])
         dst_agent = get_agent(row["Destination_Agent_Id"].split(" ")[-1])
-        assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
+        assert (
+            src_agent is not None and dst_agent is not None
+        ), f"{agent_info_input_data}"
 
         if row["Direction"] == "MEMORY_COPY_HOST_TO_DEVICE":
             assert src_agent["Agent_Type"] == "CPU"

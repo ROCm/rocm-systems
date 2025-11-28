@@ -241,7 +241,8 @@ def test_summary_data(json_data):
             )
             # check if hip-runtime memory management pools through virtual memory allocation count is equal to free count.
             assert (
-                memory_allocation_vmem_allocate_count == memory_allocation_vmem_free_count
+                memory_allocation_vmem_allocate_count
+                == memory_allocation_vmem_free_count
             )
         elif itr.domain == "MARKER_API":
             assert itr.stats.count == 1106

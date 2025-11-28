@@ -78,7 +78,9 @@ if __name__ == "__main__":
     print("uint64_t getDerivedCounter(const char* name, const char* gpu_name) {")
     for gpu in root:
         print(
-            "\n\t/**\n\t * @brief Derived " + gpu.tag + " counters\n\t *\n\t * @{\n\t */"
+            "\n\t/**\n\t * @brief Derived "
+            + gpu.tag
+            + " counters\n\t *\n\t * @{\n\t */"
         )
         print('\tif (strcmp(gpu_name, "' + gpu.tag + '")==0) {')
         for child in gpu:

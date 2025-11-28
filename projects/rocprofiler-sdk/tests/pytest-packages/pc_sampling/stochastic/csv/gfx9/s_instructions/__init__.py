@@ -139,7 +139,9 @@ def validate_s_instructions(df):
     for prefix, instruction_type in instructions_with_types:
         prefix_tree.insert(prefix, instruction_type)
 
-    _classify_instruction_by_prefix = partial(classify_instruction_by_prefix, prefix_tree)
+    _classify_instruction_by_prefix = partial(
+        classify_instruction_by_prefix, prefix_tree
+    )
     s_instructions["Instruction_Type_From_Name"] = s_instructions["Instruction"].apply(
         _classify_instruction_by_prefix
     )

@@ -96,10 +96,14 @@ def test_attachment_memory_copy_trace(memory_copy_input_data):
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
         # Count the direction of memory copies
-        if "MEMORY_COPY_HOST_TO_DEVICE" in row["Direction"] or "H2D" in row["Direction"]:
+        if (
+            "MEMORY_COPY_HOST_TO_DEVICE" in row["Direction"]
+            or "H2D" in row["Direction"]
+        ):
             host_to_device_count += 1
         elif (
-            "MEMORY_COPY_DEVICE_TO_HOST" in row["Direction"] or "D2H" in row["Direction"]
+            "MEMORY_COPY_DEVICE_TO_HOST" in row["Direction"]
+            or "D2H" in row["Direction"]
         ):
             device_to_host_count += 1
         stream_id = int(row["Stream_Id"])

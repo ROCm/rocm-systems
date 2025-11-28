@@ -74,7 +74,8 @@ def draw_wave_metrics(selections, normalize, TIMELINES, EVENTS, EVENT_NAMES):
         delta_step, int(0.5 + np.min([get_delta_time(events) for events in EVENTS]))
     )
     maxtime = (
-        np.max([np.max([e.time for e in events]) for events in EVENTS]) / quad_delta_time
+        np.max([np.max([e.time for e in events]) for events in EVENTS])
+        / quad_delta_time
         + 1
     )
 
@@ -157,8 +158,12 @@ def draw_wave_states(selections, normalize, TIMELINES):
 
     plt.figure(figsize=(15, 4))
 
-
-    maxtime = max([np.max((TIMELINES[k]!=0)*np.arange(0,TIMELINES[k].size)) for k in plot_indices])
+    maxtime = max(
+        [
+            np.max((TIMELINES[k] != 0) * np.arange(0, TIMELINES[k].size))
+            for k in plot_indices
+        ]
+    )
     maxtime = max(maxtime, 1)
     timelines = [deepcopy(TIMELINES[k][:maxtime]) for k in plot_indices]
     timelines = [np.pad(t, [0, maxtime - t.size]) for t in timelines]
@@ -175,14 +180,18 @@ def draw_wave_states(selections, normalize, TIMELINES):
         for time in timelines
     ]
     kernsize = 15
-    kernel = np.asarray([
-        np.exp(-abs(10 * k / kernsize)) for k in range(-kernsize // 2, kernsize // 2 + 1)
-    ])
+    kernel = np.asarray(
+        [
+            np.exp(-abs(10 * k / kernsize))
+            for k in range(-kernsize // 2, kernsize // 2 + 1)
+        ]
+    )
     kernel /= np.sum(kernel)
 
     timelines = [
         np.convolve(time, kernel)[kernsize // 2 : -kernsize // 2]
-        for time in timelines if len(time) > 0
+        for time in timelines
+        if len(time) > 0
     ]
     maxtime *= 16
     cycles *= 16
@@ -217,8 +226,10 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
         for ev in OCCUPANCY[k]:
             maxtime = max(maxtime, ev[0])
 
-    NUM_DOTS = 1600 # number of points taken for graphing
-    delta = max(1, maxtime // NUM_DOTS) # Spacing between data points. Waves will be averaged over this interval.
+    NUM_DOTS = 1600  # number of points taken for graphing
+    delta = max(
+        1, maxtime // NUM_DOTS
+    )  # Spacing between data points. Waves will be averaged over this interval.
     # Holds occupancy data
     chart = np.zeros((len(dispatchnames), maxtime // delta + 2), dtype=np.float32)
 
@@ -229,7 +240,7 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
         small_chart = np.zeros_like(chart)
         # Holds number of events in that time period, for averaging.
         norm_fact = np.zeros_like(chart)
-        norm_fact += 1E-5
+        norm_fact += 1e-5
 
         # Holds last known state per dispatch
         current_time = [0 for k in range(len(dispatchnames))]
@@ -243,16 +254,25 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
             norm_fact[kid][b:e] += 1
 
             # Enable = 1 means a new wave started, enable = 0 means a wave has ended on that kernel ID.
-            total_value[kid] += 2*en - 1
+            total_value[kid] += 2 * en - 1
             current_time[kid] = time // delta
-        for small, norm, time, value in zip(small_chart, norm_fact, current_time, total_value):
+        for small, norm, time, value in zip(
+            small_chart, norm_fact, current_time, total_value
+        ):
             small[time] += value
             norm[time] += value
 
-        chart += small_chart/norm_fact # small_chart / norm_fact is the mean number of waves a tthat time point
+        chart += (
+            small_chart / norm_fact
+        )  # small_chart / norm_fact is the mean number of waves a tthat time point
 
     for (id, name), occ in zip(dispatchnames.items(), chart):
-        plt.plot(np.arange(occ.size) * delta * 8, occ, label=str(id)+'#'+name, linewidth=1.1)
+        plt.plot(
+            np.arange(occ.size) * delta * 8,
+            occ,
+            label=str(id) + "#" + name,
+            linewidth=1.1,
+        )
 
     plt.legend()
     if normalize:
@@ -283,23 +303,25 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid)
 
         for time, en, _ in occ:
             occ_times.append(time)
-            occ_values.append(occ_values[-1] + 2*en - 1) # If enable = 1, increment. Else, decrement occupancy.
+            occ_values.append(
+                occ_values[-1] + 2 * en - 1
+            )  # If enable = 1, increment. Else, decrement occupancy.
 
         try:
-            names.append('SE'+name.split('_se')[1].split('.att')[0])
+            names.append("SE" + name.split("_se")[1].split(".att")[0])
         except:
             names.append(name)
 
-        NUM_DOTS = 1500 # Number of points taken for graphing
-        maxtime = occ_times[-1]+1
+        NUM_DOTS = 1500  # Number of points taken for graphing
+        maxtime = occ_times[-1] + 1
         delta = max(1, maxtime // NUM_DOTS)
         g_maxtime = max(g_maxtime, maxtime)
         g_delta = max(g_delta, delta)
         chart = np.zeros((maxtime // delta + 1), dtype=np.float32)
         norm_fact = np.zeros_like(chart)
-        norm_fact += 1E-6
+        norm_fact += 1e-6
 
-        for i in range(len(occ_times)-1):
+        for i in range(len(occ_times) - 1):
             b = occ_times[i] // delta
             e = max(b + 1, occ_times[i + 1] // delta)
             chart[b:e] += occ_values[i]
@@ -330,7 +352,7 @@ def getocc(u):
     # Bits 23:63 Time= Time divided by 8
     # Bit 18 = Enable (Wave start if 1, Wave end if 0)
     # Bits 0:11 is the kernel ID running on that wave
-    return 8*int(u>>23), (u>>18) & 1, u&0xFFF
+    return 8 * int(u >> 23), (u >> 18) & 1, u & 0xFFF
 
 
 def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False):
@@ -343,11 +365,19 @@ def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False)
     # Transforms returned data into a array of events with each event being a tuple (time, enable, kernel ID)
     OCCUPANCY = [[getocc(u) for u in OCCUPANCY[k]] for k in range(len(OCCUPANCY))]
 
-    states, figure = draw_occupancy(selections, normalize, OCCUPANCY, drawinfo["ShaderNames"], len(drawinfo["DispatchNames"]))
+    states, figure = draw_occupancy(
+        selections,
+        normalize,
+        OCCUPANCY,
+        drawinfo["ShaderNames"],
+        len(drawinfo["DispatchNames"]),
+    )
     response["occupancy.png"] = states
     figures["occupancy.png"] = figure
 
-    states, figure = draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, drawinfo["DispatchNames"])
+    states, figure = draw_occupancy_per_dispatch(
+        selections, normalize, OCCUPANCY, drawinfo["DispatchNames"]
+    )
     response["dispatches.png"] = states
     figures["dispatches.png"] = figure
 
@@ -357,7 +387,11 @@ def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False)
 
     if len(EVENTS) > 0 and np.sum([len(e) for e in EVENTS]) > 32:
         EVENT_NAMES, figure = draw_wave_metrics(
-            selections, normalize, drawinfo["TIMELINES"], EVENTS, drawinfo["EVENT_NAMES"]
+            selections,
+            normalize,
+            drawinfo["TIMELINES"],
+            EVENTS,
+            drawinfo["EVENT_NAMES"],
         )
         response["counters.png"] = EVENT_NAMES
         figures["counters.png"] = figure

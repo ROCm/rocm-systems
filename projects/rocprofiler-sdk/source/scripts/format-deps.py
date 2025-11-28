@@ -120,6 +120,10 @@ parser.add_argument(
     "-p", "--python", nargs=0, help="format python files", action=FormatPython
 )
 parser.add_argument(
-    "-a", "--all", nargs=0, help="format cmake, source and python files", action=FormatAll
+    "-a",
+    "--all",
+    nargs=0,
+    help="format cmake, source and python files",
+    action=FormatAll,
 )
 parser.parse_args()

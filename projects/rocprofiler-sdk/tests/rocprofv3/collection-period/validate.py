@@ -29,7 +29,6 @@ import json
 
 
 class TimeWindow(object):
-
     def __init__(self, beg, end):
         self.offset = beg
         self.duration = end - beg
@@ -54,7 +53,9 @@ def check_traces(data, valid_regions, invalid_regions, corrid_records=None):
             len(valid) == 1
         ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nnot found in valid regions:\n{valid_regions}"
 
-        invalid = [itr for itr in invalid_regions if itr.in_region(rval.start_timestamp)]
+        invalid = [
+            itr for itr in invalid_regions if itr.in_region(rval.start_timestamp)
+        ]
         assert (
             len(invalid) == 0
         ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nfound in invalid region(s):\n{invalid}"
@@ -76,7 +77,9 @@ def test_collection_period_trace(json_data, collection_period_data):
         if _start and _stop:
             valid_regions.append(TimeWindow(_start, _stop))
         elif "duration" in period.keys():
-            valid_regions.append(TimeWindow(period.duration.start, period.duration.stop))
+            valid_regions.append(
+                TimeWindow(period.duration.start, period.duration.stop)
+            )
         elif _start and not _stop:
             valid_regions.append(TimeWindow(_start, _start + 10e9))  # add 10 seconds
 

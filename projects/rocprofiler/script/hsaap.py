@@ -619,7 +619,9 @@ class API_DescrParser:
                     arg_var = arg_list[ind]
                     arg_val = "api_data.args." + call + "." + arg_var
                     if re.search(r"char\* ", struct["astr"][arg_var]):
-                        content += '      out << "0x" << std::hex << (uint64_t)' + arg_val
+                        content += (
+                            '      out << "0x" << std::hex << (uint64_t)' + arg_val
+                        )
                     else:
                         content += "      out << " + arg_val
                         if (
@@ -668,7 +670,10 @@ class API_DescrParser:
 # Usage
 if len(sys.argv) != 3:
     print(
-        "Usage:", sys.argv[0], " <OUT prefix> <HSA runtime include path>", file=sys.stderr
+        "Usage:",
+        sys.argv[0],
+        " <OUT prefix> <HSA runtime include path>",
+        file=sys.stderr,
     )
     sys.exit(1)
 else:

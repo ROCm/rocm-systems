@@ -674,7 +674,9 @@ if __name__ == "__main__":
     if _GCOVR_GENERATE_CMD:
         print("\n\n\n###### Generating Cobertura XML... ######")
         print(
-            "###### GCOVR command: '{}'... ######\n".format(" ".join(_GCOVR_GENERATE_CMD))
+            "###### GCOVR command: '{}'... ######\n".format(
+                " ".join(_GCOVR_GENERATE_CMD)
+            )
         )
         with open("/dev/null", "w") as devnull:
             run(_GCOVR_GENERATE_CMD, stderr=devnull)

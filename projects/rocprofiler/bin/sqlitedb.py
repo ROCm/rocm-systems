@@ -78,7 +78,8 @@ class SQLiteDB:
 
     def change_rec_name(self, table_name, rec_id, rec_name):
         self.connection.execute(
-            "UPDATE " + table_name + ' SET Name = ? WHERE "Index" = ?', (rec_name, rec_id)
+            "UPDATE " + table_name + ' SET Name = ? WHERE "Index" = ?',
+            (rec_name, rec_id),
         )
 
     def change_rec_tid(self, table_name, rec_id, tid):
@@ -189,7 +190,14 @@ class SQLiteDB:
         self.section_index += 1
 
     def flow_json(
-        self, base_id, from_pid, from_us_list, to_pid, to_us_dict, corr_id_list, file_name
+        self,
+        base_id,
+        from_pid,
+        from_us_list,
+        to_pid,
+        to_us_dict,
+        corr_id_list,
+        file_name,
     ):
         if not re.search(r"\.json$", file_name):
             raise Exception('wrong output file type: "' + file_name + '"')
@@ -262,7 +270,7 @@ class SQLiteDB:
                         if label == '"dur"' and value == 0:
                             vals_list.append('%s:"%s"' % (label, "1"))
                         elif label == '"pid"' or label == '"tid"':
-                            vals_list.append('%s:%d' % (label, value))
+                            vals_list.append("%s:%d" % (label, value))
                         else:
                             vals_list.append('%s:"%s"' % (label, value))
 

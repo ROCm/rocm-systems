@@ -3,6 +3,7 @@ import sys
 import yaml
 import requests
 
+
 def get_existing_labels(repo, token):
     headers = {"Authorization": f"token {token}"}
     labels = {}
@@ -18,15 +19,16 @@ def get_existing_labels(repo, token):
         for label in data:
             labels[label["name"]] = {
                 "color": label["color"],
-                "description": label.get("description", "")
+                "description": label.get("description", ""),
             }
         page += 1
     return labels
 
+
 def create_or_update_label(repo, token, label, existing):
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json"
+        "Accept": "application/vnd.github+json",
     }
 
     if label["name"] not in existing:
@@ -37,8 +39,9 @@ def create_or_update_label(repo, token, label, existing):
     else:
         # Update if different
         current = existing[label["name"]]
-        if (label["color"].lower() != current["color"].lower() or
-            label.get("description", "") != current.get("description", "")):
+        if label["color"].lower() != current["color"].lower() or label.get(
+            "description", ""
+        ) != current.get("description", ""):
             print(f"Updating label: {label['name']}")
             url = f"https://api.github.com/repos/{repo}/labels/{label['name']}"
             resp = requests.patch(url, json=label, headers=headers)
@@ -48,6 +51,7 @@ def create_or_update_label(repo, token, label, existing):
 
     if not resp.ok:
         print(f"Failed to apply label {label['name']}: {resp.status_code} {resp.text}")
+
 
 def main(label_file):
     token = os.environ["GH_TOKEN"]
@@ -59,6 +63,7 @@ def main(label_file):
 
     for label in labels:
         create_or_update_label(repo, token, label, existing)
+
 
 if __name__ == "__main__":
     main(sys.argv[1])

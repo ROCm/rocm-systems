@@ -201,7 +201,10 @@ def parse_cdash_args(args):
         "--submit-url", help="CDash submission site", default=SUBMIT_URL, type=str
     )
     parser.add_argument(
-        "--repeat-until-pass", help="<N> for --repeat until-pass:<N>", default=3, type=int
+        "--repeat-until-pass",
+        help="<N> for --repeat until-pass:<N>",
+        default=3,
+        type=int,
     )
     parser.add_argument(
         "--repeat-until-fail",

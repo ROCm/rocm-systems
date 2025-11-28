@@ -68,7 +68,6 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
 
 
 def test_realtime_clock(output_path):
-
     def verify_sorted(timestamps):
 
         # Sort by shader_clock (index 0)

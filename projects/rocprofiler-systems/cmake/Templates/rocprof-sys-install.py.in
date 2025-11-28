@@ -160,7 +160,11 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "-p", "--prefix", help="Installation prefix", type=str, default="/opt/rocprofiler-systems"
+        "-p",
+        "--prefix",
+        help="Installation prefix",
+        type=str,
+        default="/opt/rocprofiler-systems",
     )
     parser.add_argument(
         "-i",
@@ -264,7 +268,9 @@ if __name__ == "__main__":
         if os.path.exists(install_script):
             print_log(f"Download completed: {install_script}")
         else:
-            raise RuntimeError(f"Download completed but {install_script} does not exist")
+            raise RuntimeError(
+                f"Download completed but {install_script} does not exist"
+            )
 
         os.chmod(install_script, stat.S_IRWXU)
 

@@ -105,10 +105,14 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
                 name = (
                     parent_hier_name
                     + "."
-                    + cppHeader.classes[cppHeader_struct]["properties"]["public"][l][key]
+                    + cppHeader.classes[cppHeader_struct]["properties"]["public"][l][
+                        key
+                    ]
                 )
             else:
-                name = cppHeader.classes[cppHeader_struct]["properties"]["public"][l][key]
+                name = cppHeader.classes[cppHeader_struct]["properties"]["public"][l][
+                    key
+                ]
         if name == "":
             continue
         key2 = "type"
@@ -213,7 +217,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
             + "_OSTREAM_OPS_H_\n"
             + "\n"
         )
-        if apiname.upper() == 'HIP':
+        if apiname.upper() == "HIP":
             header_s = (
                 header_s
                 + "#include <hip/hip_runtime.h>\n"
@@ -233,7 +237,9 @@ def gen_cppheader(infilepath, outfilepath, rank):
         output_filename_h.write("namespace roctracer {\n")
         output_filename_h.write("namespace " + apiname.lower() + "_support {\n")
         output_filename_h.write("static int " + apiname.upper() + "_depth_max = 1;\n")
-        output_filename_h.write("static int " + apiname.upper() + "_depth_max_cnt = 0;\n")
+        output_filename_h.write(
+            "static int " + apiname.upper() + "_depth_max_cnt = 0;\n"
+        )
         output_filename_h.write(
             "static std::string " + apiname.upper() + '_structs_regex = "";\n'
         )

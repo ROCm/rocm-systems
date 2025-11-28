@@ -384,7 +384,9 @@ def add_args(parser):
 
     # Common arguments
     query_options.add_argument(
-        "--query", required=True, help="SQL SELECT query to execute (enclose in quotes)."
+        "--query",
+        required=True,
+        help="SQL SELECT query to execute (enclose in quotes).",
     )
 
     query_options.add_argument(
@@ -397,7 +399,16 @@ def add_args(parser):
     query_options.add_argument(
         "--format",
         help="Export format",
-        choices=("console", "csv", "html", "json", "md", "pdf", "dashboard", "clipboard"),
+        choices=(
+            "console",
+            "csv",
+            "html",
+            "json",
+            "md",
+            "pdf",
+            "dashboard",
+            "clipboard",
+        ),
         type=str.lower,
     )
 

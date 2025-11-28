@@ -151,11 +151,15 @@ def test_external_correlation_ids(input_data):
                 itr["thread_id"] == itr["correlation_id"]["external"]
             ), f"[{titr}] {itr}"
             assert itr["thread_id"] in extern_corr_ids, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert (
+                itr["correlation_id"]["external"] in extern_corr_ids
+            ), f"[{titr}] {itr}"
 
         for itr in sdk_data["callback_records"][titr]:
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert (
+                itr["correlation_id"]["external"] in extern_corr_ids
+            ), f"[{titr}] {itr}"
 
 
 def get_operation(record, kind_name, op_name=None):
@@ -188,7 +192,8 @@ def test_rocjpeg_traces(input_data):
     if len(rocjpeg_bf_traces) <= 2:
         return pytest.skip("rocdecode tracing unavailable")
     assert (
-        rocjpeg_api_bf_ops[1] == rocjpeg_api_cb_ops[1] and len(rocjpeg_api_cb_ops[1]) == 9
+        rocjpeg_api_bf_ops[1] == rocjpeg_api_cb_ops[1]
+        and len(rocjpeg_api_cb_ops[1]) == 9
     )
 
     # check that buffer and callback records agree

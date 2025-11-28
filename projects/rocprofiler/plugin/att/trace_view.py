@@ -30,6 +30,7 @@ from glob import glob
 
 JSON_GLOBAL_DICTIONARY = {}
 
+
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(0)
@@ -52,7 +53,8 @@ def get_top_n(code):
     TOP_N = 10
     top_n = sorted(deepcopy(code), key=lambda x: x[-1], reverse=True)[:TOP_N]
     return [
-        (line_num, hitc, 0, run_time) for _, _, _, _, line_num, _, hitc, run_time in top_n
+        (line_num, hitc, 0, run_time)
+        for _, _, _, _, line_num, _, hitc, run_time in top_n
     ]
 
 
@@ -74,7 +76,9 @@ def wave_info(df, id):
         "Br": df["br_ins"][id],
         "Br_stall": df["br_stalls"][id],
     }
-    dic["Issue_stall"] = int(np.sum([dic[key] for key in dic.keys() if "_STALL" in key]))
+    dic["Issue_stall"] = int(
+        np.sum([dic[key] for key in dic.keys() if "_STALL" in key])
+    )
     return dic
 
 
@@ -175,24 +179,20 @@ def call_picture_callback(return_dict, drawinfo):
 
 
 def view_trace(
-    code,
-    dbnames,
-    att_filenames,
-    se_time_begin,
-    gfxv,
-    drawinfo,
-    trace_instance_name
+    code, dbnames, att_filenames, se_time_begin, gfxv, drawinfo, trace_instance_name
 ):
     global JSON_GLOBAL_DICTIONARY
     pic_thread = None
 
     manager = Manager()
     return_dict = manager.dict()
-    occ_dict = {str(k): drawinfo["OCCUPANCY"][k] for k in range(len(drawinfo["OCCUPANCY"]))}
-    occ_dict['dispatches'] = {}
-    for id, name in drawinfo['DispatchNames'].items():
-        occ_dict['dispatches'][id] = name
-    occ_dict['names'] = drawinfo['ShaderNames']
+    occ_dict = {
+        str(k): drawinfo["OCCUPANCY"][k] for k in range(len(drawinfo["OCCUPANCY"]))
+    }
+    occ_dict["dispatches"] = {}
+    for id, name in drawinfo["DispatchNames"].items():
+        occ_dict["dispatches"][id] = name
+    occ_dict["names"] = drawinfo["ShaderNames"]
 
     JSON_GLOBAL_DICTIONARY["occupancy.json"] = Readable(occ_dict)
     pic_thread = Process(target=call_picture_callback, args=(return_dict, drawinfo))
@@ -219,8 +219,10 @@ def view_trace(
             flight_count.append(count)
             simd_wave_filenames[se_number] = wv_filenames
 
-    code_sel = [c[:-3]+c[-2:] for c in code]
-    JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code_sel, "top_n": get_top_n(code_sel)})
+    code_sel = [c[:-3] + c[-2:] for c in code]
+    JSON_GLOBAL_DICTIONARY["code.json"] = Readable(
+        {"code": code_sel, "top_n": get_top_n(code_sel)}
+    )
 
     for key in simd_wave_filenames.keys():
         wv_array = [
@@ -265,10 +267,14 @@ def view_trace(
     os.makedirs(trace_instance_name + "_ui/", exist_ok=True)
     JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
 
-    ui_dir_files = glob(os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")+"/*")
+    ui_dir_files = glob(
+        os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui") + "/*"
+    )
     for f in ui_dir_files:
         copy2(f, trace_instance_name + "_ui/")
 
     for k, v in JSON_GLOBAL_DICTIONARY.items():
-        with open(os.path.join(trace_instance_name+"_ui", k), "w" if ".json" in k else "wb") as f:
+        with open(
+            os.path.join(trace_instance_name + "_ui", k), "w" if ".json" in k else "wb"
+        ) as f:
             f.write(v.read())

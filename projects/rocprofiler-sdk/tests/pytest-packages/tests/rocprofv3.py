@@ -88,7 +88,9 @@ def test_perfetto_data(
                 for record in counter_records:
                     counter_id = record["counter_id"]["handle"]
                     counter_name = counter_info[counter_id]["name"]
-                    unique_counter_ids.add(f"Agent [{agent_node_id}] PMC {counter_name}")
+                    unique_counter_ids.add(
+                        f"Agent [{agent_node_id}] PMC {counter_name}"
+                    )
 
             _js_data = [{"counter_id": id} for id in unique_counter_ids]
 
@@ -144,7 +146,9 @@ def test_otf2_data(
                     else val
                 )
 
-            _json_data = [itr for itr in _json_data if roctx_mark_filter(itr) is not None]
+            _json_data = [
+                itr for itr in _json_data if roctx_mark_filter(itr) is not None
+            ]
 
         assert len(_otf2_data) == len(
             _json_data
@@ -255,7 +259,6 @@ def _perform_time_sanity_checks(data):
 
 
 def _perform_csv_json_match(csv_row, json_row, mapping, json_data):
-
     def get_nested(d, path):
         """Helper to get nested dict values using dot notation."""
         keys = path.split(".")
@@ -370,9 +373,9 @@ def test_csv_data(
             for key, value in buffer_records.items():
                 if key == "marker_api":
                     string_records = []
-                    marker_records = json_data["rocprofiler-sdk-tool"]["buffer_records"][
-                        "marker_api"
-                    ]
+                    marker_records = json_data["rocprofiler-sdk-tool"][
+                        "buffer_records"
+                    ]["marker_api"]
                     for item in json_data["rocprofiler-sdk-tool"]["strings"][
                         "buffer_records"
                     ]:

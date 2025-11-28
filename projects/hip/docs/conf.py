@@ -16,7 +16,7 @@ version_numbers = []
 version_file = open("../VERSION", "r")
 lines = version_file.readlines()
 for line in lines:
-    if line[0] == '#':
+    if line[0] == "#":
         continue
     version_numbers.append(line.strip())
 version_number = ".".join(version_numbers)
@@ -42,11 +42,17 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 # Add the _extensions directory to Python's search path
-sys.path.append(str(Path(__file__).parent / 'extension'))
+sys.path.append(str(Path(__file__).parent / "extension"))
 
 extensions += ["sphinxcontrib.doxylink", "custom_directive"]
 
-cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "static"]
+cpp_id_attributes = [
+    "__global__",
+    "__device__",
+    "__host__",
+    "__forceinline__",
+    "static",
+]
 cpp_paren_attributes = ["__declspec"]
 
 suppress_warnings = ["etoc.toctree"]
@@ -56,6 +62,6 @@ numfig = False
 exclude_patterns = [
     "./doxygen/mainpage.md",
     "./understand/glossary.md",
-    './how-to/debugging_env.rst',
-    "./reference/env_variables"
+    "./how-to/debugging_env.rst",
+    "./reference/env_variables",
 ]

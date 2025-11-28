@@ -388,7 +388,9 @@ if __name__ == "__main__":
 
         print(f"✅ Successfully connected to database: {db_path}")
 
-        cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view');"
+        )
         tables = cursor.fetchall()
 
         validation_result = validate_rocpd(cursor, rules, tables)

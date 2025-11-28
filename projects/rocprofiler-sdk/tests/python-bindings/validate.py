@@ -31,7 +31,9 @@ from collections import Counter
 
 
 def test_agent_info(agent_info_input_data):
-    logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
+    logical_node_id = max(
+        [int(itr["Logical_Node_Id"]) for itr in agent_info_input_data]
+    )
 
     assert logical_node_id + 1 == len(agent_info_input_data)
 

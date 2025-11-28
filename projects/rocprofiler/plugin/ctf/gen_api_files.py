@@ -277,7 +277,9 @@ def _enumerator_effective_val(enum_val):
             except:
                 pass
 
-    _make_sure(False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
+    _make_sure(
+        False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`'
+    )
 
 
 # Returns the equivalent field type of the C type `c_type`.
@@ -580,7 +582,7 @@ def _cpp_switch_statement_from_erts(api_prefix, erts):
     lines.append("switch (GetOp()) {")
 
     for ert in erts:
-        if api_prefix == 'hip' and 'R0600' in ert.api_func_name:
+        if api_prefix == "hip" and "R0600" in ert.api_func_name:
             continue
         lines.append(f"  case {api_prefix.upper()}_API_ID_{ert.api_func_name}:")
         lines.append(f"    barectf_{api_prefix}_api_trace_{ert.name(api_prefix)}(")
@@ -622,20 +624,20 @@ def _cpp_switch_statement_from_erts(api_prefix, erts):
 def _api_func_names(api_prefix, cpp_header):
     # Find the `*_api_id_t` enumeration.
     for enum in cpp_header.enums:
-        if enum.get('name') == f'{api_prefix}_api_id_t':
+        if enum.get("name") == f"{api_prefix}_api_id_t":
             break
 
     # Create the set of API function names based on enumerators.
     func_names = set()
-    pat = re.compile(rf'{api_prefix.upper()}_API_ID_(_*{api_prefix}.+)$')
+    pat = re.compile(rf"{api_prefix.upper()}_API_ID_(_*{api_prefix}.+)$")
 
-    for entry in enum['values']:
-        if type(entry['value']) is str and 'API_ID_NONE' in entry['value']:
+    for entry in enum["values"]:
+        if type(entry["value"]) is str and "API_ID_NONE" in entry["value"]:
             # An enumerator may have the value `*_API_ID_NONE` which
             # means the corresponding API function is not available.
             continue
 
-        m = pat.match(entry['name'])
+        m = pat.match(entry["name"])
 
         if m is not None:
             func_names.add(m.group(1))
@@ -660,9 +662,9 @@ def _process_file(api_prefix, path):
     new_items = []
     for struct_name, struct in cpp_header.classes.items():
         # Check if the struct_name starts with 'union '.
-        if re.match(r'^union \w+', struct_name) is not None:
-            parts = struct_name.split('::')
-            simplified = parts[-1] 
+        if re.match(r"^union \w+", struct_name) is not None:
+            parts = struct_name.split("::")
+            simplified = parts[-1]
             if simplified != "union ":
                 new_items.append((simplified, cpp_header.classes.get(struct_name)))
 
@@ -671,14 +673,13 @@ def _process_file(api_prefix, path):
 
     # Find callback data structure.
     for struct_name, struct in cpp_header.classes.items():
-        if re.match(r'^' + api_prefix + r'_api_data\w+$', struct_name) is not None:
+        if re.match(r"^" + api_prefix + r"_api_data\w+$", struct_name) is not None:
             break
 
     # Process callback data structure.
-    begin_erts, end_erts = _erts_from_cb_data_struct(api_prefix,
-                                                     cpp_header,
-                                                     retval_info,
-                                                     struct)
+    begin_erts, end_erts = _erts_from_cb_data_struct(
+        api_prefix, cpp_header, retval_info, struct
+    )
 
     # API functions without parameters are not part of the callback data
     # structure, but they have an ID in the `*_api_id_t` enumeration.
@@ -693,18 +694,16 @@ def _process_file(api_prefix, path):
             end_erts.append(_EndErt(func_name, []))
 
     # Write barectf YAML file.
-    with open(f'{api_prefix}_erts.yaml', 'w') as f:
+    with open(f"{api_prefix}_erts.yaml", "w") as f:
         f.write(_yaml_dst_from_erts(api_prefix, begin_erts + end_erts))
 
     # Write C++ code (beginning event record).
-    with open(f'{api_prefix}_begin.cpp.i', 'w') as f:
-        f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
-                                                          begin_erts)))
+    with open(f"{api_prefix}_begin.cpp.i", "w") as f:
+        f.write("\n".join(_cpp_switch_statement_from_erts(api_prefix, begin_erts)))
 
     # Write C++ code (end event record).
-    with open(f'{api_prefix}_end.cpp.i', 'w') as f:
-        f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
-                                                          end_erts)))
+    with open(f"{api_prefix}_end.cpp.i", "w") as f:
+        f.write("\n".join(_cpp_switch_statement_from_erts(api_prefix, end_erts)))
 
 
 if __name__ == "__main__":

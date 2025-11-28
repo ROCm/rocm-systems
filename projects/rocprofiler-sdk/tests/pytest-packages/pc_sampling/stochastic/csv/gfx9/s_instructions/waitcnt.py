@@ -37,7 +37,8 @@ def validate_waitcnt(all_samples, waitcnt_samples):
     assert (
         waitcnt_samples["Stall_Reason"]
         .apply(
-            lambda x: x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT"
+            lambda x: x
+            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT"
             or x
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
         )

@@ -31,7 +31,9 @@ def validate_texture_instructions_issued(samples_issued):
         == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_TEX"
     ]
     assert (
-        issued_type_texture["Instruction"].apply(lambda x: x.startswith("buffer_")).all()
+        issued_type_texture["Instruction"]
+        .apply(lambda x: x.startswith("buffer_"))
+        .all()
     )
 
     # issued instruction starts with buffer_ -> it must be TEX
@@ -49,7 +51,9 @@ def validate_texture_instructions_stalled(samples):
     texture_samples = samples[
         samples["Instruction"].apply(lambda x: x.startswith("buffer"))
     ]
-    texture_stalled = texture_samples[texture_samples["Wave_Issued_Instruction"] == False]
+    texture_stalled = texture_samples[
+        texture_samples["Wave_Issued_Instruction"] == False
+    ]
 
     assert (
         texture_stalled["Stall_Reason"]
@@ -60,7 +64,8 @@ def validate_texture_instructions_stalled(samples):
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE"
             or x
             == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN"
-            or x == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
+            or x
+            == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY"
         )
         .all()
     )

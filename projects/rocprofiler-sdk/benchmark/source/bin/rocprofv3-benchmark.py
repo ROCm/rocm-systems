@@ -189,7 +189,9 @@ def resolve_library(target, name, rpath, ld_library_path, runpath):
     """
 
     def _verify_resolved_libpath(_libpath):
-        _libpath = _libpath.replace("$ORIGIN", os.path.realpath(os.path.dirname(target)))
+        _libpath = _libpath.replace(
+            "$ORIGIN", os.path.realpath(os.path.dirname(target))
+        )
         _val = os.path.join(_libpath, name)
         if os.path.exists(_val) and os.path.isfile(_val):
             return os.path.realpath(_val)
@@ -1178,7 +1180,10 @@ def execute_input(connection, cursor, args):
     def shuffle(data):
         if isinstance(data, dict):
             return dict(
-                [[itr, data[itr]] for itr in random.sample(list(data.keys()), len(data))]
+                [
+                    [itr, data[itr]]
+                    for itr in random.sample(list(data.keys()), len(data))
+                ]
             )
         return random.sample(data, len(data))
 
@@ -1347,7 +1352,9 @@ def execute_input(connection, cursor, args):
                             )
 
                     else:
-                        raise ValueError(f"Unsupported benchmark mode: {benchmark_mode}")
+                        raise ValueError(
+                            f"Unsupported benchmark mode: {benchmark_mode}"
+                        )
 
                 # Commit the transaction
                 connection.commit()
@@ -1392,7 +1399,6 @@ def main():
 
 
 def generate_statistics(connection, cursor, args):
-
     def construct_where_condition(data, conditional="AND"):
         conditions = []
 
@@ -1423,7 +1429,9 @@ def generate_statistics(connection, cursor, args):
                     for itr in ["COUNT", "SUM", "AVG", "MIN", "MAX", "STDDEV_SAMP"]
                 ]
             )
-            select_stmt = f"SELECT {selections} FROM benchmark_metrics WHERE {where_cond}"
+            select_stmt = (
+                f"SELECT {selections} FROM benchmark_metrics WHERE {where_cond}"
+            )
             selection_stmts.append([metric, params, select_stmt])
 
     for metric, params, select_stmt in selection_stmts:
@@ -1459,7 +1467,13 @@ def generate_statistics(connection, cursor, args):
 
         else:
 
-            columns = ["app_id", "cfg_id", "sdk_id", "metric_name", "metric_unit"] + stats
+            columns = [
+                "app_id",
+                "cfg_id",
+                "sdk_id",
+                "metric_name",
+                "metric_unit",
+            ] + stats
             insert_stmt = "INSERT INTO benchmark_statistics ({}) VALUES ({})".format(
                 ", ".join(columns), ", ".join([args.db_placeholder for _ in columns])
             )

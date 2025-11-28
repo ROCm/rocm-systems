@@ -24,13 +24,12 @@ import re
 from docutils.parsers.rst import Directive
 from docutils.statemachine import StringList
 
+
 class TableInclude(Directive):
     required_arguments = 1
     optional_arguments = 0
     final_argument_whitespace = True
-    option_spec = {
-        'table': str
-    }
+    option_spec = {"table": str}
 
     def run(self):
         # Get the file path from the first argument
@@ -46,24 +45,29 @@ class TableInclude(Directive):
             raise self.error(f"RST file {full_file_path} does not exist.")
 
         # Read the entire file content
-        with open(full_file_path, 'r', encoding='utf-8') as f:
+        with open(full_file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Find all tables with named targets
-        table_pattern = r'(?:^\.\.\ _(.+?):\n)(.. list-table::.*?(?:\n\s*\*\s*-.*?)+)(?=\n\n|\Z)'
-        table_matches = list(re.finditer(table_pattern, content, re.MULTILINE | re.DOTALL))
+        table_pattern = (
+            r"(?:^\.\.\ _(.+?):\n)(.. list-table::.*?(?:\n\s*\*\s*-.*?)+)(?=\n\n|\Z)"
+        )
+        table_matches = list(
+            re.finditer(table_pattern, content, re.MULTILINE | re.DOTALL)
+        )
 
         # Get the specific table name from options
-        table_name = self.options.get('table')
+        table_name = self.options.get("table")
 
         # If no table specified, merge compatible tables
         if not table_name:
-            raise self.error("The ':table:' option is required to specify which table to include.")
+            raise self.error(
+                "The ':table:' option is required to specify which table to include."
+            )
 
         # Find the specific table
         matching_tables = [
-            match for match in table_matches
-            if match.group(1).strip() == table_name
+            match for match in table_matches if match.group(1).strip() == table_name
         ]
 
         if not matching_tables:
@@ -76,5 +80,6 @@ class TableInclude(Directive):
         self.state_machine.insert_input(table_content.splitlines(), full_file_path)
         return []
 
+
 def setup(app):
-    app.add_directive('include-table', TableInclude)
+    app.add_directive("include-table", TableInclude)

@@ -55,7 +55,6 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
 
 
 class RocpdImportData(libpyrocpd.RocpdImportData):
-
     def __init__(
         self, input, skip_auto_merge=False, automerge_limit=None, dbname=":memory:"
     ):

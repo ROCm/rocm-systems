@@ -212,7 +212,7 @@ def generate_rst_content(functions, section_filter=None):
 
 def add_function_documentation(lines, func):
     """Add documentation for a single function to the lines list."""
-    lines.append(func['name'])
+    lines.append(func["name"])
     lines.append("~" * len(f"``{func['name']}``"))
     lines.append("")
 

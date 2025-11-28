@@ -28,7 +28,9 @@ import re
 
 
 def test_agent_info(agent_info_input_data):
-    logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
+    logical_node_id = max(
+        [int(itr["Logical_Node_Id"]) for itr in agent_info_input_data]
+    )
 
     assert logical_node_id + 1 == len(agent_info_input_data)
 
@@ -225,7 +227,9 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
         assert row["Direction"] == direction
         src_agent = get_agent(row["Source_Agent_Id"].split(" ")[-1])
         dst_agent = get_agent(row["Destination_Agent_Id"].split(" ")[-1])
-        assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
+        assert (
+            src_agent is not None and dst_agent is not None
+        ), f"{agent_info_input_data}"
         if direction == "MEMORY_COPY_HOST_TO_DEVICE":
             assert src_agent["Agent_Type"] == "CPU"
             assert dst_agent["Agent_Type"] == "GPU"

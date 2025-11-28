@@ -191,7 +191,9 @@ class MemManager:
     def add_allocation(self, event, args):
         choice = 0
         if event == "hipMallocPitch":
-            malloc_args_ptrn = re.compile(r"\(ptr\((.*)\) width\((.*)\) height\((.*)\)\)")
+            malloc_args_ptrn = re.compile(
+                r"\(ptr\((.*)\) width\((.*)\) height\((.*)\)\)"
+            )
             choice = 1
         elif event == "hipMallocArray":
             malloc_args_ptrn = re.compile(
@@ -313,7 +315,9 @@ class MemManager:
         m_basic_hsa_prev = hsa_memcpy_ptrn_prev.match(args)
         m_basic_hsa = hsa_memcpy_ptrn.match(args)
         m_basic_hsa2 = hsa_memcpy_ptrn2.match(args)
-        is_hip = True if not (m_basic_hsa_prev or m_basic_hsa or m_basic_hsa2) else False
+        is_hip = (
+            True if not (m_basic_hsa_prev or m_basic_hsa or m_basic_hsa2) else False
+        )
         m_2d = hip_memcpy_ptrn2.match(args)
         m_array = hip_memcpy_ptrn3.match(args)
         is_async = 1 if async_event_ptrn.search(event) else 0
@@ -438,7 +442,13 @@ class MemManager:
         copy_line_header = ""
         copy_line_footer = ""
         copy_line_header = (
-            str(start_time) + DELIM + str(end_time) + DELIM + str(pid) + DELIM + str(tid)
+            str(start_time)
+            + DELIM
+            + str(end_time)
+            + DELIM
+            + str(pid)
+            + DELIM
+            + str(tid)
         )
         copy_line_footer = "Async=" + str(is_async)
 

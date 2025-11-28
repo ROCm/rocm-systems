@@ -202,10 +202,14 @@ def parse_res(infile):
                         )
                 m = ts_pattern.search(record)
                 if m:
-                    var_table[(var_table_pid, dispatch_number)]["DispatchNs"] = m.group(1)
+                    var_table[(var_table_pid, dispatch_number)]["DispatchNs"] = m.group(
+                        1
+                    )
                     var_table[(var_table_pid, dispatch_number)]["BeginNs"] = m.group(2)
                     var_table[(var_table_pid, dispatch_number)]["EndNs"] = m.group(3)
-                    var_table[(var_table_pid, dispatch_number)]["CompleteNs"] = m.group(4)
+                    var_table[(var_table_pid, dispatch_number)]["CompleteNs"] = m.group(
+                        4
+                    )
 
                     # filling dependenciws
                     from_ns = int(m.group(1))
@@ -274,8 +278,10 @@ def dump_csv(file_name):
             entry = var_table[(pid, ind)]
             dispatch_number = entry["Index"]
             if ind != dispatch_number:
-                fatal("Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n")
-            val_list = [entry[var] if (var in entry) else 'None' for var in var_list]
+                fatal(
+                    "Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n"
+                )
+            val_list = [entry[var] if (var in entry) else "None" for var in var_list]
             fd.write(",".join(val_list) + "\n")
 
     print("File '" + file_name + "' is generating")
@@ -361,8 +367,8 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
                     rec_vals.append(tid)
                     rec_vals.append(msg)
                     rec_vals.append(record_id)
-                    rec_vals.append(api_pid)    # __section
-                    rec_vals.append(tid)        # __lane
+                    rec_vals.append(api_pid)  # __section
+                    rec_vals.append(tid)  # __lane
 
                 if cid == 1:
                     if not pid in range_stack:
@@ -403,9 +409,9 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
                         del range_map[rid]
                     else:
                         fatal("range id(" + str(rid) + ") is not found")
-                    rec_vals[0] = tms   # begin timestamp
-                    rec_vals[4] = msg   # range message
-                    rec_vals[7] = 0     # 0 lane for ranges
+                    rec_vals[0] = tms  # begin timestamp
+                    rec_vals[4] = msg  # range message
+                    rec_vals[7] = 0  # 0 lane for ranges
 
                 db.insert_entry(table_handle, rec_vals)
                 record_id += 1
@@ -609,9 +615,7 @@ def fill_api_db(
                 (stream_id, stream_found) = get_field(record_args, "hStream")
                 if stream_found:
                     stream_id = get_stream_index(stream_id)
-                    (rec_vals[5], found) = set_field(
-                        record_args, "hStream", stream_id
-                    )
+                    (rec_vals[5], found) = set_field(record_args, "hStream", stream_id)
                     if found == 0:
                         fatal(
                             'set_field() failed for "stream", args: "'
@@ -770,7 +774,7 @@ def fill_api_db(
             rec_vals.append(api_data)
 
             # setting section and lane
-            rec_vals.append(api_pid)    # __section
+            rec_vals.append(api_pid)  # __section
             rec_vals.append(thread_id)  # __lane
 
             # inserting an API record to DB
@@ -857,9 +861,9 @@ def fill_copy_db(table_name, db, indir):
                     thread_id = -1
 
                 # completing record
-                rec_vals.append(proc_id)    # tid
+                rec_vals.append(proc_id)  # tid
                 rec_vals.append(thread_id)  # tid
-                rec_vals.append(corr_id)    # Index
+                rec_vals.append(corr_id)  # Index
 
                 # registering memcopy information
                 activity_data = (
@@ -868,7 +872,7 @@ def fill_copy_db(table_name, db, indir):
                 rec_vals.append(activity_data)
 
                 # appending straem ID and section ID
-                rec_vals.append(COPY_PID)   # __section
+                rec_vals.append(COPY_PID)  # __section
                 rec_vals.append(thread_id)  # __lane
 
                 # inserting DB activity entry
@@ -1021,12 +1025,12 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
                             )
 
                 # activity record
-                rec_vals[4] = name              # Name
-                rec_vals.append(proc_id)        # pid
-                rec_vals.append(thread_id)      # tid
-                rec_vals.append(roctx_range)    # roctx-range
-                rec_vals.append(stream_id)      # StreamId
-                rec_vals.append(corr_id)        # Index
+                rec_vals[4] = name  # Name
+                rec_vals.append(proc_id)  # pid
+                rec_vals.append(thread_id)  # tid
+                rec_vals.append(roctx_range)  # roctx-range
+                rec_vals.append(stream_id)  # StreamId
+                rec_vals.append(corr_id)  # Index
 
                 # registering memcopy information
                 activity_data = (
@@ -1037,7 +1041,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
                 rec_vals.append(activity_data)
 
                 # activity record data for stream ID and sction ID
-                rec_vals.append(sect_id)    # __section
+                rec_vals.append(sect_id)  # __section
                 rec_vals.append(stream_id)  # __lane
 
                 # inserting DB activity entry
@@ -1166,7 +1170,9 @@ else:
     if max_gpu_id >= 0:
         for ind in range(0, int(max_gpu_id) + 1):
             db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
-            db.label_json(int(ind) + int(GPU_BASE_PID) + 512 , "GPU Barriers" + str(ind), jsonfile)
+            db.label_json(
+                int(ind) + int(GPU_BASE_PID) + 512, "GPU Barriers" + str(ind), jsonfile
+            )
 
     if ext_trace_found:
         dform.gen_ext_json_trace(db, "rocTX", START_NS, jsonfile)

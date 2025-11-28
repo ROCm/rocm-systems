@@ -126,7 +126,9 @@ def write_agent_info_csv(importData, config) -> None:
         column_name, column_alias = (
             (match.group(1), match.group(2)) if match else (column, column)
         )
-        select_json.append(f"json_extract(extdata, '$.{column_name}') AS {column_alias}")
+        select_json.append(
+            f"json_extract(extdata, '$.{column_name}') AS {column_alias}"
+        )
 
     capabilities = [
         "HotPluggable",

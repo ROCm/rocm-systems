@@ -258,7 +258,8 @@ def generate_domain_query(
         return ()
 
     summary_selects = [
-        f"{query_name} AS ({query}) ," for query_name, query in summary_dictionary.items()
+        f"{query_name} AS ({query}) ,"
+        for query_name, query in summary_dictionary.items()
     ]
 
     union_selects = [
@@ -518,7 +519,12 @@ def add_args(parser):
     )
 
     def process_args(input, args):
-        valid_args = ["format", "domain_summary", "summary_by_rank", "region_categories"]
+        valid_args = [
+            "format",
+            "domain_summary",
+            "summary_by_rank",
+            "region_categories",
+        ]
 
         ret = {}
         for itr in valid_args:
@@ -543,7 +549,9 @@ def main(argv=None) -> int:
     from . import time_window
     from . import output_config
 
-    parser = argparse.ArgumentParser(description="Generate summary views from rocPD data")
+    parser = argparse.ArgumentParser(
+        description="Generate summary views from rocPD data"
+    )
     required_params = parser.add_argument_group("Required options")
 
     required_params.add_argument(

@@ -177,16 +177,22 @@ def test_external_correlation_ids(input_data):
                 itr["thread_id"] == itr["correlation_id"]["external"]
             ), f"[{titr}] {itr}"
             assert itr["thread_id"] in extern_corr_ids, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert (
+                itr["correlation_id"]["external"] in extern_corr_ids
+            ), f"[{titr}] {itr}"
 
     for titr in ["memory_allocations"]:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert (
+                itr["correlation_id"]["external"] in extern_corr_ids
+            ), f"[{titr}] {itr}"
 
         for itr in sdk_data["callback_records"][titr]:
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert (
+                itr["correlation_id"]["external"] in extern_corr_ids
+            ), f"[{titr}] {itr}"
 
 
 def test_memory_alloc_sizes(input_data):

@@ -38,5 +38,8 @@ class dotdict(dict):
             elif isinstance(v, (list, tuple)):
                 self.__setitem__(
                     k,
-                    [dotdict(i) if isinstance(i, (list, tuple, dict)) else i for i in v],
+                    [
+                        dotdict(i) if isinstance(i, (list, tuple, dict)) else i
+                        for i in v
+                    ],
                 )

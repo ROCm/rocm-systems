@@ -113,9 +113,9 @@ class validation(object):
             )
 
         def _compute(_speedup_v, _tolerance_v):
-            return _speedup_v >= (self.program_speedup - _tolerance_v) and _speedup_v <= (
-                self.program_speedup + _tolerance_v
-            )
+            return _speedup_v >= (
+                self.program_speedup - _tolerance_v
+            ) and _speedup_v <= (self.program_speedup + _tolerance_v)
 
         return _compute(_prog_speedup, _tolerance)
 
@@ -346,7 +346,9 @@ def process_data(data, _data, args):
                         )
                         itr += [_delt, _duration]
                     elif "arrival" in pts and pts["arrival"] > 0:
-                        itr = find_or_insert(data[_selected][_name], _speedup, "latency")
+                        itr = find_or_insert(
+                            data[_selected][_name], _speedup, "latency"
+                        )
                         itr += [pts["arrival"], pts["departure"], _duration]
                 else:
                     _delt = pts["laps"]

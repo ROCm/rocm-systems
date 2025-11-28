@@ -120,7 +120,10 @@ def update_line_graph(
     colors_df = pd.DataFrame()
     for color, prog in zip(colors, progress_points):
         colors_df = pd.concat(
-            [colors_df, pd.DataFrame({"progress points": [prog], "color": [color * 100]})]
+            [
+                colors_df,
+                pd.DataFrame({"progress points": [prog], "color": [color * 100]}),
+            ]
         )
 
     causalLayout = [html.H4("Selected Causal Profiles", style={"color": text_color})]
@@ -166,7 +169,9 @@ def update_line_graph(
                     name=prog,
                     mode="lines+markers",
                 ),
-            ).update_xaxes(dtick=5).update_yaxes(range=y_ranges, dtick=10).update_layout(
+            ).update_xaxes(dtick=5).update_yaxes(
+                range=y_ranges, dtick=10
+            ).update_layout(
                 xaxis={"title": x_label},
                 yaxis={"title": "Program Speedup"},
                 height=600,

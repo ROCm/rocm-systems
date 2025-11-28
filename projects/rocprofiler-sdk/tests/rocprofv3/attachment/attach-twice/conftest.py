@@ -119,7 +119,9 @@ def convert_json_records_to_csv_format(records, section_name, kernel_symbols=Non
                 else queue_info
             )
             csv_record["Kernel_Id"] = str(kernel_id)
-            csv_record["Stream_Id"] = dispatch_info.get("stream_id", {}).get("handle", 0)
+            csv_record["Stream_Id"] = dispatch_info.get("stream_id", {}).get(
+                "handle", 0
+            )
             csv_record["Thread_Id"] = record.get("thread_id", 0)
 
             # Correlation ID with internal/external handling
@@ -180,9 +182,9 @@ def convert_json_records_to_csv_format(records, section_name, kernel_symbols=Non
             csv_record["Function"] = "hsa_memory_copy"  # Common function for testing
 
             # Extract process ID from metadata
-            csv_record["Process_Id"] = (
-                "154739"  # Use thread_id as fallback for process_id
-            )
+            csv_record[
+                "Process_Id"
+            ] = "154739"  # Use thread_id as fallback for process_id
             csv_record["Thread_Id"] = str(record.get("thread_id", 154739))
             csv_record["Start_Timestamp"] = str(record.get("start_timestamp", 0))
             csv_record["End_Timestamp"] = str(record.get("end_timestamp", 0))

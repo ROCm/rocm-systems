@@ -11,8 +11,8 @@ project = "ROCm Data Center tool"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bget_version_from_tag\(\"([0-9.]+)\"', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r".*\bget_version_from_tag\(\"([0-9.]+)\"", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]

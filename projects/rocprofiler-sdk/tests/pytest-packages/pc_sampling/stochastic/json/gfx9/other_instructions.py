@@ -38,7 +38,9 @@ def validate_valu_instructions(sample_records):
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             # wave issued a VALU instruction
-            assert record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+            assert (
+                record["inst_type"] == "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+            )
             assert snapshot["arb_state_issue_valu"] == 1
             assert snapshot["arb_state_stall_valu"] == 0
         else:

@@ -45,7 +45,7 @@ from amdsmi_init import *
 from BDF import BDF
 
 
-class AMDSMIHelpers():
+class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
     Useful for determining platform and device identifiers
 
@@ -67,8 +67,9 @@ class AMDSMIHelpers():
         # Counts and Tracking variables
         self._count_of_sets_called = 0
         self._count_of_cper_files = 0
-        self._previous_set_success_check = amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR
-
+        self._previous_set_success_check = (
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR
+        )
 
         # Check if the system is a virtual OS
         if self.operating_system.startswith("Linux"):
@@ -76,8 +77,8 @@ class AMDSMIHelpers():
             logging.debug(f"AMDSMIHelpers: Platform is linux:{self._is_linux}")
 
             try:
-                with open('/proc/cpuinfo', 'r') as f:
-                    if 'hypervisor' in f.read():
+                with open("/proc/cpuinfo", "r") as f:
+                    if "hypervisor" in f.read():
                         self._is_virtual_os = True
             except IOError:
                 pass
@@ -85,11 +86,13 @@ class AMDSMIHelpers():
             self._is_baremetal = not self._is_virtual_os
 
         if self._is_virtual_os:
-            #If hard coded passthrough device ids exist on Virtual OS,
+            # If hard coded passthrough device ids exist on Virtual OS,
             #   then it is a passthrough system
             output = self.get_pci_device_ids()
             passthrough_device_ids = ["7460", "73c8", "74a0", "74a1", "74a2"]
-            if any(('0x' + device_id) in output for device_id in passthrough_device_ids):
+            if any(
+                ("0x" + device_id) in output for device_id in passthrough_device_ids
+            ):
                 self._is_baremetal = True
                 self._is_virtual_os = False
                 self._is_passthrough = True
@@ -99,19 +102,25 @@ class AMDSMIHelpers():
                 if self.is_amdgpu_initialized() and not self._is_passthrough:
                     device_handles = amdsmi_interface.amdsmi_get_processor_handles()
                     for dev in device_handles:
-                        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode(dev)
-                        if virtualization_info['mode'] == amdsmi_interface.AmdSmiVirtualizationMode.PASSTHROUGH:
+                        virtualization_info = (
+                            amdsmi_interface.amdsmi_get_gpu_virtualization_mode(dev)
+                        )
+                        if (
+                            virtualization_info["mode"]
+                            == amdsmi_interface.AmdSmiVirtualizationMode.PASSTHROUGH
+                        ):
                             self._is_baremetal = True
                             self._is_virtual_os = False
                             self._is_passthrough = True
-                            break # Once passthrough is determined, we can immediately break
+                            break  # Once passthrough is determined, we can immediately break
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to determine virtualization status: " + str(e.get_error_code()))
-
+                logging.debug(
+                    "Unable to determine virtualization status: "
+                    + str(e.get_error_code())
+                )
 
     def increment_set_count(self):
         self._count_of_sets_called += 1
-
 
     def get_set_count(self):
         return self._count_of_sets_called
@@ -131,36 +140,28 @@ class AMDSMIHelpers():
     def increment_cper_count(self):
         self._count_of_cper_files += 1
 
-
     def get_cper_count(self):
         return self._count_of_cper_files
 
-
     def is_virtual_os(self):
         return self._is_virtual_os
-
 
     def is_hypervisor(self):
         # Returns True if hypervisor is enabled on the system
         return self._is_hypervisor
 
-
     def is_baremetal(self):
         # Returns True if system is baremetal, if system is hypervisor this should return False
         return self._is_baremetal
 
-
     def is_passthrough(self):
         return self._is_passthrough
-
 
     def is_linux(self):
         return self._is_linux
 
-
     def is_windows(self):
         return self._is_windows
-
 
     def os_info(self, string_format=True):
         """Return operating_system and type information ex. (Linux, Baremetal)
@@ -196,18 +197,14 @@ class AMDSMIHelpers():
 
         return (operating_system, operating_system_type)
 
-
     def get_amdsmi_init_flag(self):
         return AMDSMI_INIT_FLAG
-
 
     def is_amdgpu_initialized(self):
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_GPUS
 
-
     def is_amd_hsmp_initialized(self):
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS
-
 
     def get_rocm_version(self):
         try:
@@ -217,7 +214,6 @@ class AMDSMIHelpers():
             return rocm_version
         except amdsmi_interface.AmdSmiLibraryException as e:
             return "N/A"
-
 
     def get_cpu_choices(self):
         """Return dictionary of possible CPU choices and string of the output:
@@ -237,21 +233,25 @@ class AMDSMIHelpers():
             # amdsmi_get_cpusocket_handles() returns the cpu socket handles stored for cpu_id
             cpu_handles = amdsmi_interface.amdsmi_get_cpusocket_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)')
+            if e.err_code in (
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+            ):
+                logging.info(
+                    "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                )
             else:
                 raise e
         if len(cpu_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi not found in modules)')
+            logging.info(
+                "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi not found in modules)"
+            )
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(cpu_handles))) + 1
 
             for cpu_id, device_handle in enumerate(cpu_handles):
-                cpu_choices[str(cpu_id)] = {
-                        "Device Handle": device_handle
-                }
+                cpu_choices[str(cpu_id)] = {"Device Handle": device_handle}
                 if cpu_id == 0:
                     id_padding = max_padding
                 else:
@@ -263,7 +263,6 @@ class AMDSMIHelpers():
             cpu_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
 
         return (cpu_choices, cpu_choices_str)
-
 
     def get_core_choices(self):
         """Return dictionary of possible Core choices and string of the output:
@@ -283,21 +282,25 @@ class AMDSMIHelpers():
             # amdsmi_get_cpucore_handles() returns the core handles stored for core_id
             core_handles = amdsmi_interface.amdsmi_get_cpucore_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)')
+            if e.err_code in (
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+            ):
+                logging.info(
+                    "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                )
             else:
                 raise e
         if len(core_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi  not found in modules)')
+            logging.info(
+                "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi  not found in modules)"
+            )
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(core_handles))) + 1
 
             for core_id, device_handle in enumerate(core_handles):
-                core_choices[str(core_id)] = {
-                        "Device Handle": device_handle
-                }
+                core_choices[str(core_id)] = {"Device Handle": device_handle}
                 if core_id == 0:
                     id_padding = max_padding
                 else:
@@ -309,7 +312,6 @@ class AMDSMIHelpers():
             core_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
 
         return (core_choices, core_choices_str)
-
 
     def get_output_format(self):
         """Returns the output format read from sys.argv
@@ -323,7 +325,6 @@ class AMDSMIHelpers():
         elif "--csv" in args or "--c" in args:
             outputformat = "csv"
         return outputformat
-
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
@@ -343,14 +344,20 @@ class AMDSMIHelpers():
             # amdsmi_get_processor_handles returns the device_handles storted for gpu_id
             device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
-            if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amdgpu not found in modules)')
+            if e.err_code in (
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
+                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+            ):
+                logging.info(
+                    "Unable to get device choices, driver not initialized (amdgpu not found in modules)"
+                )
             else:
                 raise e
 
         if len(device_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amdgpu not found in modules)')
+            logging.info(
+                "Unable to find any devices, check if driver is initialized (amdgpu not found in modules)"
+            )
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(device_handles))) + 1
@@ -368,14 +375,15 @@ class AMDSMIHelpers():
                     id_padding = max_padding
                 else:
                     id_padding = max_padding - int(math.log10(gpu_id))
-                gpu_choices_str += f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid}\n"
+                gpu_choices_str += (
+                    f"ID: {gpu_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid}\n"
+                )
 
             # Add the all option to the gpu_choices
             gpu_choices["all"] = "all"
             gpu_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
 
         return (gpu_choices, gpu_choices_str)
-
 
     @staticmethod
     def is_UUID(uuid_question: str) -> bool:
@@ -385,13 +393,17 @@ class AMDSMIHelpers():
         Returns:
             True or False: wether the UUID given matches the UUID format.
         """
-        UUID_pattern = re.compile("^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", flags=re.IGNORECASE)
+        UUID_pattern = re.compile(
+            "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$",
+            flags=re.IGNORECASE,
+        )
         if re.match(UUID_pattern, uuid_question) is None:
             return False
         return True
 
-
-    def get_device_handles_from_gpu_selections(self, gpu_selections: List[str], gpu_choices=None) -> tuple:
+    def get_device_handles_from_gpu_selections(
+        self, gpu_selections: List[str], gpu_choices=None
+    ) -> tuple:
         """Convert provided gpu_selections to device_handles
 
         Args:
@@ -403,7 +415,7 @@ class AMDSMIHelpers():
                 amdsmi device_handles
             (False, valid_gpu_format, str): Return False, whether the format of the GPU input is valid, and the first input that failed to be converted
         """
-        if 'all' in gpu_selections:
+        if "all" in gpu_selections:
             return True, True, amdsmi_interface.amdsmi_get_processor_handles()
 
         if isinstance(gpu_selections, str):
@@ -418,10 +430,10 @@ class AMDSMIHelpers():
             valid_gpu_choice = False
 
             for gpu_id, gpu_info in gpu_choices.items():
-                bdf = gpu_info['BDF']
+                bdf = gpu_info["BDF"]
                 is_bdf = True
-                uuid = gpu_info['UUID']
-                device_handle = gpu_info['Device Handle']
+                uuid = gpu_info["UUID"]
+                device_handle = gpu_info["Device Handle"]
 
                 # Check if passed gpu is a gpu ID or UUID
                 if gpu_selection == gpu_id or gpu_selection.lower() == uuid:
@@ -439,15 +451,22 @@ class AMDSMIHelpers():
                         pass
 
             if not valid_gpu_choice:
-                logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {gpu_selection}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {gpu_selection}"
+                )
                 valid_gpu_format = True
-                if not self.is_UUID(gpu_selection) and not gpu_selection.isdigit() and not is_bdf:
+                if (
+                    not self.is_UUID(gpu_selection)
+                    and not gpu_selection.isdigit()
+                    and not is_bdf
+                ):
                     valid_gpu_format = False
                 return False, valid_gpu_format, gpu_selection
         return True, True, selected_device_handles
 
-
-    def get_device_handles_from_cpu_selections(self, cpu_selections: List[str], cpu_choices=None):
+    def get_device_handles_from_cpu_selections(
+        self, cpu_selections: List[str], cpu_choices=None
+    ):
         """Convert provided cpu_selections to device_handles
 
         Args:
@@ -459,7 +478,7 @@ class AMDSMIHelpers():
                 amdsmi device_handles
             (False, str): Return False, and the first input that failed to be converted
         """
-        if 'all' in cpu_selections:
+        if "all" in cpu_selections:
             return True, True, amdsmi_interface.amdsmi_get_cpusocket_handles()
 
         if isinstance(cpu_selections, str):
@@ -472,7 +491,7 @@ class AMDSMIHelpers():
         for cpu_selection in cpu_selections:
             valid_cpu_choice = False
             for cpu_id, cpu_info in cpu_choices.items():
-                device_handle = cpu_info['Device Handle']
+                device_handle = cpu_info["Device Handle"]
 
                 # Check if passed gpu is a gpu ID
                 if cpu_selection == cpu_id:
@@ -480,15 +499,18 @@ class AMDSMIHelpers():
                     valid_cpu_choice = True
                     break
             if not valid_cpu_choice:
-                logging.debug(f"AMDSMIHelpers.get_device_handles_from_cpu_selections - Unable to convert {cpu_selection}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_device_handles_from_cpu_selections - Unable to convert {cpu_selection}"
+                )
                 valid_cpu_format = True
                 if not cpu_selection.isdigit():
                     valid_cpu_format = False
                 return False, valid_cpu_format, cpu_selection
         return True, True, selected_device_handles
 
-
-    def get_device_handles_from_core_selections(self, core_selections: List[str], core_choices=None):
+    def get_device_handles_from_core_selections(
+        self, core_selections: List[str], core_choices=None
+    ):
         """Convert provided core_selections to device_handles
 
         Args:
@@ -500,7 +522,7 @@ class AMDSMIHelpers():
                 amdsmi device_handles
             (False, str): Return False, and the first input that failed to be converted
         """
-        if 'all' in core_selections:
+        if "all" in core_selections:
             return True, True, amdsmi_interface.amdsmi_get_cpucore_handles()
 
         if isinstance(core_selections, str):
@@ -513,7 +535,7 @@ class AMDSMIHelpers():
         for core_selection in core_selections:
             valid_core_choice = False
             for core_id, core_info in core_choices.items():
-                device_handle = core_info['Device Handle']
+                device_handle = core_info["Device Handle"]
 
                 # Check if passed core is a core ID
                 if core_selection == core_id:
@@ -521,13 +543,14 @@ class AMDSMIHelpers():
                     valid_core_choice = True
                     break
             if not valid_core_choice:
-                logging.debug(f"AMDSMIHelpers.get_device_handles_from_core_selections - Unable to convert {core_selection}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_device_handles_from_core_selections - Unable to convert {core_selection}"
+                )
                 valid_core_format = True
                 if not core_selection.isdigit():
                     valid_core_format = False
                 return False, valid_core_format, core_selection
         return True, True, selected_device_handles
-
 
     def handle_gpus(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
@@ -561,7 +584,6 @@ class AMDSMIHelpers():
         else:
             return False, args.gpu
 
-
     def handle_cpus(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of cpus passed in via args.
@@ -592,7 +614,6 @@ class AMDSMIHelpers():
         else:
             return False, args.cpu
 
-
     def handle_cores(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of cores passed in via args.
@@ -622,7 +643,6 @@ class AMDSMIHelpers():
                 logging.debug("args.core has empty list")
         else:
             return False, args.core
-
 
     # The below handle_nodes function is currently unused as only node 0 is supported.
     # Marked as a private function until it is needed in the future.
@@ -657,7 +677,6 @@ class AMDSMIHelpers():
                 logging.debug("args.node has an empty list")
         else:
             return False, args.node
-
 
     def handle_watch(self, args, subcommand, logger):
         """This function will run the subcommand multiple times based
@@ -706,7 +725,6 @@ class AMDSMIHelpers():
 
         return 1
 
-
     def get_gpu_id_from_device_handle(self, input_device_handle):
         """Get the gpu index from the device_handle.
         amdsmi_get_processor_handles() returns the list of device_handles in order of gpu_index
@@ -715,10 +733,11 @@ class AMDSMIHelpers():
         for gpu_index, device_handle in enumerate(device_handles):
             if input_device_handle.value == device_handle.value:
                 return gpu_index
-        raise amdsmi_exception.AmdSmiParameterException(input_device_handle,
-                                                        amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-                                                        "Unable to find gpu ID from device_handle")
-
+        raise amdsmi_exception.AmdSmiParameterException(
+            input_device_handle,
+            amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
+            "Unable to find gpu ID from device_handle",
+        )
 
     def get_cpu_id_from_device_handle(self, input_device_handle):
         """Get the cpu index from the device_handle.
@@ -728,10 +747,11 @@ class AMDSMIHelpers():
         for cpu_index, device_handle in enumerate(device_handles):
             if input_device_handle.value == device_handle.value:
                 return cpu_index
-        raise amdsmi_exception.AmdSmiParameterException(input_device_handle,
-                                                        amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-                                                        "Unable to find cpu ID from device_handle")
-
+        raise amdsmi_exception.AmdSmiParameterException(
+            input_device_handle,
+            amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
+            "Unable to find cpu ID from device_handle",
+        )
 
     def get_core_id_from_device_handle(self, input_device_handle):
         """Get the core index from the device_handle.
@@ -741,10 +761,11 @@ class AMDSMIHelpers():
         for core_index, device_handle in enumerate(device_handles):
             if input_device_handle.value == device_handle.value:
                 return core_index
-        raise amdsmi_exception.AmdSmiParameterException(input_device_handle,
-                                                        amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-                                                        "Unable to find core ID from device_handle")
-
+        raise amdsmi_exception.AmdSmiParameterException(
+            input_device_handle,
+            amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
+            "Unable to find core ID from device_handle",
+        )
 
     def get_amd_gpu_bdfs(self):
         """Return a list of GPU BDFs visibile to amdsmi
@@ -761,144 +782,202 @@ class AMDSMIHelpers():
 
         return gpu_bdfs
 
-
     def is_amd_device(self, device_handle):
-        """ Return whether the specified device is an AMD device or not
+        """Return whether the specified device is an AMD device or not
 
         param device: DRM device identifier
         """
         # Get card vendor id
         asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
         try:
-            vendor_value = int(asic_info['vendor_id'], 16)
+            vendor_value = int(asic_info["vendor_id"], 16)
             return vendor_value == AMD_VENDOR_ID
         except:
             return False
 
-
     def get_perf_levels(self):
         perf_levels_str = [clock.name for clock in amdsmi_interface.AmdSmiDevPerfLevel]
-        perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
+        perf_levels_int = list(
+            set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel)
+        )
         return perf_levels_str, perf_levels_int
 
     def get_ptl_values(self):
         ptl_values_str = [ptl.name for ptl in amdsmi_interface.AmdSmiPtlData]
         ptl_values_int = list(set(ptl.name for ptl in amdsmi_interface.AmdSmiPtlData))
-        return ptl_values_str,ptl_values_int
+        return ptl_values_str, ptl_values_int
 
     def get_accelerator_partition_profile_config(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-        accelerator_partition_profiles = {'profile_indices':[], 'profile_types':[], 'memory_caps': []}
+        accelerator_partition_profiles = {
+            "profile_indices": [],
+            "profile_types": [],
+            "memory_caps": [],
+        }
         for dev in device_handles:
             try:
-                profile = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile_config(dev)
-                num_profiles = profile['num_profiles']
+                profile = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile_config(
+                    dev
+                )
+                num_profiles = profile["num_profiles"]
                 for p in range(num_profiles):
-                    accelerator_partition_profiles['profile_indices'].append(str(profile['profiles'][p]['profile_index']))
-                    accelerator_partition_profiles['profile_types'].append(profile['profiles'][p]['profile_type'])
-                    accelerator_partition_profiles['memory_caps'].append(profile['profiles'][p]['memory_caps'])
-                break # Only need to get the profiles for one device
+                    accelerator_partition_profiles["profile_indices"].append(
+                        str(profile["profiles"][p]["profile_index"])
+                    )
+                    accelerator_partition_profiles["profile_types"].append(
+                        profile["profiles"][p]["profile_type"]
+                    )
+                    accelerator_partition_profiles["memory_caps"].append(
+                        profile["profiles"][p]["memory_caps"]
+                    )
+                break  # Only need to get the profiles for one device
             except amdsmi_interface.AmdSmiLibraryException as e:
-                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unable to get accelerator partition profile config for device {dev}: {str(e)}")
-                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                    logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Device {dev} does not support accelerator partition profiles")
+                logging.debug(
+                    f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unable to get accelerator partition profile config for device {dev}: {str(e)}"
+                )
+                if (
+                    e.err_code
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug(
+                        f"AMDSMIHelpers.get_accelerator_partition_profile_config - Device {dev} does not support accelerator partition profiles"
+                    )
                     return accelerator_partition_profiles
                 break
             except Exception as e:
-                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occurred --> Unable to get accelerator partition profile config for device {dev}: {str(e)}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occurred --> Unable to get accelerator partition profile config for device {dev}: {str(e)}"
+                )
                 break
         return accelerator_partition_profiles
 
-
     def get_accelerator_choices_types_indices(self):
-        return_val = ("N/A", {'profile_indices':[], 'profile_types':[]})
+        return_val = ("N/A", {"profile_indices": [], "profile_types": []})
         if os.geteuid() != 0:
-            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles")
+            logging.debug(
+                "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles"
+            )
             # If not root, we can't get the accelerator partition profiles
             return return_val
         else:
-            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles")
+            logging.debug(
+                "AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles"
+            )
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
-        if len(accelerator_partition_profiles['profile_types']) != 0:
-            compute_partitions_list = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
+        if len(accelerator_partition_profiles["profile_types"]) != 0:
+            compute_partitions_list = (
+                accelerator_partition_profiles["profile_types"]
+                + accelerator_partition_profiles["profile_indices"]
+            )
             return_val = (compute_partitions_list, accelerator_partition_profiles)
         return return_val
 
-
     def get_memory_partition_types(self):
-        memory_partitions_str = [partition.name for partition in amdsmi_interface.AmdSmiMemoryPartitionType]
-        if 'UNKNOWN' in memory_partitions_str:
-            memory_partitions_str.remove('UNKNOWN')
+        memory_partitions_str = [
+            partition.name for partition in amdsmi_interface.AmdSmiMemoryPartitionType
+        ]
+        if "UNKNOWN" in memory_partitions_str:
+            memory_partitions_str.remove("UNKNOWN")
         return memory_partitions_str
-
 
     def get_clock_types(self):
         clock_types_str = [clock.name for clock in amdsmi_interface.AmdSmiClkType]
-        clock_types_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiClkType))
+        clock_types_int = list(
+            set(clock.value for clock in amdsmi_interface.AmdSmiClkType)
+        )
         return clock_types_str, clock_types_int
 
-
     def get_power_profiles(self):
-        power_profiles_str = [profile.name for profile in amdsmi_interface.AmdSmiPowerProfilePresetMasks]
-        if 'UNKNOWN' in power_profiles_str:
-            power_profiles_str.remove('UNKNOWN')
+        power_profiles_str = [
+            profile.name for profile in amdsmi_interface.AmdSmiPowerProfilePresetMasks
+        ]
+        if "UNKNOWN" in power_profiles_str:
+            power_profiles_str.remove("UNKNOWN")
         return power_profiles_str
 
-
     def get_perf_det_levels(self):
-        perf_det_level_str = [level.name for level in amdsmi_interface.AmdSmiDevPerfLevel]
-        if 'UNKNOWN' in perf_det_level_str:
-            perf_det_level_str.remove('UNKNOWN')
+        perf_det_level_str = [
+            level.name for level in amdsmi_interface.AmdSmiDevPerfLevel
+        ]
+        if "UNKNOWN" in perf_det_level_str:
+            perf_det_level_str.remove("UNKNOWN")
         return perf_det_level_str
-
 
     def get_power_caps(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         power_limit_types = {
-            'ppt0': {
-                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
-                'power_cap_max': 0
+            "ppt0": {
+                "power_cap_min": amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                "power_cap_max": 0,
             },
-            'ppt1': {
-                'power_cap_min': amdsmi_interface.MaxUIntegerTypes.UINT64_T,
-                'power_cap_max': 0
-            }
+            "ppt1": {
+                "power_cap_min": amdsmi_interface.MaxUIntegerTypes.UINT64_T,
+                "power_cap_max": 0,
+            },
         }
 
         for dev in device_handles:
             try:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
-                for sensor in power_cap_types['sensor_inds']:
-                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if power_cap_info['max_power_cap'] > power_limit_types[f'ppt{sensor}']['power_cap_max']:
-                        power_limit_types[f'ppt{sensor}']['power_cap_max'] = power_cap_info['max_power_cap']
-                    if power_cap_info['min_power_cap'] < power_limit_types[f'ppt{sensor}']['power_cap_min']:
-                        power_limit_types[f'ppt{sensor}']['power_cap_min'] = power_cap_info['min_power_cap']
+                for sensor in power_cap_types["sensor_inds"]:
+                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(
+                        dev, sensor
+                    )
+                    if (
+                        power_cap_info["max_power_cap"]
+                        > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
+                    ):
+                        power_limit_types[f"ppt{sensor}"][
+                            "power_cap_max"
+                        ] = power_cap_info["max_power_cap"]
+                    if (
+                        power_cap_info["min_power_cap"]
+                        < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
+                    ):
+                        power_limit_types[f"ppt{sensor}"][
+                            "power_cap_min"
+                        ] = power_cap_info["min_power_cap"]
             except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
-                logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}"
+                )
                 continue
 
         # If we never found a real min or max, set them to N/A
-        for ppt_key in ['ppt0', 'ppt1']:
-            if power_limit_types[ppt_key]['power_cap_min'] == amdsmi_interface.MaxUIntegerTypes.UINT64_T:
-                power_limit_types[ppt_key]['power_cap_min'] = "N/A"
-            if power_limit_types[ppt_key]['power_cap_max'] == 0:
-                power_limit_types[ppt_key]['power_cap_max'] = "N/A"
+        for ppt_key in ["ppt0", "ppt1"]:
+            if (
+                power_limit_types[ppt_key]["power_cap_min"]
+                == amdsmi_interface.MaxUIntegerTypes.UINT64_T
+            ):
+                power_limit_types[ppt_key]["power_cap_min"] = "N/A"
+            if power_limit_types[ppt_key]["power_cap_max"] == 0:
+                power_limit_types[ppt_key]["power_cap_max"] = "N/A"
 
-        ppt0_power_cap_max = self.format_power_cap(power_limit_types['ppt0']['power_cap_max'])
-        ppt0_power_cap_min = self.format_power_cap(power_limit_types['ppt0']['power_cap_min'])
-        ppt1_power_cap_max = self.format_power_cap(power_limit_types['ppt1']['power_cap_max'])
-        ppt1_power_cap_min = self.format_power_cap(power_limit_types['ppt1']['power_cap_min'])
+        ppt0_power_cap_max = self.format_power_cap(
+            power_limit_types["ppt0"]["power_cap_max"]
+        )
+        ppt0_power_cap_min = self.format_power_cap(
+            power_limit_types["ppt0"]["power_cap_min"]
+        )
+        ppt1_power_cap_max = self.format_power_cap(
+            power_limit_types["ppt1"]["power_cap_max"]
+        )
+        ppt1_power_cap_min = self.format_power_cap(
+            power_limit_types["ppt1"]["power_cap_min"]
+        )
 
-        return (ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max)
-
+        return (
+            ppt0_power_cap_min,
+            ppt0_power_cap_max,
+            ppt1_power_cap_min,
+            ppt1_power_cap_max,
+        )
 
     def format_power_cap(self, value):
         if value != "N/A":
             converted = self.convert_SI_unit(value, AMDSMIHelpers.SI_Unit.MICRO)
             return f"{converted} W"
         return value
-
 
     def get_soc_pstates(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
@@ -907,20 +986,23 @@ class AMDSMIHelpers():
             try:
                 soc_pstate_info = amdsmi_interface.amdsmi_get_soc_pstate(dev)
                 # Check if 'policies' key exists before accessing it
-                if 'policies' in soc_pstate_info and soc_pstate_info['policies']:
-                    for policy in soc_pstate_info['policies']:
-                        policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                if "policies" in soc_pstate_info and soc_pstate_info["policies"]:
+                    for policy in soc_pstate_info["policies"]:
+                        policy_string = (
+                            f"{policy['policy_id']}: {policy['policy_description']}"
+                        )
                         if not policy_string in soc_pstate_profile_list:
                             soc_pstate_profile_list.append(policy_string)
             except amdsmi_interface.AmdSmiLibraryException as e:
                 continue
             except KeyError as e:
-                logging.debug(f"AMDSMIHelpers.get_soc_pstates - Missing key in soc_pstate_info: {e}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_soc_pstates - Missing key in soc_pstate_info: {e}"
+                )
                 continue
         if len(soc_pstate_profile_list) == 0:
             soc_pstate_profile_list.append("N/A")
         return soc_pstate_profile_list
-
 
     def get_xgmi_plpd_policies(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
@@ -929,20 +1011,23 @@ class AMDSMIHelpers():
             try:
                 xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(dev)
                 # Check if 'policies' key exists before accessing it
-                if 'policies' in xgmi_plpd_info and xgmi_plpd_info['policies']:
-                    for policy in xgmi_plpd_info['policies']:
-                        policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                if "policies" in xgmi_plpd_info and xgmi_plpd_info["policies"]:
+                    for policy in xgmi_plpd_info["policies"]:
+                        policy_string = (
+                            f"{policy['policy_id']}: {policy['policy_description']}"
+                        )
                         if not policy_string in xgmi_plpd_profile_list:
                             xgmi_plpd_profile_list.append(policy_string)
             except amdsmi_interface.AmdSmiLibraryException as e:
                 continue
             except KeyError as e:
-                logging.debug(f"AMDSMIHelpers.get_xgmi_plpd_policies - Missing key in xgmi_plpd_info: {e}")
+                logging.debug(
+                    f"AMDSMIHelpers.get_xgmi_plpd_policies - Missing key in xgmi_plpd_info: {e}"
+                )
                 continue
         if len(xgmi_plpd_profile_list) == 0:
             xgmi_plpd_profile_list.append("N/A")
         return xgmi_plpd_profile_list
-
 
     def validate_clock_type(self, input_clock_type):
         valid_clock_types_str, valid_clock_types_int = self.get_clock_types()
@@ -951,7 +1036,7 @@ class AMDSMIHelpers():
         if isinstance(input_clock_type, str):
             for clock_type in valid_clock_types_str:
                 if input_clock_type.lower() == clock_type.lower():
-                    input_clock_type = clock_type # Set input_clock_type to enum value in AmdSmiClkType
+                    input_clock_type = clock_type  # Set input_clock_type to enum value in AmdSmiClkType
                     valid_clock_input = True
                     break
         elif isinstance(input_clock_type, int):
@@ -961,13 +1046,13 @@ class AMDSMIHelpers():
 
         return valid_clock_input, input_clock_type
 
-
     def confirm_out_of_spec_warning(self, auto_respond=False):
-        """ Print the warning for running outside of specification and prompt user to accept the terms.
+        """Print the warning for running outside of specification and prompt user to accept the terms.
 
         @param auto_respond: Response to automatically provide for all prompts
         """
-        print('''
+        print(
+            """
             ******WARNING******\n
             Operating your AMD GPU outside of official AMD specifications or outside of
             factory settings, including but not limited to the conducting of overclocking,
@@ -979,24 +1064,25 @@ class AMDSMIHelpers():
             OUTSIDE OF FACTORY SETTINGS ARE NOT COVERED UNDER ANY AMD PRODUCT WARRANTY AND
             MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S WARRANTY.
             Please use this utility with caution.
-            ''')
+            """
+        )
         if not auto_respond:
-            user_input = input('Do you accept these terms? [y/n] ')
+            user_input = input("Do you accept these terms? [y/n] ")
         else:
             user_input = auto_respond
-        if user_input in ['y', 'Y', 'yes', 'Yes', 'YES']:
+        if user_input in ["y", "Y", "yes", "Yes", "YES"]:
             return
         else:
-            sys.exit('Confirmation not given. Exiting without setting value')
-
+            sys.exit("Confirmation not given. Exiting without setting value")
 
     def confirm_changing_memory_partition_gpu_reload_warning(self, auto_respond=False):
-        """ Print the warning for running outside of specification and prompt user to accept the terms.
+        """Print the warning for running outside of specification and prompt user to accept the terms.
 
         :param autoRespond: Response to automatically provide for all prompts
         """
 
-        print('''
+        print(
+            """
             ******WARNING******\n
             After changing memory (NPS) partition modes, users MUST restart
             (reload) the AMD GPU driver. This command NO LONGER AUTOMATICALLY
@@ -1016,25 +1102,27 @@ class AMDSMIHelpers():
             ******REMINDER******
             In order to reload the AMD GPU driver, users MUST quit all GPU
             workloads across all devices.
-            ''')
+            """
+        )
 
         if not auto_respond:
-            user_input = input('Do you accept these terms? [Y/N] ')
+            user_input = input("Do you accept these terms? [Y/N] ")
         else:
             user_input = auto_respond
-        if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
-            print('')
+        if user_input in ["Yes", "yes", "y", "Y", "YES"]:
+            print("")
             return
         else:
-            print('Confirmation not given. Exiting without setting value')
+            print("Confirmation not given. Exiting without setting value")
             sys.exit(1)
 
     def confirm_gpu_driver_reload_warning(self, auto_respond=False):
-        """ Print the warning for running outside of specification and prompt user to accept the terms.
+        """Print the warning for running outside of specification and prompt user to accept the terms.
 
         :param autoRespond: Response to automatically provide for all prompts
         """
-        print('''
+        print(
+            """
           ****** WARNING ******\n
           AMD SMI is about to initiate an AMD GPU driver restart (module reload).
 
@@ -1048,25 +1136,27 @@ class AMDSMIHelpers():
           afterwards to ensure changes were applied as expected.
 
           Please use this utility with caution.
-          ''')
+          """
+        )
         if not auto_respond:
-            user_input = input('Do you accept these terms? [Y/N] ')
+            user_input = input("Do you accept these terms? [Y/N] ")
         else:
             user_input = auto_respond
-        if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
-            print('')
+        if user_input in ["Yes", "yes", "y", "Y", "YES"]:
+            print("")
             return
         else:
-            print('Confirmation not given. Exiting without setting value')
+            print("Confirmation not given. Exiting without setting value")
             sys.exit(1)
 
     def is_valid_profile(self, profile):
-        profile_presets = amdsmi_interface.amdsmi_wrapper.amdsmi_power_profile_preset_masks_t__enumvalues
+        profile_presets = (
+            amdsmi_interface.amdsmi_wrapper.amdsmi_power_profile_preset_masks_t__enumvalues
+        )
         if profile in profile_presets:
             return True, profile_presets[profile]
         else:
             return False, profile_presets.values()
-
 
     def convert_bytes_to_readable(self, bytes_input, format_length=None):
         if isinstance(bytes_input, str):
@@ -1086,7 +1176,6 @@ class AMDSMIHelpers():
                     return f"{bytes_input:3.1f} {unit}"
             bytes_input /= 1024
         return f"{bytes_input:.1f} YB"
-
 
     def unit_format(self, logger, value, unit):
         """This function will format output with unit based on the logger output format
@@ -1135,28 +1224,28 @@ class AMDSMIHelpers():
         """
         if logger.is_json_format():
             if isinstance(formatted_value, dict):
-                return formatted_value['value']
+                return formatted_value["value"]
             return formatted_value
         if logger.is_human_readable_format():
             return formatted_value.split()[0]
         return formatted_value
 
-
     class SI_Unit(float, Enum):
         GIGA = 1000000000  # 10^9
-        MEGA = 1000000     # 10^6
-        KILO = 1000        # 10^3
-        HECTO = 100        # 10^2
-        DEKA = 10          # 10^1
-        BASE = 1           # 10^0
-        DECI = 0.1         # 10^-1
-        CENTI = 0.01       # 10^-2
-        MILLI = 0.001      # 10^-3
-        MICRO = 0.000001   # 10^-6
-        NANO = 0.000000001 # 10^-9
+        MEGA = 1000000  # 10^6
+        KILO = 1000  # 10^3
+        HECTO = 100  # 10^2
+        DEKA = 10  # 10^1
+        BASE = 1  # 10^0
+        DECI = 0.1  # 10^-1
+        CENTI = 0.01  # 10^-2
+        MILLI = 0.001  # 10^-3
+        MICRO = 0.000001  # 10^-6
+        NANO = 0.000000001  # 10^-9
 
-
-    def convert_SI_unit(self, val: Union[int, float], unit_in: SI_Unit, unit_out = SI_Unit.BASE) -> Union[int, float]:
+    def convert_SI_unit(
+        self, val: Union[int, float], unit_in: SI_Unit, unit_out=SI_Unit.BASE
+    ) -> Union[int, float]:
         """This function will convert a value into another
          scientific (SI) unit. Defaults unit_out to SI_Unit.BASE
 
@@ -1175,57 +1264,62 @@ class AMDSMIHelpers():
         else:
             raise TypeError("val must be an int or float")
 
-
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
         pci_devices: set[str] = set()
         for device in os.listdir(pci_devices_path):
             device_path = os.path.join(pci_devices_path, device, "device")
             try:
-                with open(device_path, 'r') as f:
+                with open(device_path, "r") as f:
                     device = f.read().strip()
                     pci_devices.add(device)
             except Exception as _:
                 continue
         return pci_devices
 
-
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
-        if (add_newline):
-            print("{}\n".format(prefix),end='\r', file=out, flush=False)
+        if add_newline:
+            print("{}\n".format(prefix), end="\r", file=out, flush=False)
         else:
-            print("{}".format(prefix),end='\r', file=out, flush=False)
+            print("{}".format(prefix), end="\r", file=out, flush=False)
+
         def show(j):
-            x = int(size*j/count)
-            print("[{}{}] {}/{} secs remain".format(u"█"*x, "."*(size-x), j, count),
-                    end='\r', file=out, flush=True)
+            x = int(size * j / count)
+            print(
+                "[{}{}] {}/{} secs remain".format("█" * x, "." * (size - x), j, count),
+                end="\r",
+                file=out,
+                flush=True,
+            )
+
         show(0)
         for i, item in enumerate(it):
             yield item
-            show(i+1)
-        print("\n\n", end='\r', flush=True, file=out)
-
+            show(i + 1)
+        print("\n\n", end="\r", flush=True, file=out)
 
     def showProgressbar(self, title="", timeInSeconds=13, add_newline=False):
         if title != "":
             title += " "
-        for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
+        for i in self.progressbar(
+            range(timeInSeconds), title, 40, add_newline=add_newline
+        ):
             time.sleep(1)
 
     @lru_cache(maxsize=128)
     def _cached_group_name(self, gid: int) -> str:
-        try: 
+        try:
             return grp.getgrgid(gid).gr_name
-        except Exception: 
+        except Exception:
             # In containers, the UID may not resolve to a name
             return str(gid)
 
     @lru_cache(maxsize=128)
     def _cached_user_name(self, uid: int) -> str:
-        try: 
+        try:
             return pwd.getpwuid(uid).pw_name
-        except Exception: 
+        except Exception:
             # In containers, the GID may not resolve to a name
             return str(uid)
 
@@ -1286,11 +1380,11 @@ class AMDSMIHelpers():
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
-        
+
         Args:
             check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
             check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
-        
+
         Returns:
             bool: True if all checked devices are accessible, False if any permission errors found
         """
@@ -1300,7 +1394,7 @@ class AMDSMIHelpers():
             return True
 
         paths_to_check = []
-        
+
         # Only add paths for device types that are flagged for checking
         if check_render and os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
@@ -1319,7 +1413,7 @@ class AMDSMIHelpers():
             # Do not try to open all paths, may cause driver issues.
             # Read access is sufficient to check permissions.
             #
-            # Reason: GPUs which support partitioning (memory/compute), 
+            # Reason: GPUs which support partitioning (memory/compute),
             # logical devices will not be valid until configured.
             # See `sudo amd-smi set -h` or applicable APIs
             # to configure on supported hardware.
@@ -1359,9 +1453,11 @@ class AMDSMIHelpers():
 
             # Deduplicate group info by converting to tuple for hashing
             for device_type in required_groups:
-                unique_groups = list(dict.fromkeys(
-                    tuple(sorted(d.items())) for d in required_groups[device_type]
-                ))
+                unique_groups = list(
+                    dict.fromkeys(
+                        tuple(sorted(d.items())) for d in required_groups[device_type]
+                    )
+                )
                 required_groups[device_type] = [dict(item) for item in unique_groups]
 
             lines = []
@@ -1389,7 +1485,9 @@ class AMDSMIHelpers():
                     all_groups.add(group_info["group"])
 
             if device_types["renderD"]:
-                lines.append(f"  • /dev/dri/renderD*: {len(device_types['renderD'])} device(s) denied")
+                lines.append(
+                    f"  • /dev/dri/renderD*: {len(device_types['renderD'])} device(s) denied"
+                )
                 if len(required_groups["renderD"]) > 1:
                     lines.append("    - Required group(s):")
                 else:
@@ -1406,7 +1504,9 @@ class AMDSMIHelpers():
                     all_groups.add(group_info["group"])
 
             if device_types["card"]:
-                lines.append(f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied")
+                lines.append(
+                    f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied"
+                )
                 if len(required_groups["card"]) > 1:
                     lines.append("    - Required group(s):")
                 else:
@@ -1425,15 +1525,17 @@ class AMDSMIHelpers():
             # Generate usermod command with all unique groups
             groups_for_usermod = ",".join(sorted(all_groups))
 
-            lines.extend([
-                "",
-                "To resolve this issue, try the following:",
-                "  • Add your user to the required group(s):",
-            f"      sudo usermod -aG {groups_for_usermod} \"$USER\"",
-                "  • Log out and log back in for the group changes to take effect",
-                "  • Alternatively, run this command with sudo/admin privileges",
-                ""
-            ])
+            lines.extend(
+                [
+                    "",
+                    "To resolve this issue, try the following:",
+                    "  • Add your user to the required group(s):",
+                    f'      sudo usermod -aG {groups_for_usermod} "$USER"',
+                    "  • Log out and log back in for the group changes to take effect",
+                    "  • Alternatively, run this command with sudo/admin privileges",
+                    "",
+                ]
+            )
             print("\n".join(lines))
             return False
 
@@ -1441,22 +1543,22 @@ class AMDSMIHelpers():
 
     def _severity_as_string(self, error_severity, notify_type, for_filename):
         if error_severity == "non_fatal_uncorrected":
-            if(for_filename):
+            if for_filename:
                 return "uncorrected"
             return "NONFATAL-UNCORRECTED"
         elif error_severity == "non_fatal_corrected":
-            if(for_filename):
+            if for_filename:
                 return "corrected"
             return "NONFATAL-CORRECTED"
         elif error_severity == "fatal":
             if notify_type == "BOOT":
-                if(for_filename):
+                if for_filename:
                     return "boot"
                 return "BOOT"
-            if(for_filename):
+            if for_filename:
                 return "fatal"
             return "FATAL"
-        if(for_filename):
+        if for_filename:
             return "unknown"
         return "UNKNOWN"
 
@@ -1465,8 +1567,10 @@ class AMDSMIHelpers():
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               print(f"WARNING: No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
-               self._cper_warning_printed = True
+                print(
+                    f"WARNING: No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist."
+                )
+                self._cper_warning_printed = True
 
             self._print_header(folder)
             self._cper_display_initialized = True
@@ -1476,17 +1580,21 @@ class AMDSMIHelpers():
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
-                                              entry.get("notify_type", "Unknown"),
-                                              False)
+            prefix = self._severity_as_string(
+                entry.get("error_severity", "Unknown"),
+                entry.get("notify_type", "Unknown"),
+                False,
+            )
             output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
             if folder:
-                prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
-                                                entry.get("notify_type", "Unknown"),
-                                                True)
+                prefix = self._severity_as_string(
+                    entry.get("error_severity", "Unknown"),
+                    entry.get("notify_type", "Unknown"),
+                    True,
+                )
                 cper_data_file = f"{prefix}_{self.get_cper_count() + 1}.cper"
                 afids = self.pvtDumpAfids(cper_data_file)
-                afids_str = ' '.join(map(str, afids))
+                afids_str = " ".join(map(str, afids))
                 output += f" {cper_data_file:<17} {afids_str}"
 
             print(output)
@@ -1498,7 +1606,9 @@ class AMDSMIHelpers():
             print(f" {'file_name':<17} {'list of afids'}", end="")
         print("")
 
-    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
+    def dump_cper_entries(
+        self, folder, entries, cper_data, device_handle, file_limit=None
+    ):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
 
@@ -1525,24 +1635,24 @@ class AMDSMIHelpers():
                 error_severity = entry.get("error_severity", "").lower()
                 notify_type = entry.get("notify_type", "")
                 prefix = self._severity_as_string(error_severity, notify_type, True)
-            
+
                 # Generate filenames
                 count = self.get_cper_count() + 1
                 cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
-            
+
                 # Write CPER binary file
                 try:
                     self.write_binary(
                         cper_data[entry_index]["bytes"],
                         cper_data[entry_index]["size"],
-                        cper_path
+                        cper_path,
                     )
                 except Exception as e:
                     logging.debug(f"Failed to write CPER file {cper_path}: {e}")
-            
+
                 # Write JSON metadata file
                 try:
                     with json_path.open("w") as cper_json_file:
@@ -1550,11 +1660,13 @@ class AMDSMIHelpers():
                             obj=entry,
                             fp=cper_json_file,
                             indent=2,
-                            default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
+                            default=lambda o: o.decode("utf-8")
+                            if isinstance(o, bytes)
+                            else o,
                         )
                 except Exception as e:
                     logging.debug(f"Failed to write JSON file {json_path}: {e}")
-            
+
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
@@ -1564,13 +1676,15 @@ class AMDSMIHelpers():
 
             # Batch deletion if file limit is exceeded (AFTER writing ALL new files)
             if file_limit:
-                folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
+                folder_files = list(
+                    sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime)
+                )
                 if len(folder_files) > file_limit:
                     files_to_delete = len(folder_files) - file_limit
                     for old_file in folder_files[:files_to_delete]:
                         try:
                             old_file.unlink()
-                            json_file = old_file.with_suffix('.json')
+                            json_file = old_file.with_suffix(".json")
                             if json_file.exists():
                                 json_file.unlink()
                         except OSError as e:
@@ -1581,20 +1695,26 @@ class AMDSMIHelpers():
                 timestamp, gpu_id, severity, fname = row
                 try:
                     afids = self.pvtDumpAfids(cper_path)
-                    afids_str = ' '.join(map(str, afids))
+                    afids_str = " ".join(map(str, afids))
                 except Exception as e:
                     afids_str = "Error fetching AFIDs"
                     logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
-                print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
+                print(
+                    f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}"
+                )
 
         else:
             # Print entries as JSON if no folder is specified
             try:
-                print(json.dumps(
-                    entries,
-                    indent=2,
-                    default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
-                ))
+                print(
+                    json.dumps(
+                        entries,
+                        indent=2,
+                        default=lambda o: o.decode("utf-8")
+                        if isinstance(o, bytes)
+                        else o,
+                    )
+                )
             except Exception as e:
                 logging.debug(f"Failed to dump entries as JSON: {e}")
 
@@ -1607,17 +1727,17 @@ class AMDSMIHelpers():
         size (int): The number of bytes to write.
         filepath: The path to the output file.
         """
-        with open(filepath, 'wb') as f:
-             if isinstance(data, list):
+        with open(filepath, "wb") as f:
+            if isinstance(data, list):
                 try:
                     # Attempt to convert the list to a bytes object.
                     data_bytes = bytes(data[:size])
                 except ValueError:
                     # If any value is out of range, force them into 0-255.
                     data_bytes = bytes(x % 256 for x in data[:size])
-             else:
-                 data_bytes = data[:size]
-             f.write(data_bytes)
+            else:
+                data_bytes = data[:size]
+            f.write(data_bytes)
 
     def binary_to_hexdump_string(self, data: Union[bytes, List[int]]) -> str:
         """
@@ -1668,7 +1788,7 @@ class AMDSMIHelpers():
         elif isinstance(raw_data, str):
             # fetch_cper_file returned a filename
             with open(raw_data, "rb") as f:
-                    raw = f.read()
+                raw = f.read()
         else:
             # assume it's already bytes
             raw = raw_data
@@ -1677,24 +1797,38 @@ class AMDSMIHelpers():
             afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
             return afids
         except amdsmi_exception.AmdSmiLibraryException as e:
-            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+            if (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL
+            ):
                 raise ValueError("Invalid CPER file inputs") from e
-            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE:
+            elif (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE
+            ):
                 raise ValueError("Invalid CPER file data size") from e
-            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA:
+            elif (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA
+            ):
                 raise ValueError("Unexpected data in CPER file") from e
-            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+            elif (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            ):
                 raise NotImplementedError("AFID decoding not supported") from e
             else:
                 raise ValueError("Unexpected Error getting afids from CPER file") from e
 
-    def get_partition_id(self, device_handle, gpu_id = None) -> int:
+    def get_partition_id(self, device_handle, gpu_id=None) -> int:
         partition_id = -1
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(device_handle)
-            partition_id = kfd_info['current_partition_id']
+            partition_id = kfd_info["current_partition_id"]
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info())
+            logging.debug(
+                "Failed to get kfd info for gpu %s | %s", gpu_id, e.get_error_info()
+            )
         return partition_id
 
     def get_primary_partition_gpu_id(self, device_handle) -> Union[int, None]:
@@ -1706,19 +1840,25 @@ class AMDSMIHelpers():
             # Construct primary partition BDF (base + ".0" for function 0)
             primary_bdf = bdf[:10] + ".0"
             try:
-                primary_device_handle = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(primary_bdf)
+                primary_device_handle = (
+                    amdsmi_interface.amdsmi_get_processor_handle_from_bdf(primary_bdf)
+                )
                 partition_id = self.get_partition_id(primary_device_handle)
                 if partition_id == 0:
                     return self.get_gpu_id_from_device_handle(primary_device_handle)
                 return None
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get primary partition device handle with BDF %s: %s", primary_bdf, e.get_error_info())
+                logging.debug(
+                    "Failed to get primary partition device handle with BDF %s: %s",
+                    primary_bdf,
+                    e.get_error_info(),
+                )
                 return None
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get partition device BDF: %s", e.get_error_info())
             return None
 
-    def is_primary_partition(self, device_handle, gpu_id = None) -> bool:
+    def is_primary_partition(self, device_handle, gpu_id=None) -> bool:
         partition_id = self.get_partition_id(device_handle, gpu_id)
         if partition_id != 0:
             logging.debug(f"Skipping gpu {gpu_id} on non zero partition {partition_id}")
@@ -1734,16 +1874,16 @@ class AMDSMIHelpers():
         for sev in list(set(args.severity)):
             if sev == "all":
                 # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
-                severity_mask |= ((1 << 0) | (1 << 1) | (1 << 2))
+                severity_mask |= (1 << 0) | (1 << 1) | (1 << 2)
             elif sev == "fatal":
                 # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
-                severity_mask |= (1 << 1)
+                severity_mask |= 1 << 1
             elif sev in ("nonfatal", "nonfatal-uncorrected"):
                 # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
-                severity_mask |= (1 << 0)
+                severity_mask |= 1 << 0
             elif sev in ("nonfatal-corrected", "corrected"):
                 # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
-                severity_mask |= (1 << 2)
+                severity_mask |= 1 << 2
 
         buffer_size = 1048576
 
@@ -1765,18 +1905,40 @@ class AMDSMIHelpers():
         num_entries = 0
         while True:
             try:
-                entries, new_cursor, cper_data, status_code = amdsmi_interface.amdsmi_get_gpu_cper_entries(
-                    device_handle, severity_mask, buffer_size, args.cursor[gpu_idx])
+                (
+                    entries,
+                    new_cursor,
+                    cper_data,
+                    status_code,
+                ) = amdsmi_interface.amdsmi_get_gpu_cper_entries(
+                    device_handle, severity_mask, buffer_size, args.cursor[gpu_idx]
+                )
                 logging.debug(f"cper_entries | entries: {entries}")
                 num_entries = num_entries + len(entries)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Error opening CPER file. This command requires elevation') from e
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED or \
-                        e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND:
-                    raise FileNotFoundError('Error accessing CPER files. This command requires CPER to be enabled.') from e
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
-                    raise FileExistsError('Error opening CPER file. Unable to read CPER File') from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
+                ):
+                    raise PermissionError(
+                        "Error opening CPER file. This command requires elevation"
+                    ) from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                    or e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
+                ):
+                    raise FileNotFoundError(
+                        "Error accessing CPER files. This command requires CPER to be enabled."
+                    ) from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR
+                ):
+                    raise FileExistsError(
+                        "Error opening CPER file. Unable to read CPER File"
+                    ) from e
                 else:
                     logging.debug(f"Cannot retrieve CPER entries: {e}")
                     break
@@ -1784,18 +1946,22 @@ class AMDSMIHelpers():
             if len(entries) == 0:
                 break
             if args.folder:
-                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+                self.dump_cper_entries(
+                    args.folder, entries, cper_data, device_handle, args.file_limit
+                )
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
         if num_entries == 0 and not args.follow:
             if args.folder:
-                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+                self.dump_cper_entries(
+                    args.folder, entries, cper_data, device_handle, args.file_limit
+                )
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
 
     def get_bitmask_ranges(self, bitmask_dict):
         ranges = {}
-        #start index of the first bitmask
+        # start index of the first bitmask
         current_start = 0
 
         for cpu, bitmask in bitmask_dict.items():
@@ -1806,8 +1972,8 @@ class AMDSMIHelpers():
             start = 0
             end = len(binary_str) - 1
             # Find the range of set bits
-            start_b = binary_str.find('1')
-            end_b = binary_str.rfind('1')
+            start_b = binary_str.find("1")
+            end_b = binary_str.rfind("1")
 
             start_setbit = start_b + current_start
             end_setbit = end_b + current_start
@@ -1829,11 +1995,11 @@ class AMDSMIHelpers():
     def build_xcp_dict(self, key, violation_status, num_partition):
         if not isinstance(violation_status[key], list):
             if "active_" in key:
-               if violation_status[key] != "N/A":
-                   if violation_status[key] is True:
-                       violation_status[key] = "ACTIVE"
-                   elif violation_status[key] is False:
-                       violation_status[key] = "NOT ACTIVE"
+                if violation_status[key] != "N/A":
+                    if violation_status[key] is True:
+                        violation_status[key] = "ACTIVE"
+                    elif violation_status[key] is False:
+                        violation_status[key] = "NOT ACTIVE"
             ret = violation_status[key]
         elif isinstance(violation_status[key], list):
             for row in violation_status[key]:
@@ -1863,24 +2029,33 @@ class AMDSMIHelpers():
         # Type validation - ensure data is list or tuple
         # Note: Data can be nested list of lists and will filter out N/A values
         if not isinstance(data, (list, tuple)):
-            logging.debug(f"Invalid data type for {context}: expected list/tuple, got {type(data)}")
+            logging.debug(
+                f"Invalid data type for {context}: expected list/tuple, got {type(data)}"
+            )
             return "N/A"
 
         # Flatten nested lists and filter integers
-        flat = [v for value in data for v in (value if isinstance(value, list) else [value]) if isinstance(v, int)]
+        flat = [
+            v
+            for value in data
+            for v in (value if isinstance(value, list) else [value])
+            if isinstance(v, int)
+        ]
         return round(sum(flat) / len(flat)) if flat else "N/A"
 
-    def _get_metric_version_and_partition_info(self, gpu_metrics_info, is_partition_metrics, gpu_id, gpu_handle):
+    def _get_metric_version_and_partition_info(
+        self, gpu_metrics_info, is_partition_metrics, gpu_id, gpu_handle
+    ):
         """
         Helper method to compute metric version, partition ID, and num_partition for dynamic metrics.
         Handles logging updates internally for reusability.
-        
+
         Args:
             gpu_metrics_info (dict): GPU metrics info from amdsmi_get_gpu_metrics_info.
             is_partition_metrics (bool): Whether this is for partition metrics.
             gpu_id (int): GPU ID for logging.
             gpu_handle: GPU device handle for KFD info retrieval.
-        
+
         Returns:
             dict: {
                 'metric_version': float or "N/A",
@@ -1891,24 +2066,28 @@ class AMDSMIHelpers():
         """
         # Compute metric version from header revisions
         metric_version = "N/A"
-        format_rev = gpu_metrics_info.get('common_header.format_revision', "N/A")
-        content_rev = gpu_metrics_info.get('common_header.content_revision', "N/A")
+        format_rev = gpu_metrics_info.get("common_header.format_revision", "N/A")
+        content_rev = gpu_metrics_info.get("common_header.content_revision", "N/A")
         if format_rev != "N/A" and content_rev != "N/A":
             try:
                 metric_version = float(f"{format_rev}.{content_rev}")
             except ValueError:
                 metric_version = "N/A"  # Fallback if conversion fails
-        
+
         # Retrieve partition ID from KFD info
         partition_id = "N/A"
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(gpu_handle)
-            partition_id = kfd_info.get('current_partition_id', "N/A")
+            partition_id = kfd_info.get("current_partition_id", "N/A")
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get current partition ID for GPU %s | %s", gpu_id, e.get_error_info())
-        
+            logging.debug(
+                "Failed to get current partition ID for GPU %s | %s",
+                gpu_id,
+                e.get_error_info(),
+            )
+
         # Determine num_partition with fallback logic for dynamic metrics
-        num_partition = gpu_metrics_info.get('num_partition', "N/A")
+        num_partition = gpu_metrics_info.get("num_partition", "N/A")
         if metric_version != "N/A" and num_partition == "N/A":
             # Workaround: Default to 1 for newer metric versions if num_partition is missing
             # (Confirmed with driver team; applies to GPU and partition metrics)
@@ -1920,22 +2099,26 @@ class AMDSMIHelpers():
                 # Fallback to partition_id if partitions exist but num_partition is unavailable
                 num_partition = partition_id
             # Else: Remains "N/A" if no conditions match
-        
+
         # Alias num_xcp for XCP metrics usage
         num_xcp = num_partition
-        
+
         # Debug logging
         logging.debug(
             "GPU %s | Metric version: %s, num_partition: %s, partition_id: %s, num_xcp: %s",
-            gpu_id, metric_version, num_partition, partition_id, num_xcp
+            gpu_id,
+            metric_version,
+            num_partition,
+            partition_id,
+            num_xcp,
         )
-        
+
         return {
-            'metric_version': metric_version,
-            'partition_id': partition_id,
-            'num_partition': num_partition,
-            'num_xcp': num_xcp
-        }    
+            "metric_version": metric_version,
+            "partition_id": partition_id,
+            "num_partition": num_partition,
+            "num_xcp": num_xcp,
+        }
 
     def get_gpu_board_temperatures(self, device_handle, gpu_id, logger):
         """Get GPU board temperature readings
@@ -1968,23 +2151,31 @@ class AMDSMIHelpers():
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_B,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
-            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32,
         ]
 
         for temp_type in gpu_board_temp_types:
             type_name = temp_type.name.replace("GPUBOARD_", "")
             try:
                 gpu_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
-                    device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                    device_handle,
+                    temp_type,
+                    amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
+                )
                 if gpu_board_temp_holder != "N/A":
-                    gpu_board_temp_dict[f'{type_name}'] = self.unit_format(
-                        logger, gpu_board_temp_holder, '\N{DEGREE SIGN}C')
+                    gpu_board_temp_dict[f"{type_name}"] = self.unit_format(
+                        logger, gpu_board_temp_holder, "\N{DEGREE SIGN}C"
+                    )
                 else:
-                    gpu_board_temp_dict[f'{type_name}'] = "N/A"
+                    gpu_board_temp_dict[f"{type_name}"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                gpu_board_temp_dict[f'{type_name}'] = "N/A"
-                logging.debug("Failed to get gpu_board %s for gpu %s | %s",
-                            type_name, gpu_id, e.get_error_info())
+                gpu_board_temp_dict[f"{type_name}"] = "N/A"
+                logging.debug(
+                    "Failed to get gpu_board %s for gpu %s | %s",
+                    type_name,
+                    gpu_id,
+                    e.get_error_info(),
+                )
 
         return gpu_board_temp_dict
 
@@ -2023,22 +2214,30 @@ class AMDSMIHelpers():
             amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_0_1_2_3_3V3_VR,
             amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_4_5_6_7_3V3_VR,
             amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC_HSC,
-            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC,
         ]
 
         for temp_type in base_board_temp_types:
             type_name = temp_type.name.replace("BASEBOARD_", "")
             try:
                 base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
-                    device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                    device_handle,
+                    temp_type,
+                    amdsmi_interface.AmdSmiTemperatureMetric.CURRENT,
+                )
                 if base_board_temp_holder != "N/A":
-                    base_board_temp_dict[f'{type_name}'] = self.unit_format(
-                        logger, base_board_temp_holder, '\N{DEGREE SIGN}C')
+                    base_board_temp_dict[f"{type_name}"] = self.unit_format(
+                        logger, base_board_temp_holder, "\N{DEGREE SIGN}C"
+                    )
                 else:
-                    base_board_temp_dict[f'{type_name}'] = "N/A"
+                    base_board_temp_dict[f"{type_name}"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                base_board_temp_dict[f'{type_name}'] = "N/A"
-                logging.debug("Failed to get base_board %s for gpu %s | %s",
-                            type_name, gpu_id, e.get_error_info())
+                base_board_temp_dict[f"{type_name}"] = "N/A"
+                logging.debug(
+                    "Failed to get base_board %s for gpu %s | %s",
+                    type_name,
+                    gpu_id,
+                    e.get_error_info(),
+                )
 
         return base_board_temp_dict

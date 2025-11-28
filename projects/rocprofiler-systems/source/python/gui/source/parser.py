@@ -95,9 +95,9 @@ class validation(object):
                 f"  [{_exp_name}][{_pp_name}][{_virt_speedup}] program speedup has stddev > 2 * tolerance (+/- {_prog_speedup_stddev:.3f}). Relaxing validation...\n"
             )
             _tolerance += math.sqrt(_prog_speedup_stddev)
-        return _prog_speedup >= (self.program_speedup - _tolerance) and _prog_speedup <= (
-            self.program_speedup + _tolerance
-        )
+        return _prog_speedup >= (
+            self.program_speedup - _tolerance
+        ) and _prog_speedup <= (self.program_speedup + _tolerance)
 
 
 class throughput_point(object):
@@ -330,7 +330,9 @@ def process_data(data, _data, experiments, progress_points):
                         )
                         itr += [_delt, _duration]
                     elif "arrival" in pts and pts["arrival"] > 0:
-                        itr = find_or_insert(data[_selected][_name], _speedup, "latency")
+                        itr = find_or_insert(
+                            data[_selected][_name], _speedup, "latency"
+                        )
                         itr += [pts["arrival"], pts["departure"], _duration]
                 else:
                     _delt = pts["laps"]
@@ -675,7 +677,9 @@ def parse_files(
                             data_type = splice[0]
                     if data_type == "experiment":
                         experiment = value
-                    elif data_type == "throughput-point" or data_type == "progress-point":
+                    elif (
+                        data_type == "throughput-point" or data_type == "progress-point"
+                    ):
                         experiment["speedup"] = 100 * experiment["speedup"]
                         data = add_throughput(data, experiment, value)
                     elif data_type == "latency-point":

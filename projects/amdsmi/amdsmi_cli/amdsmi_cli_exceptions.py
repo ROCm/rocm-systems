@@ -67,8 +67,9 @@ AMDSMI_ERROR_MESSAGES = {
     54: "AMDGPU restart error",
     55: "Setting is not available",
     0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
-    0xFFFFFFFF: "Unknown error"
+    0xFFFFFFFF: "Unknown error",
 }
+
 
 def _get_error_message(error_code):
     if abs(error_code) in AMDSMI_ERROR_MESSAGES:
@@ -79,17 +80,17 @@ def _get_error_message(error_code):
 class AmdSmiException(Exception):
     def __init__(self):
         self.json_message = {}
-        self.csv_message = ''
-        self.stdout_message = ''
-        self.message = ''
-        self.output_format = ''
-        self.device_type = ''
+        self.csv_message = ""
+        self.stdout_message = ""
+        self.message = ""
+        self.output_format = ""
+        self.device_type = ""
 
     def __str__(self):
         # Return message according to the current output format
-        if self.output_format == 'json':
+        if self.output_format == "json":
             self.message = json.dumps(self.json_message)
-        elif self.output_format == 'csv':
+        elif self.output_format == "csv":
             self.message = self.csv_message
         else:
             self.message = self.stdout_message
@@ -104,7 +105,9 @@ class AmdSmiInvalidCommandException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' is invalid. Run 'amd-smi -h' for more info."
+        common_message = (
+            f"Command '{self.command}' is invalid. Run 'amd-smi -h' for more info."
+        )
 
         if message:
             common_message = message
@@ -196,7 +199,9 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.command}' requires a value. Run '--help' for more info."
+        common_message = (
+            f"Parameter '{self.command}' requires a value. Run '--help' for more info."
+        )
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

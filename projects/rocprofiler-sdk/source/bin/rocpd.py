@@ -36,9 +36,12 @@ def main(argv=sys.argv[1:], environ=dict(os.environ)):
     """
 
     ROCPD_SUPPORTED_PYTHON_VERSIONS = [
-        ".".join(itr.split(".")[:2]) for itr in "@ROCPROFILER_PYTHON_VERSIONS@".split(";")
+        ".".join(itr.split(".")[:2])
+        for itr in "@ROCPROFILER_PYTHON_VERSIONS@".split(";")
     ]
-    ROCPD_MODULE_ARGS = [f"{itr}" for itr in "@ROCPD_EXE_MODULE_ARGS@".split(" ") if itr]
+    ROCPD_MODULE_ARGS = [
+        f"{itr}" for itr in "@ROCPD_EXE_MODULE_ARGS@".split(" ") if itr
+    ]
 
     this_dir = os.path.dirname(os.path.realpath(__file__))
     this_python_ver = f"{sys.version_info.major}.{sys.version_info.minor}"

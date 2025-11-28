@@ -156,7 +156,9 @@ def merge_sqlite_dbs(
                     sql_stripped = sql.strip()
                     if sql_stripped.upper().startswith("CREATE UNIQUE INDEX"):
                         return sql_stripped.replace(
-                            "CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS", 1
+                            "CREATE UNIQUE INDEX",
+                            "CREATE UNIQUE INDEX IF NOT EXISTS",
+                            1,
                         )
                     if sql_stripped.upper().startswith("CREATE INDEX"):
                         return sql_stripped.replace(
@@ -217,7 +219,9 @@ def merge_sqlite_dbs(
                         data_views.append((name, create_sql))
                     existing_views.add(name)
 
-                views += [itr for itr in list(existing_views) if itr.startswith("rocpd_")]
+                views += [
+                    itr for itr in list(existing_views) if itr.startswith("rocpd_")
+                ]
 
                 conn.commit()
                 conn.execute(f"DETACH DATABASE {alias}")
@@ -310,7 +314,9 @@ def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> str:
     try:
         from . import package
 
-        input_files = package.flatten_rocpd_yaml_input_file(inputs, skip_auto_merge=True)
+        input_files = package.flatten_rocpd_yaml_input_file(
+            inputs, skip_auto_merge=True
+        )
     except Exception as e:
         print(f"Import error trying to use package, fallback to use inputs: {e}")
 
