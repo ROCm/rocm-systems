@@ -8552,9 +8552,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
 
 def test_amdsmi_ctx():
-    from utils.amdsmi_interface import amdsmi_ctx, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+    from utils.amdsmi_interface import amdsmi_ctx
 
     with mock.patch("amdsmi.amdsmi_init") as amdsmi_init_mock:
         with mock.patch("amdsmi.amdsmi_shut_down") as amdsmi_shutdown_mock:
@@ -8563,10 +8561,8 @@ def test_amdsmi_ctx():
             amdsmi_shutdown_mock.assert_called_once()
 
 
-def test_amdsmi_get_device_handle():
-    from utils.amdsmi_interface import get_device_handle, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_device_handle():
+    from utils.amdsmi_interface import get_device_handle
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
@@ -8580,10 +8576,8 @@ def test_amdsmi_get_device_handle():
         assert handle is None
 
 
-def test_amdsmi_get_mem_max_clock():
-    from utils.amdsmi_interface import get_mem_max_clock, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_mem_max_clock():
+    from utils.amdsmi_interface import get_mem_max_clock
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
@@ -8594,10 +8588,8 @@ def test_amdsmi_get_mem_max_clock():
             assert clk == 100
 
 
-def test_amdsmi_get_gpu_model():
-    from utils.amdsmi_interface import get_gpu_model, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_gpu_model():
+    from utils.amdsmi_interface import get_gpu_model
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
@@ -8618,10 +8610,8 @@ def test_amdsmi_get_gpu_model():
             assert model == "N/A"
 
 
-def test_amdsmi_get_gpu_vbios_part_number():
-    from utils.amdsmi_interface import get_gpu_vbios_part_number, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_gpu_vbios_part_number():
+    from utils.amdsmi_interface import get_gpu_vbios_part_number
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
@@ -8640,10 +8630,8 @@ def test_amdsmi_get_gpu_vbios_part_number():
             assert part_number == "N/A"
 
 
-def test_amdsmi_get_gpu_compute_partition():
-    from utils.amdsmi_interface import get_gpu_compute_partition, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_gpu_compute_partition():
+    from utils.amdsmi_interface import get_gpu_compute_partition
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
@@ -8663,10 +8651,8 @@ def test_amdsmi_get_gpu_compute_partition():
             assert partition == "N/A"
 
 
-def test_amdsmi_get_gpu_memory_partition():
-    from utils.amdsmi_interface import get_gpu_memory_partition, import_amdsmi_module
-
-    _ = import_amdsmi_module()
+def test_get_gpu_memory_partition():
+    from utils.amdsmi_interface import get_gpu_memory_partition
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]

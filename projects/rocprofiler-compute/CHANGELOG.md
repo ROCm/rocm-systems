@@ -53,8 +53,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Adds support for dispatch timeline analysis.
   * Shows duration as median in addition to mean in kernel view.
 
-* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
-
 ### Changed
 
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
@@ -65,10 +63,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Empty cells replaced with `N/A` for unavailable metrics in analysis.
 
-
-### Deprecated
-
-* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
 
 ### Removed
 
