@@ -199,6 +199,12 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     set(CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH} PARENT_SCOPE)
 endfunction()
 
+# function to append content of IN_FILE to OUT_FILE
+function(append_file IN_FILE OUT_FILE)
+    file(READ "${IN_FILE}" CONTENTS)
+    file(APPEND "${OUT_FILE}" "${CONTENTS}")
+endfunction()
+
 ## Configure Lintian Specific install Files for Debian Package
 function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTAINER_NM_T MAINTAINER_EMAIL_T)
     # Check If Debian Platform
@@ -213,8 +219,14 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
       file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN")
 
       # Configure the changelog file
+      set( CHANGELOG_DATA_FILES "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in" "${CMAKE_SOURCE_DIR}/CHANGELOG.md" )
+      set( CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in" )
+      file( WRITE "${CHANGELOG_DATA_APPENDED}" "" )
+      foreach( changelog_data ${CHANGELOG_DATA_FILES} )
+        append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
+      endforeach()
       configure_file(
-        "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
+        "${CHANGELOG_DATA_APPENDED}"
         "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
         @ONLY
       )
