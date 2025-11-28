@@ -2281,6 +2281,22 @@ struct_amdsmi_npm_info_t._fields_ = [
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
+# values for enumeration 'amdsmi_ptl_data_format_t'
+amdsmi_ptl_data_format_t__enumvalues = {
+    0: 'AMDSMI_PTL_DATA_FORMAT_I8',
+    1: 'AMDSMI_PTL_DATA_FORMAT_F16',
+    2: 'AMDSMI_PTL_DATA_FORMAT_BF16',
+    3: 'AMDSMI_PTL_DATA_FORMAT_F32',
+    4: 'AMDSMI_PTL_DATA_FORMAT_F64',
+    4294967295: 'AMDSMI_PTL_DATA_FORMAT_INVALID',
+}
+AMDSMI_PTL_DATA_FORMAT_I8 = 0
+AMDSMI_PTL_DATA_FORMAT_F16 = 1
+AMDSMI_PTL_DATA_FORMAT_BF16 = 2
+AMDSMI_PTL_DATA_FORMAT_F32 = 3
+AMDSMI_PTL_DATA_FORMAT_F64 = 4
+AMDSMI_PTL_DATA_FORMAT_INVALID = 4294967295
+amdsmi_ptl_data_format_t = ctypes.c_uint32 # enum
 class struct_amdsmi_smu_fw_version_t(Structure):
     pass
 
@@ -2997,6 +3013,18 @@ amdsmi_get_gpu_process_list.argtypes = [amdsmi_processor_handle, ctypes.POINTER(
 amdsmi_gpu_driver_reload = _libraries['libamd_smi.so'].amdsmi_gpu_driver_reload
 amdsmi_gpu_driver_reload.restype = amdsmi_status_t
 amdsmi_gpu_driver_reload.argtypes = []
+amdsmi_get_gpu_ptl_state = _libraries['libamd_smi.so'].amdsmi_get_gpu_ptl_state
+amdsmi_get_gpu_ptl_state.restype = amdsmi_status_t
+amdsmi_get_gpu_ptl_state.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
+amdsmi_set_gpu_ptl_state = _libraries['libamd_smi.so'].amdsmi_set_gpu_ptl_state
+amdsmi_set_gpu_ptl_state.restype = amdsmi_status_t
+amdsmi_set_gpu_ptl_state.argtypes = [amdsmi_processor_handle, ctypes.c_bool]
+amdsmi_get_gpu_ptl_formats = _libraries['libamd_smi.so'].amdsmi_get_gpu_ptl_formats
+amdsmi_get_gpu_ptl_formats.restype = amdsmi_status_t
+amdsmi_get_gpu_ptl_formats.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_ptl_data_format_t), ctypes.POINTER(amdsmi_ptl_data_format_t)]
+amdsmi_set_gpu_ptl_formats = _libraries['libamd_smi.so'].amdsmi_set_gpu_ptl_formats
+amdsmi_set_gpu_ptl_formats.restype = amdsmi_status_t
+amdsmi_set_gpu_ptl_formats.argtypes = [amdsmi_processor_handle, amdsmi_ptl_data_format_t, amdsmi_ptl_data_format_t]
 amdsmi_get_cpu_core_energy = _libraries['libamd_smi.so'].amdsmi_get_cpu_core_energy
 amdsmi_get_cpu_core_energy.restype = amdsmi_status_t
 amdsmi_get_cpu_core_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
@@ -3267,7 +3295,10 @@ __all__ = \
     'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
     'AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU',
     'AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU',
-    'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
+    'AMDSMI_PROCESSOR_TYPE_UNKNOWN', 'AMDSMI_PTL_DATA_FORMAT_BF16',
+    'AMDSMI_PTL_DATA_FORMAT_F16', 'AMDSMI_PTL_DATA_FORMAT_F32',
+    'AMDSMI_PTL_DATA_FORMAT_F64', 'AMDSMI_PTL_DATA_FORMAT_I8',
+    'AMDSMI_PTL_DATA_FORMAT_INVALID',
     'AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK',
     'AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT',
     'AMDSMI_PWR_PROF_PRST_COMPUTE_MASK',
@@ -3485,6 +3516,7 @@ __all__ = \
     'amdsmi_get_gpu_pm_metrics_info',
     'amdsmi_get_gpu_power_profile_presets',
     'amdsmi_get_gpu_process_isolation', 'amdsmi_get_gpu_process_list',
+    'amdsmi_get_gpu_ptl_formats', 'amdsmi_get_gpu_ptl_state',
     'amdsmi_get_gpu_ras_block_features_enabled',
     'amdsmi_get_gpu_ras_feature_info',
     'amdsmi_get_gpu_reg_table_info', 'amdsmi_get_gpu_revision',
@@ -3538,11 +3570,12 @@ __all__ = \
     'amdsmi_power_info_t', 'amdsmi_power_profile_preset_masks_t',
     'amdsmi_power_profile_status_t', 'amdsmi_proc_info_t',
     'amdsmi_process_handle_t', 'amdsmi_process_info_t',
-    'amdsmi_processor_handle', 'amdsmi_range_t',
-    'amdsmi_ras_err_state_t', 'amdsmi_ras_feature_t',
-    'amdsmi_reg_type_t', 'amdsmi_reset_gpu', 'amdsmi_reset_gpu_fan',
-    'amdsmi_reset_gpu_xgmi_error', 'amdsmi_retired_page_record_t',
-    'amdsmi_set_clk_freq', 'amdsmi_set_cpu_core_boostlimit',
+    'amdsmi_processor_handle', 'amdsmi_ptl_data_format_t',
+    'amdsmi_range_t', 'amdsmi_ras_err_state_t',
+    'amdsmi_ras_feature_t', 'amdsmi_reg_type_t', 'amdsmi_reset_gpu',
+    'amdsmi_reset_gpu_fan', 'amdsmi_reset_gpu_xgmi_error',
+    'amdsmi_retired_page_record_t', 'amdsmi_set_clk_freq',
+    'amdsmi_set_cpu_core_boostlimit',
     'amdsmi_set_cpu_df_pstate_range',
     'amdsmi_set_cpu_gmi3_link_width_range',
     'amdsmi_set_cpu_pcie_link_rate',
@@ -3560,7 +3593,8 @@ __all__ = \
     'amdsmi_set_gpu_overdrive_level', 'amdsmi_set_gpu_pci_bandwidth',
     'amdsmi_set_gpu_perf_determinism_mode',
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
-    'amdsmi_set_gpu_process_isolation', 'amdsmi_set_power_cap',
+    'amdsmi_set_gpu_process_isolation', 'amdsmi_set_gpu_ptl_formats',
+    'amdsmi_set_gpu_ptl_state', 'amdsmi_set_power_cap',
     'amdsmi_set_soc_pstate', 'amdsmi_set_xgmi_plpd',
     'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
     'amdsmi_sock_info_t', 'amdsmi_socket_handle',

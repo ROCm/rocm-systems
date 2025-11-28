@@ -836,9 +836,7 @@ metadata_registry::metadata_registry()
     overwrite_callback_names({
 #    if(ROCPROFILER_VERSION >= 600)
         { ROCPROFILER_CALLBACK_TRACING_OMPT,
-          { { ROCPROFILER_OMPT_ID_thread_begin, "omp_thread" },
-            { ROCPROFILER_OMPT_ID_thread_end, "omp_thread" },
-            { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
+          { { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
             { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
 #    endif
     });

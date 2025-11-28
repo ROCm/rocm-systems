@@ -688,7 +688,8 @@ rocpd_processor_t::post_process_metadata()
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
             rocpd_agent->device_id, rocpd_agent->name.c_str(),
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
-            rocpd_agent->product_name.c_str(), "");
+            rocpd_agent->product_name.c_str(), rocpd_agent->product_name.c_str(),
+            rocpd_agent->agent_info.c_str());
         rocpd_agent->base_id = _base_id;
     }
     auto _string_list = m_metadata->get_string_list();

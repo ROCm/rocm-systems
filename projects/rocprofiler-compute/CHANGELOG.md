@@ -38,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
