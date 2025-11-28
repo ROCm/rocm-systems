@@ -94,11 +94,9 @@ jobs:
       - name: Patch rocm-systems manually
         run: |
           echo "Applying rocm-systems patches manually..."
-          cd sources/rocm-systems
-
           git -c user.name="therockbot" \
               -c user.email="therockbot@amd.com" \
-              am --whitespace=nowarn ../../TheRock/patches/amd-mainline/rocm-systems/*.patch
+              am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install external python deps
         run: |
