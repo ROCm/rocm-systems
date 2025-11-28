@@ -660,6 +660,17 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 _env, "ROCPROFSYS_SAMPLING_GPUS",
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")));
         });
+    parser
+        .add_argument({ "--ainics" },
+                      "AI NIC IDs for SMI queries. Supports integers and/or ranges")
+        .dtype("int or range")
+        .required({ "device" })
+        .action([&](parser_t& p) {
+            update_env(
+                _env, "ROCPROFSYS_SAMPLING_AINICS",
+                join(array_config{ "," }, p.get<std::vector<std::string>>("ainics")));
+        });
+
 
     parser.start_group("GENERAL SAMPLING OPTIONS",
                        "General options for timer-based sampling per-thread");

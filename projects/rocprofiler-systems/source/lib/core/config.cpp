@@ -501,6 +501,13 @@ configure_settings(bool _init)
         std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_SAMPLING_AINICS",
+        "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. Values should be separated by "
+        "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
+        "'all' and 'none' suppresses all AI NIC sampling",
+        std::string{ "all" }, "amd_smi", "rocm", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_TIDS",
         "Limit call-stack sampling to specific thread IDs, starting at zero for the main "
         "thread. Be aware that some libraries, such as ROCm may create additional "
@@ -1040,6 +1047,7 @@ configure_settings(bool _init)
     }
 
     handle_deprecated_setting("ROCPROFSYS_AMD_SMI_DEVICES", "ROCPROFSYS_SAMPLING_GPUS");
+    handle_deprecated_setting("ROCPROFSYS_AMD_SMI_DEVICES", "ROCPROFSYS_SAMPLING_AINICS");
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
@@ -2307,6 +2315,18 @@ get_sampling_gpus()
     return std::string{};
 #endif
 }
+
+std::string
+get_sampling_ainics()
+{
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+    static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_AINICS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+#else
+    return std::string{};
+#endif
+}
+
 
 bool
 get_trace_thread_locks()

@@ -343,6 +343,9 @@ get_process_sampling_duration();
 std::string
 get_sampling_gpus();
 
+std::string
+get_sampling_ainics();
+
 bool
 get_trace_thread_locks();
 
