@@ -17,6 +17,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
 
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
@@ -27,6 +29,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Empty cells replaced with `N/A` for unavailable metrics in analysis.
 
+
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
 
 ### Removed
 
