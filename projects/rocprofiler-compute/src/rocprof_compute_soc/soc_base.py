@@ -673,8 +673,9 @@ class OmniSoC_Base:
         else:
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
-                console_warning(
-                    "Incomplete or missing profiling data. Skipping roofline."
+                console_error(
+                    "Incomplete or missing profiling data. Skipping roofline.",
+                    exit=False,
                 )
                 return
             console_log(
@@ -686,9 +687,10 @@ class OmniSoC_Base:
             # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)
             if not is_valid:
-                console_warning(
+                console_error(
                     "roofline",
                     f"Roofline post-processing skipped: {error_msg}",
+                    exit=False,
                 )
                 return
 
