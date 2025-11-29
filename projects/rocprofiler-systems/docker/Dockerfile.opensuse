@@ -2,16 +2,16 @@ ARG DISTRO=opensuse/leap
 ARG VERSION=15.5
 FROM ${DISTRO}:${VERSION}
 
-ENV HOME /root
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
-ENV PATH /usr/local/bin:${PATH}
-ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
+ENV PATH=/usr/local/bin:${PATH}
+ENV LIBRARY_PATH=${LIBRARY_PATH}:/opt/amdgpu/lib64
 
 RUN set +e; \
     zypper --non-interactive -i --gpg-auto-import-keys refresh; \
@@ -24,8 +24,8 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
     zypper --non-interactive install -y chrpath cmake curl dpkg-devel \
-        gcc-c++ gcc-fortran git gmock gtest iproute2 libdrm-devel ninja \
-        nlohmann_json-devel openmpi3-devel python3-pip rpm-build \
+        gcc-c++ gcc-fortran git gmock gtest iproute2 libdrm-devel libnuma-devel \
+        ninja nlohmann_json-devel openmpi3-devel python3-pip rpm-build \
         sqlite3-devel wget && \
     python3 -m pip install 'cmake==3.21'
 
