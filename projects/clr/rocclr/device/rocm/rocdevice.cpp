@@ -1747,8 +1747,8 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (!gGlInteropFuncs.glAssociate(this, flags, gfxContext, glDevice)) {
-    LogError("Failed glAssociate()");
+  if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
+    LogError("Failed GlInterop::glAssociate()");
     return false;
   }
 
@@ -1761,8 +1761,8 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
 
   void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
   if (glDevice != nullptr) {
-    if (!gGlInteropFuncs.glDissociate(this, gfxContext, glDevice)) {
-      LogWarning("Failed glDissociate()");
+    if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
+      LogWarning("Failed GlInterop::glDissociate()");
       return false;
     }
   }

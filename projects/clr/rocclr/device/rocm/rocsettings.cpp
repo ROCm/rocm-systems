@@ -128,7 +128,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   enableExtension(ClAmdMediaOps2);
   enableExtension(ClKhrImage2dFromBuffer);
 
-  if (MesaInterop::Supported()) {
+  if (GlInterop::Supported()) {
     enableExtension(ClKhrGlSharing);
   }
 
