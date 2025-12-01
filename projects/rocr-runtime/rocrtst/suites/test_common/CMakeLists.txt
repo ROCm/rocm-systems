@@ -166,7 +166,7 @@ else()
   message(STATUS "OPENCL_VER not defined, using default: 2.0")
   set(OPENCL_VER "2.0")
 endif()
- 
+
 # Find OpenCL headers using clang's resource directory
 execute_process(
   COMMAND ${CLANG} -print-resource-dir
@@ -196,10 +196,10 @@ if(AMDDeviceLibs_FOUND)
   message(STATUS "Found AMDDeviceLibs via CONFIG")
   # Try to get the bitcode directory from any target
   if(TARGET AMDDeviceLibs::oclc_isa_version_803)
-    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 LOCATION)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
     get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
   elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
-    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 LOCATION)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
     get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
   else()
     # Fallback to manual search even if package was found
@@ -210,7 +210,7 @@ endif()
 if(NOT AMDDeviceLibs_FOUND)
   # Fallback: search relative to LLVM installation
   message(STATUS "Searching for AMD Device Libraries manually...")
-  
+
   find_path(BITCODE_DIR 
     NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
     HINTS

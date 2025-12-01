@@ -41,7 +41,7 @@ if (NOT DEFINED ENV{LLVM_DIR})
   message("LLVM_DIR define is not set. Kernels cannot be built.")
   return()
 endif()
-#No longer using environment variables
+# No longer using environment variables
 # We use find_package to locate device libraries instead
 
 
@@ -82,10 +82,10 @@ if(NOT DEFINED BITCODE_DIR)
   
   if(AMDDeviceLibs_FOUND)
     if(TARGET AMDDeviceLibs::oclc_isa_version_803)
-      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 LOCATION)
+      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
       get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
     elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
-      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 LOCATION)
+      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
       get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
     else()
       set(AMDDeviceLibs_FOUND FALSE)
