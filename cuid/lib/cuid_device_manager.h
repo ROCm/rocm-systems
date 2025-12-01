@@ -13,6 +13,7 @@ public:
     amdcuid_status_t shutdown();
 
     const std::vector<DevicePtr>& devices() const { return devices_; }
+    const amdcuid_device_type_set_t& device_types() const { return device_types_; }
 
     template <class T>
     T* get_device_by_handle(void* handle) const {
@@ -33,6 +34,7 @@ private:
     AmdCuidDeviceManager& operator=(const AmdCuidDeviceManager&) = delete;
 
     std::vector<DevicePtr> devices_;
+    amdcuid_device_type_set_t device_types_;
     bool initialized_;
 };
 

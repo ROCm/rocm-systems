@@ -3,7 +3,6 @@
 #include <vector>
 #include <cstdint>
 #include "cuid.h"
-#include "hmac.h"
 
 inline const char* cuid_status_to_string(amdcuid_status_t status) {
     switch (status) {
@@ -24,10 +23,6 @@ inline const char* cuid_status_to_string(amdcuid_status_t status) {
 
 int main() {
     amdcuid_status_t err;
-
-    AMDCUID_HMAC hmac = AMDCUID_HMAC("/home/gabrpham/key_file_sample");
-    hmac.set_hmac_algorithm(nullptr);
-
     uint32_t gpu_count = 0;
     uint32_t available_gpu_count = 0;
     std::vector<amdcuid_handle> gpu_handles;
@@ -54,9 +49,11 @@ int main() {
         uint32_t bdf_len = sizeof(bdf);
         err = amdcuid_get_bdf(gpu_handles[i], bdf, &bdf_len);
         if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get BDF for GPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
-            bdf[0] = '\0';
+            // skip for now due to gpu partitioning issues
+            continue;
+            // std::cerr << "Failed to get BDF for GPU #" << i << ". Error code: " << err
+            //           << " (" << cuid_status_to_string(err) << ")" << std::endl;
+            // bdf[0] = '\0';
         }
 
         char device_node[128] = {0};
@@ -79,6 +76,64 @@ int main() {
                   << std::dec
                   << " BDF: " << bdf
                   << " DeviceNode: " << device_node
+                  << "  CUID: ";
+        for (int j = 0; j < 16; ++j) {
+            printf("%02x", secondary_id.bytes[j]);
+        }
+        std::cout << std::endl;
+    }
+
+    // Same as above but for CPUs
+    uint32_t cpu_count = 0;
+    uint32_t available_cpu_count = 0;
+    std::vector<amdcuid_handle> cpu_handles;
+
+    // Retry until the available_cpu_count matches the cpu_count
+    do {
+        cpu_count = available_cpu_count;
+        cpu_handles.resize(cpu_count);
+        err = amdcuid_get_handles(
+            AMDCUID_DEVICE_TYPE_SET_CPU,
+            &cpu_count,
+            cpu_handles.data(),
+            &available_cpu_count);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get CPU handles. Error code: " << err
+                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+            return 1;
+        }
+    } while (cpu_count != available_cpu_count);
+
+    std::cout << "Discovered " << cpu_count << " CPU(s):" << std::endl;
+
+    for (uint32_t i = 0; i < cpu_count; ++i) {
+        uint16_t vendor_id = 0;
+        err = amdcuid_get_vendor_id(cpu_handles[i], &vendor_id);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get vendor ID for CPU #" << i << ". Error code: " << err
+                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+            vendor_id = 0;
+        }
+
+        uint16_t core = 0;
+        err = amdcuid_get_cpu_core(cpu_handles[i], &core);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get core for CPU #" << i << ". Error code: " << err
+                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+            core = 0;
+        }
+
+        amdcuid secondary_id = {};
+        err = amdcuid_get_secondary_cuid(cpu_handles[i], &secondary_id);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get secondary CUID for CPU #" << i << ". Error code: " << err
+                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+        }
+
+        std::cout << "CPU #" << i
+                  << std::dec
+                  << " Core: " << core
+                  << " VendorID: " << vendor_id
                   << "  CUID: ";
         for (int j = 0; j < 16; ++j) {
             printf("%02x", secondary_id.bytes[j]);

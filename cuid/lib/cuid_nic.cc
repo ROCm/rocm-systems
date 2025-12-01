@@ -22,10 +22,11 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        // grab everything except the loopback device
-        if (strncmp(entry->d_name, "lo", 2) != 0) {
+        // grab everything except the loopback device and hidden entries
+        if (strncmp(entry->d_name, "lo", 2) != 0 && entry->d_name[0] != '.') {
             amdcuid_nic_info info = {};
             info.header.device_type = AMDCUID_DEVICE_TYPE_NIC;
+            info.network_interface = entry->d_name;
             std::string device_path = std::string(nic_base_path) + "/" + entry->d_name + "/device";
 
             std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);

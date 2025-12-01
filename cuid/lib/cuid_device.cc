@@ -20,69 +20,81 @@ amdcuid_status_t AmdCuidDevice::get_secondary_cuid(amdcuid& id, AMDCUID_HMAC * h
     //attempt to find the secondary CUID in file first
     std::string cuid_file_path = "/tmp/cuid";
     CuidFile secondary_file(cuid_file_path, false);
-    secondary_file.load();
-    std::vector<CuidFileEntry> entries = secondary_file.get_entries();
+    amdcuid_status_t status = secondary_file.load();
+    if (status != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Failed to load secondary CUID file: " << cuid_file_path << std::endl;
+        return status;
+    }
 
     amdcuid_device_type_t type = this->type();
     // there's only 1 platform entry, so handle that case first
-    if (type == AMDCUID_DEVICE_TYPE_PLATFORM)
-    {
-        // for platform, just return the first entry found
-        CuidFileEntry entry;
-        amdcuid_status_t status = secondary_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
-        if (status == AMDCUID_STATUS_SUCCESS) {
-            id = entry.secondary_cuid;
-            return AMDCUID_STATUS_SUCCESS;
-        }
-    }
-    for (auto& entry : entries) {
-        switch (type)
+    switch (type){
+        case AMDCUID_DEVICE_TYPE_PLATFORM:
         {
-            case AMDCUID_DEVICE_TYPE_GPU:
-                // search by render node
-                {
-                    auto gpu = reinterpret_cast<AmdCuidGpu*>(const_cast<AmdCuidDevice*>(this));
-                    if (gpu) {
-                        const auto& info = gpu->get_info();
-                        if (entry.device_node == info.render_node) {
-                            id = entry.secondary_cuid;
-                            return AMDCUID_STATUS_SUCCESS;
-                        }
-                    }
+            // for platform, just return the first entry found
+            CuidFileEntry entry;
+            status = secondary_file.find_by_device_type(AMDCUID_DEVICE_TYPE_PLATFORM, entry);
+            if (status == AMDCUID_STATUS_SUCCESS) {
+                id = entry.secondary_cuid;
+                return AMDCUID_STATUS_SUCCESS;
+            }
+        }break;
+        case AMDCUID_DEVICE_TYPE_GPU:
+        // search by render node
+        {
+            auto gpu = reinterpret_cast<AmdCuidGpu*>(const_cast<AmdCuidDevice*>(this));
+            if (gpu) {
+                auto info = gpu->get_info();
+                CuidFileEntry entry;
+                status = secondary_file.find_by_device_node(info.render_node, entry);
+                if (status == AMDCUID_STATUS_SUCCESS) {
+                    id = entry.secondary_cuid;
+                    return AMDCUID_STATUS_SUCCESS;
                 }
-                break;
-            case AMDCUID_DEVICE_TYPE_CPU:
-                // search by package_core_id
-                {
-                    auto cpu = reinterpret_cast<AmdCuidCpu*>(const_cast<AmdCuidDevice*>(this));
-                    if (cpu) {
-                        const auto& info = cpu->get_info();
-                        std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
-                                          ":" + std::to_string(info.header.fields.cpu.core);
-                        if (entry.package_core_id == core_id) {
-                            id = entry.secondary_cuid;
-                            return AMDCUID_STATUS_SUCCESS;
-                        }
-                    }
+                else {
+                    std::cerr << "GPU device not found in file" << std::endl;
                 }
-                break;
-            case AMDCUID_DEVICE_TYPE_NIC:
-                // search by device node
-                {
-                    auto nic = reinterpret_cast<AmdCuidNic*>(const_cast<AmdCuidDevice*>(this));
-                    if (nic) {
-                        const auto& info = nic->get_info();
-                        if (entry.device_node == info.network_interface) {
-                            id = entry.secondary_cuid;
-                            return AMDCUID_STATUS_SUCCESS;
-                        }
-                    }
-                }
-                break;
-            default:
-                break;
-            // Will expand with different devices as we implement them
+            }
+            else {
+                std::cerr << "GPU device not found" << std::endl;
+            }
         }
+        break;
+        case AMDCUID_DEVICE_TYPE_CPU:
+            // search by package_core_id
+            {
+                auto cpu = reinterpret_cast<AmdCuidCpu*>(const_cast<AmdCuidDevice*>(this));
+                if (cpu) {
+                    const auto& info = cpu->get_info();
+                    std::string core_id = std::to_string(info.header.fields.cpu.physical_id) + 
+                                    ":" + std::to_string(info.header.fields.cpu.core);
+                    CuidFileEntry entry;
+                    status = secondary_file.find_by_package_core_id(core_id, entry);
+                    if (status == AMDCUID_STATUS_SUCCESS) {
+                        id = entry.secondary_cuid;
+                        return AMDCUID_STATUS_SUCCESS;
+                    }
+                }
+            }
+            break;
+        case AMDCUID_DEVICE_TYPE_NIC:
+            // search by device node
+            {
+                auto nic = reinterpret_cast<AmdCuidNic*>(const_cast<AmdCuidDevice*>(this));
+                if (nic) {
+                    const auto& info = nic->get_info();
+                    CuidFileEntry entry;
+                    amdcuid_status_t status = secondary_file.find_by_device_node(info.network_interface, entry);
+                    if (status == AMDCUID_STATUS_SUCCESS) {
+                        id = entry.secondary_cuid;
+                        return AMDCUID_STATUS_SUCCESS;
+                    }
+                }
+            }
+            break;
+        default:
+            break;
+                // Will expand with different devices as we implement them
     }
 
     // if not found, generate secondary CUID
@@ -95,7 +107,7 @@ amdcuid_status_t AmdCuidDevice::get_secondary_cuid(amdcuid& id, AMDCUID_HMAC * h
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
     amdcuid primary;
-    amdcuid_status_t status = get_primary_cuid(primary);
+    status = get_primary_cuid(primary);
     if (status != AMDCUID_STATUS_SUCCESS) {
         return status;
     }

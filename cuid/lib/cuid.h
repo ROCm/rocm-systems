@@ -266,7 +266,7 @@ amdcuid_status_t amdcuid_get_render_node(
 */
 amdcuid_status_t amdcuid_get_cpu_core(
     amdcuid_handle handle,
-    uint16_t core
+    uint16_t *core
 );
 
 /**
