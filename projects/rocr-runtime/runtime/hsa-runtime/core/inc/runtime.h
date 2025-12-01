@@ -682,10 +682,10 @@ class Runtime {
   };
 
   struct AsyncEventsInfo {
+    bool monitor_exceptions;
     AsyncEventsControl control;
     AsyncEvents events;
     ConcurrentAsyncEvents new_events;
-    bool monitor_exceptions;
 
     AsyncEventsInfo(bool exceptions);
     ~AsyncEventsInfo();

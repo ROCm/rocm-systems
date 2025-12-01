@@ -1072,7 +1072,9 @@ rocprofsys_finalize_hidden(void)
     }
 
     ROCPROFSYS_CI_THROW(
-        _push_count > _pop_count, "%s",
+        _push_count > _pop_count &&
+            !get_env("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false, false),
+        "%s",
         TIMEMORY_JOIN(" ",
                       "rocprofsys_push_trace was called more times than "
                       "rocprofsys_pop_trace. The inverse is fine but the current state "
