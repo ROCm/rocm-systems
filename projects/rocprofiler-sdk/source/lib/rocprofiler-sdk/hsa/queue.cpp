@@ -21,6 +21,8 @@
  THE SOFTWARE. */
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+
+
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
@@ -43,6 +45,8 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <cstdint>
+#include <iomanip>
 #include <memory>
 
 // static assert for rocprofiler_packet ABI compatibility
@@ -265,18 +269,72 @@ WriteInterceptor(const void* packets,
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};
 
+    // Handle ring buffer wrap-around correctly
+    // The HSA runtime passes a linear pointer starting at ring[index & mask], but when
+    // packets wrap around the end of the circular buffer, the linear pointer extends
+    // beyond the ring buffer into unmapped memory, causing segfaults.
+    //
+    // Solution: Detect wrap-around by checking if accessing packets would cross the
+    // ring buffer boundary, and if so, access packets via the ring buffer with proper
+    // modulo arithmetic instead of using the linear pointer.
+    const hsa_queue_t* hsa_queue      = queue.intercept_queue();
+    auto*              ring_base      = static_cast<rocprofiler_packet*>(hsa_queue->base_address);
+    const uint64_t     ring_size      = hsa_queue->size;
+    const uint64_t     ring_mask      = ring_size - 1;
+
+    // Calculate which index in the ring buffer this packet batch starts at
+    // We can determine this by computing the offset from ring_base
+    const auto     pkt_offset_from_ring = packets_arr - ring_base;
+    const uint64_t start_index          = (pkt_offset_from_ring >= 0 &&
+                                            static_cast<uint64_t>(pkt_offset_from_ring) < ring_size)
+                                           ? static_cast<uint64_t>(pkt_offset_from_ring)
+                                           : 0;
+
+    // Check if linear access would exceed ring buffer boundary
+    const bool wraps_around = (start_index + pkt_count) > ring_size;
+
+    if(wraps_around)
+    {
+        ROCP_WARNING << "Detected ring buffer wrap-around: start_index=" << start_index
+                     << " pkt_count=" << pkt_count << " ring_size=" << ring_size
+                     << ". Accessing packets via ring buffer to handle wrap-around.";
+    }
+
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
     {
-        const auto& original_packet = packets_arr[i].kernel_dispatch;
-        auto        packet_type     = bit_extract(original_packet.header,
+        // Access packet correctly: if wrap-around detected, use ring buffer with modulo
+        const rocprofiler_packet* current_packet_ptr;
+        if(wraps_around)
+        {
+            // Safe access via ring buffer with wrap-around
+            const uint64_t ring_index = (start_index + i) & ring_mask;
+            current_packet_ptr = &ring_base[ring_index];
+        }
+        else
+        {
+            // Normal linear access
+            current_packet_ptr = &packets_arr[i];
+        }
+
+        // Extract packet type from ext_amd_aql_pm4 member first, which is
+        // valid for ALL packet types. Do NOT access kernel_dispatch until we verify it's
+        // actually a kernel dispatch packet. This fixes a bug where accessing the wrong union
+        // member before type checking could read invalid data.
+        const auto& current_packet = *current_packet_ptr;
+        const auto  header         = current_packet.ext_amd_aql_pm4.header;
+
+        auto packet_type = bit_extract(header,
                                        HSA_PACKET_HEADER_TYPE,
                                        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
         if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
         {
-            transformed_packets.emplace_back(packets_arr[i]);
+            transformed_packets.emplace_back(current_packet);
             continue;
         }
+
+        // Now it's safe to access as kernel_dispatch since we verified the packet type
+        const auto& original_packet = current_packet.kernel_dispatch;
 
         auto*                    corr_id      = context::get_latest_correlation_id();
         context::correlation_id* _corr_id_pop = nullptr;
@@ -321,7 +379,7 @@ WriteInterceptor(const void* packets,
         const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
 
         // Copy kernel pkt, copy is to allow for signal to be modified
-        rocprofiler_packet kernel_pkt = packets_arr[i];
+        rocprofiler_packet kernel_pkt = current_packet;
         // create our own signal that we can get a callback on. if there is an original completion
         // signal we will create a barrier packet, assign the original completion signal that that
         // barrier packet, and add it right after the kernel packet
