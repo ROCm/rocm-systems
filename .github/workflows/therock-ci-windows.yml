@@ -39,7 +39,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 6fab5d65a552483bcfa1f6ccaaabf699c8188c1e # 2025-11-06 commit
+          ref: "e238c0269a9e54b275ef34ffb43c6c52a0cddc83" # 2025-11-26 commit on release/therock-7.10 branch
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -54,7 +54,6 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0008-Find-bundled-libelf.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
@@ -89,8 +88,12 @@ jobs:
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
           dvc pull
+
+      - name: Install external python deps
+        run: |
+          pip install -r projects/rocprofiler-compute/requirements.txt
 
       - name: Configure Projects
         env:
