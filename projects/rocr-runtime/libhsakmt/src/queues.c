@@ -43,7 +43,7 @@
 
 #define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node) 		\
     (hsakmt_get_vgpr_size_per_cu(gfxv) + SGPR_SIZE_PER_CU +	\
-     (node.LDSSizeInKB << 10) + HWREG_SIZE_PER_CU)
+    (node.LDSSizeInKB << 10) + HWREG_SIZE_PER_CU)
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
     ((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
