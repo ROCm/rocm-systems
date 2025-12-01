@@ -3155,7 +3155,9 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    generate_output(cleanup_mode::reset);
+    // Launch generate output in a seperate thread and detach it
+    // This allows tool_detach to return immediately without waiting
+    std::thread([]() { generate_output(cleanup_mode::reset); }).detach();
 }
 
 void

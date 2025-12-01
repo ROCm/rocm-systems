@@ -114,6 +114,7 @@ Reattaching to the same process
 The dynamic process attachment functionality supports reattachment, which can be used to attach multiple times to the same PID over a process's lifetime. Give the same PID to ``rocprofv3`` to reattach.
 
 There are some restrictions on what options can change when reattaching.  Typically, tracing, PC sampling, ATT, counter collection, and other options that change what data will be collected cannot be changed. ``rocprofv3`` will throw a ``RuntimeError`` if it detects a configuration change that is not supported.
+Furthermore, output file generation from the previous attachment must be finished. Otherwise, errors or data corruption might occur after the profiler is reattached.
 
 .. class:: details
 
