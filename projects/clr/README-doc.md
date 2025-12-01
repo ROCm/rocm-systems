@@ -5,7 +5,7 @@ AMD CLR (Compute Language Runtime) contains source codes for AMD's compute langu
 ## Project Organisation
 
 - `hipamd` - contains implementation of `HIP` language on AMD platform. It is hosted at [hipamd](./hipamd)
-- `opencl` - contains implementation of OpenCL™ on AMD platform. It is hosted at [opencl](./opencl)
+- `opencl` - contains implementation of [OpenCL™](https://www.khronos.org/opencl/) on AMD platform. It is hosted at [opencl](./opencl)
 - `rocclr` - contains compute runtime used in `HIP` and `OpenCL™`. This is hosted at [rocclr](./rocclr)
 
 ## How to build/install
