@@ -47,7 +47,7 @@
 #include "core/agent_manager.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
+#    include "core/amd_smi.hpp"
 #    include <rocprofiler-sdk/agent.h>
 #    include <rocprofiler-sdk/cxx/serialization.hpp>
 #    include <rocprofiler-sdk/fwd.h>
@@ -97,7 +97,7 @@ amdsmi_init()
         {
             // Currently, AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_AINIC are supported.
             uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
-#if(defined ROCPROFSYS_USE_AINIC)
+#if(defined USE_AINIC)
             init_flags |= AMDSMI_INIT_AMD_AINIC;
 #endif
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));

@@ -27,9 +27,7 @@
 #endif
 
 #if ROCPROFSYS_USE_AINIC > 0
-#    define USE_AINIC true
-#else
-#    define USE_AINIC false
+#    define USE_AINIC
 #endif
 
 namespace rocprofsys
