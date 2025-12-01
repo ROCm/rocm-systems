@@ -144,14 +144,14 @@ To use the rocTX API you need the API header and to link your application with `
 - To build `roctracer` library:
 
    ```sh
-   cd <your path>/roctracer
+   cd <your path>/rocm-systems/projects/roctracer
    ./build.sh
    ```
 
 - To build and run test:
 
   ```sh
-  cd <your path>/roctracer/build
+  cd <your path>/rocm-systems/projects/roctracer/build
   make mytest
   run.sh
   ```
