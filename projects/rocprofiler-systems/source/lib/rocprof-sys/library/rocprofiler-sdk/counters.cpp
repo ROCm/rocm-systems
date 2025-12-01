@@ -121,6 +121,8 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         auto agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
 
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+            static_cast<size_t>(
+                category_enum_id<category::rocm_counter_collection>::value),
             track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
             parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
             static_cast<uint32_t>(agent.device_id), static_cast<uint8_t>(agent.type),
@@ -174,8 +176,8 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 }
 
 void
-counter_storage::write(counter_storage_type* storage, std::string metric_name,
-                       std::string metric_description)
+counter_storage::write(counter_storage_type* storage, const std::string& metric_name,
+                       const std::string& metric_description)
 {
     if(!trait::runtime_enabled<counter_data_tracker>::get())
     {

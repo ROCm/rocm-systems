@@ -24,6 +24,10 @@
 #define VHSAKMT_VIRTIO_PROTO_H
 
 #include "hsakmt/linux/kfd_ioctl.h"
+
+// Forward declaration for HsaKFDContext to avoid dependency issues
+typedef struct _HsaKFDContext HsaKFDContext;
+
 #include "hsakmt/hsakmt.h"
 
 #include <drm/amdgpu_drm.h>
