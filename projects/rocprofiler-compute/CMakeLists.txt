@@ -523,169 +523,174 @@ add_subdirectory(src/lib)
 # ---------
 # Install
 # ---------
+if(NOT BUILD_TESTS_ONLY)
+    # top-level rocprofiler-compute utility
+    install(
+        PROGRAMS src/${EXECUTABLE_NAME}
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+    )
+    # python dependency requirements
+    install(
+        FILES requirements.txt
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+    )
+    # support files and version info
+    install(
+        FILES
+            src/argparser.py
+            src/config.py
+            src/rocprof_compute_base.py
+            src/roofline.py
+            VERSION VERSION.sha
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+    )
+    # src/rocprof_compute_analyze
+    install(
+        DIRECTORY src/rocprof_compute_analyze
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN src/rocprof_compute_analyze/tests EXCLUDE
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # src/utils
+    install(
+        DIRECTORY src/utils
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN "rooflines*" EXCLUDE
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # src/utils/rooflines
+    file(GLOB rooflinebins src/utils/rooflines/roofline-*)
+    install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
+    # src/rocprof_compute_soc
+    install(
+        DIRECTORY src/rocprof_compute_soc
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # src/rocprof_compute_profile
+    install(
+        DIRECTORY src/rocprof_compute_profile
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # src/rocprof_compute_tui
+    install(
+        DIRECTORY src/rocprof_compute_tui
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # tools/config_management
+    install(
+        DIRECTORY tools/config_management
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT main
+        PATTERN "__pycache__" EXCLUDE
+    )
+    # samples
+    install(
+        DIRECTORY sample
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+        COMPONENT main
+        FILES_MATCHING
+        PATTERN "*.hip"
+        PATTERN "*.h"
+        PATTERN "*.cpp"
+        PATTERN "workloads" EXCLUDE
+    )
+    # modulefile
+    install(
+        FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        DESTINATION ${MOD_INSTALL_PATH}
+        COMPONENT main
+    )
 
-# top-level rocprofiler-compute utility
-install(
-    PROGRAMS src/${EXECUTABLE_NAME}
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-)
-# python dependency requirements
-install(
-    FILES requirements.txt
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-)
-# support files and version info
-install(
-    FILES
-        src/argparser.py
-        src/config.py
-        src/rocprof_compute_base.py
-        src/roofline.py
-        VERSION VERSION.sha
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-)
-# src/rocprof_compute_analyze
-install(
-    DIRECTORY src/rocprof_compute_analyze
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN src/rocprof_compute_analyze/tests EXCLUDE
-    PATTERN "__pycache__" EXCLUDE
-)
-# src/utils
-install(
-    DIRECTORY src/utils
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "rooflines*" EXCLUDE
-    PATTERN "__pycache__" EXCLUDE
-)
-# src/utils/rooflines
-file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
-# src/rocprof_compute_soc
-install(
-    DIRECTORY src/rocprof_compute_soc
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# src/rocprof_compute_profile
-install(
-    DIRECTORY src/rocprof_compute_profile
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# src/rocprof_compute_tui
-install(
-    DIRECTORY src/rocprof_compute_tui
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# tools/config_management
-install(
-    DIRECTORY tools/config_management
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# samples
-install(
-    DIRECTORY sample
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-    COMPONENT main
-    FILES_MATCHING
-    PATTERN "*.hip"
-    PATTERN "*.h"
-    PATTERN "*.cpp"
-    PATTERN "workloads" EXCLUDE
-)
-# modulefile
-install(
-    FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-    DESTINATION ${MOD_INSTALL_PATH}
-    COMPONENT main
-)
+    # install librocprofiler-compute-tool.so
+    install(
+        TARGETS rocprofiler-compute-tool
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+    )
 
-# install librocprofiler-compute-tool.so
-install(
-    TARGETS rocprofiler-compute-tool
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-)
+    # top-level symlink for bin/rocprof-compute
+    install(
+        CODE
+            "execute_process(
+            COMMAND bash -c \"set -e
+            cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
+            ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
+            \")"
+        COMPONENT main
+    )
 
-# top-level symlink for bin/rocprof-compute
-install(
-    CODE
-        "execute_process(
-    COMMAND bash -c \"set -e
-    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-    \")"
-    COMPONENT main
-)
+    # License header update(s)
+    add_custom_target(
+        license
+        COMMAND
+            ${PROJECT_SOURCE_DIR}/tools/update_license.py --source
+            ${PROJECT_SOURCE_DIR}/src --license ${PROJECT_SOURCE_DIR}/LICENSE.md
+            --extension '.py'
+        COMMAND
+            ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
+            --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
+            "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
+    )
 
-# License header update(s)
-add_custom_target(
-    license
-    COMMAND
-        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}/src
-        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --extension '.py'
-    COMMAND
-        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
-        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
-        "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
-)
+    # Standalone binary creation
+    add_custom_target(
+        standalonebinary
+        # Change working directory to src
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        # Install nuitka
+        COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
+        # Install patchelf
+        COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
+        # Check nuitka
+        COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
+        # Check patchelf
+        COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
+        # Create VERSION.sha file
+        COMMAND git rev-parse HEAD > VERSION.sha
+        # Build standalone binary
+        # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
+        # and fork bombs as explained in
+        # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
+        COMMAND
+            ${Python3_EXECUTABLE} -m nuitka --mode=onefile
+            --no-deployment-flag=self-execution
+            --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
+            --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
+            --include-package=dash_svg --include-package-data=dash_svg
+            --include-package=dash_bootstrap_components
+            --include-package-data=dash_bootstrap_components --include-package=plotly
+            --include-package-data=plotly --include-package=kaleido
+            --include-package-data=kaleido --include-package=rocprof_compute_analyze
+            --include-package-data=rocprof_compute_analyze
+            --include-package=rocprof_compute_profile
+            --include-package-data=rocprof_compute_profile
+            --include-package=rocprof_compute_tui
+            --include-package-data=rocprof_compute_tui
+            --include-package=rocprof_compute_soc
+            --include-package-data=rocprof_compute_soc --include-package=utils
+            --include-package-data=utils src/rocprof-compute
+        # Remove library rpath from executable
+        COMMAND patchelf --remove-rpath rocprof-compute.bin
+        # Move to build directory
+        COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
+    )
 
-# Standalone binary creation
-add_custom_target(
-    standalonebinary
-    # Change working directory to src
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    # Install nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
-    # Install patchelf
-    COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
-    # Check nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
-    # Check patchelf
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
-    # Create VERSION.sha file
-    COMMAND git rev-parse HEAD > VERSION.sha
-    # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
-    # and fork bombs as explained in
-    # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
-    COMMAND
-        ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
-        --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
-        --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
-        --include-package=dash_svg --include-package-data=dash_svg
-        --include-package=dash_bootstrap_components
-        --include-package-data=dash_bootstrap_components --include-package=plotly
-        --include-package-data=plotly --include-package=kaleido
-        --include-package-data=kaleido --include-package=rocprof_compute_analyze
-        --include-package-data=rocprof_compute_analyze
-        --include-package=rocprof_compute_profile
-        --include-package-data=rocprof_compute_profile
-        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
-        --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils src/rocprof-compute
-    # Remove library rpath from executable
-    COMMAND patchelf --remove-rpath rocprof-compute.bin
-    # Move to build directory
-    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
-)
-
-install(
-    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    COMPONENT main
-)
+    install(
+        FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}
+        COMPONENT main
+    )
+endif()
 
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
