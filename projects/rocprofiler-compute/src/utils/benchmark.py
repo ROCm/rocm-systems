@@ -98,8 +98,8 @@ cache_kernel_selector = {
 }
 
 mfma_kernel_selector = {
-    "F4": "mfma_f8f6f4<4>",
-    "F6": "mfma_f8f6f4<2>",
+    "F4": "mfma_f8f6f4<FP4_E2M1>",
+    "F6": "mfma_f8f6f4<FP6_E2M3>",
     "F8": "mfma_f8",
     "F16": "mfma_f16",
     "BF16": "mfma_bf16",
@@ -804,72 +804,9 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
 }
 """
 
-mfma_f8f6f4_src = """
+mfma_f8_src = """
 
-using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
-using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
 using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
-
-/* Datatypes available for scale mfma f8f6f4 builtin
-* 0 = fp8
-* 1 = bf8
-* 2 = fp6
-* 3 = bf6
-* 4 = fp4
-*/
-template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
-{
-    // MI350 series only
-    // Input: 8 i32 registers
-    int32_8vec a;
-    a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
-
-    // Output: 16 F32 registers
-    f32_16vec result = {0};
-
-    // CDNA4: v_mfma_f32_32x32x64_f8f6f4    ops: 32x32x64x2 = 131072
-    switch (datatype)
-    {
-        case 1: // bf8 x bf8
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 1, 1, 0, 0, 0, 0);
-            }
-            break;
-        case 2: // fp6 x fp6
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 2, 2, 0, 0, 0, 0);
-            }
-            break;
-        case 3: // bf6 x bf6
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 3, 3, 0, 0, 0, 0);
-            }
-            break;
-        case 4: // fp4 x fp4
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 4, 4, 0, 0, 0, 0);
-            }
-            break;
-    default: // fp8 x fp8
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0, 0, 0, 0, 0);
-        }
-        break;
-    }
-
-    if (result[0] != 2*result[0])
-    {
-        dummy[0] = result[0];
-    }
-}
 
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
@@ -894,6 +831,73 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
 }
 """
 
+mfma_f8f6f4_src = """
+
+using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
+using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
+using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
+using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
+using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
+
+#define FP8_E4M3 0
+#define FP8_E5M2 1
+#define FP6_E2M3 2
+#define FP6_E3M2 3
+#define FP4_E2M1 4
+
+template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
+{
+    // MI350 series only
+    // Input: 8 i32 registers
+    int32_8vec a;
+    a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
+
+    // Output: 16 F32 registers
+    f32_16vec result = {0};
+
+    // CDNA4: v_mfma_f32_32x32x64_f8f6f4    ops: 32x32x64x2 = 131072
+    switch (datatype)
+    {
+        case FP8_E4M3: // fp8 x fp8
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0, 0, 0, 0, 0);
+        	}
+        case FP8_E5M2: // bf8 x bf8
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 1, 1, 0, 0, 0, 0);
+            }
+            break;
+        case FP6_E2M3: // fp6 x fp6
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 2, 2, 0, 0, 0, 0);
+            }
+            break;
+        case FP6_E3M2: // bf6 x bf6
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 3, 3, 0, 0, 0, 0);
+            }
+            break;
+        case FP4_E2M1: // fp4 x fp4
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 4, 4, 0, 0, 0, 0);
+            }
+            break;
+    }
+
+    if (result[0] != 2*result[0])
+    {
+        dummy[0] = result[0];
+    }
+}
+
+"""
+
 
 def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     SIMDS_PER_CU = 4
@@ -914,6 +918,8 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     if type == "F32":
         src = mfma_f32_src
+    elif type == "F8":
+        src = mfma_f8_src
     elif type == "F16":
         src = mfma_f16_src
     elif type == "BF16":
