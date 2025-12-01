@@ -110,8 +110,8 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 
     if (gfxv == GFX_VERSION_GFX950 ||
         (gfxv & ~(0xff)) == GFX_VERSION_AQUA_VANJARAM ||
-         gfxv == GFX_VERSION_ALDEBARAN ||
-         gfxv == GFX_VERSION_ARCTURUS)
+        gfxv == GFX_VERSION_ALDEBARAN ||
+        gfxv == GFX_VERSION_ARCTURUS)
         vgpr_size = 0x80000;
 
     else if (gfxv == GFX_VERSION_PLUM_BONITO ||
