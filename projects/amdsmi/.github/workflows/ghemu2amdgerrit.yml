@@ -1,0 +1,83 @@
+name: GitHub to Gerrit Mirror
+
+run-name: "Mirror to Gerrit: ${{ github.event.ref || inputs.branch }} ${{ github.event.after }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to mirror (amd-staging or amd-mainline)'
+        required: true
+        default: 'amd-staging'
+        type: choice
+        options:
+          - amd-staging
+          - amd-mainline
+  pull_request:
+    branches:
+      - amd-staging
+      - amd-mainline
+    types: [closed]
+
+env:
+  GERRIT_SERVER: "gerrit-git.amd.com"
+  GERRIT_PROJECT: "SYS-MGMT/ec/amd-smi" 
+  GERRIT_USER: "z1_runner"
+  GERRIT_PORT: "29418"
+
+jobs:
+  Setup:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: banff-sc-cx43-29
+    steps:
+
+      - name: Fix workspace permissions
+        run: |
+          sudo chown -R $(id -u):$(id -g) ${{ github.workspace }}
+          sudo chmod -R u+rwX ${{ github.workspace }}
+
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          touch ~/.ssh/known_hosts
+          touch ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ env.GERRIT_PORT }} ${{ env.GERRIT_SERVER }} >> ~/.ssh/known_hosts
+
+      - name: Debug SSH setup
+        run: |
+          ls -la ~/.ssh
+          ssh -p ${{ env.GERRIT_PORT }} ${{ env.GERRIT_USER }}@${{ env.GERRIT_SERVER }} || true
+
+      - name: Set Gerrit remote
+        run: |
+          cd ${{ github.workspace }}
+          if git remote | grep -q "gerrit"
+          then
+            git remote set-url gerrit ssh://${{ env.GERRIT_USER }}@${{ env.GERRIT_SERVER }}:${{ env.GERRIT_PORT }}/${{ env.GERRIT_PROJECT }}
+          else
+            git remote add gerrit ssh://${{ env.GERRIT_USER }}@${{ env.GERRIT_SERVER }}:${{ env.GERRIT_PORT }}/${{ env.GERRIT_PROJECT }}
+          fi
+
+      - name: Set committer identity for Gerrit
+        run: |
+          git config user.name "z1_runner"
+          git config user.email "z1_runner@amd.com"
+
+      - name: Fetch selected branch
+        run: |
+          BRANCH="${{ github.event.pull_request.base.ref || inputs.branch }}"
+          git fetch origin ${BRANCH}:refs/remotes/origin/${BRANCH}
+          git checkout ${BRANCH}
+
+      - name: Mirror selected branch to Gerrit
+        run: |
+          BRANCH="${{ github.event.pull_request.base.ref || inputs.branch }}"
+          git push gerrit refs/heads/${BRANCH}:refs/heads/${BRANCH}
