@@ -162,33 +162,34 @@ endif()
 # ----------------------
 # modulefile creation
 # ----------------------
-
-set(MOD_INSTALL_PATH
-    "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
-    CACHE STRING
-    "Install path for modulefile"
-)
-message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
-
-set(moduleFileTemplate "rocprofcompute.lua.in")
-
-configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-    @ONLY
-)
-
-# Thera mods
-if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
-    list(APPEND CMAKE_MESSAGE_INDENT "  ")
-    message(STATUS "Using thera-specific modulefile modification")
-    file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-    file(
-        APPEND
-            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-        ${mod_additions}
+if(NOT BUILD_TESTS_ONLY)
+    set(MOD_INSTALL_PATH
+        "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
+        CACHE STRING
+        "Install path for modulefile"
     )
-    list(POP_BACK CMAKE_MESSAGE_INDENT)
+    message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
+
+    set(moduleFileTemplate "rocprofcompute.lua.in")
+
+    configure_file(
+        ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
+        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        @ONLY
+    )
+
+    # Thera mods
+    if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
+        list(APPEND CMAKE_MESSAGE_INDENT "  ")
+        message(STATUS "Using thera-specific modulefile modification")
+        file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
+        file(
+            APPEND
+                ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+            ${mod_additions}
+        )
+        list(POP_BACK CMAKE_MESSAGE_INDENT)
+    endif()
 endif()
 
 # Setup testing collateral
