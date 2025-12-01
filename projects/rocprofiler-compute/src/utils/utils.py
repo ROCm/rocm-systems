@@ -1200,7 +1200,7 @@ def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
     elif "debian" in id_list:
         distro = "22.04"
 
-    elif "fedora" in id_list:
+    elif ("fedora" in id_list) or ("tencentos" in id_list):
         distro = "platform:el8"
 
     elif "suse" in id_list:

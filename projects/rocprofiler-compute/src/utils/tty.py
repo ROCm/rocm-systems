@@ -351,7 +351,7 @@ def process_table_data(
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
                         cur_df_copy[header] = [
-                            (round(float(x), args.decimal) if x != "" else x)
+                            (round(float(x), args.decimal) if x != "N/A" else x)
                             for x in base_df[header]
                         ]
                         result_df = pd.concat([result_df, cur_df_copy[header]], axis=1)

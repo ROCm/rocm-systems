@@ -2,38 +2,49 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## Unreleased
+## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
 
-* Add `--list-blocks <arch>` option to general options to list available IP blocks on specified arch (similar to `--list-metrics`), cannot be used with `--block`.
+* `--list-blocks <arch>` option to general options. It lists the available IP blocks on the specified arch (similar to `--list-metrics`), however cannot be used with `--block`.
 
-* Added `config_delta/gfx950_diff.yaml` to analysis config yamls to track the revision between a gfx9 architecture against the latest supported architecture gfx950
+* `config_delta/gfx950_diff.yaml` to analysis config YAMLs to track the revision between the gfx9xx GPUs against the latest supported gfx950 GPUs.
 
 * Analysis db features
-  * Add support for per kernel metrics analysis.
-  * Add support for dispatch timeline analysis.
-  * Show duration as median in addition to mean in kernel view.
+  * Adds support for per kernel metrics analysis.
+  * Adds support for dispatch timeline analysis.
+  * Shows duration as median in addition to mean in kernel view.
+
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
 
 ### Changed
 
-* `-b/--block` accepts block alias(es) (See block aliases using command-line option `--list-blocks <arch>`).
+* `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
 
-* analysis configs yamls are now managed with the new config management workflow in `tools/config_management/`
+* Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
 
 * `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
 
+* Empty cells replaced with `N/A` for unavailable metrics in analysis.
+
+
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
 
 ### Removed
-* Removed `database` mode from `rocprofiler-compute`. This is to move our focus from grafana
-  and mongodb integration to other visualization methods such as:
-  * Analysis DB based Visualizer (upcoming)
+
+* Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
   * Plotly server based standalone GUI
   * Commandline based Textual User Interface
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
 
 ### Known issues
 
