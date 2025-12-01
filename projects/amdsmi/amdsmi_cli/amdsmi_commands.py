@@ -5576,9 +5576,11 @@ class AMDSMICommands():
                         raise PermissionError('Command requires elevation') from e
                     final_output[f"ppt{current_sensor_num}"] = f"[{e.get_error_info(detailed=False)}] Unable to reset cap to default power cap"
                 self.logger.store_output(args.gpu, 'powercap', final_output)
+                if multiple_devices:
+                    self.logger.store_multiple_device_output()
+                    return
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
-                return
 
         #######################
         # BM commands - END   #

@@ -7,6 +7,11 @@
 #
 # ----------------------------------------------------------------------------- #
 
+# Note:
+# We do not receive the end of certain OMPT callbacks. This can result in missing completion events
+# for the underlying functions that belong to the tracked host category (causing push vs pop mismatch).
+# To avoid this, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the environment.
+
 if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(
         FATAL_ERROR
@@ -112,18 +117,17 @@ endif()
 if(ROCPROFSYS_OMPVV_HOST_TESTS)
     foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
         rocprofiler_systems_add_test(
-            SKIP_RUNTIME
             NAME ${HOST_TEST_NAME}
             TARGET ${HOST_TEST_NAME}-exec
             LABELS "openmp;ompvv"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
-              -e -v 1 --label return args -E ^GOMP
+              -e -v 1 --label return args
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
             ENVIRONMENT
-              "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+              "${_ompt_environment};ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
             REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
         )
