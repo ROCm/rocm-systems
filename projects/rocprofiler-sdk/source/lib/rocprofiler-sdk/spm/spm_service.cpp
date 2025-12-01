@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <cstdint>
+#include <filesystem>
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
@@ -41,6 +42,56 @@ namespace rocprofiler
 {
 namespace SPM
 {
+
+bool is_virtualization_enabled(){
+    // Check if GPU virtualization (SR-IOV) is enabled by looking for virtual function indicators
+    // 
+    // In SR-IOV GPU virtualization:
+    // - Physical Function (PF): The actual GPU hardware device  
+    // - Virtual Function (VF): Virtualized GPU instances derived from the PF
+    // 
+    // The /sys/class/drm/card*/device/physfn symlink exists ONLY on VF devices
+    // and points back to their corresponding PF device. If this link exists,
+    // the GPU is running as a virtual function (virtualization enabled).
+    
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator("/sys/class/drm")) {
+            if (entry.path().filename().string().substr(0, 4) == "card" && 
+                std::filesystem::exists(entry.path() / "device" / "physfn")) {
+                return true;
+            }
+        }
+    } catch (...) {
+        // If filesystem access fails, assume no virtualization; fall-through
+    }
+    return false;
+}
+
+bool
+is_spm_explicitly_supported(const rocprofiler_agent_t* agent)
+{
+    // if the device is gfx90a, then spm is not supported
+    if(std::strcmp(agent->name, "gfx90a") == 0)
+    {
+        ROCP_WARNING
+            << "Streaming Performance Monitor (SPM) is not supported on gfx90a devices (agent-"
+            << agent->node_id << ")";
+        return false;
+    }
+    else if(std::string(agent->name) == "gfx942")
+    {
+        // if the device is gfx942, check if virtualization is enabled
+        if(is_virtualization_enabled())
+        {
+            ROCP_WARNING
+                << "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
+                << "when GPU virtualization (SR-IOV) is enabled (agent-" << agent->node_id << ")";
+            return false;
+        }
+    }
+    return true;
+}
+
 bool
 is_dlsym_valid()
 {
@@ -73,6 +124,9 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
     std::unordered_set<uint64_t> already_added;
     const auto*                  agent = ::rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    if(!rocprofiler::SPM::is_spm_explicitly_supported(agent))
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     std::shared_ptr<rocprofiler::SPM::spm_counter_config> config =
         std::make_shared<rocprofiler::SPM::spm_counter_config>();
@@ -155,6 +209,8 @@ rocprofiler_configure_spm_dispatch_service(
 {
     if(!rocprofiler::SPM::is_spm_explicitly_enabled())
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    // if(!rocprofiler::SPM::is_spm_explicitly_supported())
+    // return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
