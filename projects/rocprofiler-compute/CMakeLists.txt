@@ -745,7 +745,11 @@ set(PKG_MAINTAINER_NM "rocprofiler compute support")
 set(PKG_MAINTAINER_EMAIL "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
-set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
+if(BUILD_TESTS_ONLY)
+    set(CPACK_PACKAGE_NAME "${PROJECT_NAME}-tests" CACHE STRING "")
+else()
+    set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
+endif()
 set(CPACK_PACKAGE_CONTACT
     "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
