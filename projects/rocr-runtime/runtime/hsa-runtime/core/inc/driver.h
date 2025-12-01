@@ -46,7 +46,6 @@
 #include <cstdint>
 #include <limits>
 #include <string>
-#include <map>
 
 #include "core/inc/memory_region.h"
 #include "hsakmt/hsakmttypes.h"

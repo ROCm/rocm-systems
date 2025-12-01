@@ -34,7 +34,6 @@ struct CountedQueue {
 class CountedQueuePoolManager {
  public:
   explicit CountedQueuePoolManager(core::Agent*);
-  ~CountedQueuePoolManager();
 
   // Acquire a queue (either reuse or create new)
   hsa_status_t AcquireQueue(hsa_queue_type_t type, HSA::hsa_amd_queue_priority_internal_t priority,

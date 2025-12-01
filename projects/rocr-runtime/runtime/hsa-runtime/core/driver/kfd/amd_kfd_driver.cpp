@@ -63,19 +63,29 @@
 
 extern r_debug _amdgpu_r_debug;
 
+namespace rocr {
+
 /// @brief Mapping between priority type used internally within ROCR to the type used by KFD
 
 // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
 // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
 // in ROCR
-static const std::map<rocr::HSA::hsa_amd_queue_priority_internal_t, HSA_QUEUE_PRIORITY> ext_kmt_priomap = {
-    {rocr::HSA::HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
-    {rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
-    {rocr::HSA::HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
-    {rocr::HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM, HSA_QUEUE_PRIORITY_MAXIMUM},
-};
+__forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
+    rocr::HSA::hsa_amd_queue_priority_internal_t priority) {
+  switch (priority) {
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_LOW:
+      return HSA_QUEUE_PRIORITY_MINIMUM;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL:
+      return HSA_QUEUE_PRIORITY_NORMAL;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_HIGH:
+      return HSA_QUEUE_PRIORITY_HIGH;
+    case rocr::HSA::HSA_AMD_QUEUE_PRIORITY_MAXIMUM:
+      return HSA_QUEUE_PRIORITY_MAXIMUM;
+    default:
+      return HSA_QUEUE_PRIORITY_NORMAL;
+  }
+}
 
-namespace rocr {
 namespace AMD {
 
 #if defined(__linux__)
@@ -386,12 +396,9 @@ hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint3
                                     void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
                                     HsaQueueResource& queue_resource) const {
   // Convert from ROCR internal priority type to KFD type
-  auto priority_it = ext_kmt_priomap.find(priority);
-  if (priority_it == ext_kmt_priomap.end()) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, priority_it->second, sdma_engine_id,
+  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
                                        queue_addr, queue_size_bytes, event, &queue_resource)) !=
       HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -410,12 +417,9 @@ hsa_status_t KfdDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                     uint64_t queue_size, HsaEvent* event) const {
   // Convert from ROCR internal priority type to KFD type
-  auto priority_it = ext_kmt_priomap.find(priority);
-  if (priority_it == ext_kmt_priomap.end()) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, priority_it->second, queue_addr, queue_size,
+  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, kfd_priority, queue_addr, queue_size,
                                     event)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

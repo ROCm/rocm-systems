@@ -7,7 +7,6 @@
 #include "core/inc/counted_queue_manager.h"
 #include "core/inc/agent.h"
 #include "core/inc/runtime.h"
-#include <cassert>
 
 namespace rocr {
 namespace core {
@@ -137,9 +136,6 @@ void CountedQueuePoolManager::Cleanup() {
   }
   counted_queues_.clear();
 }
-
-CountedQueuePoolManager::~CountedQueuePoolManager() {}
-
 
 }  // namespace core
 }  // namespace rocr
