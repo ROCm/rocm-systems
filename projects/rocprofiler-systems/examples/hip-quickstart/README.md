@@ -6,7 +6,7 @@ This directory contains simple, well-documented HIP examples specifically design
 
 ### 1. Vector Addition (`vector_add.cpp`)
 
-**Difficulty:** Beginner  
+**Difficulty:** Beginner
 **Concepts:** Basic HIP kernel, memory transfers, memory-bound kernels
 
 A simple vector addition example that demonstrates:
@@ -30,7 +30,7 @@ rocprof-sys-sample --quick --hip-trace -- ./vector_add
 
 ### 2. Matrix Multiplication (`matrix_multiply.cpp`)
 
-**Difficulty:** Intermediate  
+**Difficulty:** Intermediate
 **Concepts:** Kernel optimization, shared memory, performance comparison
 
 Implements two versions of matrix multiplication:
@@ -57,7 +57,7 @@ rocprof-sys-run --hip-trace --rocm-events=MemUnitBusy,TCC_HIT,TCC_MISS -- ./matr
 
 ### 3. Concurrent Execution with Streams (`streams.cpp`)
 
-**Difficulty:** Advanced  
+**Difficulty:** Advanced
 **Concepts:** Async operations, concurrent kernel execution, stream management
 
 Demonstrates three execution modes:
@@ -243,15 +243,6 @@ rocprof-sys-sample --hip-trace -- ./app
 rocprof-sys-sample --quick --hip-trace -- ./app
 # Check GPUBusy percentage and timeline gaps
 ```
-
-## Next Steps
-
-After working through these examples:
-
-1. **Apply to your own code**: Profile your HIP applications
-2. **Read the documentation**: See [Profiling HIP Applications Tutorial](../../docs/tutorials/profiling-hip-applications.rst)
-3. **Understand metrics**: Review the [Metrics Glossary](../../docs/reference/metrics-glossary.rst)
-4. **Explore other examples**: Check out `transpose` and `roctx` examples for more advanced techniques
 
 ## Additional Resources
 

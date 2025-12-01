@@ -25,6 +25,7 @@
 #include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/demangler.hpp"
+#include "common/user_experience.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
@@ -479,33 +480,29 @@ main(int argc, char** argv)
     // it is unrecognized, then set the errflag to report an error.  When we come to a
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
-    
+
     const auto* _desc = R"(
 Binary instrumentation tool for profiling and tracing applications.
 
 EXAMPLES:
-  Quick instrumentation preset (runtime with sensible defaults):
-    rocprof-sys-instrument --quick -- myapp
+  Beginner (Quick Start):
+    rocprof-sys-instrument --quick -- ./myapp
+    rocprof-sys-instrument --wizard                  # Interactive setup
 
-  HPC workload preset (binary rewrite for MPI/OpenMP):
-    rocprof-sys-instrument --trace-hpc -o myapp.inst -- myapp
-    mpirun -n 4 rocprof-sys-run --trace-hpc -- ./myapp.inst
+  Intermediate (Workload-Specific Presets):
+    rocprof-sys-instrument --trace-hpc -o myapp.inst -- ./myapp  # HPC/MPI/OpenMP
+    rocprof-sys-instrument --trace-ai -- python train.py         # AI/ML/GPU
+    rocprof-sys-instrument --profile-only -o myapp.inst -- ./myapp
 
-  AI/ML workload preset (runtime for Python interop):
-    rocprof-sys-instrument --trace-ai -- python train.py
+  Advanced (Custom Configuration):
+    rocprof-sys-instrument -R '^compute_' -o myapp.inst -- ./myapp
+    rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- ./myapp
+    rocprof-sys-instrument -o myapp.inst -- ./myapp && rocprof-sys-run -- ./myapp.inst
 
-  Binary rewrite with instrumentation:
-    rocprof-sys-instrument -o myapp.inst -- myapp
-    rocprof-sys-run -- ./myapp.inst
-
-  Runtime instrumentation (fork+exec):
-    rocprof-sys-instrument -- myapp
-
-  Instrument specific functions only:
-    rocprof-sys-instrument -R '^compute_' -o myapp.inst -- myapp
-
-  Exclude library functions:
-    rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- myapp
+QUICK HELP:
+  --cheatsheet        Show quick reference card
+  --wizard            Run interactive setup wizard
+  --help              Show full help (you are here)
 )";
 
     parser_t parser("rocprof-sys-instrument", _desc);
@@ -513,6 +510,30 @@ EXAMPLES:
 
     parser.enable_help();
     parser.enable_version("rocprof-sys-instrument", ROCPROFSYS_ARGPARSE_VERSION_INFO);
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[QUICK HELP]" }, "");
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "--cheatsheet" }, "Print quick reference card and exit")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("cheatsheet"))
+            {
+                rocprofsys::user_experience::print_cheatsheet();
+                exit(EXIT_SUCCESS);
+            }
+        });
+    parser.add_argument({ "--wizard" }, "Run interactive setup wizard and exit")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("wizard"))
+            {
+                rocprofsys::user_experience::run_interactive_wizard("instrument");
+                exit(EXIT_SUCCESS);
+            }
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DEBUG OPTIONS]" }, "");
@@ -638,9 +659,10 @@ EXAMPLES:
     parser.add_argument({ "[PRESET MODES]" }, "");
     parser.add_argument({ "" }, "");
     parser
-        .add_argument({ "--quick" },
-                      "Quick instrumentation preset: runtime instrumentation with sensible "
-                      "defaults for immediate profiling")
+        .add_argument(
+            { "--quick" },
+            "Quick instrumentation preset: runtime instrumentation with sensible "
+            "defaults for immediate profiling")
         .max_count(1)
         .dtype("bool")
         .action([](parser_t& p) {
@@ -653,9 +675,10 @@ EXAMPLES:
             }
         });
     parser
-        .add_argument({ "--profile-only" },
-                      "Profile-only preset: binary rewrite optimized for profiling without "
-                      "detailed trace (lower overhead)")
+        .add_argument(
+            { "--profile-only" },
+            "Profile-only preset: binary rewrite optimized for profiling without "
+            "detailed trace (lower overhead)")
         .max_count(1)
         .dtype("bool")
         .action([](parser_t& p) {
@@ -667,9 +690,10 @@ EXAMPLES:
             }
         });
     parser
-        .add_argument({ "--trace-only" },
-                      "Trace-only preset: binary rewrite optimized for detailed tracing and "
-                      "analysis")
+        .add_argument(
+            { "--trace-only" },
+            "Trace-only preset: binary rewrite optimized for detailed tracing and "
+            "analysis")
         .max_count(1)
         .dtype("bool")
         .action([](parser_t& p) {
@@ -681,9 +705,10 @@ EXAMPLES:
             }
         });
     parser
-        .add_argument({ "--trace-hpc" },
-                      "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
-                      "applications (enables binary rewrite)")
+        .add_argument(
+            { "--trace-hpc" },
+            "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+            "applications (enables binary rewrite)")
         .max_count(1)
         .dtype("bool")
         .action([](parser_t& p) {
@@ -1191,6 +1216,29 @@ EXAMPLES:
         std::cerr << err << std::endl;
         parser.print_help(extra_help);
         return -1;
+    }
+
+    std::vector<std::string> active_presets;
+    if(parser.exists("quick") && parser.get<bool>("quick"))
+        active_presets.emplace_back("--quick");
+    if(parser.exists("profile-only") && parser.get<bool>("profile-only"))
+        active_presets.emplace_back("--profile-only");
+    if(parser.exists("trace-only") && parser.get<bool>("trace-only"))
+        active_presets.emplace_back("--trace-only");
+    if(parser.exists("trace-hpc") && parser.get<bool>("trace-hpc"))
+        active_presets.emplace_back("--trace-hpc");
+    if(parser.exists("trace-ai") && parser.get<bool>("trace-ai"))
+        active_presets.emplace_back("--trace-ai");
+
+    if(rocprofsys::user_experience::validate_preset_modes(active_presets) != EXIT_SUCCESS)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(!active_presets.empty() && verbose_level >= 0)
+    {
+        rocprofsys::user_experience::print_pre_execution_info("instrument",
+                                                              active_presets[0]);
     }
 
     if(parser.exists("config"))

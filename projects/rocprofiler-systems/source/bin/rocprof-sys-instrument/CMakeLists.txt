@@ -26,6 +26,11 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument.hpp
 )
 
+target_include_directories(
+    rocprofiler-systems-instrument
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..
+)
+
 target_link_libraries(
     rocprofiler-systems-instrument
     PRIVATE

@@ -295,30 +295,6 @@ rocprof-sys-sample -f 20 -- ./app  # Lower frequency
 rocprof-sys-instrument -R '^main$' -- ./app
 ```
 
-## Learning Path
-
-Recommended order for learning:
-
-1. **Week 1: Basics**
-   - [Quickstart Guide](../docs/tutorials/quickstart.rst)
-   - [hip-quickstart/vector_add](hip-quickstart/)
-   - [user-api/](user-api/)
-
-2. **Week 2: Optimization**
-   - [hip-quickstart/matrix_multiply](hip-quickstart/)
-   - [transpose/](transpose/)
-   - [Metrics Glossary](../docs/reference/metrics-glossary.rst)
-
-3. **Week 3: Advanced**
-   - [hip-quickstart/streams](hip-quickstart/)
-   - [causal/](causal/)
-   - [mpi/](mpi/)
-
-4. **Week 4: Real Applications**
-   - [lulesh/](lulesh/)
-   - Apply to your own code
-   - [Hardware Counters Reference](../docs/reference/hardware-counters-reference.rst)
-
 ## Additional Resources
 
 - **Documentation**: [ROCm Systems Profiler Docs](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/)
