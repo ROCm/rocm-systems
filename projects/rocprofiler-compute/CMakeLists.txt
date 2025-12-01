@@ -196,11 +196,12 @@ endif()
 
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
-if(${ENABLE_TESTS})
+if(${ENABLE_TESTS} OR ${BUILD_TESTS_ONLY})
     enable_language("C" "HIP")
     add_subdirectory(tests)
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
+message(STATUS "Build only tests: ${BUILD_TESTS_ONLY}")
 
 enable_testing()
 include(CTest)
