@@ -780,10 +780,10 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
 
   // @note: HIP requires to unpin all memory after operation, due to an optimization with
   // direct HSA signal check HIP avoids the command completion wait
-  if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
-    gpu().Barriers().WaitCurrent();
-    gpu().command()->ReleasePinnedMemory();
-  }
+  //if (amd::IS_HIP && (gpu().command() != nullptr) && gpu().command()->IsMemoryPinned()) {
+  //  gpu().Barriers().WaitCurrent();
+  //  gpu().command()->ReleasePinnedMemory();
+  //}
 
   if (!status) {
     return false;

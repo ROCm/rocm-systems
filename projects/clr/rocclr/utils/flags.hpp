@@ -80,8 +80,8 @@ debug(cstring, AMD_OCL_SUBST_OBJFILE, 0,                                      \
         "Specify binary substitution config file for OpenCL")                 \
 release(size_t, GPU_PINNED_XFER_SIZE, 32,                                     \
         "The pinned buffer size for pinning in read/write transfers in MiB")  \
-release(size_t, GPU_PINNED_MIN_XFER_SIZE, 128,                                \
-        "The minimal buffer size for pinned read/write transfers in MiB")     \
+release(size_t, GPU_PINNED_MIN_XFER_SIZE, 256,                                \
+        "The minimal buffer size for pinned read/write transfers in KiB")     \
 release(size_t, GPU_RESOURCE_CACHE_SIZE, 64,                                  \
         "The resource cache size in MB")                                      \
 release(size_t, GPU_MAX_SUBALLOC_SIZE, 4096,                                  \
