@@ -309,7 +309,6 @@ bool Program::compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
   //  Create the output data set
   amd_comgr_action_info_t action{};
   amd_comgr_data_set_t output{};
-  amd_comgr_data_set_t dataSetPCH{};
   amd_comgr_data_set_t input = compileInputs;
 
   bool hasAction = false;
