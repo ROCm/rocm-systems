@@ -284,20 +284,48 @@ WriteInterceptor(const void* packets,
 
     // Calculate which index in the ring buffer this packet batch starts at
     // We can determine this by computing the offset from ring_base
-    const auto     pkt_offset_from_ring = packets_arr - ring_base;
-    const uint64_t start_index          = (pkt_offset_from_ring >= 0 &&
-                                            static_cast<uint64_t>(pkt_offset_from_ring) < ring_size)
-                                           ? static_cast<uint64_t>(pkt_offset_from_ring)
-                                           : 0;
+    const auto pkt_offset_from_ring = packets_arr - ring_base;
+    const bool packets_in_ring      = (pkt_offset_from_ring >= 0 &&
+                                       static_cast<uint64_t>(pkt_offset_from_ring) < ring_size);
 
-    // Check if linear access would exceed ring buffer boundary
-    const bool wraps_around = (start_index + pkt_count) > ring_size;
+    // CRITICAL: start_index is only valid when packets_in_ring is true
+    // If packets are outside the ring buffer, this is an abnormal condition
+    uint64_t   start_index  = 0;
+    bool       wraps_around = false;
 
-    if(wraps_around)
+    if(packets_in_ring)
     {
-        ROCP_WARNING << "Detected ring buffer wrap-around: start_index=" << start_index
-                     << " pkt_count=" << pkt_count << " ring_size=" << ring_size
-                     << ". Accessing packets via ring buffer to handle wrap-around.";
+        start_index = static_cast<uint64_t>(pkt_offset_from_ring);
+
+        // Check if linear access would exceed ring buffer boundary (wrap-around case)
+        if((start_index + pkt_count) > ring_size)
+        {
+            wraps_around = true;
+            ROCP_WARNING << "Detected ring buffer wrap-around: start_index=" << start_index
+                         << " pkt_count=" << pkt_count << " ring_size=" << ring_size
+                         << ". Accessing packets via ring buffer to handle wrap-around.";
+        }
+    }
+    else
+    {
+        // Packets pointer is outside the ring buffer - this is unexpected!
+        // This could indicate:
+        // 1. HSA runtime bug (passing wrong pointer)
+        // 2. Memory corruption
+        // 3. Non-standard packet allocation (packets not from queue ring buffer)
+        ROCP_ERROR << "UNEXPECTED: Packets pointer 0x" << std::hex
+                   << reinterpret_cast<uintptr_t>(packets_arr)
+                   << " is OUTSIDE ring buffer range [0x"
+                   << reinterpret_cast<uintptr_t>(ring_base)
+                   << " - 0x"
+                   << reinterpret_cast<uintptr_t>(ring_base + ring_size * sizeof(rocprofiler_packet))
+                   << "] (offset=" << std::dec << pkt_offset_from_ring << ", ring_size="
+                   << ring_size << "). "
+                   << "Falling back to linear access, but this may indicate a serious issue!";
+
+        // In this abnormal case, we fall back to linear pointer access
+        // start_index is not meaningful here, so we don't set it
+        wraps_around = false;
     }
 
     // Searching accross all the packets given during this write
