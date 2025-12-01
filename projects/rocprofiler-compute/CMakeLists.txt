@@ -695,24 +695,45 @@ endif()
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
-    install(
-        DIRECTORY tests
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT tests
-        FILES_MATCHING
-        PATTERN "*.py"
-        PATTERN "__pycache__" EXCLUDE
-    )
-    install(
-        FILES requirements-test.txt
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT tests
-    )
-    install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
-        COMPONENT tests
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    )
+    if(BUILD_TESTS_ONLY)
+        install(
+            DIRECTORY tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
+            COMPONENT tests
+            FILES_MATCHING
+            PATTERN "*.py"
+            PATTERN "__pycache__" EXCLUDE
+        )
+        install(
+            FILES requirements-test.txt
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
+            COMPONENT tests
+        )
+        install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+            COMPONENT tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
+        )
+    else()
+        install(
+            DIRECTORY tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+            COMPONENT tests
+            FILES_MATCHING
+            PATTERN "*.py"
+            PATTERN "__pycache__" EXCLUDE
+        )
+        install(
+            FILES requirements-test.txt
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+            COMPONENT tests
+        )
+        install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+            COMPONENT tests
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        )
+    endif()
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")
 
