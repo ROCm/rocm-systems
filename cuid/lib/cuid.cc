@@ -286,7 +286,7 @@ amdcuid_status_t amdcuid_get_network_interface(amdcuid_handle handle, char *netw
 
     amdcuid_device_type_t type = dev->type();
     switch (type) {
-        case AMDCUID_DEVICE_TYPE_NIC:
+        case AMDCUID_DEVICE_TYPE_NIC: {
             const amdcuid_nic_info& info = static_cast<AmdCuidNic*>(dev)->get_info();
             if (info.network_interface.empty()) {
                 *length = 0;
@@ -301,6 +301,7 @@ amdcuid_status_t amdcuid_get_network_interface(amdcuid_handle handle, char *netw
             std::strcpy(network_interface, info.network_interface.c_str());
             *length = rn_len;
             return AMDCUID_STATUS_SUCCESS;
+        }
         default:
             *length = 0;
             network_interface[0] = '\0';
