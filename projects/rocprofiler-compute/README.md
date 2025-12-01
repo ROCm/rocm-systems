@@ -64,6 +64,15 @@ ctest
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
 
+Use `BUILD_TEST_ONLY=ON` cmake option to only build the tests.  
+
+This is useful for testing with existing rocprofiler-compute installation on the system using the command:
+```
+ctest --test-dir install/libexec/rocprofiler-compute-tests
+```
+
+NOTE: This Dockerfile uses `ubuntu 22.04` as the base operating system image
+
 ## Standalone binary
 
 To create a standalone binary, run the following commands:
