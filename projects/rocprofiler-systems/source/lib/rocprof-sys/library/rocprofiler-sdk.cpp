@@ -24,6 +24,7 @@
 #include "api.hpp"
 #include "common/synchronized.hpp"
 #include "core/common.hpp"
+#include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/debug.hpp"
@@ -594,20 +595,6 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 }
 #endif
 
-std::string
-get_args_string(const function_args_t& args)
-{
-    std::string args_str;
-    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
-        const auto*       delimiter = ";;";
-        std::stringstream ss;
-        ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
-           << delimiter << arg.arg_value << delimiter;
-        args_str.append(ss.str());
-    });
-    return args_str;
-}
-
 template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
@@ -651,7 +638,14 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
                 }
                 default:
                 {
-                    break;
+                    // A basic roctx marker region starts with roctxRangePushA ENTER and
+                    // ends with roctxRangePop EXIT.
+                    // Breaking instead of returning allows the roctxRangePop ENTER to be
+                    // processed, which timemory will link to the roctxRangePop EXIT. As
+                    // we do not push roctxRangePushA EXIT into timemory, it will think
+                    // that the roctxRangePushA ENTER is still active when it is in fact
+                    // not. This will cause the wall clock tree to be incorrect.
+                    return;
                 }
             }
         }
@@ -659,7 +653,7 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
 
     if(get_use_timemory())
     {
-        tracing::push_timemory(category::rocm_marker_api{}, _name);
+        tracing::push_timemory(CategoryT{}, _name);
     }
 }
 
@@ -729,7 +723,7 @@ tool_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        tracing::pop_timemory(category::rocm_marker_api{}, _name);
+        tracing::pop_timemory(CategoryT{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1069,7 +1063,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 
     if(get_use_timemory())
     {
-        tracing::push_timemory(category::rocm_marker_api{}, _name);
+        tracing::push_timemory(category::rocm_ompt_api{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1115,7 +1109,7 @@ ompt_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        tracing::pop_timemory(category::rocm_marker_api{}, _name);
+        tracing::pop_timemory(category::rocm_ompt_api{}, _name);
     }
 
     if(get_use_perfetto())
