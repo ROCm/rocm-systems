@@ -30,7 +30,7 @@ from pathlib import Path
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
-
+from utils.utils import consolidate_torch_trace_output
 
 class rocprof_v3_profiler(RocProfCompute_Base):
     def __init__(
@@ -60,6 +60,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             )
         elif args.hip_trace:
             trace_option = "--hip-trace"
+        elif args.torch_operators:
+            trace_option = "--torch-operators"
         else:
             trace_option = "--kernel-trace"
 
@@ -134,6 +136,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
+            # Consolidate torch trace output if --torch-operators was used
+            if self.get_args().torch_operators:
+                consolidate_torch_trace_output(self.get_args().path)
+
             # Run roofline microbenchmark
             super().post_processing()
         else:

@@ -1,0 +1,211 @@
+"""
+ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators
+Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
+"""
+
+import sys
+sys.path.insert(0, '/home/ggottipa/rocm-systems/rocprofiler-sdk-build/lib/python3.10/site-packages')
+
+import torch
+import torch.nn.functional as F
+from roctx import rangePush, rangePop
+from functools import wraps
+import importlib.util
+import inspect
+
+def roctx_wrapper(func, name=None):
+    func_name = name or func.__name__
+    call_counter = {'count': 0}
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        call_counter['count'] += 1
+        frame = inspect.currentframe().f_back
+        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        
+        # Unique marker: function + call_number + source_location
+        rangePush(f"{func_name}:#{call_counter['count']}@{location}")
+        try:
+            result = func(*args, **kwargs)
+        finally:
+            rangePop()
+        return result
+    return wrapper
+
+
+def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
+    """Automatically discover all callable functions in a module."""
+    if exclude_patterns is None:
+        exclude_patterns = ['__', '_', 'is_', 'set_', 'get_']
+    
+    functions = {}
+    for name in dir(module):
+        # Skip private/internal functions
+        if any(name.startswith(pat) for pat in exclude_patterns):
+            continue
+        
+        try:
+            attr = getattr(module, name)
+            # Only wrap callables (functions, not classes or constants)
+            if callable(attr) and not isinstance(attr, type):
+                full_name = f"{prefix}.{name}"
+                functions[full_name] = (module, name, attr)
+        except Exception:
+            pass
+    
+    return functions
+
+
+def inject_roctx_into_torch():
+    """Monkey-patch PyTorch operations to add ROCTX markers."""
+    
+    print("🔧 Auto-discovering PyTorch operations to wrap...")
+    
+    # Auto-discover functions from key modules
+    all_operations = {}
+    
+    # torch.* functions (matmul, mm, cat, etc.)
+    all_operations.update(auto_discover_torch_functions(torch, 'torch'))
+    
+    # torch.nn.functional.* functions (linear, relu, softmax, etc.)
+    all_operations.update(auto_discover_torch_functions(F, 'torch.nn.functional'))
+    
+    # torch.linalg.* functions (matrix operations)
+    try:
+        all_operations.update(auto_discover_torch_functions(torch.linalg, 'torch.linalg'))
+    except:
+        pass
+    
+    # torch.fft.* functions (FFT operations)
+    try:
+        all_operations.update(auto_discover_torch_functions(torch.fft, 'torch.fft'))
+    except:
+        pass
+    
+    print(f"Found {len(all_operations)} operations to wrap")
+    print("🔧 Injecting ROCTX markers into PyTorch operations...")
+    
+    wrapped_count = 0
+    failed_count = 0
+    
+    for full_name, (module, attr_name, original_func) in all_operations.items():
+        try:
+            # Replace with wrapped version
+            wrapped_func = roctx_wrapper(original_func, full_name)
+            setattr(module, attr_name, wrapped_func)
+            wrapped_count += 1
+            
+            # Print first 20 and last 5 for visibility
+            if wrapped_count <= 20 or wrapped_count > len(all_operations) - 5:
+                print(f"  ✓ Wrapped: {full_name}")
+            elif wrapped_count == 21:
+                print(f"  ... (wrapping {len(all_operations) - 25} more operations)")
+                
+        except Exception as e:
+            failed_count += 1
+            if failed_count <= 5:  # Only show first few failures
+                print(f"  ✗ Failed to wrap {full_name}: {e}")
+    
+    # Wrap tensor methods
+    original_backward = torch.Tensor.backward
+    backward_counter = {'count': 0}
+    def backward_with_roctx(self, *args, **kwargs):
+        backward_counter['count'] += 1
+        frame = inspect.currentframe().f_back
+        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        rangePush(f"torch.Tensor.backward:#{backward_counter['count']}@{location}")
+        try:
+            return original_backward(self, *args, **kwargs)
+        finally:
+            rangePop()
+    torch.Tensor.backward = backward_with_roctx
+
+    wrapped_count += 1
+    print(f"  ✓ Wrapped: torch.Tensor.backward")
+    
+    print(f"✅ Wrapped {wrapped_count} operations with ROCTX markers")
+    if failed_count > 0:
+        print(f"⚠️  Failed to wrap {failed_count} operations (likely not patchable)")
+    print()
+
+
+def inject_roctx_into_optimizer():
+    """Wrap optimizer step() method."""
+    from torch.optim import Optimizer
+    
+    original_step = Optimizer.step
+    
+    def step_with_roctx(self, *args, **kwargs):
+        rangePush(f"optimizer.{self.__class__.__name__}.step")
+        try:
+            return original_step(self, *args, **kwargs)
+        finally:
+            rangePop()
+    
+    Optimizer.step = step_with_roctx
+    print("✅ Wrapped optimizer.step() with ROCTX markers\n")
+
+
+def inject_roctx_into_model():
+    """Wrap nn.Module forward() method with call counter."""
+    from torch import nn
+    import inspect
+    
+    original_call = nn.Module.__call__
+    
+    # Per-instance call counters
+    def call_with_roctx(self, *args, **kwargs):
+        class_name = self.__class__.__name__
+        
+        # Initialize counter for this instance if not exists
+        if not hasattr(self, '_roctx_call_count'):
+            self._roctx_call_count = 0
+        self._roctx_call_count += 1
+        
+        # Get caller location
+        frame = inspect.currentframe().f_back
+        location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
+        
+        # Create detailed marker
+        rangePush(f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}")
+        try:
+            return original_call(self, *args, **kwargs)
+        finally:
+            rangePop()
+    
+    nn.Module.__call__ = call_with_roctx
+    print("✅ Wrapped nn.Module forward() with ROCTX markers\n")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python inject_roctx.py <script.py> [script_args...]")
+        sys.exit(1)
+    
+    # Get target script and its arguments
+    target_script = sys.argv[1]
+    script_args = sys.argv[2:]
+    
+    print("=" * 70)
+    print("ROCTX Auto-Injection Wrapper")
+    print("=" * 70)
+    print(f"Target script: {target_script}")
+    print(f"Arguments: {' '.join(script_args)}\n")
+    
+    # Inject ROCTX markers BEFORE importing the target script
+    inject_roctx_into_torch()
+    inject_roctx_into_optimizer()
+    inject_roctx_into_model()
+    
+    print("=" * 70)
+    print("Starting target script with ROCTX instrumentation...")
+    print("=" * 70)
+    print()
+    
+    # Modify sys.argv so the target script sees correct arguments
+    sys.argv = [target_script] + script_args
+    
+    # Load and execute the target script
+    spec = importlib.util.spec_from_file_location("__main__", target_script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules['__main__'] = module
+    spec.loader.exec_module(module)

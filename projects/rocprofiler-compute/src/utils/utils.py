@@ -896,11 +896,13 @@ def run_prof(
                 app_cmd, new_env=new_env, profileMode=True
             )
     else:
+        # Filter out --torch-operators (internal flag) before passing to rocprofv3
+        rocprof_options = [opt if opt != "--torch-operators" else "--marker-trace" for opt in options]
         # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
+        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + rocprof_options)}")
         # profile the app
         success, output = capture_subprocess_output(
-            [rocprof_cmd] + options, new_env=new_env, profileMode=True
+            [rocprof_cmd] + rocprof_options, new_env=new_env, profileMode=True
         )
 
     time_2 = time.time()
@@ -1004,6 +1006,8 @@ def run_prof(
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
+            elif "--torch-operators" in options:
+                process_torch_trace_output(workload_dir, fbase)
 
         # Combine results into single CSV file
         if results_files:
@@ -1263,6 +1267,107 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
 
 @demarcate
+def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
+    # marker api trace csv files are generated for each process    
+    marker_api_trace_csvs = glob.glob(
+        f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
+    )
+    existing_marker_files_csv = [
+        markers_file for markers_file in marker_api_trace_csvs 
+        if Path(markers_file).is_file() and 
+        Path(markers_file.replace("_marker_api_trace.csv", "_counter_collection.csv")).is_file()
+    ]
+
+    if not existing_marker_files_csv:
+        console_warning(
+            f"No marker files with corresponding counter files found for {fbase}"
+        )
+        return
+
+    # Collect corresponding counter files
+    counter_files = [
+        f.replace("_marker_api_trace.csv", "_counter_collection.csv") 
+        for f in existing_marker_files_csv
+    ]
+
+    # Join marker and counter data
+    combined_markers = pd.concat(
+        [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
+    )
+    combined_counters = pd.concat(
+        [pd.read_csv(f) for f in counter_files], ignore_index=True
+    )
+
+    # Merge markers with counters on Correlation_Id
+    merged_results = pd.merge(
+        combined_markers,
+        combined_counters,
+        on=["Correlation_Id"],
+        how="inner",
+        suffixes=("_function", "_kernel"),
+    )
+    # merged_results = merged_results[['Function', 'Start_Timestamp_function', 'End_Timestamp_function', 'Kernel_Name', 'Counter_Name', 'Counter_Value', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']]
+    # Save merged results
+    merged_results.to_csv(
+        f"{workload_dir}/out/pmc_1/results_{fbase}_torch_trace.csv",
+        index=False,
+    )
+
+    if Path(f"{workload_dir}/out").exists():
+        shutil.copyfile(
+            f"{workload_dir}/out/pmc_1/results_{fbase}_torch_trace.csv",
+            f"{workload_dir}/{fbase}_torch_trace.csv",
+        )
+
+@demarcate
+def consolidate_torch_trace_output(workload_dir: str) -> None:
+    # marker api trace csv files are generated for each process
+    console_log("Consolidating torch operator trace output...")
+    # Find all torch trace CSV files in workload directory
+    torch_trace_files = glob.glob(f"{workload_dir}/*_torch_trace.csv")
+    if not torch_trace_files:
+        console_warning("No torch trace files found.")
+        return
+    # Read and concatenate all torch trace files
+    all_traces = []
+    for trace_file in torch_trace_files:
+        try:
+            df = pd.read_csv(trace_file)
+            all_traces.append(df[['Function', 'Kernel_Name', 'Counter_Name', 'Counter_Value','Start_Timestamp_function', 'End_Timestamp_function', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']])
+        except Exception as e:
+            console_warning(f"Error reading {trace_file}: {e}")
+    if not all_traces:
+        console_warning("No valid torch trace data to consolidate.")
+        return
+    
+    consolidated_df = pd.concat(all_traces, ignore_index=True)
+    sorted_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
+    
+    split_columns = consolidated_df["Function"].str.split(":#", expand=True)
+    consolidated_df["Operator_Name"] = split_columns[0] if len(split_columns.columns) > 0 else None
+    consolidated_df["Context_Id"] = split_columns[1] if len(split_columns.columns) > 1 else None
+    consolidated_df.drop(columns=["Function"], inplace=True)
+    consolidated_df = consolidated_df[[
+        "Operator_Name",
+        "Context_Id",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+        "Start_Timestamp_function",
+        "End_Timestamp_function",
+        "Start_Timestamp_kernel",
+        "End_Timestamp_kernel",
+    ]]
+    grouped = consolidated_df.groupby("Operator_Name")
+    for operator_name, group in grouped:
+        f = operator_name.replace("torch.","").replace(".", "_")
+        # Ensure output directory exists
+        os.makedirs(f"{workload_dir}/torch_operators", exist_ok=True)
+        output_file = f"{workload_dir}/torch_operators/{f}.csv"
+        group.to_csv(output_file, index=False)
+        console_log(f"Saved consolidated trace for {f} to {output_file}")
+
+@demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
@@ -1285,6 +1390,7 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
+
 
 
 @demarcate
