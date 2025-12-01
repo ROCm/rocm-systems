@@ -36,6 +36,7 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -301,7 +302,7 @@ void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    auto _mode = _append ? update_mode::UPD_APPEND : update_mode::UPD_REPLACE;
+    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
                                    _join_delim, updated_envs, original_envs);
 }
@@ -311,16 +312,17 @@ void
 add_default_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val)
 {
     // Check if already exists
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0) return;
-    }
+    auto       _key = join("", _env_var, "=");
+    const auto exists =
+        std::any_of(_environ.begin(), _environ.end(), [&_key](const char* itr) {
+            return itr && std::string_view{ itr }.find(_key) == 0;
+        });
+
+    if(exists) return;
 
     // If not exists, use common::update_env
     rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
-                                   update_mode::UPD_REPLACE, ":", updated_envs,
+                                   update_mode::REPLACE, ":", updated_envs,
                                    original_envs);
 }
 

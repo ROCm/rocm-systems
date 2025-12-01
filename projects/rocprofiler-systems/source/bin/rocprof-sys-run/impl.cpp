@@ -76,10 +76,6 @@ to_string(bool _v)
 namespace
 {
 using rocprofsys::common::update_mode;
-constexpr auto UPD_REPLACE = update_mode::UPD_REPLACE;
-constexpr auto UPD_PREPEND = update_mode::UPD_PREPEND;
-constexpr auto UPD_APPEND  = update_mode::UPD_APPEND;
-constexpr auto UPD_WEAK    = update_mode::UPD_WEAK;
 
 auto original_envs = std::unordered_set<std::string>{};
 
@@ -114,8 +110,8 @@ get_initial_environment(parser_data_t& _data)
     if(!_libexecpath.empty())
     {
         rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
-                                       _libexecpath, UPD_REPLACE, ":", _data.updated,
-                                       original_envs);
+                                       _libexecpath, update_mode::REPLACE, ":",
+                                       _data.updated, original_envs);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
@@ -123,7 +119,8 @@ get_initial_environment(parser_data_t& _data)
        !llvm_dir.empty())
     {
         rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
-                                       UPD_APPEND, ":", _data.updated, original_envs);
+                                       update_mode::APPEND, ":", _data.updated,
+                                       original_envs);
         auto        current_ld = getenv("LD_LIBRARY_PATH");
         std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
