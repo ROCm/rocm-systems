@@ -353,5 +353,3 @@ if(DOXYGEN_FOUND)
 else()
     message(STATUS "Doxygen was not found. Building test plan documentation will not be available")
 endif()
-
-

@@ -104,6 +104,3 @@ def make_test_files_portable(filenames):
 
 inccmake_files = glob.glob(build_folder + "/**/*"+inc_cmake_pattern, recursive=True)
 make_test_files_portable(inccmake_files)
-
-
-
