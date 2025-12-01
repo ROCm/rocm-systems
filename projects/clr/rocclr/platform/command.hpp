@@ -1410,6 +1410,11 @@ class AccumulateCommand : public Command {
     kernelNamesRef_ = kernelNames;
   }
 
+  //! Set kernel names by reference
+  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
+  }
+
   //! Add kernel timestamp to the list if available
   void addTimestamps(uint64_t startTs, uint64_t endTs) {
     tsList_.push_back(std::make_pair(startTs, endTs));
