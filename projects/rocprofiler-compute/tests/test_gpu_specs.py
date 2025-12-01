@@ -30,7 +30,10 @@ from unittest.mock import patch
 
 import pytest
 
-from src.utils.specs import generate_machine_specs
+try:
+    from src.utils.specs import generate_machine_specs
+except Exception:
+    from utils.specs import generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {

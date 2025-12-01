@@ -684,6 +684,12 @@ if(INSTALL_TESTS)
         PATTERN "__pycache__" EXCLUDE
     )
     install(
+        DIRECTORY tests/workloads
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+    )
+    install(
         PROGRAMS
             tests/vcopy
             tests/vmem
