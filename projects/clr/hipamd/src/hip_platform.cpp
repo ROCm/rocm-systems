@@ -813,6 +813,9 @@ void PlatformState::init() {
   for (auto& it : statCO_.functions_) {
     it.second->resize_dFunc(g_devices.size());
   }
+  amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
+    statCO_.RemoveAllFatBinaries();
+  });
 }
 
 hipError_t PlatformState::loadModule(hipModule_t* module, const char* fname, const void* image) {

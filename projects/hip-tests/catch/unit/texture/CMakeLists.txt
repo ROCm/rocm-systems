@@ -100,14 +100,14 @@ endfunction()  # CheckAcceptedArchs
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 else()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR}
                    -o tex_ref_get_module.code
@@ -167,4 +167,5 @@ hip_add_exe_to_target(NAME TextureTest
 set_target_properties(TextureTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(TextureTest ${GPGPU_LINKER_LIBRARIES})
 
+target_compile_options(TextureTest PRIVATE -Wno-deprecated-declarations)
 add_dependencies(TextureTest tex_ref_get_module)

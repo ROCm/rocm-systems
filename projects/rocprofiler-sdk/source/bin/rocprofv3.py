@@ -964,7 +964,9 @@ def patch_args(data):
     return data
 
 
-def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
+def get_args(
+    cmd_args, inp_args, filter=None, require_in_both=False, ignore_prev_inp=None
+):
     """
     Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
     arguments from multiple sources (e.g. command line and an input file).
@@ -979,6 +981,11 @@ def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
     RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
     is generated instead, and the unique key is used in the merged dict.
     """
+
+    import re
+
+    filter_regex = re.compile(filter) if filter != None else None
+    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp != None else None
 
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
@@ -1002,20 +1009,23 @@ def get_args(cmd_args, inp_args, filter=[], require_in_both=False):
 
     data = {}
 
+    def is_ignored(key):
+        if ignored_regex:
+            return ignored_regex.match(key)
+        return False
+
     def get_attr(key):
         if has_set_attr(cmd_args, key):
             return getattr(cmd_args, key)
+        elif is_ignored(key):
+            return None
         elif has_set_attr(inp_args, key):
             return getattr(inp_args, key)
         return None
 
     def is_filtered(key):
-        if filter:
-            for fitr in filter:
-                import re
-
-                if re.match(fitr, key):
-                    return True
+        if filter_regex:
+            return filter_regex.match(key)
         else:
             # if there are no filters, all keys match
             return True
@@ -1804,14 +1814,12 @@ def main(argv=None):
                     dotdict(prev_args),
                     # when updating this filter, please also update documentation on reattachment
                     # in using-rocprofv3-process-attachment.rst
-                    filter=[
-                        ".*_trace",
-                        "^pc_sampling_.*$",
-                        "^att_.*$",
-                        "^(pmc|pmc_groups|output_config|extra_counters)$",
-                        "^kernel_(include_regex|exclude_regex|iteration_range)$",
-                    ],
+                    filter=r".*_trace|^pc_sampling_.*$|^att_.*$|"
+                    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+                    r"^kernel_(include_regex|exclude_regex|iteration_range)$",
                     require_in_both=True,
+                    # Allow this value to be None if it is not set in current cmd line
+                    ignore_prev_inp=r"attach_duration_msec",
                 )
 
         pass_idx = None

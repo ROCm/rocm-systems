@@ -604,6 +604,13 @@ class AmdSmiAffinityScope(IntEnum):
     NUMA_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_NODE
     SOCKET_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_SOCKET
 
+class AmdSmiPtlData(IntEnum):
+    I8 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_I8
+    F16 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F16
+    BF16 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_BF16
+    F32 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F32
+    F64 = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_F64
+    INVALID = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_INVALID
 
 class AmdSmiPowerCapType(IntEnum):
     PPT0 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT0
@@ -5539,6 +5546,75 @@ def amdsmi_get_gpu_virtualization_mode(
     return {
         "mode": AmdSmiVirtualizationMode(mode.value)
     }
+
+def amdsmi_get_gpu_ptl_state(
+    processor_handle: processor_handle_t
+    ) -> bool:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    is_ptl_enabled = ctypes.c_bool()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_ptl_state(
+            processor_handle, ctypes.byref(is_ptl_enabled)
+        )
+    )
+
+    return is_ptl_enabled.value
+
+def amdsmi_set_gpu_ptl_state(
+    processor_handle: processor_handle_t,
+    state: int
+    ) -> None:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_ptl_state(
+            processor_handle, state
+        )
+    )
+
+def amdsmi_get_gpu_ptl_formats(
+    processor_handle: processor_handle_t
+    ) -> tuple[int, int]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    data_format1 = amdsmi_wrapper.amdsmi_ptl_data_format_t()
+    data_format2 = amdsmi_wrapper.amdsmi_ptl_data_format_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_ptl_formats(
+            processor_handle, ctypes.byref(data_format1), ctypes.byref(data_format2)
+        )
+    )
+
+    return int(data_format1.value), int(data_format2.value)
+
+def amdsmi_set_gpu_ptl_formats(
+    processor_handle: processor_handle_t,
+    fmt1: AmdSmiPtlData,
+    fmt2: AmdSmiPtlData,
+    ) -> None:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    for fmt in (fmt1, fmt2):
+        if not isinstance(fmt, AmdSmiPtlData):
+            raise AmdSmiParameterException(fmt, AmdSmiPtlData)
+        if fmt is AmdSmiPtlData.INVALID:
+            raise AmdSmiParameterException(fmt, "A valid PTL data format (not INVALID)")
+
+    c_fmt1 = amdsmi_wrapper.amdsmi_ptl_data_format_t(int(fmt1))
+    c_fmt2 = amdsmi_wrapper.amdsmi_ptl_data_format_t(int(fmt2))
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_ptl_formats(
+            processor_handle, c_fmt1, c_fmt2)
+    )
 
 ### Non C-Lib APIs ###
 

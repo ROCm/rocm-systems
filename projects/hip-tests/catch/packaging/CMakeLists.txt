@@ -195,7 +195,7 @@ install(DIRECTORY
         DESTINATION ${INSTALL_DIR_TESTS})
 # workaround to make the built test binaries portable
 # CPACK_GENERATOR executes this packaging/CMakeLists.txt multiple times
-# there is no way to check which generator is being used. 
+# there is no way to check which generator is being used.
 # So had to be written in a config file for each generator to replace and execute
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/catch_package.cmake.in
                ${CMAKE_CURRENT_BINARY_DIR}/catch_package.cmake @ONLY)

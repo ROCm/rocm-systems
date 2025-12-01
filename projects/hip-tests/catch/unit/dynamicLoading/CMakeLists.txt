@@ -51,7 +51,6 @@ if(UNIX AND BUILD_SHARED_LIBS)
       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   endif()
 
-
   add_custom_target(vecadd.cc COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
@@ -65,6 +64,7 @@ if(UNIX AND BUILD_SHARED_LIBS)
                         TEST_TARGET_NAME build_tests
                         LINKER_LIBS ${CMAKE_DL_LIBS})
   endif()
+  add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()
 set_target_properties(dynamicLoading PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(dynamicLoading ${GPGPU_LINKER_LIBRARIES})

@@ -38,7 +38,6 @@ set(TEST_SRC
     hipModuleLoadFatBinary.cc
 )
 
-
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
@@ -406,6 +405,7 @@ set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE ${GPGP
 set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
+target_link_libraries(hipGetFuncBySymbol_exe hip::host hip::device)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
 # Common Tests - Test independent of all platforms
@@ -524,6 +524,7 @@ set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUA
 set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(testhipModuleLoadUnloadFunc_exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
+target_link_libraries(testhipModuleLoadUnloadFunc_exe hip::host hip::device)
 
 add_dependencies(module managed_kernel.code vcpy_kernel.code matmul.code kernel_composite_test.code
 testhipModuleLoadUnloadFunc_exe)

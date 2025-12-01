@@ -31,8 +31,8 @@ endif()
 
 # Creating Custom object file
 add_custom_target(devprop_c_custom
-    COMMAND ${CMAKE_HIP_COMPILER}
-            -c -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
+    COMMAND ${CMAKE_C_COMPILER}
+            -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -I${HIP_INCLUDE_DIR}
             -D${PLATFORM_DEFINE}
             -o hipGetDeviceProp.o
