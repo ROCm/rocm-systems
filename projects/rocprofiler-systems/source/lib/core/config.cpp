@@ -271,6 +271,12 @@ configure_settings(bool _init)
                               "for continuous integration)",
                               false, "debugging", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK",
+        "Skip CI validation check for push/pop trace count mismatch "
+        "(used only for tests with known imbalances)",
+        false, "debugging", "advanced");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MONOCHROME", "Disable colorized logging",
                               false, "debugging", "advanced");
 
