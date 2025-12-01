@@ -22,7 +22,6 @@
 
 #pragma once
 #include "core/trace_cache/cache_type_traits.hpp"
-#include "library/runtime.hpp"
 
 #include <algorithm>
 #include <cassert>
