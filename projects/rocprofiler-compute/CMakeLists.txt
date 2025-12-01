@@ -47,9 +47,17 @@ project(
         "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
 
-set(PACKAGE_NAME "rocprofiler-compute")
-set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
-set(EXECUTABLE_NAME "rocprof-compute")
+option(BUILD_TESTS_ONLY FALSE)
+if(${BUILD_TESTS_ONLY})
+    set(PACKAGE_NAME "rocprofiler-compute-tests")
+    set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute_tests")
+else()
+    set(PACKAGE_NAME "rocprofiler-compute")
+    set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
+    set(EXECUTABLE_NAME "rocprof-compute")
+endif()
+
+message(STATUS "Build only tests: ${BUILD_TESTS_ONLY}")
 
 include(ExternalProject)
 include(GNUInstallDirs)
