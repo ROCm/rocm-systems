@@ -265,7 +265,7 @@ void IPCTest::SetUp(void) {
 
   // Update the size granularity for allocations
   if (rocrtst::isEmuModeEnabled()) {
-    gpu_mem_granule = 4; 
+    gpu_mem_granule = 4;
   } else {
     err = hsa_amd_memory_pool_get_info(device_pool(), HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
                                       &gpu_mem_granule);

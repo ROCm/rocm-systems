@@ -60,7 +60,7 @@ DispatchTime(bool defaultInterrupt, bool launchSingleKernel) : TestBase(),
               use_default_interupt_(defaultInterrupt),
                                           launch_single_(launchSingleKernel) {
   queue_size_ = 0;
-  
+
   if (rocrtst::isEmuModeEnabled()) {
     num_batch_ = 2;
     set_num_iteration(1);

@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 2.8.0)
 #
 #  Setup build environment
 #
-#  1) Setup env var ROCR_INC_DIR and ROCR_LIB_DIR to point to 
+#  1) Setup env var ROCR_INC_DIR and ROCR_LIB_DIR to point to
 #     ROC Runtime header and libraries seperately
-#     
+#
 #     export ROCR_INC_DIR="Path to ROC Runtime header"
 #
 #     export ROCR_LIB_DIR="Path to ROC Runtime libraries"

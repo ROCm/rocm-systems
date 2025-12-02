@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "hsatimer.hpp"
 
 #define NANOSECONDS_PER_SECOND 1000000000
@@ -82,7 +82,7 @@ int PerfTimer::StopTimer(int index) {
     Error("Cannot reset timer. Invalid handle.");
     return HSA_FAILURE;
   }
-  
+
   #ifdef _WIN32
     #ifndef _AMD
       long long n1;
@@ -139,7 +139,7 @@ double PerfTimer::ReadTimer(int index) {
 }
 
 void PerfTimer::ResetTimer(int index) {
-  
+
   // Check if index value is over the timer's size
   if (index >= (int)_timers.size()) {
     Error("Invalid index value\n");
@@ -151,7 +151,7 @@ void PerfTimer::ResetTimer(int index) {
 }
 
 uint64_t PerfTimer::CoarseTimestampUs() {
-  
+
   #ifdef _WIN32
     uint64_t freqHz, ticks;
     QueryPerformanceFrequency((LARGE_INTEGER *)&freqHz);
@@ -174,7 +174,7 @@ uint64_t PerfTimer::CoarseTimestampUs() {
 }
 
 uint64_t PerfTimer::MeasureTSCFreqHz() {
-  
+
   // Make a coarse interval measurement of TSC ticks for 1 gigacycles.
   unsigned int unused;
   uint64_t tscTicksEnd;

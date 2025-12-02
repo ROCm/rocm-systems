@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -25,7 +25,7 @@ void RocmAsync::PrintHelpScreen() {
   std::cout << "\t -a Perform Unidirectional Copy involving all pool combinations" << std::endl;
   std::cout << "\t -A Perform Bidirectional Copy involving all pool combinations" << std::endl;
   std::cout << std::endl;
-  
+
   std::cout << std::endl;
   std::cout << "\t @note 1: Removes copyReq(srcI, dstJ) - where either Src or Dst Pool is fine-grained" << std::endl;
   std::cout << std::endl;
@@ -155,7 +155,7 @@ void RocmAsync::PrintCopyAccessError(uint32_t src_idx, uint32_t dst_idx) {
   // Retrieve Roc runtime handles for Src memory pool and agents
   uint32_t src_dev_idx = pool_list_[src_idx].agent_index_;
   hsa_device_type_t src_dev_type = agent_list_[src_dev_idx].device_type_;
-    
+
   // Retrieve Roc runtime handles for Dst memory pool and agents
   uint32_t dst_dev_idx = pool_list_[dst_idx].agent_index_;
   hsa_device_type_t dst_dev_type = agent_list_[dst_dev_idx].device_type_;
@@ -177,7 +177,7 @@ void RocmAsync::PrintIOAccessError(uint32_t exec_idx, uint32_t pool_idx) {
 
   // Retrieve device type of executing agent
   hsa_device_type_t exec_dev_type = agent_list_[exec_idx].device_type_;
-    
+
   // Retrieve device type of memory pool's agent
   uint32_t pool_dev_idx = pool_list_[pool_idx].agent_index_;
   hsa_device_type_t pool_dev_type = agent_list_[pool_dev_idx].device_type_;
@@ -185,7 +185,7 @@ void RocmAsync::PrintIOAccessError(uint32_t exec_idx, uint32_t pool_idx) {
   std::cout << std::endl;
   std::cout << "Index of Executing Agent: " << exec_idx << std::endl;
   std::cout << "Device Type of Executing Agent: " << exec_dev_type << std::endl;
-  
+
   std::cout << "Index of Buffer's Memory Pool: " << pool_idx << std::endl;
   std::cout << "Index of Buffer Memory Pool's Agent: " << pool_dev_idx << std::endl;
   std::cout << "Device Type of Buffer Memory Pool's Agent: " << pool_dev_type << std::endl;

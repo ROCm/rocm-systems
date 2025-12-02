@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -50,7 +50,7 @@ void RocmAsync::AllocateHostBuffers(bool bidir, uint32_t size,
   // Initialize host buffers to a determinate value
   memset(src_fwd, 0x23, size);
   memset(dst_fwd, 0x00, size);
-  
+
   // Create a signal to wait on copy operation
   // @TODO: replace it with a signal pool call
   err_ = hsa_signal_create(1, 0, NULL, &signal_fwd);
@@ -73,7 +73,7 @@ void RocmAsync::AllocateHostBuffers(bool bidir, uint32_t size,
   // Initialize host buffers to a determinate value
   memset(src_rev, 0x23, size);
   memset(dst_rev, 0x00, size);
-  
+
   err_ = hsa_signal_create(1, 0, NULL, &signal_rev);
   ErrorCheck(err_);
 }
@@ -110,7 +110,7 @@ void RocmAsync::AllocateCopyBuffers(bool bidir, uint32_t size,
     AcquireAccess(src_agent_rev, dst_rev);
     AcquireAccess(dst_agent_rev, src_rev);
   }
-  
+
   // Create a signal to wait on copy operation
   // @TODO: replace it with a signal pool call
   err_ = hsa_signal_create(1, 0, NULL, &signal_fwd);
@@ -177,7 +177,7 @@ void RocmAsync::copy_buffer(void* dst, hsa_agent_t dst_agent,
                                    src, src_agent,
                                    size, 0, NULL, signal);
   ErrorCheck(err_);
-  
+
   // Wait for the forward copy operation to complete
   while (hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
                                      uint64_t(-1), HSA_WAIT_STATE_ACTIVE));
@@ -191,7 +191,7 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
   // Initialize size of buffer to equal the largest element of allocation
   uint32_t size_len = size_list_.size();
   uint32_t max_size = size_list_.back() * 1024 * 1024;
-  
+
   // Bind to resources such as pool and agents that are involved
   // in both forward and reverse copy operations
   void* buf_src_fwd;
@@ -217,14 +217,14 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
 
   // Allocate buffers and signal objects
   AllocateCopyBuffers(bidir, max_size,
-                      buf_src_fwd, src_pool_fwd, 
+                      buf_src_fwd, src_pool_fwd,
                       buf_dst_fwd, dst_pool_fwd,
                       src_agent_fwd, dst_agent_fwd,
-                      buf_src_rev, src_pool_rev, 
+                      buf_src_rev, src_pool_rev,
                       buf_dst_rev, dst_pool_rev,
                       src_agent_rev, dst_agent_rev,
                       signal_fwd, signal_rev);
-  
+
   if (verify_) {
     AllocateHostBuffers(bidir, max_size,
                         host_src_fwd, host_dst_fwd,
@@ -254,7 +254,7 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
   // Iterate through the differnt buffer sizes to
   // compute the bandwidth as determined by copy
   for (uint32_t idx = 0; idx < size_len; idx++) {
-    
+
     // This should not be happening
     uint32_t curr_size = size_list_[idx] * 1024 * 1024;
     if (curr_size > max_size) {
@@ -329,14 +329,14 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
         // Re-Establish access to destination buffer and host buffer
         AcquireAccess(cpu_agent_, buf_dst_fwd);
         AcquireAccess(dst_agent_fwd, host_dst_fwd);
-        
+
         // Init dst buffer with values from outbuffer of copy operation
         hsa_signal_store_relaxed(host_signal_fwd, 1);
         copy_buffer(host_dst_fwd, cpu_agent_,
                     buf_dst_fwd, dst_agent_fwd,
                     curr_size, host_signal_fwd);
         ErrorCheck(err_);
-        
+
         // Compare output equals input
         err_ = (hsa_status_t)memcmp(host_src_fwd, host_dst_fwd, curr_size);
         ErrorCheck(err_);
@@ -352,7 +352,7 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
                       buf_dst_rev, dst_agent_rev,
                       curr_size, host_signal_rev);
           ErrorCheck(err_);
-        
+
           // Compare output equals input
           err_ = (hsa_status_t)memcmp(host_src_rev, host_dst_rev, curr_size);
           ErrorCheck(err_);
@@ -379,11 +379,11 @@ void RocmAsync::RunCopyBenchmark(async_trans_t& trans) {
     cpu_time.clear();
     gpu_time.clear();
   }
-  
+
   // Free up buffers and signal objects used in copy operation
   ReleaseBuffers(bidir, buf_src_fwd, buf_src_rev,
                  buf_dst_fwd, buf_dst_rev, signal_fwd, signal_rev);
-  
+
   if (verify_) {
     ReleaseBuffers(bidir, host_src_fwd, host_src_rev,
                    host_dst_fwd, host_dst_rev, host_signal_fwd, host_signal_rev);
@@ -428,7 +428,7 @@ void RocmAsync::Close() {
 // Sets up the bandwidth test object to enable running
 // the various test scenarios requested by user. The
 // things this proceedure takes care of are:
-//    
+//
 //    Parse user arguments
 //    Discover RocR Device Topology
 //    Determine validity of requested test scenarios

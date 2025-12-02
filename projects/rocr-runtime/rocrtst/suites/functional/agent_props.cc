@@ -90,7 +90,7 @@ AgentPropTest::~AgentPropTest(void) {
 // should be done here.
 void AgentPropTest::SetUp(void) {
   TestBase::SetUp();
-  std::cout << "  *** Initialize ROCr Runtime and " 
+  std::cout << "  *** Initialize ROCr Runtime and "
             << "acquire handles of agents" << " ***" << std::endl;
 }
 

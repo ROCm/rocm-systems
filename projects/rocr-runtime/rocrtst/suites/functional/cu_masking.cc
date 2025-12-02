@@ -211,7 +211,7 @@ void CU_Masking::Run() {
 
     if(!init())
       break;
-    
+
     {
       char name[64];
       hsa_agent_get_info(gpu->agent, HSA_AGENT_INFO_NAME, name);
@@ -265,7 +265,7 @@ void CU_Masking::Run() {
     std::vector<uint32_t> bits;
     for(uint32_t i=0; i<cu_count; i++)
       bits.push_back(i);
-    
+
     std::vector<uint32_t> bitmask, resultmask;
     uint32_t dwords = (cu_count + 31) / 32;
 
@@ -339,7 +339,7 @@ void CU_Masking::Run() {
       getIsect();
       printf("Overlap of %lu CUs.\n", isect.size());
       ASSERT_EQ(0u, isect.size());
-      
+
       // CU set API check, overlap possible
       uint32_t high_split_index = (rand() % (cu_count - 2)) + 1;
 
@@ -363,10 +363,10 @@ void CU_Masking::Run() {
       getIsect();
       printf("Overlap of %lu CUs.\n", isect.size());
       ASSERT_EQ(high_split_index - split_index, isect.size());
-      
+
       // HSA_CU_MASK check, default
       fini();
-      
+
       // Pick masking bits for env var
       std::shuffle(bits.begin(), bits.end(), rand);
       uint32_t mask_index = (rand() % (cu_count - 2)) + 1;
@@ -412,7 +412,7 @@ void CU_Masking::Run() {
       printf("\n");
 
       init();
-      
+
       getHwIds(left);
       printf("Expecting %u CUs, found %lu\n", mask_index, left.size());
       ASSERT_EQ(left.size(), mask_index);

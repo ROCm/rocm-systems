@@ -1,6 +1,6 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -210,14 +210,14 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
       if (engine_ids_mask == 0) {
           std::cout << "WARNING: No available copy engine detected. Exiting test." << std::endl;
           return;
-      } 
-      hsa_amd_sdma_engine_id_t engine_id = 
+      }
+      hsa_amd_sdma_engine_id_t engine_id =
           static_cast<hsa_amd_sdma_engine_id_t>(1 << (ffs(engine_ids_mask) - 1));
-      
+
       err = hsa_amd_memory_async_copy_on_engine(ptr_dst, dst_agent, ptr_src, src_agent,
                                               Granularities[i].Size, 0, NULL, t->signal,
                                               engine_id, false);
-      
+
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,

@@ -55,7 +55,7 @@ enum SignalKernelType {
 	WAIT, // For single wait operation
     MULTIWAIT, // For multiple wait operation
 	NOTEST  // No operation
-}; 
+};
 class SignalKernelTest : public TestBase {
  public:
     SignalKernelTest(SignalKernelType);

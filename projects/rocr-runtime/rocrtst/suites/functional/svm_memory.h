@@ -75,7 +75,7 @@ class SvmMemoryTestBasic : public TestBase {
 
   void TestCreateDestroy(void);
   void TestSVMPrefetch(void);
-  
+
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_t pool);

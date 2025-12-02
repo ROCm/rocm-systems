@@ -70,7 +70,7 @@ EnqueueLatency::
 EnqueueLatency(bool enqueueSinglePacket) : TestBase(),
                                     enqueue_single_(enqueueSinglePacket) {
   queue_size_ = 0;
-  
+
   if (rocrtst::isEmuModeEnabled()) {
     num_of_pkts_ = 2;
     set_num_iteration(1);

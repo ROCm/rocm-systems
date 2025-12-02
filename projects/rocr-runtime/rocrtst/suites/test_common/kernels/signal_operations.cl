@@ -48,7 +48,7 @@
 
 __kernel void signal_st_rlx_kernel(__global void* dumy_signal)
 {
- 
+
  int  tid = get_global_id(0);
  volatile __global long* p = (volatile __global long* )(dumy_signal);
  atom_xchg(p,0);
@@ -56,7 +56,7 @@ __kernel void signal_st_rlx_kernel(__global void* dumy_signal)
 
 __kernel void signal_st_rlx_kernel_multi(__global void* dumy_signal)
 {
- 
+
  int  tid = get_global_id(0);
  int offset = 8*tid; // handle is of long unsigned int, having size of 8bytes
  volatile __global long* p = (volatile __global long* )(dumy_signal+ offset);
@@ -65,7 +65,7 @@ __kernel void signal_st_rlx_kernel_multi(__global void* dumy_signal)
 
 __kernel void signal_wait_kernel(__global void* dumy_signal)
 {
- 
+
  int  tid = get_global_id(0);
  volatile __global long* p = (volatile __global long* )(dumy_signal);
  while(!(*p == 0)) {  } // Will be using the volatile type as we dont have atom_cmp() function from Khronos spec
@@ -74,7 +74,7 @@ __kernel void signal_wait_kernel(__global void* dumy_signal)
 
 __kernel void signal_wait_kernel_multi(__global void* dumy_signal)
 {
- 
+
  int  tid = get_global_id(0);
  int offset = 8*tid; // handle is of long unsigned int, having size of 8bytes
  volatile __global long* p = (volatile __global long* )(dumy_signal + offset);

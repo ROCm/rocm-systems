@@ -197,7 +197,7 @@ class MemoryAsyncCopy : public TestBase {
 
  protected:
   void PrintTransactionType(Transaction *t);
-  
+
   // Struct representing one granularity (copy size + string label)
   struct Granularity {
     const char* Str;

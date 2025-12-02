@@ -305,7 +305,7 @@ void SvmMemoryTestBasic::TestCreateDestroy(void) {
   // Check if SVM is supported by the ROCr runtime
   bool svm_supported = false;
   err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
-  
+
   if (err != HSA_STATUS_SUCCESS || !svm_supported) {
     std::cout << "  *** SVM is not supported - skipping CreateDestroy test ***" << std::endl;
     return;
@@ -338,7 +338,7 @@ void SvmMemoryTestBasic::TestSVMPrefetch(void) {
   // Check if SVM is supported by the ROCr runtime
   bool svm_supported = false;
   err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
-  
+
   if (err != HSA_STATUS_SUCCESS || !svm_supported) {
     std::cout << "  *** SVM is not supported - skipping SVMPrefetch test ***" << std::endl;
     return;

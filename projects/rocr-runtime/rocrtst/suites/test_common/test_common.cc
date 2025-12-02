@@ -167,7 +167,7 @@ int DumpMonitorInfo() {
   amdsmi_socket_handle socket_handles[AMDSMI_MAX_DEVICES];
   amdsmi_ret = amdsmi_get_socket_handles(&socket_count, socket_handles);
   if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
-      std::cout << "Failed to get socket count. Error: " << 
+      std::cout << "Failed to get socket count. Error: " <<
                                                       amdsmi_ret << std::endl;
       amdsmi_shut_down();
       return 1;
@@ -181,16 +181,16 @@ int DumpMonitorInfo() {
 
   // Collect devices from sockets
   for (uint32_t socket_idx = 0; socket_idx < socket_count; ++socket_idx) {
-    amdsmi_ret = amdsmi_get_processor_handles(socket_handles[socket_idx], 
+    amdsmi_ret = amdsmi_get_processor_handles(socket_handles[socket_idx],
       &socket_processors, socket_processor_handles);
     if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
-        std::cout << "amdsmi_get_processor_handles() for socket " << 
+        std::cout << "amdsmi_get_processor_handles() for socket " <<
                         socket_idx << " returned " << amdsmi_ret << std::endl;
         amdsmi_shut_down();
         return 1;
     }
 
-    for (uint32_t i = 0; i < socket_processors && 
+    for (uint32_t i = 0; i < socket_processors &&
                         total_num_processors + i < AMDSMI_MAX_DEVICES; ++i) {
       processor_handles[total_num_processors + i] = socket_processor_handles[i];
     }
@@ -201,16 +201,16 @@ int DumpMonitorInfo() {
   uint32_t gpu_count = 0;
   for (uint32_t i = 0; i < total_num_processors; ++i) {
       processor_type_t processor_type;
-      amdsmi_ret = amdsmi_get_processor_type(processor_handles[i], 
+      amdsmi_ret = amdsmi_get_processor_type(processor_handles[i],
                                                               &processor_type);
-      if (amdsmi_ret == AMDSMI_STATUS_SUCCESS && 
+      if (amdsmi_ret == AMDSMI_STATUS_SUCCESS &&
                               processor_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
           gpu_count++;
       }
   }
 
   for (uint32_t dindx = 0; dindx < gpu_count; ++dindx) {
-    auto print_frequencies = [&](amdsmi_frequencies_t *freqs, 
+    auto print_frequencies = [&](amdsmi_frequencies_t *freqs,
                                                             std::string label) {
       if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
         std::cout << "get frequency call  returned " << amdsmi_ret << std::endl;
@@ -257,37 +257,37 @@ int DumpMonitorInfo() {
     print_val_str(perf_str, "Performance Level: ");
 
     uint32_t overdrive_level;
-    amdsmi_ret = amdsmi_get_gpu_overdrive_level(processor_handles[dindx], 
+    amdsmi_ret = amdsmi_get_gpu_overdrive_level(processor_handles[dindx],
                                                             &overdrive_level);
 
     print_val_str(IntegerToString(value_u32, false) + "%", "OverDrive Level: ");
 
     amdsmi_frequencies_t freqs;
-    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx], 
+    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx],
                                                 AMDSMI_CLK_TYPE_SYS, &freqs);
 
     print_frequencies(&freqs, "Supported GPU clock frequencies:\n");
 
-    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx], 
+    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx],
                                                 AMDSMI_CLK_TYPE_MEM, &freqs);
     print_frequencies(&freqs, "Supported GPU Memory clock frequencies:\n");
 
     amdsmi_board_info_t board_info;
     amdsmi_get_gpu_board_info(processor_handles[dindx], &board_info);
     print_val_str(board_info.product_name, "Monitor name: ");
-    
-    amdsmi_ret = amdsmi_get_temp_metric(processor_handles[dindx], 
+
+    amdsmi_ret = amdsmi_get_temp_metric(processor_handles[dindx],
                 AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT, &value_i64);
     print_val_str(IntegerToString(value_i64/1000, false) + "C",
                                                             "Temperature: ");
 
-    amdsmi_ret = amdsmi_get_gpu_fan_speed(processor_handles[dindx], 
+    amdsmi_ret = amdsmi_get_gpu_fan_speed(processor_handles[dindx],
                                                                 0, &value_i64);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         std::cout << "not available; amdsmi call returned" << amdsmi_ret;
         dump_ret = 1;
     }
-    amdsmi_ret = amdsmi_get_gpu_fan_speed_max(processor_handles[dindx], 
+    amdsmi_ret = amdsmi_get_gpu_fan_speed_max(processor_handles[dindx],
                                                                 0, &value_u64);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         std::cout << "not available; amdsmi call returned" << amdsmi_ret;

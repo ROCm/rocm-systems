@@ -421,7 +421,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       int index = copy_timer.CreateTimer();
 
       copy_timer.StartTimer(index);
-      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, 
+      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag,
                                                 Granularities[i].Size, 0, NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 

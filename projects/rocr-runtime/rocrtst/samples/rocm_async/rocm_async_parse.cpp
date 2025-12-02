@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -14,14 +14,14 @@
 // Parse option value string. The string has one more decimal
 // values separated by comma - "3,6,9,12,15".
 static bool ParseOptionValue(char* value, vector<uint32_t>&value_list) {
- 
+
   // Capture the option value string
   std::stringstream stream;
   stream << value;
-  
+
   uint32_t token = 0x11231926;
   do {
-    
+
     // Read the option value
     stream >> token;
 
@@ -52,7 +52,7 @@ void RocmAsync::ParseArguments() {
   // In case of error, it will return the character '?' as
   // return value.
   opterr = 0;
-  
+
   int opt;
   bool status;
   while ((opt = getopt(usr_argc_, usr_argv_, "hvtaAb:s:d:r:w:m:")) != -1) {
@@ -156,20 +156,20 @@ void RocmAsync::ParseArguments() {
         break;
     }
   }
-  
+
   // Print help screen if user option has "-h"
   if (print_help) {
     PrintHelpScreen();
     exit(0);
   }
-  
+
   // Initialize Roc Runtime
   err_ = hsa_init();
   ErrorCheck(err_);
 
   // Discover the topology of RocR agent in system
   DiscoverTopology();
-  
+
   // Print system topology if user option has "-t"
   if (print_topology) {
     PrintTopology();

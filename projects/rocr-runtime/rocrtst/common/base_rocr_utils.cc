@@ -376,7 +376,7 @@ hsa_status_t InitializeAQLPacket(const BaseRocR* test,
   if (aql == nullptr) {
     return HSA_STATUS_ERROR;
   }
-  
+
   // Initialize Packet type as Invalid
   // Update packet type to Kernel Dispatch
   // right before ringing doorbell

@@ -70,7 +70,7 @@ static const uint32_t kShmemID = 1594685;
 }
 
 bool isEmuModeEnabled() {
-  auto checkMode = []{ 
+  auto checkMode = []{
     const char* path = "/sys/module/amdgpu/parameters/emu_mode";
     FILE* file = fopen(path, "r");
     if (!file) {
@@ -88,7 +88,7 @@ bool isEmuModeEnabled() {
     return emu_mode != 0;
   };
 
-  static bool emu_mode = checkMode(); 
+  static bool emu_mode = checkMode();
   return emu_mode;
 }
 
@@ -539,7 +539,7 @@ int main(int argc, char** argv) {
     PROCESS_LOG("PASSED on P0\n");
 
     hsa_signal_store_relaxed(ipc_signal, 0);
-    
+
     err = hsa_signal_destroy(ipc_signal);
     RET_IF_HSA_ERR(err);
 

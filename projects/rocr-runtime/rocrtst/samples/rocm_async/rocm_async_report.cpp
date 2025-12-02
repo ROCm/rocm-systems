@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -133,7 +133,7 @@ void RocmAsync::DisplayIOTime(async_trans_t& trans) const {
 }
 
 void RocmAsync::DisplayCopyTime(async_trans_t& trans) const {
-  
+
   // Print Benchmark Header
   uint32_t src_idx = trans.copy.src_idx_;
   uint32_t dst_idx = trans.copy.dst_idx_;
@@ -142,7 +142,7 @@ void RocmAsync::DisplayCopyTime(async_trans_t& trans) const {
   uint32_t dst_dev_idx = pool_list_[dst_idx].agent_index_;
   hsa_device_type_t dst_dev_type = agent_list_[dst_dev_idx].device_type_;
   printCopyBanner(src_idx, src_dev_type, dst_idx, dst_dev_type);
-  
+
   uint32_t size_len = size_list_.size();
   for (uint32_t idx = 0; idx < size_len; idx++) {
     printRecord(size_list_[idx], trans.avg_time_[idx],
@@ -152,7 +152,7 @@ void RocmAsync::DisplayCopyTime(async_trans_t& trans) const {
 }
 
 void RocmAsync::DisplayCopyTimeMatrix() const {
-  
+
   double* avg_matrix = new double[agent_index_ * agent_index_]();
   double* peak_matrix = new double[agent_index_ * agent_index_]();
   uint32_t trans_size = trans_list_.size();

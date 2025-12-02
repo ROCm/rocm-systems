@@ -211,7 +211,7 @@ void TestGroupThreadCreate(test_group *t_group) {
     }
   }
 
-  // Update test group properties to 
+  // Update test group properties to
   // accommodate thread creation error
   t_group->num_test = ii;
   t_group->n_threads = ii;

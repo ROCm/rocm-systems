@@ -1,33 +1,33 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
 bool RocmAsync::BuildReadOrWriteTrans(uint32_t req_type,
                                       vector<uint32_t>& in_list) {
-  
+
   // Validate the list of pool-agent tuples
   hsa_status_t status;
   hsa_amd_memory_pool_access_t access;
   uint32_t list_size = in_list.size();
   for (uint32_t idx = 0; idx < list_size; idx+=2) {
-    
+
     uint32_t pool_idx = in_list[idx];
     uint32_t exec_idx = in_list[idx + 1];
-    
+
     // Retrieve Roc runtime handles for memory pool and agent
     hsa_agent_t exec_agent = agent_list_[exec_idx].agent_;
     hsa_amd_memory_pool_t pool = pool_list_[pool_idx].pool_;
-  
+
     // Determine agent can access the memory pool
     status = hsa_amd_agent_memory_pool_get_info(exec_agent, pool,
                            HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
     ErrorCheck(status);
-    
+
     // Determine if accessibility to agent is not denied
     if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
       PrintIOAccessError(exec_idx, pool_idx);
@@ -61,11 +61,11 @@ bool RocmAsync::BuildCopyTrans(uint32_t req_type,
 
   uint32_t src_size = src_list.size();
   uint32_t dst_size = dst_list.size();
-  
+
   hsa_status_t status;
   hsa_amd_memory_pool_access_t access;
   for (uint32_t idx = 0; idx < src_size; idx++) {
-    
+
     // Retrieve Roc runtime handles for Src memory pool and agents
     uint32_t src_idx = src_list[idx];
     hsa_agent_t src_agent = pool_list_[src_idx].owner_agent_;
@@ -84,7 +84,7 @@ bool RocmAsync::BuildCopyTrans(uint32_t req_type,
     }
 
     for (uint32_t jdx = 0; jdx < dst_size; jdx++) {
-    
+
       // Retrieve Roc runtime handles for Dst memory pool and agents
       uint32_t dst_idx = dst_list[jdx];
       hsa_agent_t dst_agent = pool_list_[dst_idx].owner_agent_;
@@ -116,7 +116,7 @@ bool RocmAsync::BuildCopyTrans(uint32_t req_type,
         continue;
       }
       */
-      
+
       // Determine if accessibility to src pool for dst agent is not denied
       status = hsa_amd_agent_memory_pool_get_info(dst_agent, src_pool,
                              HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
@@ -169,7 +169,7 @@ bool RocmAsync::BuildAllPoolsUnidirCopyTrans() {
 
 // @brief: Builds a list of transaction per user request
 bool RocmAsync::BuildTransList() {
-  
+
   // Build list of Read transactions per user request
   bool status = false;
   if (req_read_ == REQ_READ) {
@@ -233,7 +233,7 @@ void RocmAsync::ComputeCopyTime(async_trans_t& trans) {
   // Get the frequency of Gpu Timestamping
   uint64_t sys_freq = 0;
   hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sys_freq);
-  
+
   double avg_time = 0;
   double min_time = 0;
   double bandwidth = 0;
@@ -241,7 +241,7 @@ void RocmAsync::ComputeCopyTime(async_trans_t& trans) {
   double peak_bandwidth = 0;
   uint32_t size_len = size_list_.size();
   for (uint32_t idx = 0; idx < size_len; idx++) {
-    
+
     // Adjust size of data involved in copy
     data_size = size_list_[idx];
     if (trans.copy.bidir_ == true) {

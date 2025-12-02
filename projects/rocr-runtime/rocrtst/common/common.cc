@@ -65,7 +65,7 @@ namespace rocrtst {
 size_t pool_size_limit = 0;
 
 bool isEmuModeEnabled() {
-  auto checkMode = []{ 
+  auto checkMode = []{
     const char* path = "/sys/module/amdgpu/parameters/emu_mode";
     FILE* file = fopen(path, "r");
     if (!file) {
@@ -83,7 +83,7 @@ bool isEmuModeEnabled() {
     return emu_mode != 0;
   };
 
-  static bool emu_mode = checkMode(); 
+  static bool emu_mode = checkMode();
   return emu_mode;
 }
 

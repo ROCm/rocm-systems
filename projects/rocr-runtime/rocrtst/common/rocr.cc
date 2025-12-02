@@ -159,7 +159,7 @@ CodeObject::CodeObject(std::string filename, Device& agent) : agent(agent.agent)
   err = hsa_code_object_reader_create_from_file(file, &code_obj_rdr);
   CHECK(err);
   MAKE_NAMED_SCOPE_GUARD(readerGuard, [&](){ hsa_code_object_reader_destroy(code_obj_rdr); });
-  
+
   err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr, &executable);
   CHECK(err);
   MAKE_NAMED_SCOPE_GUARD(exeGuard, [&](){ hsa_executable_destroy(executable); });
@@ -201,7 +201,7 @@ bool CodeObject::GetKernel(std::string name, Kernel& kern) {
   err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &kern.group);
   CHECK(err);
   //printf("LDS: %d\n", kern.group);
-  
+
   // Remaining needs code object v2 or comgr.
   err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kern.kernarg_size);
   CHECK(err);
@@ -223,7 +223,7 @@ bool SubmitPacket(hsa_queue_t* queue, Aql& pkt) {
   uint64_t read = hsa_queue_load_read_index_relaxed(queue);
   //if(write - read + 1 > queue->size)
   //  return false;
-  
+
   Aql& dst = ring[write & mask];
 
   uint16_t header = pkt.header.raw;

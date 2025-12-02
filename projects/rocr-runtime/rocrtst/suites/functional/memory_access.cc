@@ -503,7 +503,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(void) {
 
 void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   hsa_status_t err;
-  
+
   PrintMemorySubtestHeader("MemoryAccessCoherentTest in Memory Pools");
 
   // find all cpu agents
@@ -524,7 +524,7 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   err = hsa_queue_create(gpus[0], queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0, &queue);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  
+
   int* host_buffer_src = nullptr;
   int* host_buffer_dst = nullptr;
 
@@ -549,10 +549,10 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   // - fill host-buffer-src with increasing integers pattern
   int* src = static_cast<int*>(host_buffer_src);
   int* dst = static_cast<int*>(host_buffer_dst);
-  for (int j = 0; j < kMemoryAllocSize; ++j) 
+  for (int j = 0; j < kMemoryAllocSize; ++j)
     host_buffer_src[j] = j;
-  
-  // - memset host-buffer-dst with a different pattern 
+
+  // - memset host-buffer-dst with a different pattern
   memset(host_buffer_dst, 0xA5, kMemoryAllocSize * sizeof(int));
 
   // - Allocate a buffer in Device Memory
@@ -603,7 +603,7 @@ void MemoryAccessTest::MemoryAccessCoherentTest(void) {
   // Allocate the kernel argument buffer from the kernarg_pool.
   err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
                                       reinterpret_cast<void **>(&k_Args));
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);  
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_amd_agents_allow_access(1, &gpus[0], NULL, k_Args);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);

@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef ROCM_ASYNC_BW_MYTIME_H_
 #define ROCM_ASYNC_BW_MYTIME_H_
 
@@ -56,17 +56,17 @@ class PerfTimer {
   // General Linux timing method
 
  public:
-  
+
   int CreateTimer();
   int StartTimer(int index);
   int StopTimer(int index);
   void ResetTimer(int index);
 
  public:
- 
+
   // retrieve time
   double ReadTimer(int index);
-  
+
   // write into a file
   double WriteTimer(int index);
 

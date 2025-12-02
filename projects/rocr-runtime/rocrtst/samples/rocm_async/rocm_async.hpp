@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef __ROCM_ASYNC_BW_H__
 #define __ROCM_ASYNC_BW_H__
 
@@ -26,7 +26,7 @@ typedef struct agent_info {
   }
 
   agent_info() {}
-  
+
   uint32_t index_;
   hsa_agent_t agent_;
   hsa_device_type_t device_type_;
@@ -74,9 +74,9 @@ typedef struct pool_info {
 typedef struct agent_pool_info {
 
   agent_pool_info() {}
-  
+
   agent_info agent;
-  
+
   vector<pool_info_t> pool_list;
 
 } agent_pool_info_t;
@@ -179,7 +179,7 @@ class RocmAsync : public BaseTest {
   // @brief: Parse the arguments provided by user to
   // build list of transactions
   void ParseArguments();
-  
+
   // @brief: Print the list of transactions
   void PrintTransList();
 
@@ -210,13 +210,13 @@ class RocmAsync : public BaseTest {
   bool ValidateReadReq();
   bool ValidateWriteReq();
   bool ValidateReadOrWriteReq(vector<uint32_t>& in_list);
-  
+
   bool ValidateBidirCopyReq();
   bool ValidateUnidirCopyReq();
   bool ValidateCopyReq(vector<uint32_t>& in_list);
   void PrintIOAccessError(uint32_t agent_idx, uint32_t pool_idx);
   void PrintCopyAccessError(uint32_t src_pool_idx, uint32_t dst_pool_idx);
-  
+
   bool PoolIsPresent(vector<uint32_t>& in_list);
   bool PoolIsDuplicated(vector<uint32_t>& in_list);
 
@@ -260,7 +260,7 @@ class RocmAsync : public BaseTest {
                    void* src, hsa_agent_t src_agent,
                    size_t size, hsa_signal_t signal);
 
-  // @brief: Check if agent and access memory pool, if so, set 
+  // @brief: Check if agent and access memory pool, if so, set
   // access to the agent, if not, exit
   void AcquireAccess(hsa_agent_t agent, void* ptr);
 
@@ -270,7 +270,7 @@ class RocmAsync : public BaseTest {
   friend hsa_status_t MemPoolInfo(hsa_amd_memory_pool_t pool, void* data);
 
  protected:
-  
+
   // More variables declared for testing
   // vector<transaction> tran_;
 
@@ -308,12 +308,12 @@ class RocmAsync : public BaseTest {
   // two agents, the first agent hosts the memory pool
   // while the second agent executes the read operation
   vector<uint32_t> read_list_;
-  
+
   // List of agents involved in write operation. Has
   // two agents, the first agent hosts the memory pool
   // while the second agent executes the write operation
   vector<uint32_t> write_list_;
-  
+
   // List of sizes to use in copy and read/write transactions
   // Size is specified in terms of Megabytes
   vector<uint32_t> size_list_;
@@ -356,7 +356,7 @@ class RocmAsync : public BaseTest {
 
   // System region
   hsa_amd_memory_pool_t sys_pool_;
- 
+
   static const uint32_t SIZE_LIST[4];
   //static const uint32_t SIZE_LIST[9];
 

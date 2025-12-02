@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common.hpp"
 #include "rocm_async.hpp"
 
@@ -14,7 +14,7 @@
 #include <sstream>
 
 bool RocmAsync::PoolIsPresent(vector<uint32_t>& in_list) {
-  
+
   bool is_present;
   uint32_t idx1 = 0;
   uint32_t idx2 = 0;
@@ -37,7 +37,7 @@ bool RocmAsync::PoolIsPresent(vector<uint32_t>& in_list) {
 }
 
 bool RocmAsync::PoolIsDuplicated(vector<uint32_t>& in_list) {
-  
+
   uint32_t idx1 = 0;
   uint32_t idx2 = 0;
   uint32_t count = in_list.size();
@@ -62,7 +62,7 @@ bool RocmAsync::ValidateReadOrWriteReq(vector<uint32_t>& in_list) {
   if ((list_size % 2) != 0) {
     return false;
   }
-  
+
   // Validate the list of pool-agent tuples
   for (uint32_t idx = 0; idx < list_size; idx+=2) {
     uint32_t pool_idx = in_list[idx];
@@ -85,20 +85,20 @@ bool RocmAsync::ValidateWriteReq() {
 }
 
 bool RocmAsync::ValidateCopyReq(vector<uint32_t>& in_list) {
-  
+
   // Determine pool list length is valid
   uint32_t count = in_list.size();
   uint32_t pool_count = pool_list_.size();
   if (count > pool_count) {
     return false;
   }
-  
+
   // Determine no pool is duplicated
   bool status = PoolIsDuplicated(in_list);
   if (status == false) {
     return false;
   }
-  
+
   // Determine every pool is present in system
   return PoolIsPresent(in_list);
 }
@@ -112,7 +112,7 @@ bool RocmAsync::ValidateUnidirCopyReq() {
 }
 
 bool RocmAsync::ValidateArguments() {
-  
+
   // Determine if user has requested a READ
   // operation and gave valid inputs
   bool status = false;
