@@ -121,7 +121,7 @@ def binary_handler_profile_rocprof_compute(request):
             return process.returncode
         else:
             baseline_opts = [
-                "install/bin/rocprof-compute",
+                "rocprof-compute",
                 "profile",
                 "-n",
                 app_name,
