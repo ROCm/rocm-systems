@@ -1765,7 +1765,7 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        event = AmdSmiEventReader(device[0], AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET)
+        event = AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET])
         event.read(10000)
 except AmdSmiException as e:
     print(e)
@@ -1781,7 +1781,7 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        with AmdSmiEventReader(device[0], AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET) as event:
+        with AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET]) as event:
             event.read(10000)
 except AmdSmiException as e:
     print(e)
@@ -1908,7 +1908,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            profile = ...
+            profile = AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
              amdsmi_set_gpu_power_profile(device, 0, profile)
 except AmdSmiException as e:
     print(e)
@@ -1924,7 +1924,7 @@ Input parameters:
 * `processor_handle` handle for the given device
 * `min_clk_value` minimum clock value for desired clock range
 * `max_clk_value` maximum clock value for desired clock range
-* `clk_type`AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
+* `clk_type` SYS | MEM range type
 
 Output: None
 
@@ -1950,7 +1950,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_clk_range(device, 0, 1000, AmdSmiClkType.AMDSMI_CLK_TYPE_SYS)
+            amdsmi_set_gpu_clk_range(device, 0, 1000, AmdSmiClkType.SYS)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2277,10 +2277,10 @@ It is not supported on virtual machine guest
 Input parameters:
 
 * `processor_handle` handle for the given device
-* `level` AMDSMI_FREQ_IND_MIN|AMDSMI_FREQ_IND_MAX to set the minimum (0)
+* `level` MIN | MAX to set the minimum (0)
 or maximum (1) speed
 * `clk_value` value to apply to the clock range
-* `clk_type` AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
+* `clk_type` SYS | MEM range type
 
 Output: None
 
@@ -2308,9 +2308,9 @@ try:
         for device in devices:
             amdsmi_set_gpu_od_clk_info(
                 device,
-                AmdSmiFreqInd.AMDSMI_FREQ_IND_MAX,
+                AmdSmiFreqInd.MAX,
                 1000,
-                AmdSmiClkType.AMDSMI_CLK_TYPE_SYS
+                AmdSmiClkType.SYS
             )
 except AmdSmiException as e:
     print(e)
@@ -3546,6 +3546,7 @@ try:
     else:
         for device in devices:
             event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi_gpu_control_counter(event_handle, AmdSmiCounterCommand.CMD_START)
             amdsmi_gpu_read_counter(event_handle)
 except AmdSmiException as e:
     print(e)
@@ -6289,8 +6290,8 @@ Example:
 
 ```python
 try:
-    processor_handles = amdsmi_get_cpusocket_handles()
-    if len(processor_handles) == 0:
+    socket_handles = amdsmi_get_cpusocket_handles()
+    if len(socket_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for socket in socket_handles:
@@ -6326,9 +6327,9 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            nbio = amdsmi_get_cpu_socket_lclk_dpm_level(processor)
-            print(nbio['max_dpm_level'])
-            print(nbio['max_dpm_level'])
+            nbio = amdsmi_get_cpu_socket_lclk_dpm_level(processor, 0)
+            print(nbio['nbio_max_dpm_level'])
+            print(nbio['nbio_max_dpm_level'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -6360,7 +6361,7 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            link_rate = amdsmi_set_cpu_pcie_link_rate(processor, 0, 0)
+            link_rate = amdsmi_set_cpu_pcie_link_rate(processor, 0)
 except AmdSmiException as e:
     print(e)
 ```
