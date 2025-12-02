@@ -23,6 +23,7 @@
 #include "cache_manager.hpp"
 
 #include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
@@ -33,7 +34,9 @@
 #include "library/runtime.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
+#include <sstream>
 #include <vector>
 
 namespace rocprofsys
@@ -50,38 +53,128 @@ struct cache_files_t
     inline bool empty() const { return buff_storage.empty() || metadata.empty(); }
 };
 
+struct format_t
+{
+    bool        process_parallel;
+    bool        enabled;
+    const char* name;
+};
+
 struct enabled_formats_t
 {
-    bool rocpd = get_use_rocpd();
+    std::vector<format_t> formats = { { true, get_use_rocpd(), "rocpd" },
+                                      { false, get_caching_perfetto(), "perfetto" } };
 
     void print() const
     {
-        constexpr std::pair<const char*, bool enabled_formats_t::*> formats[] = {
-            { "rocpd", &enabled_formats_t::rocpd },
-        };
+        if(std::none_of(formats.begin(), formats.end(),
+                        [](const auto& f) { return f.enabled; }))
+            return;
 
-        bool any_enabled = false;
-        for(const auto& fmt : formats)
-            any_enabled |= this->*(fmt.second);
-
-        if(!any_enabled) return;
-
-        bool              first = true;
         std::stringstream ss;
+        bool              first = true;
 
         for(const auto& fmt : formats)
         {
-            if(this->*(fmt.second))
+            if(fmt.enabled)
             {
-                if(!first && sizeof(formats) > 1) ss << ", ";
-                ss << fmt.first;
+                if(!first) ss << ", ";
+                ss << fmt.name;
                 first = false;
             }
         }
+
         ROCPROFSYS_PRINT(
             "Generating [%s] format(s) with collected data from trace cache. This may "
             "take a while..\n",
             ss.str().c_str());
+
+        if(has_parallel_formats())
+        {
+            std::stringstream parallel_ss;
+            bool              first_parallel = true;
+            for(const auto& fmt : formats)
+            {
+                if(fmt.enabled && fmt.process_parallel)
+                {
+                    if(!first_parallel) parallel_ss << ", ";
+                    parallel_ss << fmt.name;
+                    first_parallel = false;
+                }
+            }
+            ROCPROFSYS_PRINT("  - Using parallel processing for: %s\n",
+                             parallel_ss.str().c_str());
+        }
+
+        if(has_sequential_formats())
+        {
+            std::stringstream sequential_ss;
+            bool              first_sequential = true;
+            for(const auto& fmt : formats)
+            {
+                if(fmt.enabled && !fmt.process_parallel)
+                {
+                    if(!first_sequential) sequential_ss << ", ";
+                    sequential_ss << fmt.name;
+                    first_sequential = false;
+                }
+            }
+            ROCPROFSYS_PRINT("  - Using sequential processing for: %s\n",
+                             sequential_ss.str().c_str());
+        }
+    }
+
+    bool has_parallel_formats() const
+    {
+        return std::any_of(formats.begin(), formats.end(),
+                           [](const auto& f) { return f.enabled && f.process_parallel; });
+    }
+
+    bool has_sequential_formats() const
+    {
+        return std::any_of(formats.begin(), formats.end(), [](const auto& f) {
+            return f.enabled && !f.process_parallel;
+        });
+    }
+
+    enabled_formats_t get_parallel_formats() const
+    {
+        enabled_formats_t parallel_formats;
+        parallel_formats.formats.clear();
+        for(const auto& fmt : formats)
+        {
+            parallel_formats.formats.push_back(
+                { true, fmt.enabled && fmt.process_parallel, fmt.name });
+        }
+        return parallel_formats;
+    }
+
+    enabled_formats_t get_sequential_formats() const
+    {
+        enabled_formats_t sequential_formats;
+        sequential_formats.formats.clear();
+        for(const auto& fmt : formats)
+        {
+            sequential_formats.formats.push_back(
+                { false, fmt.enabled && !fmt.process_parallel, fmt.name });
+        }
+        return sequential_formats;
+    }
+
+    bool is_rocpd_enabled() const
+    {
+        auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+            return std::strcmp(f.name, "rocpd") == 0;
+        });
+        return it != formats.end() && it->enabled;
+    }
+
+    bool is_perfetto_enabled() const
+    {
+        auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
+            return std::strcmp(f.name, "perfetto") == 0;
+        });
+        return it != formats.end() && it->enabled;
     }
 };
 
@@ -105,7 +198,8 @@ struct processor_config_t
 
 struct processor_storage_t
 {
-    std::shared_ptr<rocpd_processor_t> rocpd_processor{ nullptr };
+    std::shared_ptr<rocpd_processor_t>    rocpd_processor{ nullptr };
+    std::shared_ptr<perfetto_processor_t> perfetto_processor{ nullptr };
 };
 
 using directory_files_t    = std::vector<std::string>;
@@ -234,6 +328,84 @@ clear_cache_files(const data::mapped_cache_files_t& _cache_files)
     }
 }
 
+void
+merge_perfetto_files(const std::vector<std::string>& perfetto_files,
+                     const std::string&              _filename)
+{
+    if(perfetto_files.empty())
+    {
+        ROCPROFSYS_VERBOSE(
+            0, "perfetto trace data is empty. File '%s' will not be written...\n",
+            _filename.c_str());
+        return;
+    }
+
+    std::vector<char> trace_data;
+    size_t            total_size = 0;
+
+    // Calculate total size for reservation
+    for(const auto& file : perfetto_files)
+    {
+        std::ifstream ifs(file, std::ios::binary | std::ios::ate);
+        if(ifs)
+        {
+            total_size += ifs.tellg();
+        }
+    }
+
+    trace_data.reserve(total_size);
+
+    // Read and concatenate all files
+    for(const auto& file : perfetto_files)
+    {
+        std::ifstream ifs(file, std::ios::binary);
+        if(!ifs)
+        {
+            ROCPROFSYS_VERBOSE(-1, "Error opening '%s'...\n", file.c_str());
+            continue;
+        }
+
+        ifs.seekg(0, std::ios::end);
+        size_t file_size = ifs.tellg();
+        ifs.seekg(0, std::ios::beg);
+
+        size_t current_size = trace_data.size();
+        trace_data.resize(current_size + file_size);
+
+        ifs.read(trace_data.data() + current_size, file_size);
+    }
+
+    if(!trace_data.empty())
+    {
+        operation::file_output_message<tim::project::rocprofsys> _fom{};
+        // Write the trace into a file.
+        if(config::get_verbose() >= 0)
+            _fom(_filename, std::string{ "perfetto" },
+                 " (%.2f KB / %.2f MB / %.2f GB)... ",
+                 static_cast<double>(trace_data.size()) / units::KB,
+                 static_cast<double>(trace_data.size()) / units::MB,
+                 static_cast<double>(trace_data.size()) / units::GB);
+        std::ofstream ofs{};
+        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+        {
+            _fom.append("Error opening '%s'...", _filename.c_str());
+        }
+        else
+        {
+            // Write the trace into a file.
+            ofs.write(trace_data.data(), trace_data.size());
+            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+        }
+        ofs.close();
+    }
+    else
+    {
+        ROCPROFSYS_VERBOSE(
+            0, "perfetto trace data is empty. File '%s' will not be written...\n",
+            _filename.c_str());
+    }
+}
+
 }  // namespace filesystem_utils
 
 namespace processing_utils
@@ -244,12 +416,19 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
                      const data::enabled_formats_t&                   _enabled_formats)
 {
     data::processor_storage_t processor_storage;
-    if(_enabled_formats.rocpd)
+    if(_enabled_formats.is_rocpd_enabled())
     {
         processor_storage.rocpd_processor = std::make_shared<rocpd_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
             _processor_config->_pid, _processor_config->_ppid);
         _type_processing->add_handler(*processor_storage.rocpd_processor);
+    }
+    if(_enabled_formats.is_perfetto_enabled())
+    {
+        processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
+            _processor_config->_metadata_registry, _processor_config->_agent_manager,
+            _processor_config->_pid, _processor_config->_ppid);
+        _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
     return processor_storage;
 }
@@ -321,6 +500,37 @@ multithreaded_processing(
     }
 }
 
+void
+sequential_processing(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
+    const data::enabled_formats_t&                                _enabled_formats)
+{
+    for(const auto& processor_config : _processor_configs)
+    {
+        process_buffered_storage(processor_config,
+                                 utility::get_buffered_storage_filename(
+                                     processor_config->_ppid, processor_config->_pid),
+                                 _enabled_formats);
+    }
+}
+
+void
+dispatch_processing(
+    const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
+    const data::enabled_formats_t&                                _enabled_formats)
+{
+    if(_enabled_formats.has_sequential_formats())
+    {
+        auto sequential_formats = _enabled_formats.get_sequential_formats();
+        sequential_processing(_processor_configs, sequential_formats);
+    }
+    if(_enabled_formats.has_parallel_formats())
+    {
+        auto parallel_formats = _enabled_formats.get_parallel_formats();
+        multithreaded_processing(_processor_configs, parallel_formats);
+    }
+}
+
 }  // namespace processing_utils
 
 cache_manager&
@@ -361,7 +571,50 @@ cache_manager::post_process_bulk()
         getpid(), root_pid, m_metadata,
         std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
-    processing_utils::multithreaded_processing(processor_configs, enabled_formats);
+    processing_utils::dispatch_processing(processor_configs, enabled_formats);
+
+    if(enabled_formats.is_perfetto_enabled())
+    {
+        std::vector<std::string> perfetto_files;
+
+        for(const auto& config : processor_configs)
+        {
+            // Check for both naming styles: default (current process) and PID-suffixed
+            auto filename_default = config::get_perfetto_output_filename();
+            auto filename_suffix  = config::get_perfetto_output_filename_with_suffix(
+                std::to_string(config->_pid));
+
+            if(static_cast<pid_t>(config->_pid) == getpid() &&
+               tim::filepath::exists(filename_default))
+            {
+                perfetto_files.push_back(filename_default);
+            }
+            else if(tim::filepath::exists(filename_suffix))
+            {
+                perfetto_files.push_back(filename_suffix);
+            }
+        }
+
+        if(config::get_perfetto_combined_traces() && perfetto_files.size() > 1)
+        {
+            // Use base filename without suffix for merged output
+            auto _filename = config::get_perfetto_output_filename();
+            filesystem_utils::merge_perfetto_files(perfetto_files, _filename);
+        }
+        else if(perfetto_files.size() > 1)
+        {
+            ROCPROFSYS_VERBOSE(
+                0,
+                "Generated %zu separate perfetto trace files. "
+                "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.\n",
+                perfetto_files.size());
+
+            for(const auto& file : perfetto_files)
+            {
+                ROCPROFSYS_VERBOSE(1, "  - %s\n", file.c_str());
+            }
+        }
+    }
 
     filesystem_utils::clear_cache_files(cache_files);
 }

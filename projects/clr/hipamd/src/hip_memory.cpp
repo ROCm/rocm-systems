@@ -34,8 +34,6 @@ namespace hip {
 amd::Monitor hipArraySetLock{};
 std::unordered_set<hipArray*> hipArraySet;
 
-template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
-
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   auto memObj = amd::MemObjMap::FindMemObj(ptr, &offset);
