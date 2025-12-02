@@ -1,4 +1,4 @@
-ROCTracer (pid=566858): 
+ROCTracer (pid=566858):
 0x55ae2fa607c0 agent cpu
 0x55ae2fa5eeb0 agent gpu
 0x55ae2fa9b540 agent gpu
@@ -9,7 +9,7 @@ ROCTracer (pid=566858):
 975785719403482:975785719403643 566858:566858 hsa_agent_get_info(, 17, 0x7ffe30b97814) = 0 :7
 975785719404274:975785719404364 566858:566858 hsa_agent_get_info(, 17, 0x7ffe30b97814) = 0 :8
 975785719404274:975785719404885 566858:566858 hsa_iterate_agents(1, 0) = 0 :5
-ROCTracer (pid=566858): 
+ROCTracer (pid=566858):
 0x55ae2fa607c0 agent cpu
 0x55ae2fb02cc0 agent gpu
 0x55ae2fa62970 agent gpu

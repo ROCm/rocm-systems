@@ -1,4 +1,4 @@
-ROCTracer (pid=566828): 
+ROCTracer (pid=566828):
 0x55e1b9d507c0 agent cpu
 0x55e1b9d4eeb0 agent gpu
 0x55e1b9d8b540 agent gpu
