@@ -448,8 +448,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command() const { return command_; }
 
   void* allocKernArg(size_t size, size_t alignment);
-  bool isFenceDirty() const { return fence_dirty_; }
-  void setFenceDirty(bool state) { fence_dirty_ = state; }
+  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
   void HiddenHeapInit();
