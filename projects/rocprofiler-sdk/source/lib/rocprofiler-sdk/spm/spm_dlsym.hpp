@@ -44,8 +44,9 @@ public:
 
     bool valid() const
     {
-        return create_packets_fn && delete_packets_fn && spm_start_fn && spm_stop_fn &&
-               spm_decode_fn && spm_query_fn && is_supported_fn && handle;
+        return create_packets_fn != nullptr && delete_packets_fn != nullptr &&
+               spm_start_fn != nullptr && spm_stop_fn != nullptr && spm_decode_fn != nullptr &&
+               spm_query_fn != nullptr && is_supported_fn != nullptr && handle != nullptr;
     }
 
     CreateFn*  create_packets_fn = nullptr;

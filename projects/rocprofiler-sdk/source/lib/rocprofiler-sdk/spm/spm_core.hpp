@@ -100,7 +100,7 @@ struct spm_counter_callback_info
 class SpmCounterController
 {
 public:
-    SpmCounterController(){};
+    SpmCounterController() = default;
     // Adds a counter collection profile to our global cache.
     // Note: these profiles can be used across multiple contexts
     //       and are independent of the context.
@@ -145,6 +145,12 @@ configure_spm_dispatch(rocprofiler_context_id_t                       context_id
 
 bool
 is_spm_explicitly_enabled();
+
+void
+start_context(const context::context*);
+
+void
+stop_context(const context::context*);
 
 }  // namespace SPM
 }  // namespace rocprofiler

@@ -261,7 +261,7 @@ struct SPMMemoryPool
     SPMMemoryPool(const class AgentCache& agent, const class AmdExtTable& ext, copy_fn_t copy_fn);
     ~SPMMemoryPool()
     {
-        if(delete_packets_fn && handle.handle) delete_packets_fn(handle);
+        if(delete_packets_fn != nullptr && handle.handle != 0) delete_packets_fn(handle);
     };
     explicit SPMMemoryPool() = default;
     static hsa_status_t   Alloc(void**                         ptr,
