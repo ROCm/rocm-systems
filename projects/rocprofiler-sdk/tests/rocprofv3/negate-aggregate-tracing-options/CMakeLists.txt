@@ -62,7 +62,6 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     WILL_FAIL)
->>>>>>> d75d0bc1c91cf23ecdf47629e7932a5588d1c17f
 
 ##########################################################################################
 #
