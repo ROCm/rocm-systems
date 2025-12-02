@@ -70,7 +70,7 @@ typedef struct spm_desc_v0_t
     uint64_t event_elem_size{sizeof(spm_counter_instance_t)};
     uint64_t reserved{0};
 
-    bool valid()
+    bool valid() const
     {
         return version == 0 && aql_desc_size != 0 && struct_size == sizeof(spm_desc_v0_t) &&
                event_elem_size == sizeof(spm_counter_instance_t);
@@ -81,7 +81,7 @@ typedef struct spm_desc_v0_t
     void* aqlprofile_desc() { return events() + num_events; }
 } spm_desc_v0_t;
 
-static_assert((sizeof(spm_desc_v0_t) % sizeof(spm_counter_instance_t)) == 0 &&
+static_assert((sizeof(spm_desc_v0_t) % sizeof(spm_counter_instance_t)) == 0,
               "invalid descriptor and counter combination");
 
 void
