@@ -379,6 +379,13 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
         });
     parser
+        .add_argument({ "--trace-cached" },
+                      "Generate a detailed trace (perfetto output) from cached data ")
+        .max_count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "ROCPROFSYS_TRACE_CACHED", p.get<bool>("trace-cached"));
+        });
+    parser
         .add_argument(
             { "-P", "--profile" },
             "Generate a call-stack-based profile (conflicts with --flat-profile)")
