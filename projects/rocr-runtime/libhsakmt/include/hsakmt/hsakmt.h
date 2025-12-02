@@ -553,9 +553,9 @@ hsaKmtExportDMABufHandle(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetMemoryHandle(
-	void                  *MemoryAddress,     // IN
-	HSAuint64             SizeInBytes,        // IN
-	uint64_t              *SharedMemoryHandle // OUT
+    void* MemoryAddress,          // IN
+    HSAuint64 SizeInBytes,        // IN
+    uint64_t* SharedMemoryHandle  // OUT
 );
 
 /**

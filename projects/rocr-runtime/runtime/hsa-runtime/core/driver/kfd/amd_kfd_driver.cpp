@@ -444,12 +444,11 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
                                      core::ShareableHandle &handle) {
-  auto &gpu_agent = static_cast<GpuAgent &>(agent);
+  auto& gpu_agent = static_cast<GpuAgent&>(agent);
   amdgpu_bo_import_result res;
-  auto ret = DRM_CALL(amdgpu_bo_import(
-      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res));
-  if (ret)
-    return HSA_STATUS_ERROR;
+  auto ret = DRM_CALL(
+      amdgpu_bo_import(gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res));
+  if (ret) return HSA_STATUS_ERROR;
 
   handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
   return HSA_STATUS_SUCCESS;

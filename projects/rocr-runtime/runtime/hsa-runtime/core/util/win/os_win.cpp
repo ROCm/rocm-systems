@@ -459,12 +459,10 @@ uint64_t HostTotalPhysicalMemory() {
   return totalPhys;
 }
 
-bool UnmapMemory(void* addr, size_t size) {
-  return VirtualFree(addr, size, MEM_RELEASE) != 0;
-}
+bool UnmapMemory(void* addr, size_t size) { return VirtualFree(addr, size, MEM_RELEASE) != 0; }
 
 bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
-                  uint64_t cpu_addr [[maybe_unused]]) {
+               uint64_t cpu_addr [[maybe_unused]]) {
   DWORD OldProtect;
   return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
 }

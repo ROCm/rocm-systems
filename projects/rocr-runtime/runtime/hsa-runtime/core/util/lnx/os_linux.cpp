@@ -849,9 +849,7 @@ size_t PageSize() {
   return g_page_size_;
 }
 
-bool UnmapMemory(void* va, size_t size) {
-  return ::munmap(va, size) == 0;
-}
+bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
   void* mapped_ptr =
