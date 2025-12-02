@@ -32,6 +32,7 @@ else
 fi
 
 # This names/values should match the TestType enum in rocSHMEM/tests/functional_tests/tester.hpp
+# and in driver.sh
 declare -A TEST_NUMBERS=(
   ["get"]="0"
   ["getnbi"]="1"
