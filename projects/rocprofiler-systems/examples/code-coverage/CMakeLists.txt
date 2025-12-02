@@ -21,8 +21,17 @@ add_executable(code-coverage code-coverage.cpp)
 target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
+set_target_properties(
+    code-coverage
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/code-coverage"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS code-coverage DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS code-coverage
+        DESTINATION share/rocprofiler-systems/samples/code-coverage
+        COMPONENT rocprofiler-systems-samples
+    )
 endif()
 
 set(PYTHON_FILES code-coverage.py)
@@ -35,15 +44,16 @@ if(Python3_FOUND)
     foreach(_FILE ${PYTHON_FILES})
         configure_file(
             ${PROJECT_SOURCE_DIR}/${_FILE}
-            ${PROJECT_BINARY_DIR}/${_FILE}
+            ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/code-coverage/${_FILE}
             @ONLY
         )
 
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
-                PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
-                DESTINATION bin
-                COMPONENT rocprofiler-systems-examples
+                PROGRAMS
+                    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/code-coverage/${_FILE}
+                DESTINATION share/rocprofiler-systems/samples/code-coverage
+                COMPONENT rocprofiler-systems-samples
             )
         endif()
     endforeach()

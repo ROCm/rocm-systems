@@ -157,12 +157,21 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     target_compile_options(jpegdecode PRIVATE ${_FLAGS})
     copy_image_files_and_make_copies()
 
+    set_target_properties(
+        jpegdecode
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/jpegdecode"
+    )
+
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(TARGETS jpegdecode DESTINATION bin COMPONENT rocprofiler-systems-examples)
+        install(
+            TARGETS jpegdecode
+            DESTINATION share/rocprofiler-systems/samples/jpegdecode
+            COMPONENT rocprofiler-systems-samples
+        )
         install(
             FILES ${CMAKE_BINARY_DIR}/images
             DESTINATION share/rocprofiler-systems/tests/images
-            COMPONENT rocprofiler-systems-examples
+            COMPONENT rocprofiler-systems-samples
         )
     endif()
 else()

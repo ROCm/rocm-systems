@@ -17,8 +17,17 @@ target_link_libraries(
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
+set_target_properties(
+    fork-example
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/fork"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS fork-example DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS fork-example
+        DESTINATION share/rocprofiler-systems/samples/fork
+        COMPONENT rocprofiler-systems-samples
+    )
 endif()
 
 # HIP fork example (multi-process concurrency test)
@@ -55,7 +64,10 @@ if(HIPCC_EXECUTABLE)
     )
         add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
         target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
-
+        set_target_properties(
+            hipMallocConcurrencyMproc
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/fork"
+        )
         if(
             CMAKE_CXX_COMPILER_ID MATCHES "Clang"
             AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
@@ -84,8 +96,8 @@ if(HIPCC_EXECUTABLE)
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 TARGETS hipMallocConcurrencyMproc
-                DESTINATION bin
-                COMPONENT rocprofiler-systems-examples
+                DESTINATION share/rocprofiler-systems/samples/fork
+                COMPONENT rocprofiler-systems-samples
             )
         endif()
     else()

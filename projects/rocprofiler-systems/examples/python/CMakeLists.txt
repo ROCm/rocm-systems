@@ -29,15 +29,16 @@ if(Python3_FOUND)
     foreach(_FILE ${PYTHON_FILES})
         configure_file(
             ${PROJECT_SOURCE_DIR}/${_FILE}
-            ${PROJECT_BINARY_DIR}/${_FILE}
+            ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/python/${_FILE}
             @ONLY
         )
 
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
-                PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
-                DESTINATION bin
-                COMPONENT rocprofiler-systems-examples
+                PROGRAMS
+                    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/python/${_FILE}
+                DESTINATION share/rocprofiler-systems/samples/python
+                COMPONENT rocprofiler-systems-samples
             )
         endif()
     endforeach()

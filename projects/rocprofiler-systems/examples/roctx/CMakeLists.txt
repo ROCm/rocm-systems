@@ -78,6 +78,11 @@ endif()
 add_executable(roctx roctx.cpp)
 target_link_libraries(roctx PRIVATE Threads::Threads)
 
+set_target_properties(
+    roctx
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/roctx"
+)
+
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
@@ -114,5 +119,11 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS roctx DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET roctx)
+        install(
+            TARGETS roctx
+            DESTINATION share/rocprofiler-systems/samples/roctx
+            COMPONENT rocprofiler-systems-samples
+        )
+    endif()
 endif()

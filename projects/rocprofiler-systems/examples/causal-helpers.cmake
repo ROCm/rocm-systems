@@ -58,6 +58,11 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             rocprofsys-causal-example-lib-debug
     )
 
+    set_target_properties(
+        ${_NAME}
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal"
+    )
+
     add_executable(${_NAME}-rocprofsys ${CAUSAL_SOURCES})
     target_compile_definitions(
         ${_NAME}-rocprofsys
@@ -73,6 +78,11 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             ${CAUSAL_LINK_LIBRARIES}
             rocprofiler-systems::rocprofiler-systems-user-library
             rocprofsys-causal-example-lib-debug
+    )
+
+    set_target_properties(
+        ${_NAME}-rocprofsys
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal"
     )
 
     add_executable(${_NAME}-ndebug ${CAUSAL_SOURCES})
@@ -92,6 +102,11 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             rocprofsys-causal-example-lib-no-debug
     )
 
+    set_target_properties(
+        ${_NAME}-ndebug
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal"
+    )
+
     add_executable(${_NAME}-rocprofsys-ndebug ${CAUSAL_SOURCES})
     target_compile_definitions(
         ${_NAME}-rocprofsys-ndebug
@@ -107,6 +122,11 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             ${CAUSAL_LINK_LIBRARIES}
             rocprofiler-systems::rocprofiler-systems-user-library
             rocprofsys-causal-example-lib-no-debug
+    )
+
+    set_target_properties(
+        ${_NAME}-rocprofsys-ndebug
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal"
     )
 
     add_dependencies(
@@ -138,15 +158,34 @@ function(rocprofiler_systems_causal_example_executable _NAME)
             PRIVATE ${CAUSAL_LINK_LIBRARIES} rocprofsys-causal-example-lib-coz coz::coz
         )
 
+        set_target_properties(
+            ${_NAME}-coz
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal"
+        )
+
         add_dependencies(rocprofsys-causal-examples ${_NAME}-coz)
     endif()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(
-            TARGETS ${_NAME} ${_NAME}-rocprofsys ${_NAME}-coz
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples
-            OPTIONAL
+        set(_TARGETS
+            ${_NAME}
+            ${_NAME}-rocprofsys
+            ${_NAME}-ndebug
+            ${_NAME}-rocprofsys-ndebug
+            ${_NAME}-coz
         )
+        set(_EXISTING_TARGETS)
+        foreach(_TGT IN LISTS _TARGETS)
+            if(TARGET ${_TGT})
+                list(APPEND _EXISTING_TARGETS ${_TGT})
+            endif()
+        endforeach()
+        if(_EXISTING_TARGETS)
+            install(
+                TARGETS ${_EXISTING_TARGETS}
+                DESTINATION share/rocprofiler-systems/samples/causal
+                COMPONENT rocprofiler-systems-samples
+            )
+        endif()
     endif()
 endfunction()

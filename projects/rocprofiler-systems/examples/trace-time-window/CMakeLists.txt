@@ -18,6 +18,12 @@ set(CMAKE_BUILD_TYPE "Debug")
 add_executable(trace-time-window trace-time-window.cpp)
 target_compile_options(trace-time-window PRIVATE ${_FLAGS})
 
+set_target_properties(
+    trace-time-window
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/trace-time-window"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS trace-time-window

@@ -24,6 +24,15 @@ target_link_libraries(
     PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
 )
 
+set_target_properties(
+    user-api
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/user-api"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS user-api DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS user-api
+        DESTINATION share/rocprofiler-systems/samples/user-api
+        COMPONENT rocprofiler-systems-samples
+    )
 endif()

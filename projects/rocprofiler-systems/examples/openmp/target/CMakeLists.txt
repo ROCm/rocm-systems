@@ -71,7 +71,7 @@ endif()
 # Use the directory that actually contains the library we found
 get_filename_component(_rocm_llvm_lib "${LIBOMPTARGET_SO}" DIRECTORY)
 set(_rocm_clang_lib "${ROCM_ROOT_DIR}/lib")
-set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN")
+set(_COMMON_RPATH "${_rocm_llvm_lib};${_rocm_clang_lib};$ORIGIN;$ORIGIN/lib")
 if(ROCmVersion_DIR)
     list(APPEND _COMMON_RPATH "${ROCmVersion_DIR}/llvm/lib")
 endif()
@@ -98,6 +98,16 @@ target_link_libraries(openmp-target PRIVATE openmp-target-lib)
 target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target PUBLIC -fopenmp)
 add_offload_flags(openmp-target)
+
+set_target_properties(
+    openmp-target
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/openmp"
+)
+
+set_target_properties(
+    openmp-target-lib
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/openmp/lib"
+)
 
 foreach(tgt openmp-target-lib openmp-target)
     set_target_properties(
@@ -126,3 +136,15 @@ rocprofiler_systems_custom_compilation(
 rocprofiler_systems_custom_compilation(TARGET openmp-target
                                        COMPILER ${OMP_TARGET_COMPILER}
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    if(TARGET openmp-target AND TARGET openmp-target-lib)
+        install(
+            TARGETS openmp-target openmp-target-lib
+            RUNTIME DESTINATION share/rocprofiler-systems/samples/openmp
+            LIBRARY
+                DESTINATION share/rocprofiler-systems/samples/openmp/lib
+                COMPONENT rocprofiler-systems-samples
+        )
+    endif()
+endif()

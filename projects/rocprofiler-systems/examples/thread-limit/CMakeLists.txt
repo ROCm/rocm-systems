@@ -40,3 +40,16 @@ target_compile_options(tests-compile-options INTERFACE -g)
 add_executable(thread-limit thread-limit.cpp)
 target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
 target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
+
+set_target_properties(
+    thread-limit
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/thread-limit"
+)
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    install(
+        TARGETS thread-limit
+        DESTINATION share/rocprofiler-systems/samples/thread-limit
+        COMPONENT rocprofiler-systems-samples
+    )
+endif()

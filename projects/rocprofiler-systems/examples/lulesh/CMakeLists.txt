@@ -82,16 +82,24 @@ rocprofiler_systems_causal_example_executable(
     INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes
 )
 
+# Set output directories for Kokkos libraries
+if(LULESH_BUILD_KOKKOS AND TARGET kokkoscore)
+    set_target_properties(
+        kokkoscore
+        kokkoscontainers
+        kokkossimd
+        PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/causal/lib"
+    )
+    set_target_properties(lulesh PROPERTIES INSTALL_RPATH "\$ORIGIN/lib")
+endif()
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
         install(
-            TARGETS kokkoscore kokkoscontainers
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT rocprofiler-systems-examples
-        )
-        set_target_properties(
-            lulesh
-            PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+            TARGETS kokkoscore kokkoscontainers kokkossimd
+            LIBRARY
+                DESTINATION share/rocprofiler-systems/samples/causal/lib
+                COMPONENT rocprofiler-systems-samples
         )
     endif()
 endif()

@@ -32,10 +32,17 @@ target_link_libraries(
 )
 target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 
+set_target_properties(
+    parallel-overhead
+    parallel-overhead-locks
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/parallel-overhead"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS parallel-overhead parallel-overhead-locks
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
+        DESTINATION share/rocprofiler-systems/samples/parallel-overhead
+        COMPONENT rocprofiler-systems-samples
     )
 endif()

@@ -114,6 +114,10 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
     # Also tests the case where Fortran Main has FuncReturnStatus == NORETURN
     add_executable(mpi-fortran-intervals intervals_mpi.f90)
     target_link_libraries(mpi-fortran-intervals PRIVATE mpi-fortran-interface-library)
+    set_target_properties(
+        mpi-fortran-intervals
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mpi"
+    )
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -130,6 +134,18 @@ target_link_libraries(
 add_executable(mpi-example mpi.cpp)
 target_link_libraries(mpi-example PRIVATE mpi-cxx-interface-library)
 
+set_target_properties(
+    mpi-example
+    mpi-allgather
+    mpi-bcast
+    mpi-all2all
+    mpi-reduce
+    mpi-scatter-gather
+    mpi-send-recv
+    mpi-allreduce
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/mpi"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS
@@ -140,14 +156,15 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
             mpi-reduce
             mpi-scatter-gather
             mpi-send-recv
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
+            mpi-allreduce
+        DESTINATION share/rocprofiler-systems/samples/mpi
+        COMPONENT rocprofiler-systems-samples
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
             TARGETS mpi-fortran-intervals
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples
+            DESTINATION share/rocprofiler-systems/samples/mpi
+            COMPONENT rocprofiler-systems-samples
         )
     endif()
 endif()

@@ -18,6 +18,15 @@ set(CMAKE_BUILD_TYPE "Debug")
 add_executable(rewrite-caller rewrite-caller.cpp)
 target_compile_options(rewrite-caller PRIVATE ${_FLAGS})
 
+set_target_properties(
+    rewrite-caller
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rewrite-caller"
+)
+
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS rewrite-caller DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS rewrite-caller
+        DESTINATION share/rocprofiler-systems/samples/rewrite-caller
+        COMPONENT rocprofiler-systems-samples
+    )
 endif()

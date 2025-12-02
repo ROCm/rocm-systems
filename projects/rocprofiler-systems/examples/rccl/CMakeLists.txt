@@ -102,20 +102,30 @@ if(hip_FOUND AND rccl_FOUND)
     else()
         file(GLOB RCCL_TEST_EXECUTABLES ${rccl-tests_BUILD_DIR}/build/*_perf)
         set(_RCCL_TEST_TARGETS)
+        set(_RCCL_STAGING_DIR
+            "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/rccl"
+        )
+        file(MAKE_DIRECTORY ${_RCCL_STAGING_DIR})
 
         foreach(_EXE ${RCCL_TEST_EXECUTABLES})
             get_filename_component(_EXE_NAME "${_EXE}" NAME)
             execute_process(
-                COMMAND
-                    ${CMAKE_COMMAND} -E copy ${_EXE}
-                    ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
+                COMMAND ${CMAKE_COMMAND} -E copy ${_EXE} ${_RCCL_STAGING_DIR}/${_EXE_NAME}
             )
             add_executable(rccl-tests::${_EXE_NAME} IMPORTED GLOBAL)
             set_property(
                 TARGET rccl-tests::${_EXE_NAME}
-                PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
+                PROPERTY IMPORTED_LOCATION ${_RCCL_STAGING_DIR}/${_EXE_NAME}
             )
             list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
+
+            if(ROCPROFSYS_INSTALL_EXAMPLES)
+                install(
+                    PROGRAMS ${_RCCL_STAGING_DIR}/${_EXE_NAME}
+                    DESTINATION share/rocprofiler-systems/samples/rccl
+                    COMPONENT rocprofiler-systems-samples
+                )
+            endif()
         endforeach()
 
         set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")

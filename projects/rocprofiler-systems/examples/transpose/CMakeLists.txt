@@ -88,11 +88,22 @@ if(TRANSPOSE_USE_MPI)
     target_link_libraries(transpose PRIVATE MPI::MPI_C)
 endif()
 
+set_target_properties(
+    transpose
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/transpose"
+)
+
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     # defined in MacroUtilities.cmake
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS transpose DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET transpose)
+        install(
+            TARGETS transpose
+            DESTINATION share/rocprofiler-systems/samples/transpose
+            COMPONENT rocprofiler-systems-samples
+        )
+    endif()
 endif()

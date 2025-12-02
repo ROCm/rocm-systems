@@ -95,6 +95,11 @@ target_include_directories(
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INCLUDE_DIR}
 )
 
+set_target_properties(
+    transferBench
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/transferBench"
+)
+
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
@@ -121,5 +126,11 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS transferBench DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET transferBench)
+        install(
+            TARGETS transferBench
+            DESTINATION share/rocprofiler-systems/samples/transferBench
+            COMPONENT rocprofiler-systems-samples
+        )
+    endif()
 endif()

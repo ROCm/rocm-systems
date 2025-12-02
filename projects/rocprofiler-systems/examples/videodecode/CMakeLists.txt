@@ -176,16 +176,22 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
         target_compile_definitions(videodecode PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
     endif()
 
+    set_target_properties(
+        videodecode
+        PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/videodecode"
+    )
+
     if(ROCPROFSYS_INSTALL_EXAMPLES)
         install(
             TARGETS videodecode
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples
+            DESTINATION share/rocprofiler-systems/samples/videodecode
+            COMPONENT rocprofiler-systems-samples
         )
         install(
             FILES ${CMAKE_BINARY_DIR}/videos
             DESTINATION share/rocprofiler-systems/tests/videos
-            COMPONENT rocprofiler-systems-examples
+            COMPONENT rocprofiler-systems-samples
         )
     endif()
 else()

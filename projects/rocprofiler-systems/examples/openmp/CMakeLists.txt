@@ -31,6 +31,12 @@ add_executable(
     $<TARGET_OBJECTS:openmp-common>
 )
 
+set_target_properties(
+    openmp-cg
+    openmp-lu
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/openmp"
+)
+
 option(USE_CLANG_OMP "Use the clang OpenMP if available" ON)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -92,8 +98,8 @@ target_link_libraries(openmp-lu PRIVATE openmp-common)
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS openmp-cg openmp-lu
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
+        DESTINATION share/rocprofiler-systems/samples/openmp
+        COMPONENT rocprofiler-systems-samples
     )
 endif()
 

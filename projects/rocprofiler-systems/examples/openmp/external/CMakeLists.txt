@@ -43,7 +43,7 @@ set(ROCPROFSYS_OMPVV_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/external/ompvv")
 set(ROCPROFSYS_OPENMP_EXTERNAL_DIR "${CMAKE_BINARY_DIR}/examples/openmp/external")
 set(ROCPROFSYS_OMPVV_SOURCE_DIR "${ROCPROFSYS_OPENMP_EXTERNAL_DIR}/ompvv")
 set(OMPVV_MAKEDEF_FILE "sys/make/make.def")
-set(OMPVV_BIN_DEST "${CMAKE_BINARY_DIR}")
+set(OMPVV_BIN_DEST "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/samples/openmp")
 
 # ---------------------------------------------------------------------------------------#
 # Helper Function
@@ -281,3 +281,19 @@ set(ROCPROFSYS_OMPVV_OFFLOAD_TESTS
 rocprofiler_systems_message(STATUS
                             "Successfully configured OMPVV"
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    foreach(
+        test_target
+        IN
+        LISTS ROCPROFSYS_OMPVV_HOST_TESTS ROCPROFSYS_OMPVV_OFFLOAD_TESTS
+    )
+        if(TARGET "${test_target}-build")
+            install(
+                PROGRAMS "${OMPVV_BIN_DEST}/${test_target}"
+                DESTINATION share/rocprofiler-systems/samples/openmp
+                COMPONENT rocprofiler-systems-samples
+            )
+        endif()
+    endforeach()
+endif()
