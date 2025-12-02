@@ -24,7 +24,7 @@ struct span
     {}
 
     template <size_t N>
-    constexpr span(const std::array<T, N>& arr) noexcept
+    constexpr span(std::array<T, N>& arr) noexcept
     : m_data(arr.data())
     , m_size(arr.size())
     {}

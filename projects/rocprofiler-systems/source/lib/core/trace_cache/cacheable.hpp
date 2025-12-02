@@ -120,9 +120,11 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
                  type_traits::is_span_v<DecayedType>)
     {
         const size_t total_size          = get_size(value);
-        *reinterpret_cast<size_t*>(dest) = total_size;
-        std::memcpy(dest + sizeof(size_t), value.data(), total_size);
-        position += total_size + sizeof(size_t);
+        const size_t header_size         = sizeof(size_t);
+        const size_t data_size           = total_size - header_size;
+        *reinterpret_cast<size_t*>(dest) = data_size;
+        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        position += total_size;
     }
     else
     {
@@ -162,7 +164,8 @@ parse_value(uint8_t*& data_pos, Type& arg)
         const size_t total_size = *reinterpret_cast<const size_t*>(data_pos);
         data_pos += sizeof(size_t);
         arg.reserve(total_size / item_size);
-        std::copy_n(data_pos, total_size, std::back_inserter(arg));
+        std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
+                    total_size / item_size, std::back_inserter(arg));
         data_pos += total_size;
     }
     else
