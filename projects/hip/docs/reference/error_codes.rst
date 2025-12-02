@@ -486,7 +486,7 @@ Kernel and Launch Errors
   hipErrorInvalidValue
 
     Error returned when a grid dimension check finds any input global work size
-    dimension is zero, or a shared memory size check finds the size exceeds the size limit. 
+    dimension is zero, or a shared memory size check finds the size exceeds the size limit.
 
   hipErrorInvalidDeviceFunction
 
@@ -497,7 +497,7 @@ Kernel and Launch Errors
 
   hipErrorContextIsDestroyed
 
-    This error is returned when the input stream or input stream handle is invalid. 
+    This error is returned when the input stream or input stream handle is invalid.
 
   hipErrorInvalidConfiguration
 

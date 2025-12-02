@@ -74,7 +74,7 @@ __global__ void block_reduce(int* input, std::uint64_t* mask, int* output, std::
         __syncthreads();
     }
 
-    // Use local variable in warp reduction  
+    // Use local variable in warp reduction
     int result =  shared[tid];
     __syncthreads();
 
@@ -92,14 +92,14 @@ __global__ void block_reduce(int* input, std::uint64_t* mask, int* output, std::
 
 // [Sphinx HIP warp size mask generation start]
 void generate_and_copy_mask(
-    std::uint64_t *d_mask, 
+    std::uint64_t *d_mask,
     std::vector<int>& vectorExpected,
     int warpSizeHost,
     int numOfBlocks,
     int numberOfWarp,
     int mask_size,
     int mask_element_size)
-{ 
+{
     std::random_device rd;
     std::mt19937_64 eng(rd());
 
@@ -107,7 +107,7 @@ void generate_and_copy_mask(
     std::vector<std::uint64_t> mask(mask_size);
     // Define uniform unsigned int distribution
     std::uniform_int_distribution<std::uint64_t> distr;
-    // Fill up the mask 
+    // Fill up the mask
     for(int i=0; i < numOfBlocks; i++)
     {
         int count = 0;
@@ -153,7 +153,7 @@ int main()
     HIP_CHECK(hipMalloc(&d_results, numOfBlocks * sizeof(*d_results)));
     // Host to Device copy of the input array
     HIP_CHECK(hipMemcpy(d_data, vectorInput.data(), arraySize * sizeof(*d_data), hipMemcpyHostToDevice));
-  
+
     // [Sphinx HIP warp size select kernel start]
     // Generate and copy mask arrays
     generate_and_copy_mask(

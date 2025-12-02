@@ -45,7 +45,7 @@ int64_t ulp_diff(float a, float b)
 {
     if (a == b)
         return 0;
-    
+
     union
     {
         float f;

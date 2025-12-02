@@ -8,7 +8,7 @@
 HIP compilers
 ********************************************************************************
 
-ROCm provides the compiler tools used to compile HIP applications for use on AMD GPUs. 
+ROCm provides the compiler tools used to compile HIP applications for use on AMD GPUs.
 The compilers set up the default libraries and include paths for the HIP and ROCm
 libraries and some needed environment variables. For more information, see the
 :doc:`ROCm compiler reference <llvm-project:reference/rocmcc>`.
@@ -33,14 +33,14 @@ Offline compilation
 --------------------------------------------------------------------------------
 
 Offline compilation is performed in two steps: host and  device code
-compilation. 
+compilation.
 
 - Host-code compilation: On the host side, ``amdclang++`` or ``hipcc`` can
-  compile the host code in one step without other C++ compilers. 
+  compile the host code in one step without other C++ compilers.
 
 - Device-code compilation: The compiled device code is embedded into the
   host object file. Depending on the platform, the device code can be compiled
-  into assembly or binary. 
+  into assembly or binary.
 
 For an example on how to compile HIP from the command line, see :ref:`SAXPY
 tutorial <compiling_on_the_command_line>` .

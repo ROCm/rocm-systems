@@ -14,7 +14,7 @@
     - will not return control back to host until the command completes.
 
 
-   The following commands are "host-synchronous". 
+   The following commands are "host-synchronous".
 
     - hipMemcpy waits for preceding work in the same stream to complete.
 
@@ -26,9 +26,9 @@
 
 The term "blocking" has two meanings in HIP.
 
-The first refers to synchronization commands (ie hipStreamSynchronize, hipEventSynchronize) that cause the host CPU to wait for GPU activity to complete.  
-These can either use an active where the host CPU spin-waits on the synchronization variable, or can use an interrupt-based scheme where the core is interrupted 
-when the wait completes.  The second technique is referred to as "blocking" (ie hipDeviceBlockingSync, hipEventBlockingSync) while the first is referred 
+The first refers to synchronization commands (ie hipStreamSynchronize, hipEventSynchronize) that cause the host CPU to wait for GPU activity to complete.
+These can either use an active where the host CPU spin-waits on the synchronization variable, or can use an interrupt-based scheme where the core is interrupted
+when the wait completes.  The second technique is referred to as "blocking" (ie hipDeviceBlockingSync, hipEventBlockingSync) while the first is referred
 to as "active".  Active can be appropriate for short tasks where latency is critical, but comes at the expense of a CPU core dedicated to monitoring the event.
 
  ### HIP_LAUNCH_BLOCKING (also can use CUDA_LAUNCH_BLOCKING)
@@ -39,11 +39,11 @@ to as "active".  Active can be appropriate for short tasks where latency is crit
       - Memory set commands (hipMemset, hipMemsetAsync).
       - Memory copy commands (hipMemcpy, hipMemsetAsync).
 
-    Note CUDA_LAUNCH_BLOCKING does add any pre-serialization to the commands and does not affect the concurrent stream behavior.  For example, 
+    Note CUDA_LAUNCH_BLOCKING does add any pre-serialization to the commands and does not affect the concurrent stream behavior.  For example,
     even when CUDA_LAUNCH_BLOCKING is set, kernels or data copy commands launched to separate streams can execute concurrently.   Use the NULL
     stream if additional stream synchronization is desired.
 
 
 
- 
+
 */

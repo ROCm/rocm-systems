@@ -59,11 +59,11 @@ Dimensionality of stencils
 
 Stencil computations extend beyond 2D image grids:
 
-* **1D:** Signal filtering, time series processing  
+* **1D:** Signal filtering, time series processing
 
-* **2D:** Image processing, texture analysis  
+* **2D:** Image processing, texture analysis
 
-* **3D:** Volume data, fluid flow, and physical field simulation  
+* **3D:** Volume data, fluid flow, and physical field simulation
 
 This tutorial focuses on **2D image convolution**, the most common stencil
 operation in visual and scientific computing.
@@ -131,31 +131,31 @@ Here's the complete 2D convolution kernel for image smoothing:
     {
         int x = blockIdx.x * blockDim.x + threadIdx.x;
         int y = blockIdx.y * blockDim.y + threadIdx.y;
-        
+
         if (x >= image_width || y >= image_height) {
             return;
         }
-        
+
         float sum = 0;
         for (int i = 0; i < mask_width; i++) {
             for (int j = 0; j < mask_height; j++) {
                 // Calculate the coordinate of the pixel to read.
                 int image_x = x + i - mask_width / 2;
                 int image_y = y + j - mask_height / 2;
-                
+
                 // Do not read outside the image.
-                if (image_x < 0 || image_x >= image_width || 
+                if (image_x < 0 || image_x >= image_width ||
                     image_y < 0 || image_y >= image_height) {
                     continue;
                 }
-                
+
                 // Accumulate the value of the pixel.
                 int image_index = image_y * image_width + image_x;
                 int mask_index = j * mask_width + i;
                 sum += image[image_index] / 255.0f * mask[mask_index];
             }
         }
-        
+
         int image_index = y * image_width + x;
         image[image_index] = sum * 255;
     }
@@ -221,7 +221,7 @@ Edge handling
 
 .. code-block:: c++
 
-    if (image_x < 0 || image_x >= image_width || 
+    if (image_x < 0 || image_x >= image_width ||
         image_y < 0 || image_y >= image_height) {
         continue;
     }
@@ -270,12 +270,12 @@ Main function setup
         static const int maskWidth = 200;
         static const int maskHeight = 200;
         std::vector<float> mask(maskWidth * maskHeight * channels);
-        
+
         // Initialize mask with uniform averaging weights
         for (int i = 0; i < maskWidth * maskHeight; ++i) {
             mask[i] = 1.0f / maskWidth / maskHeight / channels;
         }
-        
+
         // Load an image from disk (implementation not shown)
 
 Mask initialization
@@ -299,7 +299,7 @@ Memory allocation and data transfer
         float *d_mask;
         hipMalloc(&d_image, width * height * channels * sizeof(uint8_t));
         hipMalloc(&d_mask, maskWidth * maskHeight * channels * sizeof(float));
-        
+
         hipMemcpy(d_image, image, width * height * channels * sizeof(uint8_t),
                   hipMemcpyHostToDevice);
         hipMemcpy(d_mask, mask.data(),
@@ -315,7 +315,7 @@ Grid configuration and kernel launch
         dim3 block_size = {16, 16, 1};
         dim3 grid_size = {(width + block_size.x - 1) / block_size.x,
                          (height + block_size.y - 1) / block_size.y, 1};
-        
+
         conv2d<<<grid_size, block_size>>>(d_image, d_mask, width, height,
                                           maskWidth, maskHeight);
         hipDeviceSynchronize();
@@ -337,12 +337,12 @@ Retrieving results and cleanup
         // Copy the data back to the host.
         hipMemcpy(image, d_image, width * height * channels * sizeof(uint8_t),
                   hipMemcpyDeviceToHost);
-        
+
         // Store the image to disk (implementation not shown)
-        
+
         hipFree(d_image);
         hipFree(d_mask);
-        
+
         return 0;
     }
 

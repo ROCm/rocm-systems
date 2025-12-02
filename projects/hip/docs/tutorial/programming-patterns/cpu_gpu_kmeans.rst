@@ -66,7 +66,7 @@ K-means is frequently used in:
 
 * **Feature engineering**: Creating new features based on cluster membership
 
-Algorithm 
+Algorithm
 =========
 
 The K-means algorithm iteratively refines a partition of a dataset into
@@ -195,7 +195,7 @@ flattened ``std::vector<float>`` arrays, while cluster assignments are stored as
     // length: Number of data points to cluster
     // dimension: Number of features per data point
     // k: Number of clusters
-    
+
     std::vector<float> data;           // Data points (length * dimension)
     std::vector<float> centroids;      // Centroid positions (k * dimension)
     std::vector<int> memberships;      // Cluster assignments (length)
@@ -210,20 +210,20 @@ The core K-means iteration:
     // length is an integer for the number of entries to be clustered.
     // dimension is an integer for the number of properties of each entry.
     // k is an integer that determines the number of clusters.
-    
+
     std::vector<float> centroids = initializeCentroids(length * dimension, k);
     std::vector<int> memberships(length, 0);
-    
+
     for (int iteration = 0; iteration < maxIterations; ++iteration) {
-        // Determine the cluster that each entry belongs to. 
+        // Determine the cluster that each entry belongs to.
         // The function returns how many entries changed membership.
         int membershipChanges = updateMembership(data, centroids, memberships);
-        
+
         // Converge checking.
         if (membershipChanges == 0) {
             break;
         }
-        
+
         // Calculate new centroids.
         std::vector<Point> newCentroids = centroids;
         updateCentroid(data, newCentroids, memberships);
@@ -244,36 +244,36 @@ The ``updateMembership`` function serves as the interface between CPU and GPU:
 
 .. code-block:: c++
 
-    int updateMembership(float* data, float* centroids, int* membership, 
+    int updateMembership(float* data, float* centroids, int* membership,
                         int dataSize, int dimension, int k) {
         // gpuData is allocated and copied to the GPU earlier.
-        
+
         float *gpuCentroids, *gpuMembership;
-        
+
         // Allocate GPU memory
         hipMalloc(&gpuCentroids, k * dimension * sizeof(float));
         hipMalloc(&gpuMembership, dataSize * sizeof(int));
-        
+
         // Copy data from CPU to GPU
         hipMemcpy(gpuCentroids, centroids, k * dimension * sizeof(float),
                   hipMemcpyHostToDevice);
-        
+
         // Calculate the sizes for the kernel launch
         int localSize = 256;
         int globalSize = (dataSize + localSize - 1) / localSize;
-        
+
         // Launch the kernel
         updateMembershipGPU<<<globalSize, localSize>>>(
             gpuData, gpuCentroids, gpuMembership, dataSize, dimension, k);
         hipDeviceSynchronize();
-        
+
         // Create CPU Data to hold the results
         std::vector<int> cpuNewMembership(dataSize);
-        
+
         // Copy GPU data back to CPU
-        hipMemcpy(cpuNewMembership.data(), gpuMembership, 
+        hipMemcpy(cpuNewMembership.data(), gpuMembership,
                   dataSize * sizeof(int), hipMemcpyDeviceToHost);
-        
+
         // Count membership updates
         int membershipUpdate = 0;
         for (int i = 0; i < dataSize; ++i) {
@@ -282,11 +282,11 @@ The ``updateMembership`` function serves as the interface between CPU and GPU:
                 membership[i] = cpuNewMembership[i]; // Update the original
             }
         }
-        
+
         // Free GPU memory
         hipFree(gpuCentroids);
         hipFree(gpuMembership);
-        
+
         return membershipUpdate;
     }
 
@@ -345,7 +345,7 @@ Step 5: Retrieve results
 .. code-block:: c++
 
     std::vector<int> cpuNewMembership(dataSize);
-    hipMemcpy(cpuNewMembership.data(), gpuMembership, 
+    hipMemcpy(cpuNewMembership.data(), gpuMembership,
               dataSize * sizeof(int), hipMemcpyDeviceToHost);
 
 Copy the new membership assignments back from GPU to CPU.
@@ -386,28 +386,28 @@ Kernel implementation
         int dataSize, int dimension, int k)
     {
         int tid = blockIdx.x * blockDim.x + threadIdx.x;
-        
+
         if (tid < dataSize) {
             float minDistance = INFINITY;
             int bestCluster = 0;
-            
+
             // Find nearest centroid
             for (int cluster = 0; cluster < k; ++cluster) {
                 float distance = 0.0f;
-                
+
                 // Calculate Euclidean distance
                 for (int d = 0; d < dimension; ++d) {
-                    float diff = data[tid * dimension + d] - 
+                    float diff = data[tid * dimension + d] -
                                 centroids[cluster * dimension + d];
                     distance += diff * diff;
                 }
-                
+
                 if (distance < minDistance) {
                     minDistance = distance;
                     bestCluster = cluster;
                 }
             }
-            
+
             membership[tid] = bestCluster;
         }
     }
@@ -431,22 +431,22 @@ The CPU handles the averaging operation:
     {
         std::vector<int> counts(k, 0);
         std::vector<float> sums(k * dimension, 0.0f);
-        
+
         // Accumulate sums for each cluster
         for (int i = 0; i < dataSize; ++i) {
             int cluster = membership[i];
             counts[cluster]++;
-            
+
             for (int d = 0; d < dimension; ++d) {
                 sums[cluster * dimension + d] += data[i * dimension + d];
             }
         }
-        
+
         // Calculate averages (new centroids)
         for (int cluster = 0; cluster < k; ++cluster) {
             if (counts[cluster] > 0) {
                 for (int d = 0; d < dimension; ++d) {
-                    centroids[cluster * dimension + d] = 
+                    centroids[cluster * dimension + d] =
                         sums[cluster * dimension + d] / counts[cluster];
                 }
             }
@@ -564,7 +564,7 @@ Performance Considerations
 
    * - **Many iterations**
 
-     - Use persistent buffers and asynchronous reduction to minimize 
+     - Use persistent buffers and asynchronous reduction to minimize
        per-iteration synchronization overhead.
 
    * - **Small number of clusters (k)**

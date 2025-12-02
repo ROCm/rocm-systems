@@ -915,7 +915,7 @@ enum hipLimit_t {
 #define hipHostRegisterMapped 0x2
 
 /** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
- * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and
  * contiguous.
  * */
 #define hipHostRegisterIoMemory 0x4

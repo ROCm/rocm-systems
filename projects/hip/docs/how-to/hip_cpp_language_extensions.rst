@@ -337,7 +337,7 @@ warpSize
 ================================================================================
 
 The ``warpSize`` constant contains the number of threads per warp for the given
-target device. On AMD hardware, this is referred to as ``wavefront size``, which 
+target device. On AMD hardware, this is referred to as ``wavefront size``, which
 may vary depending on the architecture. For more details, see the
 :doc:`hardware features <../reference/hardware_features>`.
 
@@ -453,7 +453,7 @@ The host code with the main function:
 
 - Synchronizes the device and copies the results back to the host.
 
-- Checks that each block's sum is equal with the expected mask bit count, 
+- Checks that each block's sum is equal with the expected mask bit count,
   verifying the reduction's correctness.
 
 - Frees the device memory to prevent memory leaks.
@@ -463,7 +463,7 @@ The host code with the main function:
   The ``warpSize`` runtime example code is also provided for comparison purposes
   and the full example codes are located in the `tools folder <https://github.com/ROCm/hip/tree/docs/develop/docs/tools/example_codes>`_.
 
-  The variable ``warpSize`` can be used for loop bounds and supports 
+  The variable ``warpSize`` can be used for loop bounds and supports
   loop unrolling similarly to the template parameter ``WarpSize``.
 
 For users who still require a compile-time constant warp size as a macro on the
@@ -478,7 +478,7 @@ as shown in the following example.
     #define WarpSize 32
   #endif
 
-.. note:: 
+.. note::
 
   ``mwavefrontsize64`` compiler option is not supported by HIP runtime, that's
   why the architecture based compile time selector is an acceptable approach.
@@ -949,7 +949,7 @@ Logical reduces:
 Returns the result of the aggregated logical AND/OR/XOR operation where each of the participating threads
 (i.e. the ones mentioned on the mask) contribute ``var``.
 
-The mask argument is a 64-bit unsigned integer that specifies the lanes in the warp that 
+The mask argument is a 64-bit unsigned integer that specifies the lanes in the warp that
 participate in cross-lane communication with the calling lane. Each participating thread must have its own
 bit set in its mask argument, and all active threads specified in any mask argument must execute the same
 call with the same mask, otherwise the result is undefined.

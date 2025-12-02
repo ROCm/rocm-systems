@@ -172,7 +172,7 @@ Threads (64 threads on CDNA and 32 threads on RDNA) in a warp cannot execute dif
 
 .. warning::
 
-  AMD GPUs do not support independent thread scheduling. Some CUDA application can rely on this feature and the ported HIP version on AMD GPUs can deadlock, when they try to make use of independent thread scheduling. 	
+  AMD GPUs do not support independent thread scheduling. Some CUDA application can rely on this feature and the ported HIP version on AMD GPUs can deadlock, when they try to make use of independent thread scheduling.
 
 This group type also supports sub-wave level intrinsics.
 

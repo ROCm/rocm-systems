@@ -424,7 +424,7 @@ find out what device binary flavors are embedded into the executable?
       main-hip-amdgcn-amd-amdhsa-gfx942.bc
       main-hip-amdgcn-amd-amdhsa-gfx942.o
       main-hip-amdgcn-amd-amdhsa-gfx942.out.resolution.txt
-      main-hip-amdgcn-amd-amdhsa-gfx942.hipi 
+      main-hip-amdgcn-amd-amdhsa-gfx942.hipi
       main-hip-amdgcn-amd-amdhsa-gfx942.out
       main-hip-amdgcn-amd-amdhsa-gfx942.s
 

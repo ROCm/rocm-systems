@@ -64,7 +64,7 @@ auto main() -> int
 
         std::cout << "Device supports " << numBranches << " asynchronous engines; preprocessing will use "
                   << numBranches << " parallel branches." << std::endl;
-        
+
         // For interoperability with hipFFT we require streams and events
         auto streams = std::vector<hipStream_t>{};
         streams.resize(numBranches);
@@ -94,7 +94,7 @@ auto main() -> int
         auto projGeom = phantom::make_projectionGeometry();
         auto volGeom = phantom::make_volumeGeometry();
         auto phantomProjections = phantom::make_projections(projGeom, volGeom, streams);
-        
+
         std::cout << "Initializing... " << std::flush;
 
         auto stream = streams.at(0);
@@ -114,7 +114,7 @@ auto main() -> int
         filter_absolute_kernel<<<absoluteBlocks, 1024, 0, stream>>>(R, projGeom.dimTrans.x, projGeom.pixelDim.x);
 
         hip_check(hipStreamSynchronize(stream));
-            
+
         hipfft_check(hipfftDestroy(filterPlan));
         hip_check(hipFree(r));
 
@@ -135,7 +135,7 @@ auto main() -> int
         auto memRequired = static_cast<std::size_t>(memTotal);
         if(memRequired > devMemFree)
         {
-            std::cerr << "Not enough device memory. Required: " << memRequired 
+            std::cerr << "Not enough device memory. Required: " << memRequired
                       << ", available: " << devMemFree << std::endl;
             return EXIT_FAILURE;
         }
@@ -247,7 +247,7 @@ auto main() -> int
         ));
         auto hostVol = make_hipPitchedPtr(
             hostVolPtr, volGeom.dim.x * sizeof(float), volGeom.dim.x, volGeom.dim.y
-        );    
+        );
         auto vol = hipPitchedPtr{};
         auto volExt = make_hipExtent(volGeom.dim.x * sizeof(float), volGeom.dim.y, volGeom.dim.z);
         hip_check(hipMalloc3D(&vol, volExt));
@@ -737,7 +737,7 @@ auto main() -> int
         memcpyParams.extent = volExt;
         memcpyParams.kind = hipMemcpyDeviceToHost;
         hip_check(hipMemcpy3DAsync(&memcpyParams, graphStream));
-        
+
         auto saveVolArgs = new save_volume_args
         {
             "volume.tif",

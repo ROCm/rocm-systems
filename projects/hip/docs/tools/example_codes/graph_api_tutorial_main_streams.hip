@@ -114,7 +114,7 @@ auto main() -> int
         filter_absolute_kernel<<<absoluteBlocks, 1024, 0, stream>>>(R, projGeom.dimTrans.x, projGeom.pixelDim.x);
 
         hip_check(hipStreamSynchronize(stream));
-                
+
         hipfft_check(hipfftDestroy(filterPlan));
         hip_check(hipFree(r));
 
@@ -135,7 +135,7 @@ auto main() -> int
         auto memRequired = static_cast<std::size_t>(memTotal);
         if(memRequired > devMemFree)
         {
-            std::cerr << "Not enough device memory. Required: " << memRequired 
+            std::cerr << "Not enough device memory. Required: " << memRequired
                       << ", available: " << devMemFree << std::endl;
             return EXIT_FAILURE;
         }
@@ -169,7 +169,7 @@ auto main() -> int
             ));
             expandedProjections.push_back(expanded);
             expandedPitches.push_back(expandedPitch);
-            
+
             auto transformed = static_cast<hipfftComplex*>(nullptr);
             auto transformedPitch = std::size_t{};
             hip_check(hipMallocPitch(
@@ -247,7 +247,7 @@ auto main() -> int
         ));
         auto hostVol = make_hipPitchedPtr(
             hostVolPtr, volGeom.dim.x * sizeof(float), volGeom.dim.x, volGeom.dim.y
-        );    
+        );
         auto vol = hipPitchedPtr{};
         auto volExt = make_hipExtent(volGeom.dim.x * sizeof(float), volGeom.dim.y, volGeom.dim.z);
         hip_check(hipMalloc3D(&vol, volExt));
@@ -336,7 +336,7 @@ auto main() -> int
                 auto& forward = forwardPlans.at(streamIdx);
                 hipfft_check(hipfftExecR2C(forward, expanded, transformed));
                 // [sphinx-forward-end]
-                    
+
                 // [sphinx-filter-start]
                 // Apply filter
                 auto filterBlocksPerGrid = dim3{
@@ -347,7 +347,7 @@ auto main() -> int
                 filter_application_kernel<<<filterBlocksPerGrid, threadsPerBlock, 0, stream>>>(
                     transformed, transformedPitch, R, projGeom.dimTrans
                 );
-                    
+
                 auto& backward = backwardPlans.at(streamIdx);
                 hipfft_check(hipfftExecC2R(backward, transformed, expanded));
                 // [sphinx-filter-end]
@@ -364,7 +364,7 @@ auto main() -> int
                     hipMemcpyDeviceToDevice,
                     stream
                 ));
-                    
+
                 filter_normalization_kernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(
                     proj, projPitch, projGeom.dimFFT.x, projGeom.dim
                 );
@@ -423,7 +423,7 @@ auto main() -> int
                 // [sphinx-bp-end]
             }
         }
-        
+
         // [sphinx-sync-start]
         // First stream waits for other streams to complete
         auto completionEvents = std::vector<hipEvent_t>{};
@@ -457,7 +457,7 @@ auto main() -> int
         memcpyParams.extent = volExt;
         memcpyParams.kind = hipMemcpyDeviceToHost;
         hip_check(hipMemcpy3DAsync(&memcpyParams, streams.at(0)));
-            
+
         auto saveVolArgs = new save_volume_args
         {
             "volume.tif",

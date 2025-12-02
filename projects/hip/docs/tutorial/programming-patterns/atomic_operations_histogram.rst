@@ -261,7 +261,7 @@ Typical performance degradation sources include:
 Best practices
 ==============
 
-1. **Apply atomic operations only where necessary** 
+1. **Apply atomic operations only where necessary**
 
    Atomic instructions serialize access to a memory location and use can
    diminish SIMT parallel efficiency and increase warp stalls. Restrict atomic
@@ -278,7 +278,7 @@ Best practices
    Use fast, low-latency shared memory to aggregate partial results within a
    block before issuing a single atomic update to global memory.
 
-4. **Validate correctness** 
+4. **Validate correctness**
 
    Validate the numerical and logical correctness of GPU kernels by comparing
    against single-threaded or deterministic multi-threaded CPU baselines.
@@ -286,7 +286,7 @@ Best practices
 5. **Profile regularly**
 
    GPU performance is highly sensitive to thread divergence, memory-access
-   patterns, and workload distribution. Regularly use profiling tools such as 
+   patterns, and workload distribution. Regularly use profiling tools such as
    :doc:`rocprofv3<rocprofiler-sdk:how-to/using-rocprofv3>` or
    :doc:`ROCm compute profiler<rocprofiler-compute:how-to/profile/mode>` to
    examine warp-level execution efficiency, memory-coalescing behavior,

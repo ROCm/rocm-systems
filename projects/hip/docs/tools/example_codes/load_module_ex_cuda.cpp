@@ -86,7 +86,7 @@ int main()
     CUDA_CHECK(cuMemcpyHtoD(d_B, B.data(), size_bytes));
 
     // Load module
-    
+
     // For NVIDIA the module file has to contain PTX, found in e.g. "myKernel.ptx"
     // [sphinx-start]
     CUmodule module;

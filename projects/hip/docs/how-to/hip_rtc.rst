@@ -15,7 +15,7 @@ alongside options to guide the compilation.
 .. note::
 
   * Device code compilation via HIPRTC uses the ``__hip_internal`` namespace instead
-    of the ``std`` namespace to avoid namespace collision. 
+    of the ``std`` namespace to avoid namespace collision.
   * This library can be used for compilation on systems without AMD GPU drivers
     installed (offline compilation). However, running the compiled code still
     requires both the HIP runtime library and GPU drivers on the target system.
@@ -40,8 +40,8 @@ To use HIPRTC functionality the header needs to be included:
 .. note::
 
   Prior to the 7.0 release, the HIP runtime included the hipRTC library. With the 7.0
-  release, the library is separate and must be specifically included as shown above. 
-  
+  release, the library is separate and must be specifically included as shown above.
+
 Kernels can be stored in a string:
 
 .. code-block:: cpp
@@ -334,7 +334,7 @@ CU contains two SIMD32 units. The LDS is attached to the WGP, so threads from di
 they run on CUs within the same WGP.
 
 .. note::
-  
+
   Because CDNA GPUs do not use workgroup processors and have a different CU layout, the following information applies
   only to RDNA GPUs.
 
@@ -483,7 +483,7 @@ For instance, if compiling bitcode/IR version 14, the HIPRTC and comgr libraries
 released by AMD around mid 2022 would be the best choice, assuming the
 LLVM/Clang version included in the package is also version 14.
 
-.. note:: 
+.. note::
   When viewing the *README* in the Comgr GitHub repository you should look at a
   specific branch of interest, such as ``docs/6.3.0`` or ``docs/6.4.1``, rather than the default branch.
 

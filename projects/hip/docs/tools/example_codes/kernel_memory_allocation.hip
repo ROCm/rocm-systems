@@ -68,8 +68,8 @@ int main()
 {
     kernel_memory_allocation<<<64, 1024>>>();
     HIP_CHECK(hipGetLastError());
-    
+
     std::cout << "Success!" << std::endl;
-    
+
     return EXIT_SUCCESS;
 }
