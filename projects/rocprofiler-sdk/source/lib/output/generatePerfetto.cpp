@@ -277,7 +277,7 @@ write_perfetto(
             auto agent_index_info =
                 tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
             _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
-                    << "] QUEUE [" << qitr.handle - 1 << "] ";
+                    << "] QUEUE [" << (qitr.handle > 0 ? qitr.handle - 1 : 0) << "] ";
             _namess << agent_index_info.type;
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
