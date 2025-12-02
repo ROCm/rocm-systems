@@ -216,7 +216,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
 
  private:
   // Serialize packet interception processing.
-  KernelMutex lock_;
+  std::mutex lock_;
 
   // Largest processed packet index.
   uint64_t next_packet_;

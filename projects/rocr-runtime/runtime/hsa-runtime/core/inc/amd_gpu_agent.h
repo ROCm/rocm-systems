@@ -594,7 +594,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<const core::Agent*> xgmi_peer_list_;
 
   // Protects xgmi_peer_list_
-  KernelMutex xgmi_peer_list_lock_;
+  std::mutex xgmi_peer_list_lock_;
 
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
@@ -607,19 +607,19 @@ class GpuAgent : public GpuAgentInt {
   lazy_ptr<core::Queue> queues_[QueueCount];
 
   // @brief Mutex to protect the update to coherency type.
-  KernelMutex coherency_lock_;
+  std::mutex coherency_lock_;
 
   // @brief Mutex to protect access to scratch pool.
-  KernelMutex scratch_lock_;
+  std::mutex scratch_lock_;
 
   // @brief Mutex to protect access to ::t1_.
-  KernelMutex t1_lock_;
+  std::mutex t1_lock_;
 
   // @brief Mutex to protect access to blit objects.
-  KernelMutex blit_lock_;
+  std::mutex blit_lock_;
 
   // @brief Mutex to protect sdma gang submissions.
-  KernelMutex sdma_gang_lock_;
+  std::mutex sdma_gang_lock_;
 
   // @brief GPU tick on initialization.
   HsaClockCounters t0_;
@@ -729,7 +729,7 @@ class GpuAgent : public GpuAgentInt {
   struct {
     lazy_ptr<core::Queue> queue_;
     int ref_ct_;
-    KernelMutex lock_;
+    std::mutex lock_;
   } gws_queue_;
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer

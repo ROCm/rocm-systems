@@ -561,7 +561,7 @@ void GpuAgent::ReserveScratch()
   size_t available;
   hsa_status_t err = driver().AvailableMemory(node_id(), &available);
   assert(err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
-  std::lock_guard<KernelMutex> lock(scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
@@ -910,7 +910,7 @@ void GpuAgent::InitGWS() {
 }
 
 void GpuAgent::GWSRelease() {
-  std::lock_guard<KernelMutex> lock(gws_queue_.lock_);
+  std::lock_guard<std::mutex> lock(gws_queue_.lock_);
   gws_queue_.ref_ct_--;
   if (gws_queue_.ref_ct_ != 0) return;
   InitGWS();
@@ -968,22 +968,22 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
 }
 
 void GpuAgent::SetCopyRequestRefCount(bool set) {
-  std::lock_guard<KernelMutex> lock(blit_lock_);
+  std::lock_guard<std::mutex> lock(blit_lock_);
   while (pending_copy_stat_check_ref_) {
-    blit_lock_.Release();
+    blit_lock_.unlock();
     os::YieldThread();
-    blit_lock_.Acquire();
+    blit_lock_.lock();
   }
   if (!set && pending_copy_req_ref_) pending_copy_req_ref_--;
   else pending_copy_req_ref_++;
 }
 
 void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
-  std::lock_guard<KernelMutex> lock(blit_lock_);
+  std::lock_guard<std::mutex> lock(blit_lock_);
   while (pending_copy_req_ref_) {
-    blit_lock_.Release();
+    blit_lock_.unlock();
     os::YieldThread();
-    blit_lock_.Acquire();
+    blit_lock_.lock();
   }
   if (!set && pending_copy_stat_check_ref_) pending_copy_stat_check_ref_--;
   else pending_copy_stat_check_ref_++;
@@ -1059,7 +1059,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                       std::min(gang_factor, properties_.NumSdmaXgmiEngines);
   }
 
-  std::lock_guard<KernelMutex> lock(sdma_gang_lock_);
+  std::lock_guard<std::mutex> lock(sdma_gang_lock_);
   // Manage internal gang signals
   std::vector<core::Signal*> gang_signals;
   if (gang_factor > 1) {
@@ -1726,7 +1726,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
                                    core::Queue** queue) {
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
-    std::lock_guard<KernelMutex> lock(gws_queue_.lock_);
+    std::lock_guard<std::mutex> lock(gws_queue_.lock_);
     auto ret = (*gws_queue_.queue_).get();
     if (ret != nullptr) {
       gws_queue_.ref_ct_++;
@@ -1872,7 +1872,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   */
   bool large;
 
-  std::lock_guard<KernelMutex> lock(scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   const size_t small_limit = scratch_pool_.size() >> 3;
   bool use_reclaim = true;
 
@@ -2031,7 +2031,7 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
   uint64_t size_per_wave = AlignUp(scratch.alt_size_per_thread * properties_.WaveFrontSize, 1024);
   if (size_per_wave > MAX_WAVE_SCRATCH) return;
 
-  std::lock_guard<KernelMutex> lock(scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Ensure mapping will be in whole pages.
   scratch.alt_size = AlignUp(scratch.alt_size, 4096);
@@ -2172,7 +2172,7 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
 
-  std::lock_guard<KernelMutex> lock(t1_lock_);
+  std::lock_guard<std::mutex> lock(t1_lock_);
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
   // clock read certainty is <4us.
@@ -2394,7 +2394,7 @@ lazy_ptr<core::Blit>& GpuAgent::GetXgmiBlit(const core::Agent& dst_agent) {
   uint32_t xgmi_engine_cnt = properties_.NumSdmaXgmiEngines;
   assert((xgmi_engine_cnt > 0) && ("Illegal condition, should not happen"));
 
-  std::lock_guard<KernelMutex> lock(xgmi_peer_list_lock_);
+  std::lock_guard<std::mutex> lock(xgmi_peer_list_lock_);
 
   for (uint32_t idx = 0; idx < xgmi_peer_list_.size(); idx++) {
     uint64_t dst_handle = dst_agent.public_handle().handle;
@@ -2486,7 +2486,7 @@ lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(const core::Agent& dst_agent,
 void GpuAgent::Trim() {
   Agent::Trim();
   AsyncReclaimScratchQueues();
-  std::lock_guard<KernelMutex> lock(scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   scratch_cache_.trim(false);
 }
 

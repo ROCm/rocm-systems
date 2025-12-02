@@ -293,7 +293,7 @@ static bool DepSignalCompleteHandler(hsa_signal_value_t signal_value, void *arg 
 template <bool useGCR>
 hsa_status_t BlitSdma<useGCR>::SubmitBlockingCommand(const void* cmd, size_t cmd_size,
                                                      uint64_t size) {
-  std::unique_lock<KernelMutex> lock(lock_);
+  std::unique_lock<std::mutex> lock(lock_);
 
   // Alternate between completion signals
   // Using two allows overlapping command writing and copies

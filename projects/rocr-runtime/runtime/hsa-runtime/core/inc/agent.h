@@ -47,6 +47,7 @@
 
 #include <assert.h>
 #include <vector>
+#include <mutex>
 
 #include "core/inc/checked.h"
 #include "core/inc/isa.h"
@@ -385,7 +386,7 @@ protected:
   // Serial memory operations are needed to ensure, among other things, that allocation failures are
   // due to true OOM conditions and per region caching (Trim and Allocate must be serial and
   // exclusive to ensure this).
-  KernelMutex agent_memory_lock_;
+  std::mutex agent_memory_lock_;
 
   // Forbid copying and moving of this object
   DISALLOW_COPY_AND_ASSIGN(Agent);

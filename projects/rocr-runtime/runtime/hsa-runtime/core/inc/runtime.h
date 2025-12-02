@@ -51,6 +51,7 @@
 #include <tuple>
 #include <utility>
 #include <thread>
+#include <shared_mutex>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>
@@ -715,10 +716,10 @@ class Runtime {
 
   // Will be created before any user could call hsa_init but also could be
   // destroyed before incorrectly written programs call hsa_shutdown.
-  static __forceinline KernelMutex& bootstrap_lock() {
+  static __forceinline std::mutex& bootstrap_lock() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-    static KernelMutex* bootstrap_lock_ = new KernelMutex;
+    static std::mutex* bootstrap_lock_ = new std::mutex;
     return *bootstrap_lock_;
   }
   Runtime();
@@ -776,7 +777,7 @@ class Runtime {
   // Also ensures atomicity of pointer info queries by interlocking
   // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo
   // registered & mapped arrays.
-  KernelSharedMutex memory_lock_;
+  std::shared_mutex memory_lock_;
 
   // Array containing driver interfaces for compatible agent kernel-mode
   // drivers. Currently supports AIE agents.
@@ -828,7 +829,7 @@ class Runtime {
   std::map<const void*, AllocationRegion> allocation_map_;
 
   // Pending prefetch containers.
-  KernelMutex prefetch_lock_;
+  std::mutex prefetch_lock_;
   prefetch_map_t prefetch_map_;
 
   // Allocator using ::system_region_
@@ -866,7 +867,7 @@ class Runtime {
       system_event_handlers_;
 
   // System event handler lock
-  KernelMutex system_event_lock_;
+  std::mutex system_event_lock_;
 
   // Internal queue creation notifier
   AMD::callback_t<hsa_amd_runtime_queue_notifier> internal_queue_create_notifier_;
@@ -895,7 +896,7 @@ class Runtime {
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
   std::map<uint64_t, int> ipc_sock_server_conns_;
-  KernelMutex ipc_sock_server_lock_;
+  std::mutex ipc_sock_server_lock_;
 
  private:
   void CheckVirtualMemApiSupport();

@@ -105,32 +105,6 @@ class HybridMutex {
   DISALLOW_COPY_AND_ASSIGN(HybridMutex);
 };
 
-
-/// @brief: a class represents a kernel mutex.
-/// Uses the kernel's scheduler to keep the waiting thread from being scheduled
-/// until the lock is released (Best for long waits, though anything using
-/// a kernel object is a long wait).
-class KernelMutex {
- public:
-  KernelMutex() { lock_ = os::CreateMutex(); }
-  ~KernelMutex() { os::DestroyMutex(lock_); }
-
-  bool Try() { return os::TryAcquireMutex(lock_); }
-  bool Acquire() { return os::AcquireMutex(lock_); }
-  void Release() { os::ReleaseMutex(lock_); }
-
-  // To add compatibility with std::lock_guard
-  void lock() { Acquire(); }
-  void unlock() { Release(); }
-  bool try_lock() { return Try(); }
-
- private:
-  os::Mutex lock_;
-
-  /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(KernelMutex);
-};
-
 /// @brief: represents a spin lock.
 /// For very short hold durations on the order of the thread scheduling
 /// quanta or less.
@@ -182,39 +156,6 @@ class KernelEvent {
   DISALLOW_COPY_AND_ASSIGN(KernelEvent);
 };
 
-/// @brief: represents a yielding shared mutex.
-/// aka read/write mutex
-class KernelSharedMutex {
- public:
-  KernelSharedMutex() { lock_ = os::CreateSharedMutex(); }
-  ~KernelSharedMutex() { os::DestroySharedMutex(lock_); }
-
-  // Exclusive mode operations
-  bool Try() { return os::TryAcquireSharedMutex(lock_); }
-  bool Acquire() { return os::AcquireSharedMutex(lock_); }
-  void Release() { os::ReleaseSharedMutex(lock_); }
-
-  // To add compatibility with std::lock_guard
-  void lock() { Acquire(); }
-  void unlock() { Release(); }
-  bool try_lock() { return Try(); }
-
-  // Shared mode operations
-  bool TryShared() { return os::TrySharedAcquireSharedMutex(lock_); }
-  bool AcquireShared() { return os::SharedAcquireSharedMutex(lock_); }
-  void ReleaseShared() { os::SharedReleaseSharedMutex(lock_); }
-
-  // To add compatibility with std::shared_lock
-  void lock_shared() { AcquireShared(); }
-  void unlock_shared() { ReleaseShared(); }
-  bool try_lock_shared() { return TryShared(); }
-
- private:
-  os::SharedMutex lock_;
-
-  /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(KernelSharedMutex);
-};
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_SUTIL_LOCKS_H_
