@@ -213,3 +213,9 @@ else()
     message(AUTHOR_WARNING "clangrt builtins lib not found: ${CLANGRT_BUILTINS_FETCH_EXIT_CODE}")
   endif() # CLANGRT_BUILTINS_FETCH_EXIT_CODE Check
 endif() # CLANGRT_Error Check
+# Ensure hip::host also links the same C++ standard libraries the C++ compiler would use for host code
+if (CMAKE_CXX_IMPLICIT_LINK_LIBRARIES)
+  set_property(TARGET hip::host APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES ${CMAKE_CXX_IMPLICIT_LINK_LIBRARIES}
+  )
+endif()
