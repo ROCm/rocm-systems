@@ -78,7 +78,14 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
+    auto* qc = get_queue_controller();
+    if(qc)
+    {
+        // Clean up our tracking (sync, signals, remove from map)
+        qc->destroy_queue(hsa_queue);
+        // Call the original HSA destroy function to actually destroy the queue
+        return qc->get_core_table().hsa_queue_destroy_fn(hsa_queue);
+    }
     return HSA_STATUS_SUCCESS;
 }
 
