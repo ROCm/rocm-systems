@@ -48,7 +48,7 @@ namespace rocr {
 namespace core {
 
 HsaEvent* InterruptSignal::EventPool::alloc() {
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   if (events_.empty()) {
     if (!allEventsAllocated) {
       HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
@@ -64,7 +64,7 @@ HsaEvent* InterruptSignal::EventPool::alloc() {
 
 void InterruptSignal::EventPool::free(HsaEvent* evt) {
   if (evt == nullptr) return;
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   events_.push_back(unique_event_ptr(evt));
 }
 

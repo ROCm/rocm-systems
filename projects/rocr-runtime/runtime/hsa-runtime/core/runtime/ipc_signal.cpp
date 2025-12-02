@@ -85,7 +85,7 @@ Signal* IPCSignal::Attach(const hsa_amd_ipc_signal_t* ipc_signal_handle) {
 
   hsa_signal_t handle = SharedSignal::Convert(shared.signal());
 
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::lock_guard<KernelMutex> lock(lock_);
   Signal* ret = core::Signal::DuplicateHandle(handle);
   if (ret == nullptr) ret = new IPCSignal(std::move(shared));
   return ret;

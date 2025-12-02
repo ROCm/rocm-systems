@@ -337,7 +337,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     return;
   }
 
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::lock_guard<KernelMutex> lock(lock_);
 
   // Submit overflow packets.
   if (!overflow_.empty()) {
