@@ -12,6 +12,19 @@
 struct pmu_dimension_coords;
 
 /*
+ * Event ID Constraints
+ * ====================
+ *
+ * Hardware event IDs are 9-bit values programmed into counter SELECT registers.
+ * Event IDs exceeding this limit will be silently truncated, causing incorrect
+ * counter behavior or reading the wrong event.
+ *
+ * This limit is enforced at runtime in lookup_event_id() and should also be
+ * validated at compile-time in architecture-specific event definition files.
+ */
+#define EVENT_ID_MAX 0x1FF  /* 9-bit limit (0-511) */
+
+/*
  * Dimension Capability Flags
  * ===========================
  *
@@ -147,9 +160,10 @@ const counter_def_t* lookup_counter_by_id(counter_id_t id);
  *
  * @param counter Pointer to counter definition
  * @param arch Architecture information containing the event map
- * @return Hardware event ID, or 0 if not found
+ * @param out_event_id Output: hardware event ID (valid if return is 0)
+ * @return 0 on success, negative error code on failure (-EINVAL, -ENOENT, -ERANGE)
  */
-uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch);
+int lookup_event_id(const counter_def_t* counter, const arch_t* arch, uint32_t* out_event_id);
 
 /**
  * @brief Get pointer to the full array of counter definitions

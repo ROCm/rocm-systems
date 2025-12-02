@@ -60,6 +60,54 @@ static const struct arch_event_map gfx12_events[] = {
 
 #define GFX12_EVENT_COUNT (sizeof(gfx12_events) / sizeof(struct arch_event_map))
 
+/*
+ * Compile-time validation: Verify all event IDs are within 9-bit limit.
+ * This catches invalid event IDs at build time rather than at runtime.
+ *
+ * Note: These assertions are evaluated at compile time and generate no
+ * runtime code. If any event ID exceeds EVENT_ID_MAX, compilation will
+ * fail with a clear error message.
+ */
+#ifndef __KERNEL__
+/* Userspace builds: Use _Static_assert for each event ID */
+_Static_assert(140 <= EVENT_ID_MAX, "GL2C_EA_RDREQ event ID exceeds limit");
+_Static_assert(148 <= EVENT_ID_MAX, "GL2C_EA_RDREQ_128B event ID exceeds limit");
+_Static_assert(146 <= EVENT_ID_MAX, "GL2C_EA_RDREQ_32B event ID exceeds limit");
+_Static_assert(147 <= EVENT_ID_MAX, "GL2C_EA_RDREQ_64B event ID exceeds limit");
+_Static_assert(108 <= EVENT_ID_MAX, "GL2C_EA_WRREQ event ID exceeds limit");
+_Static_assert(114 <= EVENT_ID_MAX, "GL2C_EA_WRREQ_64B event ID exceeds limit");
+_Static_assert(122 <= EVENT_ID_MAX, "GL2C_EA_WRREQ_STALL event ID exceeds limit");
+_Static_assert(41 <= EVENT_ID_MAX, "GL2C_HIT event ID exceeds limit");
+_Static_assert(42 <= EVENT_ID_MAX, "GL2C_MISS event ID exceeds limit");
+_Static_assert(288 <= EVENT_ID_MAX, "SQC_LDS_BANK_CONFLICT event ID exceeds limit");
+_Static_assert(293 <= EVENT_ID_MAX, "SQC_LDS_IDX_ACTIVE event ID exceeds limit");
+_Static_assert(1 <= EVENT_ID_MAX, "SQ_ACCUM_PREV event ID exceeds limit");
+_Static_assert(3 <= EVENT_ID_MAX, "SQ_BUSY_CYCLES event ID exceeds limit");
+_Static_assert(44 <= EVENT_ID_MAX, "SQ_INSTS_FLAT event ID exceeds limit");
+_Static_assert(45 <= EVENT_ID_MAX, "SQ_INSTS_LDS event ID exceeds limit");
+_Static_assert(46 <= EVENT_ID_MAX, "SQ_INSTS_SALU event ID exceeds limit");
+_Static_assert(47 <= EVENT_ID_MAX, "SQ_INSTS_SMEM event ID exceeds limit");
+_Static_assert(54 <= EVENT_ID_MAX, "SQ_INSTS_TEX_LOAD event ID exceeds limit");
+_Static_assert(55 <= EVENT_ID_MAX, "SQ_INSTS_TEX_STORE event ID exceeds limit");
+_Static_assert(50 <= EVENT_ID_MAX, "SQ_INSTS_VALU event ID exceeds limit");
+_Static_assert(58 <= EVENT_ID_MAX, "SQ_INSTS_WAVE32 event ID exceeds limit");
+_Static_assert(60 <= EVENT_ID_MAX, "SQ_INSTS_WAVE32_LDS event ID exceeds limit");
+_Static_assert(61 <= EVENT_ID_MAX, "SQ_INSTS_WAVE32_VALU event ID exceeds limit");
+_Static_assert(102 <= EVENT_ID_MAX, "SQ_INST_CYCLES_VMEM event ID exceeds limit");
+_Static_assert(75 <= EVENT_ID_MAX, "SQ_INST_LEVEL_LDS event ID exceeds limit");
+_Static_assert(27 <= EVENT_ID_MAX, "SQ_WAIT_ANY event ID exceeds limit");
+_Static_assert(26 <= EVENT_ID_MAX, "SQ_WAIT_INST_ANY event ID exceeds limit");
+_Static_assert(70 <= EVENT_ID_MAX, "SQ_WAVE32_INSTS event ID exceeds limit");
+_Static_assert(71 <= EVENT_ID_MAX, "SQ_WAVE64_INSTS event ID exceeds limit");
+_Static_assert(4 <= EVENT_ID_MAX, "SQ_WAVES event ID exceeds limit");
+_Static_assert(24 <= EVENT_ID_MAX, "SQ_WAVE_CYCLES event ID exceeds limit");
+_Static_assert(45 <= EVENT_ID_MAX, "TA_BUFFER_LOAD_WAVEFRONTS event ID exceeds limit");
+_Static_assert(46 <= EVENT_ID_MAX, "TA_BUFFER_STORE_WAVEFRONTS event ID exceeds limit");
+_Static_assert(15 <= EVENT_ID_MAX, "TA_TA_BUSY event ID exceeds limit");
+_Static_assert(0 <= EVENT_ID_MAX, "GRBM_COUNT event ID exceeds limit");
+_Static_assert(2 <= EVENT_ID_MAX, "GRBM_GUI_ACTIVE event ID exceeds limit");
+#endif
+
 /**
  * @brief Get the GFX12 event mapping array
  *

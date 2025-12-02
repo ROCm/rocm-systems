@@ -261,12 +261,7 @@ static void aql_perf_session_release(struct aql_perf_session *session)
                 aql_perf_measurement_stop(measurement);
             }
 
-            /* Flush and destroy workqueue */
-            if (measurement->work_queue) {
-                flush_workqueue(measurement->work_queue);
-                destroy_workqueue(measurement->work_queue);
-                measurement->work_queue = NULL;
-            }
+            /* Note: No per-measurement workqueue to clean up - using global workqueue */
 
             /* Release counter if owned */
             if (measurement->owns_counter && measurement->allocated_counter) {
@@ -860,6 +855,7 @@ int aql_build_counter_info(uint32_t counter_id,
     uint32_t event_id;
     block_info_t *block;
     uint32_t counter_index;
+    int ret;
 
     if (!arch || !allocated_counter || !out_info || !out_block) {
         aql_err("[PMU] aql_build_counter_info: Invalid parameters");
@@ -874,9 +870,9 @@ int aql_build_counter_info(uint32_t counter_id,
     }
 
     /* Get architecture-specific event ID */
-    event_id = lookup_event_id(counter_def, arch);
-    if (event_id == 0) {
-        aql_err("[PMU] aql_build_counter_info: No event mapping for counter %s", counter_def->name);
+    ret = lookup_event_id(counter_def, arch, &event_id);
+    if (ret < 0) {
+        aql_err("[PMU] aql_build_counter_info: No event mapping for counter %s (err=%d)", counter_def->name, ret);
         return -ENOTSUPP;
     }
 
