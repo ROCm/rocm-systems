@@ -237,6 +237,13 @@ correlation_id_finalize()
     if(!get_correlation_id_map()) return;
 
     get_correlation_id_map()->rlock([](const auto& data) {
+        // Get contexts that have correlation ID retirement tracing enabled
+        auto ctxs = get_active_contexts([](const context* ctx) {
+            return (ctx->buffered_tracer &&
+                    (ctx->buffered_tracer->domains(
+                        ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+        });
+
         uint64_t ndangling = 0;
         for(const auto& itr : data)
         {
@@ -246,8 +253,32 @@ correlation_id_finalize()
                 ROCP_WARNING << "retiring dangling correlation ID " << itr->internal
                              << " from thread " << itr->thread_idx
                              << " :: remaining reference count: " << itr->get_ref_count();
-                while(itr && itr->get_ref_count() > 0 && itr->sub_ref_count() > 1)
-                {}
+
+                // Directly generate retirement record since sub_ref_count() returns early
+                // during finalization (due to get_fini_status() check)
+                if(!ctxs.empty())
+                {
+                    auto record = rocprofiler_buffer_tracing_correlation_id_retirement_record_t{
+                        .size =
+                            sizeof(rocprofiler_buffer_tracing_correlation_id_retirement_record_t),
+                        .kind      = ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+                        .timestamp = common::timestamp_ns(),
+                        .internal_correlation_id = itr->internal};
+
+                    for(const auto* ctx : ctxs)
+                    {
+                        auto* _buffer = buffer::get_buffer(ctx->buffered_tracer->buffer_data.at(
+                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT));
+
+                        auto success = CHECK_NOTNULL(_buffer)->emplace(
+                            ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+                            record);
+
+                        ROCP_CI_LOG_IF(WARNING, !success) << fmt::format(
+                            "failed to emplace correlation id retirement for {}", itr->internal);
+                    }
+                }
             }
         }
         ROCP_INFO_IF(ndangling > 0) << "retired dangling correlation IDs: " << ndangling;

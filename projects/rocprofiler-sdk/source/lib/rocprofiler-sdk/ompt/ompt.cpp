@@ -197,8 +197,7 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
     assert(state_prior->task_flags != 0);
     if(prior_task_status == ompt_task_complete)
     {
-        // FIXME? do we need to decrement the ref count
-        // state_prior->corr_id->sub_ref_count();
+        state_prior->corr_id->sub_ref_count();
         delete state_prior;
         pprior->ptr = nullptr;
     }
