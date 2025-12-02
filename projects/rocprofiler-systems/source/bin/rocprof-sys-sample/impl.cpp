@@ -351,7 +351,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                       "Generate a detailed trace (perfetto output) from cached data ")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "ROCPROFSYS_TRACE_CACHED", p.get<bool>("trace-cached"));
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_TRACE_CACHED", p.get<bool>("trace-cached"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument(
