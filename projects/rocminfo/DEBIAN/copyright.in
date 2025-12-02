@@ -5,4 +5,3 @@ Source: https://github.com/ROCm/rocm-systems
 Files: *
 License: @DEB_LICENSE@
 Copyright: @DEB_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc. All rights reserved.
-

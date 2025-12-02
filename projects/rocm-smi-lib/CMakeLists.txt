@@ -40,8 +40,16 @@ set(SHARE_INSTALL_PREFIX
 find_program (GIT NAMES git)
 
 # Set Lintian Support Flags
-set( BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set(BUILD_ENABLE_LINTIAN_OVERRIDES
+    OFF
+    CACHE BOOL
+    "Enable/Disable Lintian Overrides"
+)
+set(BUILD_DEBIAN_PKGING_FLAG
+    OFF
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
 
 # sets DRM_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
@@ -192,12 +200,12 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 
 ## set components
 if(ENABLE_ASAN_PACKAGING)
-  # ASAN Package requires only asan component with libraries and license file
-  set(CPACK_COMPONENTS_ALL asan)
-  set( COMP_TYPE "asan" )
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
+    set(COMP_TYPE "asan")
 else()
-  set(CPACK_COMPONENTS_ALL dev tests)
-  set( COMP_TYPE "dev" )
+    set(CPACK_COMPONENTS_ALL dev tests)
+    set(COMP_TYPE "dev")
 endif()
 
 # Enable Component Mode & Install Settings
@@ -305,8 +313,8 @@ else()
   set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
 endif()
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(PKG_MAINTAINER_NM     "RocmSMILib Support")
-set(PKG_MAINTAINER_EMAIL  "rocm-smi.support@amd.com")
+set(PKG_MAINTAINER_NM "RocmSMILib Support")
+set(PKG_MAINTAINER_EMAIL "rocm-smi.support@amd.com")
 set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
 
@@ -394,30 +402,34 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
 # Configure Lintian Specific Package Data
-configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 # Custom installation for Debian Lintian File
-if( BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG )
-    set( OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}" )
-    set( OVERRIDE_TEMP_INSTALL_LOC "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}" )
+if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
+    set(OVERRIDE_FILE
+        "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+    )
+    set(OVERRIDE_TEMP_INSTALL_LOC
+        "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}"
+    )
     if(BUILD_SHARED_LIBS)
-      set(CPACK_INSTALL_COMMANDS
-          "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
-          "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
-      )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+        )
     else()
-      set( OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev" )
-      set( OVERRIDE_FILE_STATIC_DEST
-           "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}" )
-      set(CPACK_INSTALL_COMMANDS
-          "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
-          "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
-      )
+        set(OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev")
+        set(OVERRIDE_FILE_STATIC_DEST
+            "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}"
+        )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
+        )
     endif()
 endif()
 
-
-include (CPack)
+include(CPack)
 
 cpack_add_component(
   dev
