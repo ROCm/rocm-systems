@@ -4786,7 +4786,7 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_P2P_status
+### amdsmi_topo_get_p2p_status
 
 Description: Retrieve the connection type and P2P capabilities between 2 GPUs
 
@@ -4802,7 +4802,7 @@ Fields | Description
 `type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `cap` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`is_iolink_coherent`</td><td>1 == True; 0 == False; Uint_max = Undefined</td></tr><tr><td>`is_iolink_atomics_32bit`</td><td>Supports 32bit atomics</td></tr><tr><td>`is_iolink_atomics_64bit`</td><td>Supports 64bit atomics</td></tr><tr><td>`is_iolink_dma`</td><td>Supports DMA</td></tr><tr><td>`is_iolink_bi_directional`</td><td>Is the IOLink Bidirectional</td></tr></tbody></table>
 
-Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
+Exceptions that can be thrown by `amdsmi_topo_get_p2p_status` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -4825,7 +4825,7 @@ try:
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        link_type = amdsmi_get_P2P_status(processor_handle_src, processor_handle_dest)
+        link_type = amdsmi_topo_get_p2p_status(processor_handle_src, processor_handle_dest)
         if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
             print('internal')
         if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
