@@ -124,6 +124,31 @@ convert_ptrace_error(int error)
         }                                                                                          \
     }
 
+// How long to wait for a process to start or stop after a ptrace operation
+constexpr size_t PTRACE_BREAKPOINT_TIMEOUT_MS = 10000;
+// How long to wait for the signal handler thread to start or stop
+constexpr size_t PTRACE_HANDLER_START_STOP_TIMEOUT_MS = 10000;
+
+template <typename T>
+bool
+wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
+{
+    auto start_time       = std::chrono::steady_clock::now();
+    auto timeout_duration = std::chrono::milliseconds(timeout_ms);
+    auto end_time         = start_time + timeout_duration;
+
+    while(std::chrono::steady_clock::now() < end_time)
+    {
+        if(flag.load() != condition)
+        {
+            return true;
+        }
+        std::this_thread::yield();
+    }
+    // Last chance check in case we were scheduled after timeout
+    return flag.load() != condition;
+}
+
 }  // namespace
 
 PTraceSession::PTraceSession(int _pid)
@@ -188,15 +213,20 @@ PTraceSession::start_signal_handler()
 {
     if(m_ptrace_signal_handler_state != PTRACE_SIGNAL_HANDLER_STATE_INITIAL)
     {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] PTraceSession signal handler was in an "
+                      "unexpected state when started";
         return ROCATTACH_STATUS_ERROR;
     }
     m_ptrace_signal_handler_thread = std::thread(ptrace_signal_handler_func,
                                                  m_pid,
                                                  std::ref(m_ptrace_signal_handler_state),
                                                  std::ref(m_ptrace_signal_handler_error));
-    while(m_ptrace_signal_handler_state.load() == PTRACE_SIGNAL_HANDLER_STATE_INITIAL)
+    if(!wait_for_ne(m_ptrace_signal_handler_state,
+                    PTRACE_SIGNAL_HANDLER_STATE_INITIAL,
+                    PTRACE_HANDLER_START_STOP_TIMEOUT_MS))
     {
-        std::this_thread::yield();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] PTraceSession signal handler failed to start";
+        return ROCATTACH_STATUS_ERROR;
     }
     return ROCATTACH_STATUS_SUCCESS;
 }
@@ -217,9 +247,15 @@ PTraceSession::stop_signal_handler()
     else if(m_ptrace_signal_handler_state.load() != PTRACE_SIGNAL_HANDLER_STATE_FINAL)
     {
         m_ptrace_signal_handler_state.store(PTRACE_SIGNAL_HANDLER_STATE_DETACHING);
-        while(m_ptrace_signal_handler_state.load() == PTRACE_SIGNAL_HANDLER_STATE_DETACHING)
+        if(!wait_for_ne(m_ptrace_signal_handler_state,
+                        PTRACE_SIGNAL_HANDLER_STATE_DETACHING,
+                        PTRACE_HANDLER_START_STOP_TIMEOUT_MS))
         {
-            std::this_thread::yield();
+            status = m_ptrace_signal_handler_error.load();
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] PTraceSession signal handler failed to stop "
+                          "when requested. Last status: "
+                       << status;
+            return status;
         }
         m_ptrace_signal_handler_thread.join();
         status = m_ptrace_signal_handler_error.load();
@@ -292,7 +328,7 @@ PTraceSession::ptrace_signal_handler_func(
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] process " << _pid << " stopped by signal "
                        << sig;
             // If the signal is SIGTRAP (5) AND we were expecting a breakpoint, change state to
-            // signal the update, otherwise continue forward it to the process. NOTE: If our
+            // signal the update, otherwise continue to forward it to the process. NOTE: If our
             // injection causes a SIGSEGV, we can technically recover by handling the signal and
             // restoring the code, which would allow the user code to continue normally. For now,
             // this will crash the user app.
@@ -465,10 +501,15 @@ PTraceSession::wait_for_breakpoint()
 
     // Continue until breakpoint is hit
     ROCATTACH_CALL(cont());
-    while(m_ptrace_signal_handler_state.load() ==
-          PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT)
+    if(!wait_for_ne(m_ptrace_signal_handler_state,
+                    PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT,
+                    PTRACE_BREAKPOINT_TIMEOUT_MS))
     {
-        std::this_thread::yield();
+        auto status = m_ptrace_signal_handler_error.load();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] signal handler thread did not receive expected "
+                      "breakpoint within timeout. Last status: "
+                   << status;
+        return status;
     }
 
     // If signal handler is not ATTACHED, error has occurred
@@ -507,10 +548,15 @@ PTraceSession::wait_for_stop()
 
     // Call interrupt and wait until process is stopped
     PTRACE_CALL(PTRACE_INTERRUPT, m_pid, NULL, NULL);
-    while(m_ptrace_signal_handler_state.load() ==
-          PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT)
+    if(!wait_for_ne(m_ptrace_signal_handler_state,
+                    PTRACE_SIGNAL_HANDLER_STATE_WAITING_FOR_BREAKPOINT,
+                    PTRACE_BREAKPOINT_TIMEOUT_MS))
     {
-        std::this_thread::yield();
+        auto status = m_ptrace_signal_handler_error.load();
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] signal handler thread did not receive expected "
+                      "breakpoint within timeout. Last status: "
+                   << status;
+        return status;
     }
 
     // If signal handler is not ATTACHED, error has occurred
