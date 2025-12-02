@@ -23,13 +23,13 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 
 ```{note}
 The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
-control the internal GPU metrics cache duration (ms). 
+control the internal GPU metrics cache duration (ms).
 Default 1, set to 0 to disable.
 ```
 
 ```{note}
 The environment variable ``AMDSMI_ASIC_INFO_CACHE_MS`` may be set to
-control the internal GPU asic info cache duration (ms). 
+control the internal GPU asic info cache duration (ms).
 Default 10000 ms, set to 0 to disable.
 ```
 

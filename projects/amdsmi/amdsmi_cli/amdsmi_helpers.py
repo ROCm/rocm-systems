@@ -1215,17 +1215,17 @@ class AMDSMIHelpers():
 
     @lru_cache(maxsize=128)
     def _cached_group_name(self, gid: int) -> str:
-        try: 
+        try:
             return grp.getgrgid(gid).gr_name
-        except Exception: 
+        except Exception:
             # In containers, the UID may not resolve to a name
             return str(gid)
 
     @lru_cache(maxsize=128)
     def _cached_user_name(self, uid: int) -> str:
-        try: 
+        try:
             return pwd.getpwuid(uid).pw_name
-        except Exception: 
+        except Exception:
             # In containers, the GID may not resolve to a name
             return str(uid)
 
@@ -1286,11 +1286,11 @@ class AMDSMIHelpers():
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
-        
+
         Args:
             check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
             check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
-        
+
         Returns:
             bool: True if all checked devices are accessible, False if any permission errors found
         """
@@ -1300,7 +1300,7 @@ class AMDSMIHelpers():
             return True
 
         paths_to_check = []
-        
+
         # Only add paths for device types that are flagged for checking
         if check_render and os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
@@ -1319,7 +1319,7 @@ class AMDSMIHelpers():
             # Do not try to open all paths, may cause driver issues.
             # Read access is sufficient to check permissions.
             #
-            # Reason: GPUs which support partitioning (memory/compute), 
+            # Reason: GPUs which support partitioning (memory/compute),
             # logical devices will not be valid until configured.
             # See `sudo amd-smi set -h` or applicable APIs
             # to configure on supported hardware.
@@ -1525,14 +1525,14 @@ class AMDSMIHelpers():
                 error_severity = entry.get("error_severity", "").lower()
                 notify_type = entry.get("notify_type", "")
                 prefix = self._severity_as_string(error_severity, notify_type, True)
-            
+
                 # Generate filenames
                 count = self.get_cper_count() + 1
                 cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
-            
+
                 # Write CPER binary file
                 try:
                     self.write_binary(
@@ -1542,7 +1542,7 @@ class AMDSMIHelpers():
                     )
                 except Exception as e:
                     logging.debug(f"Failed to write CPER file {cper_path}: {e}")
-            
+
                 # Write JSON metadata file
                 try:
                     with json_path.open("w") as cper_json_file:
@@ -1554,7 +1554,7 @@ class AMDSMIHelpers():
                         )
                 except Exception as e:
                     logging.debug(f"Failed to write JSON file {json_path}: {e}")
-            
+
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
@@ -1874,13 +1874,13 @@ class AMDSMIHelpers():
         """
         Helper method to compute metric version, partition ID, and num_partition for dynamic metrics.
         Handles logging updates internally for reusability.
-        
+
         Args:
             gpu_metrics_info (dict): GPU metrics info from amdsmi_get_gpu_metrics_info.
             is_partition_metrics (bool): Whether this is for partition metrics.
             gpu_id (int): GPU ID for logging.
             gpu_handle: GPU device handle for KFD info retrieval.
-        
+
         Returns:
             dict: {
                 'metric_version': float or "N/A",
@@ -1898,7 +1898,7 @@ class AMDSMIHelpers():
                 metric_version = float(f"{format_rev}.{content_rev}")
             except ValueError:
                 metric_version = "N/A"  # Fallback if conversion fails
-        
+
         # Retrieve partition ID from KFD info
         partition_id = "N/A"
         try:
@@ -1906,7 +1906,7 @@ class AMDSMIHelpers():
             partition_id = kfd_info.get('current_partition_id', "N/A")
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get current partition ID for GPU %s | %s", gpu_id, e.get_error_info())
-        
+
         # Determine num_partition with fallback logic for dynamic metrics
         num_partition = gpu_metrics_info.get('num_partition', "N/A")
         if metric_version != "N/A" and num_partition == "N/A":
@@ -1920,22 +1920,22 @@ class AMDSMIHelpers():
                 # Fallback to partition_id if partitions exist but num_partition is unavailable
                 num_partition = partition_id
             # Else: Remains "N/A" if no conditions match
-        
+
         # Alias num_xcp for XCP metrics usage
         num_xcp = num_partition
-        
+
         # Debug logging
         logging.debug(
             "GPU %s | Metric version: %s, num_partition: %s, partition_id: %s, num_xcp: %s",
             gpu_id, metric_version, num_partition, partition_id, num_xcp
         )
-        
+
         return {
             'metric_version': metric_version,
             'partition_id': partition_id,
             'num_partition': num_partition,
             'num_xcp': num_xcp
-        }    
+        }
 
     def get_gpu_board_temperatures(self, device_handle, gpu_id, logger):
         """Get GPU board temperature readings
