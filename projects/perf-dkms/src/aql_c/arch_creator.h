@@ -21,7 +21,7 @@
  * @note Caller is responsible for freeing with arch_destroy()
  * @see arch_destroy(), create_gfx12_arch()
  */
-arch_t* arch_create_by_name(const char* arch_name);
+arch_t *arch_create_by_name(const char *arch_name);
 
 /**
  * @brief Create a GFX12 architecture structure
@@ -34,7 +34,7 @@ arch_t* arch_create_by_name(const char* arch_name);
  * @note Caller must call arch_destroy() to free the returned structure
  * @see arch_create_by_name(), arch_destroy()
  */
-arch_t* arch_create_gfx12(void);
+arch_t *arch_create_gfx12(void);
 
 /**
  * @brief Destroy an architecture structure and free all memory
@@ -47,7 +47,7 @@ arch_t* arch_create_gfx12(void);
  * @note Safe to call with NULL pointer
  * @see arch_create_by_name(), arch_create_gfx12()
  */
-void arch_destroy(arch_t* arch);
+void arch_destroy(arch_t *arch);
 
 /**
  * @brief Initialize an architecture structure (currently unused)
@@ -61,6 +61,6 @@ void arch_destroy(arch_t* arch);
  *
  * @note This function is not currently used; use arch_create_by_name() instead
  */
-int arch_init(arch_t* arch, arch_type_t type);
+int arch_init(arch_t *arch, arch_type_t type);
 
 #endif /* ARCH_CREATOR_H */

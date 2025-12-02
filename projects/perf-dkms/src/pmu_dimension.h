@@ -47,16 +47,16 @@ typedef uint64_t u64;
  */
 
 /* Bit field layout constants */
-#define PMU_DIM_XCC_SHIFT       0
-#define PMU_DIM_XCC_MASK        0xFF
-#define PMU_DIM_SE_SHIFT        8
-#define PMU_DIM_SE_MASK         0xFF
-#define PMU_DIM_SA_SHIFT        16
-#define PMU_DIM_SA_MASK         0xFF
-#define PMU_DIM_WGP_SHIFT       24
-#define PMU_DIM_WGP_MASK        0xFF
-#define PMU_DIM_CU_SHIFT        32
-#define PMU_DIM_CU_MASK         0xFF
+#define PMU_DIM_XCC_SHIFT 0
+#define PMU_DIM_XCC_MASK 0xFF
+#define PMU_DIM_SE_SHIFT 8
+#define PMU_DIM_SE_MASK 0xFF
+#define PMU_DIM_SA_SHIFT 16
+#define PMU_DIM_SA_MASK 0xFF
+#define PMU_DIM_WGP_SHIFT 24
+#define PMU_DIM_WGP_MASK 0xFF
+#define PMU_DIM_CU_SHIFT 32
+#define PMU_DIM_CU_MASK 0xFF
 #define PMU_DIM_AGGREGATE_SHIFT 40
 
 /**
@@ -120,8 +120,7 @@ struct pmu_dimension_limits {
  * wgp=0,cu=0). If config1 is 0 (no dimensions specified), the driver uses
  * broadcast mode and aggregates across all instances.
  */
-static inline void pmu_extract_dimensions(u64 config1,
-					  struct pmu_dimension_coords *dims)
+static inline void pmu_extract_dimensions(u64 config1, struct pmu_dimension_coords *dims)
 {
 	dims->xcc = (config1 >> PMU_DIM_XCC_SHIFT) & PMU_DIM_XCC_MASK;
 	dims->se = (config1 >> PMU_DIM_SE_SHIFT) & PMU_DIM_SE_MASK;

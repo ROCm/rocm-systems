@@ -21,7 +21,7 @@
 
 /* Base counter definitions - architecture agnostic */
 static const counter_def_t base_counters[] = {
-    /*
+	/*
      * GL2C Block Counters - DIM_SE_SA (L2 Cache per Shader Array)
      *
      * Dimension rationale: The GL2C (Graphics L2 Cache) is a hardware block that
@@ -32,17 +32,17 @@ static const counter_def_t base_counters[] = {
      *
      * Hardware topology: SE -> SA -> [GL2C instance] -> WGPs (share this cache)
      */
-    {COUNTER_GL2C_EA_RDREQ, "gl2c_ea_rdreq", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_RDREQ_128B, "gl2c_ea_rdreq_128b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_RDREQ_32B, "gl2c_ea_rdreq_32b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_RDREQ_64B, "gl2c_ea_rdreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_WRREQ, "gl2c_ea_wrreq", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_WRREQ_64B, "gl2c_ea_wrreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_EA_WRREQ_STALL, "gl2c_ea_wrreq_stall", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_HIT, "gl2c_hit", HW_IP_BLOCK_GL2C, DIM_SE_SA},
-    {COUNTER_GL2C_MISS, "gl2c_miss", HW_IP_BLOCK_GL2C, DIM_SE_SA},
+	{ COUNTER_GL2C_EA_RDREQ, "gl2c_ea_rdreq", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_RDREQ_128B, "gl2c_ea_rdreq_128b", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_RDREQ_32B, "gl2c_ea_rdreq_32b", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_RDREQ_64B, "gl2c_ea_rdreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_WRREQ, "gl2c_ea_wrreq", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_WRREQ_64B, "gl2c_ea_wrreq_64b", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_EA_WRREQ_STALL, "gl2c_ea_wrreq_stall", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_HIT, "gl2c_hit", HW_IP_BLOCK_GL2C, DIM_SE_SA },
+	{ COUNTER_GL2C_MISS, "gl2c_miss", HW_IP_BLOCK_GL2C, DIM_SE_SA },
 
-    /*
+	/*
      * SQ Block Counters - DIM_SE_SA_WGP (Shader Quad per Work Group Processor)
      *
      * Dimension rationale: The SQ (Shader Quad / Shader Engine Sequencer) contains
@@ -54,30 +54,30 @@ static const counter_def_t base_counters[] = {
      *
      * Hardware topology: SE -> SA -> WGP -> [SQ instance with CUs/SIMDs]
      */
-    {COUNTER_SQC_LDS_BANK_CONFLICT, "sqc_lds_bank_conflict", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQC_LDS_IDX_ACTIVE, "sqc_lds_idx_active", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_ACCUM_PREV, "sq_accum_prev", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_BUSY_CYCLES, "sq_busy_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_FLAT, "sq_insts_flat", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_LDS, "sq_insts_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_SALU, "sq_insts_salu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_SMEM, "sq_insts_smem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_TEX_LOAD, "sq_insts_tex_load", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_TEX_STORE, "sq_insts_tex_store", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_VALU, "sq_insts_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_WAVE32, "sq_insts_wave32", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_WAVE32_LDS, "sq_insts_wave32_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INSTS_WAVE32_VALU, "sq_insts_wave32_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INST_CYCLES_VMEM, "sq_inst_cycles_vmem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_INST_LEVEL_LDS, "sq_inst_level_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAIT_ANY, "sq_wait_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAIT_INST_ANY, "sq_wait_inst_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAVE32_INSTS, "sq_wave32_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAVE64_INSTS, "sq_wave64_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAVES, "sq_waves", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
-    {COUNTER_SQ_WAVE_CYCLES, "sq_wave_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP},
+	{ COUNTER_SQC_LDS_BANK_CONFLICT, "sqc_lds_bank_conflict", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQC_LDS_IDX_ACTIVE, "sqc_lds_idx_active", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_ACCUM_PREV, "sq_accum_prev", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_BUSY_CYCLES, "sq_busy_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_FLAT, "sq_insts_flat", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_LDS, "sq_insts_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_SALU, "sq_insts_salu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_SMEM, "sq_insts_smem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_TEX_LOAD, "sq_insts_tex_load", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_TEX_STORE, "sq_insts_tex_store", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_VALU, "sq_insts_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_WAVE32, "sq_insts_wave32", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_WAVE32_LDS, "sq_insts_wave32_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INSTS_WAVE32_VALU, "sq_insts_wave32_valu", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INST_CYCLES_VMEM, "sq_inst_cycles_vmem", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_INST_LEVEL_LDS, "sq_inst_level_lds", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAIT_ANY, "sq_wait_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAIT_INST_ANY, "sq_wait_inst_any", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAVE32_INSTS, "sq_wave32_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAVE64_INSTS, "sq_wave64_insts", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAVES, "sq_waves", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
+	{ COUNTER_SQ_WAVE_CYCLES, "sq_wave_cycles", HW_IP_BLOCK_SQ, DIM_SE_SA_WGP },
 
-    /*
+	/*
      * TA Block Counters - DIM_SE_SA_WGP (Texture Addresser per WGP)
      *
      * Dimension rationale: The TA (Texture Addresser) handles texture and buffer
@@ -86,11 +86,13 @@ static const counter_def_t base_counters[] = {
      *
      * Hardware topology: SE -> SA -> WGP -> [TA instance]
      */
-    {COUNTER_TA_BUFFER_LOAD_WAVEFRONTS, "ta_buffer_load_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
-    {COUNTER_TA_BUFFER_STORE_WAVEFRONTS, "ta_buffer_store_wavefronts", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
-    {COUNTER_TA_TA_BUSY, "ta_ta_busy", HW_IP_BLOCK_TA, DIM_SE_SA_WGP},
+	{ COUNTER_TA_BUFFER_LOAD_WAVEFRONTS, "ta_buffer_load_wavefronts", HW_IP_BLOCK_TA,
+	  DIM_SE_SA_WGP },
+	{ COUNTER_TA_BUFFER_STORE_WAVEFRONTS, "ta_buffer_store_wavefronts", HW_IP_BLOCK_TA,
+	  DIM_SE_SA_WGP },
+	{ COUNTER_TA_TA_BUSY, "ta_ta_busy", HW_IP_BLOCK_TA, DIM_SE_SA_WGP },
 
-    /*
+	/*
      * GRBM Block Counters - DIM_NONE (Global, not per-dimension)
      *
      * Dimension rationale: The GRBM (Graphics Register Bus Manager) is a global
@@ -101,12 +103,11 @@ static const counter_def_t base_counters[] = {
      *
      * Hardware topology: GPU -> [Single GRBM instance] (global, not replicated)
      */
-    {COUNTER_GRBM_COUNT, "grbm_count", HW_IP_BLOCK_GRBM, DIM_NONE},
-    {COUNTER_GRBM_GUI_ACTIVE, "grbm_gui_active", HW_IP_BLOCK_GRBM, DIM_NONE},
+	{ COUNTER_GRBM_COUNT, "grbm_count", HW_IP_BLOCK_GRBM, DIM_NONE },
+	{ COUNTER_GRBM_GUI_ACTIVE, "grbm_gui_active", HW_IP_BLOCK_GRBM, DIM_NONE },
 };
 
 #define BASE_COUNTER_COUNT (sizeof(base_counters) / sizeof(counter_def_t))
-
 
 /* Lookup functions */
 
@@ -129,15 +130,17 @@ static const counter_def_t base_counters[] = {
  * @see lookup_counter_by_id(), lookup_event_id(), BlockInfoMap::Find in
  *      projects/aqlprofile/src/core/pm4_factory.h:89
  */
-const counter_def_t* lookup_counter_by_name(const char* counter_name) {
-    if (!counter_name) return NULL;
+const counter_def_t *lookup_counter_by_name(const char *counter_name)
+{
+	if (!counter_name)
+		return NULL;
 
-    for (size_t i = 0; i < BASE_COUNTER_COUNT; i++) {
-        if (strcmp(base_counters[i].name, counter_name) == 0) {
-            return &base_counters[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < BASE_COUNTER_COUNT; i++) {
+		if (strcmp(base_counters[i].name, counter_name) == 0) {
+			return &base_counters[i];
+		}
+	}
+	return NULL;
 }
 
 /**
@@ -152,15 +155,17 @@ const counter_def_t* lookup_counter_by_name(const char* counter_name) {
  * @note The returned pointer is valid for the lifetime of the program
  * @see lookup_counter_by_name(), lookup_event_id()
  */
-const counter_def_t* lookup_counter_by_id(counter_id_t id) {
-    if (id <= 0 || id >= COUNTER_ID_LAST) return NULL;
+const counter_def_t *lookup_counter_by_id(counter_id_t id)
+{
+	if (id <= 0 || id >= COUNTER_ID_LAST)
+		return NULL;
 
-    for (size_t i = 0; i < BASE_COUNTER_COUNT; i++) {
-        if (base_counters[i].id == id) {
-            return &base_counters[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < BASE_COUNTER_COUNT; i++) {
+		if (base_counters[i].id == id) {
+			return &base_counters[i];
+		}
+	}
+	return NULL;
 }
 
 /**
@@ -185,34 +190,38 @@ const counter_def_t* lookup_counter_by_id(counter_id_t id) {
  * @see lookup_counter_by_name(), GpuBlockInfo::select_value in
  *      projects/aqlprofile/def/gpu_block_info.h
  */
-int lookup_event_id(const counter_def_t* counter, const arch_t* arch, uint32_t* out_event_id) {
-    uint32_t event_id;
+int lookup_event_id(const counter_def_t *counter, const arch_t *arch, uint32_t *out_event_id)
+{
+	uint32_t event_id;
 
-    if (!counter || !arch || !out_event_id) return -EINVAL;
+	if (!counter || !arch || !out_event_id)
+		return -EINVAL;
 
-    /* Use the event map from the architecture structure */
-    if (!arch->event_map || arch->event_count == 0) return -ENOENT;
+	/* Use the event map from the architecture structure */
+	if (!arch->event_map || arch->event_count == 0)
+		return -ENOENT;
 
-    for (size_t i = 0; i < arch->event_count; i++) {
-        if (arch->event_map[i].counter_id == counter->id) {
-            event_id = arch->event_map[i].event_id;
+	for (size_t i = 0; i < arch->event_count; i++) {
+		if (arch->event_map[i].counter_id == counter->id) {
+			event_id = arch->event_map[i].event_id;
 
-            /* Validate 9-bit limit - event IDs are programmed into SELECT registers
+			/* Validate 9-bit limit - event IDs are programmed into SELECT registers
              * which only have 9 bits for event selection. Values exceeding this will
              * be silently truncated, causing wrong events to be counted. */
-            if (event_id > EVENT_ID_MAX) {
+			if (event_id > EVENT_ID_MAX) {
 #ifdef __KERNEL__
-                printk(KERN_ERR "AQL_PERF: Event ID 0x%x for counter '%s' exceeds 9-bit limit (max=0x%x)\n",
-                       event_id, counter->name, EVENT_ID_MAX);
+				printk(KERN_ERR
+				       "AQL_PERF: Event ID 0x%x for counter '%s' exceeds 9-bit limit (max=0x%x)\n",
+				       event_id, counter->name, EVENT_ID_MAX);
 #endif
-                return -ERANGE;  /* Invalid event ID */
-            }
+				return -ERANGE; /* Invalid event ID */
+			}
 
-            *out_event_id = event_id;
-            return 0;  /* Success */
-        }
-    }
-    return -ENOENT;  /* Counter not found in event map */
+			*out_event_id = event_id;
+			return 0; /* Success */
+		}
+	}
+	return -ENOENT; /* Counter not found in event map */
 }
 
 /**
@@ -227,8 +236,9 @@ int lookup_event_id(const counter_def_t* counter, const arch_t* arch, uint32_t* 
  * @note Array is valid for the lifetime of the program
  * @see get_counter_count()
  */
-const counter_def_t* get_all_counters(void) {
-    return base_counters;
+const counter_def_t *get_all_counters(void)
+{
+	return base_counters;
 }
 
 /**
@@ -238,8 +248,9 @@ const counter_def_t* get_all_counters(void) {
  *
  * @see get_all_counters()
  */
-size_t get_counter_count(void) {
-    return BASE_COUNTER_COUNT;
+size_t get_counter_count(void)
+{
+	return BASE_COUNTER_COUNT;
 }
 
 /**
@@ -262,44 +273,44 @@ size_t get_counter_count(void) {
  * @param dims Requested dimension coordinates
  * @return 0 on success, -EINVAL if counter doesn't support requested dimensions
  */
-int pmu_validate_counter_dimensions(const counter_def_t* counter,
-                                    const struct pmu_dimension_coords* dims)
+int pmu_validate_counter_dimensions(const counter_def_t *counter,
+				    const struct pmu_dimension_coords *dims)
 {
-    uint32_t requested_dims = 0;
+	uint32_t requested_dims = 0;
 
-    if (!counter || !dims)
-        return -EINVAL;
+	if (!counter || !dims)
+		return -EINVAL;
 
-    /* If dimensions not specified, always valid */
-    if (!dims->valid)
-        return 0;
+	/* If dimensions not specified, always valid */
+	if (!dims->valid)
+		return 0;
 
-    /* Aggregate mode is always allowed */
-    if (dims->aggregate)
-        return 0;
+	/* Aggregate mode is always allowed */
+	if (dims->aggregate)
+		return 0;
 
-    /* Build a bitmap of requested dimensions.
+	/* Build a bitmap of requested dimensions.
      * Note: We check != 0 because dimension value 0 is indistinguishable from
      * "not specified" in the current config1 encoding. This means se=0 cannot
      * be explicitly requested (it's the default). This is a known limitation. */
-    if (dims->xcc != 0)
-        requested_dims |= DIM_XCC;
-    if (dims->se != 0)
-        requested_dims |= DIM_SE;
-    if (dims->sa != 0)
-        requested_dims |= DIM_SA;
-    if (dims->wgp != 0)
-        requested_dims |= DIM_WGP;
-    if (dims->cu != 0)
-        requested_dims |= DIM_CU;
+	if (dims->xcc != 0)
+		requested_dims |= DIM_XCC;
+	if (dims->se != 0)
+		requested_dims |= DIM_SE;
+	if (dims->sa != 0)
+		requested_dims |= DIM_SA;
+	if (dims->wgp != 0)
+		requested_dims |= DIM_WGP;
+	if (dims->cu != 0)
+		requested_dims |= DIM_CU;
 
-    /* Special case: if counter supports DIM_NONE, reject any dimensions */
-    if (counter->supported_dimensions == DIM_NONE && requested_dims != 0)
-        return -EINVAL;
+	/* Special case: if counter supports DIM_NONE, reject any dimensions */
+	if (counter->supported_dimensions == DIM_NONE && requested_dims != 0)
+		return -EINVAL;
 
-    /* Check if all requested dimensions are supported */
-    if ((requested_dims & ~counter->supported_dimensions) != 0)
-        return -EINVAL;
+	/* Check if all requested dimensions are supported */
+	if ((requested_dims & ~counter->supported_dimensions) != 0)
+		return -EINVAL;
 
-    return 0;
+	return 0;
 }

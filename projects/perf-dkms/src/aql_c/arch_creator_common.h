@@ -25,7 +25,7 @@
 #endif
 
 /* Function declarations for architecture-specific creators */
-arch_t* create_gfx12_arch(void);
+arch_t *create_gfx12_arch(void);
 /* Future architecture creators can be declared here:
  * arch_t* create_gfx11_arch(void);
  * arch_t* create_gfx10_arch(void);
@@ -44,10 +44,10 @@ arch_t* create_gfx12_arch(void);
  * different parts of the GPU.
  */
 typedef struct {
-    uint32_t se;    /* Shader Engine index (0 to num_se-1) */
-    uint32_t sa;    /* Shader Array index within SE (0 to num_sa-1) */
-    uint32_t wgp;   /* Work Group Processor index within SA (0 to wgp_per_sa-1) */
-    uint32_t flat_index; /* Equivalent flat array index */
+	uint32_t se; /* Shader Engine index (0 to num_se-1) */
+	uint32_t sa; /* Shader Array index within SE (0 to num_sa-1) */
+	uint32_t wgp; /* Work Group Processor index within SA (0 to wgp_per_sa-1) */
+	uint32_t flat_index; /* Equivalent flat array index */
 } dimension_coords_t;
 
 /**
@@ -70,8 +70,9 @@ typedef struct {
  * @see decode_dimension_index()
  */
 static inline uint32_t encode_dimension_index(uint32_t se, uint32_t sa, uint32_t wgp,
-                                              uint32_t sa_count, uint32_t wgp_per_sa) {
-    return (se * sa_count * wgp_per_sa) + (sa * wgp_per_sa) + wgp;
+					      uint32_t sa_count, uint32_t wgp_per_sa)
+{
+	return (se * sa_count * wgp_per_sa) + (sa * wgp_per_sa) + wgp;
 }
 
 /**
@@ -91,19 +92,20 @@ static inline uint32_t encode_dimension_index(uint32_t se, uint32_t sa, uint32_t
  * @note Coordinates are calculated using integer division and modulo
  * @see encode_dimension_index(), validate_dimension_coords()
  */
-static inline dimension_coords_t decode_dimension_index(uint32_t flat_index,
-                                                        uint32_t sa_count, uint32_t wgp_per_sa) {
-    dimension_coords_t coords;
-    coords.flat_index = flat_index;
+static inline dimension_coords_t decode_dimension_index(uint32_t flat_index, uint32_t sa_count,
+							uint32_t wgp_per_sa)
+{
+	dimension_coords_t coords;
+	coords.flat_index = flat_index;
 
-    /* Calculate coordinates using integer division */
-    uint32_t sa_wgp_total = sa_count * wgp_per_sa;
-    coords.se = flat_index / sa_wgp_total;
-    uint32_t remainder = flat_index % sa_wgp_total;
-    coords.sa = remainder / wgp_per_sa;
-    coords.wgp = remainder % wgp_per_sa;
+	/* Calculate coordinates using integer division */
+	uint32_t sa_wgp_total = sa_count * wgp_per_sa;
+	coords.se = flat_index / sa_wgp_total;
+	uint32_t remainder = flat_index % sa_wgp_total;
+	coords.sa = remainder / wgp_per_sa;
+	coords.wgp = remainder % wgp_per_sa;
 
-    return coords;
+	return coords;
 }
 
 /**
@@ -122,12 +124,12 @@ static inline dimension_coords_t decode_dimension_index(uint32_t flat_index,
  * @note Returns 0 (invalid) if coords pointer is NULL
  * @see decode_dimension_index(), encode_dimension_index()
  */
-static inline int validate_dimension_coords(const dimension_coords_t* coords,
-                                            uint32_t se_count, uint32_t sa_count, uint32_t wgp_per_sa) {
-    if (!coords) return 0;
-    return (coords->se < se_count &&
-            coords->sa < sa_count &&
-            coords->wgp < wgp_per_sa);
+static inline int validate_dimension_coords(const dimension_coords_t *coords, uint32_t se_count,
+					    uint32_t sa_count, uint32_t wgp_per_sa)
+{
+	if (!coords)
+		return 0;
+	return (coords->se < se_count && coords->sa < sa_count && coords->wgp < wgp_per_sa);
 }
 
 /**
@@ -152,24 +154,27 @@ static inline int validate_dimension_coords(const dimension_coords_t* coords,
  * @note Initializes allocation state to COUNTER_STATE_FREE
  * @see counter_reg_info_t, projects/aqlprofile/gfxip/gfx12/gfx12_block_info.h
  */
-static inline void create_counter_reg_info(counter_reg_info_t* reg_info, uint32_t select_addr, uint32_t control_addr,
-                                           uint32_t register_addr_lo, uint32_t register_addr_hi) {
-    if (!reg_info) return;
+static inline void create_counter_reg_info(counter_reg_info_t *reg_info, uint32_t select_addr,
+					   uint32_t control_addr, uint32_t register_addr_lo,
+					   uint32_t register_addr_hi)
+{
+	if (!reg_info)
+		return;
 
-    reg_info->select_addr = select_addr;
-    reg_info->control_addr = control_addr;
-    reg_info->register_addr_lo = register_addr_lo;
-    reg_info->register_addr_hi = register_addr_hi;
+	reg_info->select_addr = select_addr;
+	reg_info->control_addr = control_addr;
+	reg_info->register_addr_lo = register_addr_lo;
+	reg_info->register_addr_hi = register_addr_hi;
 
-    /* Initialize allocation info to FREE state */
-    atomic_set(&reg_info->allocation.state, COUNTER_STATE_FREE);
-    reg_info->allocation.event_id = 0;
-    reg_info->allocation.instance_id = 0;
-    reg_info->allocation.user_id = 0;
-    reg_info->allocation.description = NULL;
-    reg_info->allocation.allocation_time = 0;
-    reg_info->allocation.command_buffer = NULL;
-    reg_info->allocation.data_buffer = NULL;
+	/* Initialize allocation info to FREE state */
+	atomic_set(&reg_info->allocation.state, COUNTER_STATE_FREE);
+	reg_info->allocation.event_id = 0;
+	reg_info->allocation.instance_id = 0;
+	reg_info->allocation.user_id = 0;
+	reg_info->allocation.description = NULL;
+	reg_info->allocation.allocation_time = 0;
+	reg_info->allocation.command_buffer = NULL;
+	reg_info->allocation.data_buffer = NULL;
 }
 
 #endif /* ARCH_CREATOR_COMMON_H */

@@ -35,41 +35,41 @@ struct pmu_dimension_coords;
 
 /* Per-event private data */
 struct amdgpu_pmu_event {
-    struct perf_event *event;
-    u64 prev_count;
-    u64 period;
-    bool active;
-    bool uses_aql_hardware;                  /* Event uses AQL hardware counters */
+	struct perf_event *event;
+	u64 prev_count;
+	u64 period;
+	bool active;
+	bool uses_aql_hardware; /* Event uses AQL hardware counters */
 };
 
 /* Main PMU structure */
 struct amdgpu_pmu {
-    struct pmu pmu;                          /* Base PMU structure */
-    struct device *dev;                      /* Device for sysfs */
+	struct pmu pmu; /* Base PMU structure */
+	struct device *dev; /* Device for sysfs */
 
-    /* Event management */
-    spinlock_t lock;                         /* Protects event_list */
-    struct amdgpu_pmu_event events[AMDGPU_PMU_MAX_EVENTS];
-    DECLARE_BITMAP(used_mask, AMDGPU_PMU_MAX_EVENTS);
-    int num_events;
+	/* Event management */
+	spinlock_t lock; /* Protects event_list */
+	struct amdgpu_pmu_event events[AMDGPU_PMU_MAX_EVENTS];
+	DECLARE_BITMAP(used_mask, AMDGPU_PMU_MAX_EVENTS);
+	int num_events;
 
-    /* Timer for simulating counter updates */
-    struct hrtimer timer;
-    ktime_t timer_period;
+	/* Timer for simulating counter updates */
+	struct hrtimer timer;
+	ktime_t timer_period;
 
-    /* AQL Hardware Integration */
-    struct mutex aql_mutex;                  /* Protects AQL operations */
+	/* AQL Hardware Integration */
+	struct mutex aql_mutex; /* Protects AQL operations */
 
-    /* Statistics */
-    atomic64_t total_events;
-    atomic64_t total_samples;
-    atomic64_t hardware_events;              /* Number of hardware events */
-    atomic64_t simulation_events;            /* Number of simulation events */
+	/* Statistics */
+	atomic64_t total_events;
+	atomic64_t total_samples;
+	atomic64_t hardware_events; /* Number of hardware events */
+	atomic64_t simulation_events; /* Number of simulation events */
 
-    /* Simulated counter values */
-    atomic64_t counter_sq_waves;
-    atomic64_t counter_sq_instructions;
-    atomic64_t counter_ta_busy;
+	/* Simulated counter values */
+	atomic64_t counter_sq_waves;
+	atomic64_t counter_sq_instructions;
+	atomic64_t counter_ta_busy;
 };
 
 /* Function prototypes */
@@ -112,16 +112,12 @@ uint64_t aql_pmu_event_read_sync(struct perf_event *event);
 void aql_pmu_get_stats(struct aql_perf_stats *stats);
 
 /* Debug helpers */
-#define pmu_debug(fmt, ...) \
-    pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
+#define pmu_debug(fmt, ...) pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
-#define pmu_info(fmt, ...) \
-    pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
+#define pmu_info(fmt, ...) pr_info("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
-#define pmu_warn(fmt, ...) \
-    pr_warn("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
+#define pmu_warn(fmt, ...) pr_warn("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
-#define pmu_err(fmt, ...) \
-    pr_err("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
+#define pmu_err(fmt, ...) pr_err("[" MODULE_NAME "] " fmt, ##__VA_ARGS__)
 
 #endif /* _AMDGPU_PMU_H */
