@@ -31,10 +31,10 @@
  * projects/aqlprofile/src/pm4/pmc_builder.h:64-69
  */
 typedef struct {
-    hardware_ip_block_t block_id;      /* Which hardware block (SQ, CPC, etc.) */
-    uint32_t event_id;                 /* Event ID to monitor */
-    uint32_t counter_index;            /* Which counter in the block (0-7 for SQ) */
-    const char* name;                  /* Optional counter name for debugging */
+	hardware_ip_block_t block_id; /* Which hardware block (SQ, CPC, etc.) */
+	uint32_t event_id; /* Event ID to monitor */
+	uint32_t counter_index; /* Which counter in the block (0-7 for SQ) */
+	const char *name; /* Optional counter name for debugging */
 } counter_info_t;
 
 /**
@@ -48,10 +48,10 @@ typedef struct {
  * projects/aqlprofile/src/core/aql_profile.cpp
  */
 typedef struct {
-    counter_info_t* counters;          /* Array of counters to collect */
-    size_t counter_count;              /* Number of counters in array */
-    uint64_t gpu_memory_addr;          /* GPU address for counter data results */
-    size_t memory_size;                /* Size of allocated memory in bytes */
+	counter_info_t *counters; /* Array of counters to collect */
+	size_t counter_count; /* Number of counters in array */
+	uint64_t gpu_memory_addr; /* GPU address for counter data results */
+	size_t memory_size; /* Size of allocated memory in bytes */
 } counter_collection_t;
 
 /**
@@ -72,9 +72,8 @@ typedef struct {
  * @param collection Counter collection context
  * @return 0 on success, negative error code on failure
  */
-int generate_start_packet(pm4_buffer_t *buffer,
-                         const arch_t *arch,
-                         const counter_collection_t *collection);
+int generate_start_packet(pm4_buffer_t *buffer, const arch_t *arch,
+			  const counter_collection_t *collection);
 
 /**
  * Generate PM4 packet sequence to read performance counters
@@ -93,9 +92,8 @@ int generate_start_packet(pm4_buffer_t *buffer,
  * @param collection Counter collection context
  * @return 0 on success, negative error code on failure
  */
-int generate_read_packet(pm4_buffer_t *buffer,
-                        const arch_t *arch,
-                        const counter_collection_t *collection);
+int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
+			 const counter_collection_t *collection);
 
 /**
  * Generate PM4 packet sequence to stop performance counters
@@ -109,8 +107,7 @@ int generate_read_packet(pm4_buffer_t *buffer,
  * @param arch Architecture information with control registers
  * @return 0 on success, negative error code on failure
  */
-int generate_stop_packet(pm4_buffer_t *buffer,
-                        const arch_t *arch);
+int generate_stop_packet(pm4_buffer_t *buffer, const arch_t *arch);
 
 /**
  * Calculate total memory size needed for counter data collection
@@ -124,8 +121,7 @@ int generate_stop_packet(pm4_buffer_t *buffer,
  * @param collection Counter collection context
  * @return Total memory size in bytes, 0 on error
  */
-size_t calculate_counter_memory_size(const arch_t *arch,
-                                   const counter_collection_t *collection);
+size_t calculate_counter_memory_size(const arch_t *arch, const counter_collection_t *collection);
 
 /**
  * Helper function: Generate CS partial flush packet
@@ -151,10 +147,8 @@ int generate_grbm_broadcast(pm4_buffer_t *buffer, const arch_t *arch);
  * @param sample_enable Whether to enable sampling (boolean)
  * @return 0 on success, negative on error
  */
-int generate_perfmon_enable(pm4_buffer_t *buffer,
-                           const arch_t *arch,
-                           uint8_t enable_state,
-                           bool sample_enable);
+int generate_perfmon_enable(pm4_buffer_t *buffer, const arch_t *arch, uint8_t enable_state,
+			    bool sample_enable);
 
 /**
  * Helper function: Configure counter selection and control registers
@@ -163,9 +157,8 @@ int generate_perfmon_enable(pm4_buffer_t *buffer,
  * @param counter Counter to configure
  * @return 0 on success, negative on error
  */
-int generate_counter_config(pm4_buffer_t *buffer,
-                           const arch_t *arch,
-                           const counter_info_t *counter);
+int generate_counter_config(pm4_buffer_t *buffer, const arch_t *arch,
+			    const counter_info_t *counter);
 
 /**
  * Validate counter collection configuration
@@ -173,7 +166,6 @@ int generate_counter_config(pm4_buffer_t *buffer,
  * @param collection Counter collection to validate
  * @return 0 if valid, negative error code otherwise
  */
-int validate_counter_collection(const arch_t *arch,
-                               const counter_collection_t *collection);
+int validate_counter_collection(const arch_t *arch, const counter_collection_t *collection);
 
 #endif /* PACKET_GENERATION_H */

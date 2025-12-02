@@ -32,7 +32,7 @@ static struct workqueue_struct *aql_global_workqueue = NULL;
  */
 struct workqueue_struct *aql_get_global_workqueue(void)
 {
-    return aql_global_workqueue;
+	return aql_global_workqueue;
 }
 
 /**
@@ -42,50 +42,49 @@ struct workqueue_struct *aql_get_global_workqueue(void)
  */
 int aql_pmu_init(void)
 {
-    int ret;
+	int ret;
 
-    mutex_init(&aql_pmu_mutex);
+	mutex_init(&aql_pmu_mutex);
 
-    aql_info("Initializing AQL PMU integration");
+	aql_info("Initializing AQL PMU integration");
 
-    /* Create global workqueue - shared by all measurements */
-    aql_global_workqueue = alloc_workqueue("aql_pmu",
-                                           WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND,
-                                           0);
-    if (!aql_global_workqueue) {
-        aql_err("Failed to create global workqueue");
-        return -ENOMEM;
-    }
+	/* Create global workqueue - shared by all measurements */
+	aql_global_workqueue =
+		alloc_workqueue("aql_pmu", WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND, 0);
+	if (!aql_global_workqueue) {
+		aql_err("Failed to create global workqueue");
+		return -ENOMEM;
+	}
 
-    aql_info("Created global workqueue for all measurements");
+	aql_info("Created global workqueue for all measurements");
 
-    /* Create global AQL session */
-    global_aql_session = aql_perf_session_create();
-    if (IS_ERR(global_aql_session)) {
-        ret = PTR_ERR(global_aql_session);
-        aql_err("Failed to create global AQL session: %d", ret);
-        global_aql_session = NULL;
-        destroy_workqueue(aql_global_workqueue);
-        aql_global_workqueue = NULL;
-        return ret;
-    }
+	/* Create global AQL session */
+	global_aql_session = aql_perf_session_create();
+	if (IS_ERR(global_aql_session)) {
+		ret = PTR_ERR(global_aql_session);
+		aql_err("Failed to create global AQL session: %d", ret);
+		global_aql_session = NULL;
+		destroy_workqueue(aql_global_workqueue);
+		aql_global_workqueue = NULL;
+		return ret;
+	}
 
-    /* Initialize the session */
-    ret = aql_perf_session_initialize(global_aql_session);
-    if (ret) {
-        aql_err("Failed to initialize global AQL session: %d", ret);
-        aql_perf_session_put(global_aql_session);
-        global_aql_session = NULL;
-        destroy_workqueue(aql_global_workqueue);
-        aql_global_workqueue = NULL;
-        return ret;
-    }
+	/* Initialize the session */
+	ret = aql_perf_session_initialize(global_aql_session);
+	if (ret) {
+		aql_err("Failed to initialize global AQL session: %d", ret);
+		aql_perf_session_put(global_aql_session);
+		global_aql_session = NULL;
+		destroy_workqueue(aql_global_workqueue);
+		aql_global_workqueue = NULL;
+		return ret;
+	}
 
-    aql_feature_available = true;
-    aql_info("AQL PMU integration initialized successfully with %u GPUs",
-             global_aql_session->num_gpus);
+	aql_feature_available = true;
+	aql_info("AQL PMU integration initialized successfully with %u GPUs",
+		 global_aql_session->num_gpus);
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -99,19 +98,19 @@ int aql_pmu_init(void)
  */
 void aql_pmu_flush_all_measurements(void)
 {
-    mutex_lock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
 
-    if (!aql_global_workqueue) {
-        mutex_unlock(&aql_pmu_mutex);
-        return;
-    }
+	if (!aql_global_workqueue) {
+		mutex_unlock(&aql_pmu_mutex);
+		return;
+	}
 
-    pmu_info("Flushing global workqueue");
-    flush_workqueue(aql_global_workqueue);
+	pmu_info("Flushing global workqueue");
+	flush_workqueue(aql_global_workqueue);
 
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_unlock(&aql_pmu_mutex);
 
-    pmu_info("Global workqueue flushed");
+	pmu_info("Global workqueue flushed");
 }
 
 /**
@@ -119,28 +118,28 @@ void aql_pmu_flush_all_measurements(void)
  */
 void aql_pmu_cleanup(void)
 {
-    aql_info("Cleaning up AQL PMU integration");
+	aql_info("Cleaning up AQL PMU integration");
 
-    mutex_lock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
 
-    if (global_aql_session) {
-        aql_perf_session_put(global_aql_session);
-        global_aql_session = NULL;
-    }
+	if (global_aql_session) {
+		aql_perf_session_put(global_aql_session);
+		global_aql_session = NULL;
+	}
 
-    aql_feature_available = false;
+	aql_feature_available = false;
 
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_unlock(&aql_pmu_mutex);
 
-    /* Destroy global workqueue - safe because session is already released
+	/* Destroy global workqueue - safe because session is already released
      * and timer is already cancelled (done in pmu_main.c before calling this) */
-    if (aql_global_workqueue) {
-        aql_info("Destroying global workqueue");
-        destroy_workqueue(aql_global_workqueue);
-        aql_global_workqueue = NULL;
-    }
+	if (aql_global_workqueue) {
+		aql_info("Destroying global workqueue");
+		destroy_workqueue(aql_global_workqueue);
+		aql_global_workqueue = NULL;
+	}
 
-    aql_info("AQL PMU integration cleanup complete");
+	aql_info("AQL PMU integration cleanup complete");
 }
 
 /**
@@ -150,14 +149,14 @@ void aql_pmu_cleanup(void)
  */
 bool aql_pmu_is_available(void)
 {
-    bool available;
+	bool available;
 
-    mutex_lock(&aql_pmu_mutex);
-    available = aql_feature_available && global_aql_session &&
-                (global_aql_session->state == SESSION_ACTIVE);
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
+	available = aql_feature_available && global_aql_session &&
+		    (global_aql_session->state == SESSION_ACTIVE);
+	mutex_unlock(&aql_pmu_mutex);
 
-    return available;
+	return available;
 }
 
 /**
@@ -168,15 +167,15 @@ bool aql_pmu_is_available(void)
  */
 static bool aql_pmu_should_use_hardware(struct perf_event *event)
 {
-    if (!event || !event->pmu)
-        return false;
+	if (!event || !event->pmu)
+		return false;
 
-    /* Check if AQL is available */
-    if (!aql_pmu_is_available())
-        return false;
+	/* Check if AQL is available */
+	if (!aql_pmu_is_available())
+		return false;
 
-    /* All events are now supported by hardware (validated by counter_registry) */
-    return true;
+	/* All events are now supported by hardware (validated by counter_registry) */
+	return true;
 }
 
 /**
@@ -195,59 +194,59 @@ static bool aql_pmu_should_use_hardware(struct perf_event *event)
  */
 static uint32_t aql_pmu_get_gpu_id_for_event_locked(struct perf_event *event)
 {
-    struct aql_perf_session *session;
-    uint32_t cpu;
-    uint32_t gpu_id;
+	struct aql_perf_session *session;
+	uint32_t cpu;
+	uint32_t gpu_id;
 
-    if (!event) {
-        return U32_MAX;
-    }
+	if (!event) {
+		return U32_MAX;
+	}
 
-    session = global_aql_session;
-    cpu = event->cpu;
+	session = global_aql_session;
+	cpu = event->cpu;
 
-    aql_debug("get_gpu_id_for_event: cpu=%d, num_gpus=%u",
-              cpu, session ? session->num_gpus : 0);
+	aql_debug("get_gpu_id_for_event: cpu=%d, num_gpus=%u", cpu,
+		  session ? session->num_gpus : 0);
 
-    if (!session || session->num_gpus == 0) {
-        aql_err("get_gpu_id_for_event: no session or no GPUs");
-        return U32_MAX;
-    }
+	if (!session || session->num_gpus == 0) {
+		aql_err("get_gpu_id_for_event: no session or no GPUs");
+		return U32_MAX;
+	}
 
-    /* For now, use simple CPU-to-GPU mapping */
-    if (cpu == -1) {
-        /* Use first healthy GPU for CPU-wide events */
-        for (uint32_t i = 0; i < session->num_gpus; i++) {
-            gpu_id = session->gpu_ids[i];
-            if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
-                aql_debug("Selected GPU %u for CPU-wide event", gpu_id);
-                return gpu_id;
-            }
-        }
-    } else {
-        /* Map CPU to GPU using modulo */
-        uint32_t healthy_count = aql_perf_get_healthy_gpu_count(session);
+	/* For now, use simple CPU-to-GPU mapping */
+	if (cpu == -1) {
+		/* Use first healthy GPU for CPU-wide events */
+		for (uint32_t i = 0; i < session->num_gpus; i++) {
+			gpu_id = session->gpu_ids[i];
+			if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
+				aql_debug("Selected GPU %u for CPU-wide event", gpu_id);
+				return gpu_id;
+			}
+		}
+	} else {
+		/* Map CPU to GPU using modulo */
+		uint32_t healthy_count = aql_perf_get_healthy_gpu_count(session);
 
-        if (healthy_count == 0) {
-            return U32_MAX;
-        }
+		if (healthy_count == 0) {
+			return U32_MAX;
+		}
 
-        uint32_t gpu_index = cpu % healthy_count;
-        uint32_t healthy_idx = 0;
+		uint32_t gpu_index = cpu % healthy_count;
+		uint32_t healthy_idx = 0;
 
-        for (uint32_t i = 0; i < session->num_gpus; i++) {
-            gpu_id = session->gpu_ids[i];
-            if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
-                if (healthy_idx == gpu_index) {
-                    aql_debug("Selected GPU %u for CPU %u", gpu_id, cpu);
-                    return gpu_id;
-                }
-                healthy_idx++;
-            }
-        }
-    }
+		for (uint32_t i = 0; i < session->num_gpus; i++) {
+			gpu_id = session->gpu_ids[i];
+			if (!aql_perf_is_gpu_disabled(session, gpu_id)) {
+				if (healthy_idx == gpu_index) {
+					aql_debug("Selected GPU %u for CPU %u", gpu_id, cpu);
+					return gpu_id;
+				}
+				healthy_idx++;
+			}
+		}
+	}
 
-    return U32_MAX;
+	return U32_MAX;
 }
 
 /**
@@ -262,19 +261,19 @@ static uint32_t aql_pmu_get_gpu_id_for_event_locked(struct perf_event *event)
  */
 uint32_t aql_pmu_get_gpu_id_for_event(struct perf_event *event)
 {
-    uint32_t gpu_id;
+	uint32_t gpu_id;
 
-    mutex_lock(&aql_pmu_mutex);
-    gpu_id = aql_pmu_get_gpu_id_for_event_locked(event);
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
+	gpu_id = aql_pmu_get_gpu_id_for_event_locked(event);
+	mutex_unlock(&aql_pmu_mutex);
 
-    return gpu_id;
+	return gpu_id;
 }
 
 /* Internal helper - calls locked version since we already hold mutex in event_init */
 static uint32_t aql_pmu_select_gpu(struct perf_event *event)
 {
-    return aql_pmu_get_gpu_id_for_event_locked(event);
+	return aql_pmu_get_gpu_id_for_event_locked(event);
 }
 
 /**
@@ -285,77 +284,78 @@ static uint32_t aql_pmu_select_gpu(struct perf_event *event)
  */
 int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coords *dims)
 {
-    struct aql_measurement *measurement;
-    uint32_t gpu_id;
+	struct aql_measurement *measurement;
+	uint32_t gpu_id;
 
-    aql_debug("ENTRY: aql_pmu_event_init");
+	aql_debug("ENTRY: aql_pmu_event_init");
 
-    if (!aql_pmu_should_use_hardware(event)) {
-        aql_debug("Not using hardware, returning -EOPNOTSUPP");
-        return -EOPNOTSUPP; /* Use simulation instead */
-    }
+	if (!aql_pmu_should_use_hardware(event)) {
+		aql_debug("Not using hardware, returning -EOPNOTSUPP");
+		return -EOPNOTSUPP; /* Use simulation instead */
+	}
 
-    aql_debug("Before mutex_lock(&aql_pmu_mutex)");
-    mutex_lock(&aql_pmu_mutex);
-    aql_debug("After mutex_lock(&aql_pmu_mutex), global_aql_session=%p", global_aql_session);
+	aql_debug("Before mutex_lock(&aql_pmu_mutex)");
+	mutex_lock(&aql_pmu_mutex);
+	aql_debug("After mutex_lock(&aql_pmu_mutex), global_aql_session=%p", global_aql_session);
 
-    if (!global_aql_session) {
-        aql_debug("Global AQL session is NULL, falling back to simulation");
-        mutex_unlock(&aql_pmu_mutex);
-        return -EOPNOTSUPP;
-    }
+	if (!global_aql_session) {
+		aql_debug("Global AQL session is NULL, falling back to simulation");
+		mutex_unlock(&aql_pmu_mutex);
+		return -EOPNOTSUPP;
+	}
 
-    aql_debug("About to check session state, session=%p", global_aql_session);
-    if (global_aql_session->state != SESSION_ACTIVE) {
-        aql_debug("AQL session state is %d (not active), falling back to simulation", global_aql_session->state);
-        mutex_unlock(&aql_pmu_mutex);
-        return -EOPNOTSUPP;
-    }
-    aql_debug("Session is active, state=%d", global_aql_session->state);
+	aql_debug("About to check session state, session=%p", global_aql_session);
+	if (global_aql_session->state != SESSION_ACTIVE) {
+		aql_debug("AQL session state is %d (not active), falling back to simulation",
+			  global_aql_session->state);
+		mutex_unlock(&aql_pmu_mutex);
+		return -EOPNOTSUPP;
+	}
+	aql_debug("Session is active, state=%d", global_aql_session->state);
 
-    /* Select GPU for this event */
-    aql_debug("Before aql_pmu_select_gpu");
-    gpu_id = aql_pmu_select_gpu(event);
-    aql_debug("After aql_pmu_select_gpu, gpu_id=%u", gpu_id);
-    if (gpu_id == U32_MAX) {
-        aql_debug("No suitable GPU found for event, falling back to simulation");
-        mutex_unlock(&aql_pmu_mutex);
-        return -EOPNOTSUPP;
-    }
+	/* Select GPU for this event */
+	aql_debug("Before aql_pmu_select_gpu");
+	gpu_id = aql_pmu_select_gpu(event);
+	aql_debug("After aql_pmu_select_gpu, gpu_id=%u", gpu_id);
+	if (gpu_id == U32_MAX) {
+		aql_debug("No suitable GPU found for event, falling back to simulation");
+		mutex_unlock(&aql_pmu_mutex);
+		return -EOPNOTSUPP;
+	}
 
-    /* Create AQL measurement */
-    aql_debug("Before aql_perf_measurement_create for GPU %u", gpu_id);
-    measurement = aql_perf_measurement_create(global_aql_session, gpu_id, event);
-    aql_debug("After aql_perf_measurement_create, measurement=%p", measurement);
-    if (IS_ERR(measurement)) {
-        aql_err("Failed to create AQL measurement: %ld", PTR_ERR(measurement));
-        mutex_unlock(&aql_pmu_mutex);
-        return PTR_ERR(measurement);
-    }
+	/* Create AQL measurement */
+	aql_debug("Before aql_perf_measurement_create for GPU %u", gpu_id);
+	measurement = aql_perf_measurement_create(global_aql_session, gpu_id, event);
+	aql_debug("After aql_perf_measurement_create, measurement=%p", measurement);
+	if (IS_ERR(measurement)) {
+		aql_err("Failed to create AQL measurement: %ld", PTR_ERR(measurement));
+		mutex_unlock(&aql_pmu_mutex);
+		return PTR_ERR(measurement);
+	}
 
-    /* Store dimension information in measurement if specified */
-    if (dims && dims->valid) {
-        measurement->target_dims = *dims;
-        /* If aggregate flag is set, aggregate across all dimensions.
+	/* Store dimension information in measurement if specified */
+	if (dims && dims->valid) {
+		measurement->target_dims = *dims;
+		/* If aggregate flag is set, aggregate across all dimensions.
          * Otherwise, monitor only the specific dimension. */
-        if (dims->aggregate) {
-            measurement->dimension_specific = false;  /* Aggregate mode */
-            aql_debug("GPU %u: aggregate mode (all dimensions)", gpu_id);
-        } else {
-            measurement->dimension_specific = true;   /* Dimension-specific mode */
-            aql_debug("GPU %u: dimension-specific se=%u sa=%u wgp=%u",
-                      gpu_id, dims->se, dims->sa, dims->wgp);
-        }
-    } else {
-        measurement->dimension_specific = false;
-        aql_debug("GPU %u: initialized (aggregated)", gpu_id);
-    }
+		if (dims->aggregate) {
+			measurement->dimension_specific = false; /* Aggregate mode */
+			aql_debug("GPU %u: aggregate mode (all dimensions)", gpu_id);
+		} else {
+			measurement->dimension_specific = true; /* Dimension-specific mode */
+			aql_debug("GPU %u: dimension-specific se=%u sa=%u wgp=%u", gpu_id, dims->se,
+				  dims->sa, dims->wgp);
+		}
+	} else {
+		measurement->dimension_specific = false;
+		aql_debug("GPU %u: initialized (aggregated)", gpu_id);
+	}
 
-    /* Store measurement in event's hardware config */
-    event->hw.config_base = (unsigned long)measurement;
+	/* Store measurement in event's hardware config */
+	event->hw.config_base = (unsigned long)measurement;
 
-    mutex_unlock(&aql_pmu_mutex);
-    return 0;
+	mutex_unlock(&aql_pmu_mutex);
+	return 0;
 }
 
 /**
@@ -364,22 +364,22 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
  */
 void aql_pmu_event_destroy(struct perf_event *event)
 {
-    struct aql_measurement *measurement;
+	struct aql_measurement *measurement;
 
-    if (!event->hw.config_base)
-        return;
+	if (!event->hw.config_base)
+		return;
 
-    measurement = (struct aql_measurement *)event->hw.config_base;
+	measurement = (struct aql_measurement *)event->hw.config_base;
 
-    mutex_lock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
 
-    aql_debug("Destroying hardware event for GPU %u", measurement->gpu_id);
-    aql_perf_measurement_destroy(measurement);
+	aql_debug("Destroying hardware event for GPU %u", measurement->gpu_id);
+	aql_perf_measurement_destroy(measurement);
 
-    /* Clear config_base so add/del/start/stop know the event is destroyed */
-    event->hw.config_base = 0;
+	/* Clear config_base so add/del/start/stop know the event is destroyed */
+	event->hw.config_base = 0;
 
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_unlock(&aql_pmu_mutex);
 }
 
 /**
@@ -390,24 +390,24 @@ void aql_pmu_event_destroy(struct perf_event *event)
  */
 int aql_pmu_event_start(struct perf_event *event)
 {
-    struct aql_measurement *measurement;
-    int ret;
+	struct aql_measurement *measurement;
+	int ret;
 
-    if (!event->hw.config_base)
-        return -EINVAL;
+	if (!event->hw.config_base)
+		return -EINVAL;
 
-    measurement = (struct aql_measurement *)event->hw.config_base;
+	measurement = (struct aql_measurement *)event->hw.config_base;
 
-    /* Use atomic version to avoid sleeping in PMU callback */
-    ret = aql_perf_measurement_start_atomic(measurement);
-    if (ret) {
-        aql_err("Failed to schedule start for AQL measurement on GPU %u: %d",
-                measurement->gpu_id, ret);
-    } else {
-        aql_debug("Scheduled start for AQL measurement on GPU %u", measurement->gpu_id);
-    }
+	/* Use atomic version to avoid sleeping in PMU callback */
+	ret = aql_perf_measurement_start_atomic(measurement);
+	if (ret) {
+		aql_err("Failed to schedule start for AQL measurement on GPU %u: %d",
+			measurement->gpu_id, ret);
+	} else {
+		aql_debug("Scheduled start for AQL measurement on GPU %u", measurement->gpu_id);
+	}
 
-    return ret;
+	return ret;
 }
 
 /**
@@ -418,24 +418,24 @@ int aql_pmu_event_start(struct perf_event *event)
  */
 int aql_pmu_event_stop(struct perf_event *event)
 {
-    struct aql_measurement *measurement;
-    int ret;
+	struct aql_measurement *measurement;
+	int ret;
 
-    if (!event->hw.config_base)
-        return -EINVAL;
+	if (!event->hw.config_base)
+		return -EINVAL;
 
-    measurement = (struct aql_measurement *)event->hw.config_base;
+	measurement = (struct aql_measurement *)event->hw.config_base;
 
-    /* Use atomic version to avoid sleeping in PMU callback */
-    ret = aql_perf_measurement_stop_atomic(measurement);
-    if (ret) {
-        aql_err("Failed to schedule stop for AQL measurement on GPU %u: %d",
-                measurement->gpu_id, ret);
-    } else {
-        aql_debug("Scheduled stop for AQL measurement on GPU %u", measurement->gpu_id);
-    }
+	/* Use atomic version to avoid sleeping in PMU callback */
+	ret = aql_perf_measurement_stop_atomic(measurement);
+	if (ret) {
+		aql_err("Failed to schedule stop for AQL measurement on GPU %u: %d",
+			measurement->gpu_id, ret);
+	} else {
+		aql_debug("Scheduled stop for AQL measurement on GPU %u", measurement->gpu_id);
+	}
 
-    return ret;
+	return ret;
 }
 
 /**
@@ -446,23 +446,23 @@ int aql_pmu_event_stop(struct perf_event *event)
  */
 uint64_t aql_pmu_event_read(struct perf_event *event)
 {
-    struct aql_measurement *measurement;
-    uint64_t counter_value;
+	struct aql_measurement *measurement;
+	uint64_t counter_value;
 
-    if (!event->hw.config_base) {
-        return 0;
-    }
+	if (!event->hw.config_base) {
+		return 0;
+	}
 
-    measurement = (struct aql_measurement *)event->hw.config_base;
+	measurement = (struct aql_measurement *)event->hw.config_base;
 
-    /* Use atomic version to return cached value and schedule refresh */
-    counter_value = aql_perf_measurement_read_atomic(measurement);
+	/* Use atomic version to return cached value and schedule refresh */
+	counter_value = aql_perf_measurement_read_atomic(measurement);
 
-    aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
-    aql_info("[PMU] ========== aql_pmu_event_read RETURNING: %llu (0x%llx) ==========",
-             counter_value, counter_value);
+	aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
+	aql_info("[PMU] ========== aql_pmu_event_read RETURNING: %llu (0x%llx) ==========",
+		 counter_value, counter_value);
 
-    return counter_value;
+	return counter_value;
 }
 
 /**
@@ -477,21 +477,21 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
  */
 uint64_t aql_pmu_event_read_sync(struct perf_event *event)
 {
-    struct aql_measurement *measurement;
-    uint64_t counter_value;
+	struct aql_measurement *measurement;
+	uint64_t counter_value;
 
-    if (!event->hw.config_base) {
-        return 0;
-    }
+	if (!event->hw.config_base) {
+		return 0;
+	}
 
-    measurement = (struct aql_measurement *)event->hw.config_base;
+	measurement = (struct aql_measurement *)event->hw.config_base;
 
-    /* Use synchronous version to wait for actual hardware read */
-    counter_value = aql_perf_measurement_read(measurement);
+	/* Use synchronous version to wait for actual hardware read */
+	counter_value = aql_perf_measurement_read(measurement);
 
-    aql_debug("GPU %u: read_sync=%llu", measurement->gpu_id, counter_value);
+	aql_debug("GPU %u: read_sync=%llu", measurement->gpu_id, counter_value);
 
-    return counter_value;
+	return counter_value;
 }
 
 /**
@@ -501,13 +501,13 @@ uint64_t aql_pmu_event_read_sync(struct perf_event *event)
  */
 int aql_pmu_get_gpu_count(void)
 {
-    int count;
+	int count;
 
-    mutex_lock(&aql_pmu_mutex);
-    count = global_aql_session ? global_aql_session->num_gpus : 0;
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
+	count = global_aql_session ? global_aql_session->num_gpus : 0;
+	mutex_unlock(&aql_pmu_mutex);
 
-    return count;
+	return count;
 }
 
 /**
@@ -524,15 +524,15 @@ int aql_pmu_get_gpu_count(void)
  */
 struct aql_perf_session *aql_pmu_get_session(void)
 {
-    struct aql_perf_session *session;
+	struct aql_perf_session *session;
 
-    mutex_lock(&aql_pmu_mutex);
-    session = global_aql_session;
-    if (session)
-        aql_perf_session_get(session);
-    mutex_unlock(&aql_pmu_mutex);
+	mutex_lock(&aql_pmu_mutex);
+	session = global_aql_session;
+	if (session)
+		aql_perf_session_get(session);
+	mutex_unlock(&aql_pmu_mutex);
 
-    return session;
+	return session;
 }
 
 /**
@@ -547,8 +547,8 @@ struct aql_perf_session *aql_pmu_get_session(void)
  */
 void aql_pmu_put_session(struct aql_perf_session *session)
 {
-    if (session)
-        aql_perf_session_put(session);
+	if (session)
+		aql_perf_session_put(session);
 }
 
 /**
@@ -557,24 +557,24 @@ void aql_pmu_put_session(struct aql_perf_session *session)
  */
 void aql_pmu_get_stats(struct aql_perf_stats *stats)
 {
-    if (!stats)
-        return;
+	if (!stats)
+		return;
 
-    aql_perf_get_stats(stats);
+	aql_perf_get_stats(stats);
 
-    /* Add session-specific stats if available */
-    mutex_lock(&aql_pmu_mutex);
-    if (global_aql_session) {
-        atomic64_add(atomic64_read(&global_aql_session->stats.packets_submitted),
-                     &stats->packets_submitted);
-        atomic64_add(atomic64_read(&global_aql_session->stats.packets_completed),
-                     &stats->packets_completed);
-        atomic64_add(atomic64_read(&global_aql_session->stats.errors_total),
-                     &stats->errors_total);
-        atomic64_add(atomic64_read(&global_aql_session->stats.sessions_created),
-                     &stats->sessions_created);
-    }
-    mutex_unlock(&aql_pmu_mutex);
+	/* Add session-specific stats if available */
+	mutex_lock(&aql_pmu_mutex);
+	if (global_aql_session) {
+		atomic64_add(atomic64_read(&global_aql_session->stats.packets_submitted),
+			     &stats->packets_submitted);
+		atomic64_add(atomic64_read(&global_aql_session->stats.packets_completed),
+			     &stats->packets_completed);
+		atomic64_add(atomic64_read(&global_aql_session->stats.errors_total),
+			     &stats->errors_total);
+		atomic64_add(atomic64_read(&global_aql_session->stats.sessions_created),
+			     &stats->sessions_created);
+	}
+	mutex_unlock(&aql_pmu_mutex);
 }
 
 EXPORT_SYMBOL_GPL(aql_get_global_workqueue);

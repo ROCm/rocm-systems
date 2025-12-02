@@ -11,11 +11,11 @@
 
 /* KFD test result structure */
 struct kfd_test_result {
-    bool success;            /* True if test passed */
-    u32 major_version;       /* KFD major version (if successful) */
-    u32 minor_version;       /* KFD minor version (if successful) */
-    int error_code;          /* Error code (if failed) */
-    char error_msg[256];     /* Error message (if failed) */
+	bool success; /* True if test passed */
+	u32 major_version; /* KFD major version (if successful) */
+	u32 minor_version; /* KFD minor version (if successful) */
+	int error_code; /* Error code (if failed) */
+	char error_msg[256]; /* Error message (if failed) */
 };
 
 /* Function prototypes */

@@ -16,7 +16,7 @@
  * @return Pointer to const array of arch_event_map structures
  * @see get_gfx12_event_count()
  */
-const struct arch_event_map* get_gfx12_events(void);
+const struct arch_event_map *get_gfx12_events(void);
 
 /**
  * @brief Get the number of GFX12 event mappings

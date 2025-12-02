@@ -30,15 +30,17 @@
  * @note Caller is responsible for freeing with arch_destroy()
  * @see arch_destroy(), Pm4Factory::Create in projects/aqlprofile/src/core/pm4_factory.h:113
  */
-arch_t* arch_create_by_name(const char* arch_name) {
-    if (!arch_name) return NULL;
+arch_t *arch_create_by_name(const char *arch_name)
+{
+	if (!arch_name)
+		return NULL;
 
-    /* GFX12 architecture */
-    if (strcmp(arch_name, "gfx12") == 0 || strcmp(arch_name, "GFX12") == 0) {
-        return create_gfx12_arch();
-    }
+	/* GFX12 architecture */
+	if (strcmp(arch_name, "gfx12") == 0 || strcmp(arch_name, "GFX12") == 0) {
+		return create_gfx12_arch();
+	}
 
-    /* Future architectures can be added here with their respective creator functions:
+	/* Future architectures can be added here with their respective creator functions:
      *
      * if (strcmp(arch_name, "gfx11") == 0 || strcmp(arch_name, "GFX11") == 0) {
      *     return create_gfx11_arch();
@@ -53,8 +55,8 @@ arch_t* arch_create_by_name(const char* arch_name) {
      * }
      */
 
-    /* Unknown architecture */
-    return NULL;
+	/* Unknown architecture */
+	return NULL;
 }
 
 /**
@@ -80,31 +82,33 @@ arch_t* arch_create_by_name(const char* arch_name) {
  * @see arch_create_by_name(), Pm4Factory::~Pm4Factory in
  *      projects/aqlprofile/src/core/pm4_factory.h:233
  */
-void arch_destroy(arch_t* arch) {
-    if (!arch) return;
+void arch_destroy(arch_t *arch)
+{
+	if (!arch)
+		return;
 
-    /* Free block information */
-    for (uint32_t i = 0; i < HW_IP_BLOCK_LAST; i++) {
-        if (arch->block_map.blocks[i]) {
-            /* Free counter register info arrays */
-            if (arch->block_map.blocks[i]->counter_reg_info) {
-                FREE(arch->block_map.blocks[i]->counter_reg_info);
-            }
+	/* Free block information */
+	for (uint32_t i = 0; i < HW_IP_BLOCK_LAST; i++) {
+		if (arch->block_map.blocks[i]) {
+			/* Free counter register info arrays */
+			if (arch->block_map.blocks[i]->counter_reg_info) {
+				FREE(arch->block_map.blocks[i]->counter_reg_info);
+			}
 
-            /* Free dimensions arrays */
-            if (arch->block_map.blocks[i]->dimensions) {
-                FREE(arch->block_map.blocks[i]->dimensions);
-            }
+			/* Free dimensions arrays */
+			if (arch->block_map.blocks[i]->dimensions) {
+				FREE(arch->block_map.blocks[i]->dimensions);
+			}
 
-            FREE(arch->block_map.blocks[i]);
-        }
-    }
+			FREE(arch->block_map.blocks[i]);
+		}
+	}
 
-    /* Free command buffer */
-    if (arch->command) {
-        FREE(arch->command);
-    }
+	/* Free command buffer */
+	if (arch->command) {
+		FREE(arch->command);
+	}
 
-    /* Free the architecture structure itself */
-    FREE(arch);
+	/* Free the architecture structure itself */
+	FREE(arch);
 }

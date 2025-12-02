@@ -19,11 +19,10 @@
 struct kfd_process;
 
 /* External declarations for the exported KFD functions */
-extern long kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
-                                  void *data);
+extern long kfd_ioctl_get_version(struct file *filep, struct kfd_process *p, void *data);
 
 /* Global test result */
-static struct kfd_test_result kfd_result = {0};
+static struct kfd_test_result kfd_result = { 0 };
 
 /**
  * kfd_test_get_version - Test KFD ioctl get version call
@@ -35,70 +34,70 @@ static struct kfd_test_result kfd_result = {0};
  */
 int kfd_test_get_version(void)
 {
-    struct file *kfd_file = NULL;
-    struct kfd_ioctl_get_version_args version_args;
-    struct kfd_process *process;
-    long ret = 0;
+	struct file *kfd_file = NULL;
+	struct kfd_ioctl_get_version_args version_args;
+	struct kfd_process *process;
+	long ret = 0;
 
-    /* Clear previous results */
-    memset(&kfd_result, 0, sizeof(kfd_result));
-    memset(&version_args, 0, sizeof(version_args));
+	/* Clear previous results */
+	memset(&kfd_result, 0, sizeof(kfd_result));
+	memset(&version_args, 0, sizeof(version_args));
 
-    pmu_info("KFD Test: Opening /dev/kfd to get valid file and process\n");
+	pmu_info("KFD Test: Opening /dev/kfd to get valid file and process\n");
 
-    /* Open /dev/kfd which calls kfd_open() and sets up filep->private_data */
-    kfd_file = filp_open("/dev/kfd", O_RDWR, 0);
-    if (IS_ERR(kfd_file)) {
-        ret = PTR_ERR(kfd_file);
-        snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
-                "Failed to open /dev/kfd: error %ld", ret);
-        kfd_result.error_code = (int)ret;
-        pmu_err("KFD Test: %s\n", kfd_result.error_msg);
-        return ret;
-    }
+	/* Open /dev/kfd which calls kfd_open() and sets up filep->private_data */
+	kfd_file = filp_open("/dev/kfd", O_RDWR, 0);
+	if (IS_ERR(kfd_file)) {
+		ret = PTR_ERR(kfd_file);
+		snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
+			 "Failed to open /dev/kfd: error %ld", ret);
+		kfd_result.error_code = (int)ret;
+		pmu_err("KFD Test: %s\n", kfd_result.error_msg);
+		return ret;
+	}
 
-    pmu_info("KFD Test: Successfully opened /dev/kfd\n");
+	pmu_info("KFD Test: Successfully opened /dev/kfd\n");
 
-    /* Extract the kfd_process from private_data (set by kfd_open) */
-    process = kfd_file->private_data;
-    if (!process) {
-        ret = -EINVAL;
-        snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
-                "No kfd_process found in file private_data");
-        kfd_result.error_code = (int)ret;
-        pmu_err("KFD Test: %s\n", kfd_result.error_msg);
-        filp_close(kfd_file, NULL);
-        return ret;
-    }
+	/* Extract the kfd_process from private_data (set by kfd_open) */
+	process = kfd_file->private_data;
+	if (!process) {
+		ret = -EINVAL;
+		snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
+			 "No kfd_process found in file private_data");
+		kfd_result.error_code = (int)ret;
+		pmu_err("KFD Test: %s\n", kfd_result.error_msg);
+		filp_close(kfd_file, NULL);
+		return ret;
+	}
 
-    pmu_info("KFD Test: Found valid kfd_process, calling kfd_ioctl_get_version\n");
+	pmu_info("KFD Test: Found valid kfd_process, calling kfd_ioctl_get_version\n");
 
-    /* Now call kfd_ioctl_get_version with proper parameters */
-    ret = kfd_ioctl_get_version(kfd_file, process, &version_args);
+	/* Now call kfd_ioctl_get_version with proper parameters */
+	ret = kfd_ioctl_get_version(kfd_file, process, &version_args);
 
-    if (ret != 0) {
-        snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
-                "kfd_ioctl_get_version failed: error %ld", ret);
-        kfd_result.error_code = (int)ret;
-        pmu_err("KFD Test: %s\n", kfd_result.error_msg);
-        filp_close(kfd_file, NULL);
-        return ret;
-    }
+	if (ret != 0) {
+		snprintf(kfd_result.error_msg, sizeof(kfd_result.error_msg),
+			 "kfd_ioctl_get_version failed: error %ld", ret);
+		kfd_result.error_code = (int)ret;
+		pmu_err("KFD Test: %s\n", kfd_result.error_msg);
+		filp_close(kfd_file, NULL);
+		return ret;
+	}
 
-    /* Success - store the version information */
-    kfd_result.success = true;
-    kfd_result.major_version = version_args.major_version;
-    kfd_result.minor_version = version_args.minor_version;
-    kfd_result.error_code = 0;
+	/* Success - store the version information */
+	kfd_result.success = true;
+	kfd_result.major_version = version_args.major_version;
+	kfd_result.minor_version = version_args.minor_version;
+	kfd_result.error_code = 0;
 
-    pmu_info("KFD Test: SUCCESS! KFD Version: %u.%u\n",
-             kfd_result.major_version, kfd_result.minor_version);
+	pmu_info("KFD Test: SUCCESS! KFD Version: %u.%u\n", kfd_result.major_version,
+		 kfd_result.minor_version);
 
-    /* Clean up - this calls kfd_release which unrefs the process */
-    filp_close(kfd_file, NULL);
+	/* Clean up - this calls kfd_release which unrefs the process */
+	filp_close(kfd_file, NULL);
 
-    pmu_info("KFD Test: Test completed successfully\n");
-    return 0;
+	pmu_info("KFD Test: Test completed successfully\n");
+	return 0;
 }
 
 /**
@@ -109,11 +108,11 @@ int kfd_test_get_version(void)
  */
 int kfd_test_get_result(struct kfd_test_result *result)
 {
-    if (!result)
-        return -EINVAL;
+	if (!result)
+		return -EINVAL;
 
-    memcpy(result, &kfd_result, sizeof(struct kfd_test_result));
-    return 0;
+	memcpy(result, &kfd_result, sizeof(struct kfd_test_result));
+	return 0;
 }
 
 /**
@@ -121,11 +120,11 @@ int kfd_test_get_result(struct kfd_test_result *result)
  */
 void kfd_test_print_result(void)
 {
-    if (kfd_result.success) {
-        pmu_info("KFD Test Result: SUCCESS - Version %u.%u\n",
-                 kfd_result.major_version, kfd_result.minor_version);
-    } else {
-        pmu_info("KFD Test Result: FAILED - Error %d: %s\n",
-                 kfd_result.error_code, kfd_result.error_msg);
-    }
+	if (kfd_result.success) {
+		pmu_info("KFD Test Result: SUCCESS - Version %u.%u\n", kfd_result.major_version,
+			 kfd_result.minor_version);
+	} else {
+		pmu_info("KFD Test Result: FAILED - Error %d: %s\n", kfd_result.error_code,
+			 kfd_result.error_msg);
+	}
 }
