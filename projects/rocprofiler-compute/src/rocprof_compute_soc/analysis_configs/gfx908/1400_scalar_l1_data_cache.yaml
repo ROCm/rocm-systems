@@ -154,7 +154,7 @@ Panel Config:
     sL1D-L2 BW Utilization: The percentage of the peak theoretical sL1D - L2 interface
       bandwidth acheived. Calculated as total number of bytes read from, written to,
       or atomically updated across the sL1D - L2 interface.
-    sL1D-L2 BW: |-
+    sL1D-L2 BW: >-
       The total number of bytes read from, written to, or atomically updated
       across the sL1D\u2194L2 interface, divided by total duration. Note that sL1D
       writes and atomics are typically unused on current CDNA accelerators, so
@@ -164,7 +164,7 @@ Panel Config:
       unit.
     Hits: The total number of sL1D requests that hit on a previously loaded cache
       line, per normalization unit.
-    Misses - Non Duplicated: |-
+    Misses - Non Duplicated: >-
       The total number of sL1D requests that missed on a cache line that was
       not already pending due to another request, per normalization unit.
     Misses- Duplicated: The total number of sL1D requests that missed on a cache line
@@ -187,6 +187,6 @@ Panel Config:
       unit.
     Write Req: The total number of write requests from sL1D to the L2, per normalization
       unit. Typically unused on current CDNA accelerators.
-    Stall Cycles: |-
+    Stall Cycles: >-
       The total number of cycles the sL1D\u2194L2 interface was stalled, per
       normalization unit.

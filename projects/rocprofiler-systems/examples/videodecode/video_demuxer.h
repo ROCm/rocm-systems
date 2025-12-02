@@ -570,9 +570,17 @@ private:
              !strcmp(av_fmt_input_ctx_->iformat->long_name, "FLV (Flash Video)") ||
              !strcmp(av_fmt_input_ctx_->iformat->long_name, "Matroska / WebM"));
 
+        // For latest version of FFMPeg, read_seek and read_seek2 are not exposed in
+        // AVInputFormat
+#if USE_AVCODEC_GREATER_THAN_58_134
+        // Check if the input stream is seekable for FFmpeg >= 58.134
+        is_seekable_ = (av_fmt_input_ctx_->iformat->flags & AVFMT_NO_BYTE_SEEK) == 0 &&
+                       av_fmt_input_ctx_->pb && av_fmt_input_ctx_->pb->seekable;
+#else
         // Check if the input file allow seek functionality.
         is_seekable_ = av_fmt_input_ctx_->iformat->read_seek ||
                        av_fmt_input_ctx_->iformat->read_seek2;
+#endif
 
         if(is_h264_)
         {
