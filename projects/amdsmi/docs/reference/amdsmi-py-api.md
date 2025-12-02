@@ -700,7 +700,7 @@ Example:
 
 ```python
 try:
-    devices = amdsmi_get_processor_handles(handle)
+    devices = amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
@@ -766,12 +766,12 @@ try:
     else:
         for device in devices:
             cache_info = amdsmi_get_gpu_cache_info(device)
-            for cache_index, cache_values in cache_info.items():
-                print(cache_values['cache_properties'])
-                print(cache_values['cache_size'])
-                print(cache_values['cache_level'])
-                print(cache_values['max_num_cu_shared'])
-                print(cache_values['num_cache_instance'])
+            for cache_values in cache_info.values():
+                for cache_value in cache_values:
+                    print(cache_value['cache_properties'])
+                    print(cache_value['cache_level'])
+                    print(cache_value['max_num_cu_shared'])
+                    print(cache_value['num_cache_instance'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -2743,7 +2743,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            perf_level = amdsmi_get_gpu_perf_level(dev)
+            perf_level = amdsmi_get_gpu_perf_level(device)
             print(perf_level)
 except AmdSmiException as e:
     print(e)
@@ -3750,7 +3750,7 @@ Input parameters:
 
 * `processor_handle` handle for the given device
 * `clk_type` the type of clock for which the set of frequencies will be modified
-as AmdSmiClkType
+as a string of AmdSmiClkType. Example AmdSmiClkType.SCLK becomes "SCLK".
 * `freq_bitmask`  bitmask indicating the indices of the frequencies that are to
 be enabled (1) and disabled (0). Only the lowest ::amdsmi_frequencies_t.num_supported
 bits of this mask are relevant.
@@ -3779,7 +3779,7 @@ try:
     else:
         for device in devices:
             freq_bitmask = 0
-             amdsmi_set_clk_freq(device, AmdSmiClkType.GFX, freq_bitmask)
+            amdsmi_set_clk_freq(device, "SCLK", freq_bitmask)
 except AmdSmiException as e:
     print(e)
 ```
@@ -4712,21 +4712,20 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        for device in devices:
+        for device_num, device in enumerate(devices):
             link_metrics = amdsmi_get_link_metrics(device)
-            print(link_metrics['bit_rate'])
-            print(link_metrics['max_bandwidth'])
-            for idx, link in enumerate(link_metrics['links']):
-                print(f"{idx}: {link['bdf']}, {link['read']} KB, {link['write']} KB")
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print(link_metrics['num_links'])
+            for idx, links in enumerate(link_metrics['links']):
+                print(f"{idx}: {links['bdf']}, {links['read']} KB, {links['write']} KB")
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
                     print('internal')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
                     print('pcie')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
                     print('xgmi')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
                     print('not applicable')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
                     print('unknown')
 except AmdSmiException as e:
     print(e)
