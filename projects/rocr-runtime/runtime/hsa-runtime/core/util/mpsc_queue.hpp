@@ -153,7 +153,7 @@ public:
         Node* head = head_.ptr.load(std::memory_order_relaxed);
         Node* next = head->next.load(std::memory_order_acquire);
         if (!next) return false;
-        out = next->value; 
+        out = next->value;
         return true;
     }
 
@@ -229,4 +229,4 @@ private:
 };
 
 }
-#endif // HSA_RUNTIME_CORE_UTIL_MPSC_QUEUE_HPP_ 
+#endif // HSA_RUNTIME_CORE_UTIL_MPSC_QUEUE_HPP_
