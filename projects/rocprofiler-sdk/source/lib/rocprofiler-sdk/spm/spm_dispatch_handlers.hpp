@@ -35,12 +35,6 @@ using ClientID   = int64_t;
 using inst_pkt_t = common::container::
     small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
 
-void
-start_context(const context::context*);
-
-void
-stop_context(const context::context*);
-
 hsa::Queue::pkt_and_serialize_t
 pre_kernel_call(const context::context*                                         ctx,
                 const std::shared_ptr<spm_counter_callback_info>&               info,

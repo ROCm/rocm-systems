@@ -31,7 +31,6 @@
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_core.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>

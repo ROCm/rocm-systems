@@ -286,7 +286,7 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
                                        uint64_t                             timeout)
 : _agent_id(agent_id)
 {
-    auto*        agent       = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
+    const auto*  agent       = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
     const double sclk_freq   = agent->max_engine_clk_fcompute * 1E6;  // MHz
     const size_t sclk_period = static_cast<size_t>(std::round(sclk_freq / sample_freq));
 
@@ -296,7 +296,7 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
     params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT, timeout});
 
     events.clear();
-    for(auto& metric : metrics)
+    for(const auto& metric : metrics)
     {
         auto query_info                = get_query_info(_agent_id, metric);
         _metrics.emplace_back().metric = metric;
