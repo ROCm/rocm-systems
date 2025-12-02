@@ -79,6 +79,7 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/functional/filter_devices.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 
@@ -477,6 +478,15 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
     VirtMemoryTestInterProcess vmt;
     RunCustomTestProlog(&vmt);
     RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, Filter_Devices_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    FilterDevicesTest fd;
+    RunCustomTestProlog(&fd);
+    fd.TestRocrVisibleDevicesFiltering();
+    RunCustomTestEpilog(&fd);
   );
 }
 
