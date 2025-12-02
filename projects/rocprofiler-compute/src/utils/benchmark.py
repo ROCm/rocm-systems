@@ -841,7 +841,7 @@ using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
 using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 
 #define FP8_E4M3 0
-#define FP8_E5M2 1
+#define BF8_E5M2 1
 #define FP6_E2M3 2
 #define BF6_E3M2 3
 #define FP4_E2M1 4
@@ -864,7 +864,7 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
             {
                 result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0, 0, 0, 0, 0);
         	}
-        case FP8_E5M2: // bf8 x bf8
+        case BF8_E5M2: // bf8 x bf8
             for(int i = 0; i < iter; ++i)
             {
                 result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 1, 1, 0, 0, 0, 0);
