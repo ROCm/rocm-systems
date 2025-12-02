@@ -28,12 +28,10 @@
 
 #pragma once
 
-#include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/state.hpp"
-#include "library/thread_data.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
@@ -41,14 +39,10 @@
 
 #include <chrono>
 #include <cstdint>
-#include <deque>
 #include <future>
 #include <limits>
 #include <memory>
-#include <ratio>
 #include <thread>
-#include <tuple>
-#include <type_traits>
 
 namespace rocprofsys
 {
@@ -71,15 +65,16 @@ post_process();
 
 void set_state(State);
 
-// Fork handling - cleanup AMD SMI state in child process
+uint32_t
+device_count();
+
 void
 postfork_child_cleanup();
 
-// Fork handling - reinitialize AMD SMI state in parent process
 void
 postfork_parent_reinit();
 
-struct settings
+struct legacy_settings
 {
     bool busy          = true;
     bool temp          = true;
@@ -104,7 +99,6 @@ struct data
     using mem_usage_t = uint64_t;
     using temp_t      = int64_t;
 
-    // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
     using gpu_metrics_t = rocprofsys::gpu::gpu_metrics_t;
 
     ROCPROFSYS_DEFAULT_OBJECT(data)
@@ -178,6 +172,12 @@ inline void
 set_state(State)
 {}
 
+inline uint32_t
+device_count()
+{
+    return 0;
+}
+
 inline void
 postfork_child_cleanup()
 {}
@@ -185,7 +185,9 @@ postfork_child_cleanup()
 inline void
 postfork_parent_reinit()
 {}
+
 #endif
+
 }  // namespace amd_smi
 }  // namespace rocprofsys
 

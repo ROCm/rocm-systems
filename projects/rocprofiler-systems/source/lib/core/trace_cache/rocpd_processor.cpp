@@ -369,7 +369,7 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-
+/*
     const auto* _name            = trait::name<category::amd_smi>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
@@ -385,17 +385,18 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         m_data_processor->insert_sample(track_name, _amd_smi.timestamp, event_id);
     };
 
-    using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
-    bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
+    bool is_busy_enabled  = true;  // settings_bits.test(static_cast<int>(pos::busy));
+    bool is_temp_enabled  = true;  // settings_bits.test(static_cast<int>(pos::temp));
+    bool is_power_enabled = true;  // settings_bits.test(static_cast<int>(pos::power));
+    bool is_mem_usage_enabled =
+        true;  // settings_bits.test(static_cast<int>(pos::mem_usage));
 
-    bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
-    bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
-    bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
-    bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
+    bool is_vcn_enabled =
+        true;  // settings_bits.test(static_cast<int>(pos::vcn_activity));
+    bool is_jpeg_enabled =
+        true;  // settings_bits.test(static_cast<int>(pos::jpeg_activity));
+    bool is_xgmi_enabled = true;  // settings_bits.test(static_cast<int>(pos::xgmi));
+    bool is_pcie_enabled = true;  // settings_bits.test(static_cast<int>(pos::pcie));
 
     insert_event_and_sample(
         is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
@@ -564,6 +565,7 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
             _amd_smi.device_id)
             .c_str(),
         static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
+        */
 #endif
 }
 

@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #pragma once
+#include "common/span.hpp"
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <tuple>
@@ -80,11 +82,23 @@ struct tuple_to_variant<std::tuple<Types...>>
 template <class...>
 using void_t = void;
 
+template <typename T>
+struct is_span : std::false_type
+{};
+
+template <typename T>
+struct is_span<common::span<T>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_span_v = is_span<T>::value;
+
 template <typename... Types>
 struct typelist
 {
     template <typename T>
-    constexpr static bool is_supported = (std::is_same_v<std::decay_t<T>, Types> || ...);
+    constexpr static bool is_supported =
+        is_span_v<T> || (std::is_same_v<std::decay_t<T>, Types> || ...);
 };
 
 using supported_types = typelist<std::string_view, uint64_t, int32_t, uint32_t,

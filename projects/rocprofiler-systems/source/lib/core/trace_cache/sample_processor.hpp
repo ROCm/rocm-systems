@@ -23,6 +23,7 @@
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/amd_smi/amd_smi_sample.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/version.h>

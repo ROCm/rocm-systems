@@ -26,6 +26,8 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "core/trace_cache/storage_parser.hpp"
+#include "library/amd_smi/amd_smi_sample.hpp"
+#include "library/runtime.hpp"
 #include <memory>
 
 namespace rocprofsys

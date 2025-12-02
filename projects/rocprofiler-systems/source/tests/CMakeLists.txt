@@ -25,7 +25,8 @@ set(unit_test_sources dummy.cpp)
 # Add AMD SMI unit tests when ROCm is enabled
 if(ROCPROFSYS_USE_ROCM)
     list(APPEND unit_test_sources
-        ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/amd_smi/test/sampler_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi/processor_tests.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi/amd_smi_impl_tests.cpp
     )
 endif()
 
@@ -49,6 +50,7 @@ if(ROCPROFSYS_USE_ROCM)
         PRIVATE
             ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
             ${PROJECT_SOURCE_DIR}/source/lib
+            ${CMAKE_CURRENT_SOURCE_DIR}/amd_smi
     )
 endif()
 

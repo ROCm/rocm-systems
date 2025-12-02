@@ -30,15 +30,15 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/tracing.hpp
 )
 
-# AMD SMI refactored components (template-based, no virtual function overhead)
 set(amd_smi_headers
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/policies.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/sampler_impl.hpp
-)
-
-set(amd_smi_sources
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/amd_smi_driver.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/processor.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/service.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/settings.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/perfetto_policy.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/rocpd_policy.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/amd_smi_impl.hpp
 )
 
 target_sources(
@@ -53,7 +53,6 @@ if(ROCPROFSYS_USE_ROCM)
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
             ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-            ${amd_smi_sources}
             ${amd_smi_headers}
     )
     add_subdirectory(rocprofiler-sdk)
@@ -69,7 +68,6 @@ set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/backtrace_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi/metrics.cpp
 )
 
 set_source_files_properties(
