@@ -105,11 +105,21 @@ context_filter(const context::context* ctx)
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    if(!data) return true;
+    ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler INVOKED data={} fini_status={}",
+                              fmt::ptr(data), registration::get_fini_status());
+
+    if(!data)
+    {
+        ROCP_ERROR << "DEBUG: AsyncSignalHandler - NULL data pointer! Returning true.";
+        return true;
+    }
 
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
+        ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler - early return due to fini_status={}, "
+                                  "deleting data={}",
+                                  registration::get_fini_status(), fmt::ptr(data));
         auto* _session = static_cast<Queue::queue_info_session_t**>(data);
         delete _session;
         return false;
@@ -119,7 +129,17 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     get_balanced_signal_slots().fetch_add(1);
     auto signal_slots_after = get_balanced_signal_slots().load();
 
-    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    auto* shared_ptr_ptr = static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    if(!shared_ptr_ptr || !(*shared_ptr_ptr))
+    {
+        ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler - invalid shared_ptr! shared_ptr_ptr={} "
+                                  "*shared_ptr_ptr={}",
+                                  fmt::ptr(shared_ptr_ptr),
+                                  shared_ptr_ptr ? fmt::ptr(shared_ptr_ptr->get()) : "null");
+        return false;
+    }
+
+    auto& shared_ptr_info    = *shared_ptr_ptr;
     auto& queue_info_session = *shared_ptr_info;
 
     ROCP_ERROR << fmt::format("DEBUG: AsyncSignalHandler ENTRY queue_id={:#x} signal_slots: {} -> {} (target={})",
@@ -194,7 +214,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                               queue_info_session.queue.get_id().handle,
                               active_before, active_after);
 
-    delete &shared_ptr_info;
+    delete shared_ptr_ptr;
 
     return false;
 }

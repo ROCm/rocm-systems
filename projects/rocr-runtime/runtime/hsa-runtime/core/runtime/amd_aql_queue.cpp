@@ -343,6 +343,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 }
 
 AqlQueue::~AqlQueue() {
+  fprintf(stderr, "DEBUG: AqlQueue::~AqlQueue() ENTRY this=%p queue_id=%lu\n",
+          static_cast<void*>(this), amd_queue_.hsa_queue.id);
+
   // Remove error handler synchronously.
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;
@@ -395,13 +398,23 @@ AqlQueue::~AqlQueue() {
     }
   }
   agent_->system_deallocator()(pm4_ib_buf_);
+
+  fprintf(stderr, "DEBUG: AqlQueue::~AqlQueue() EXIT this=%p - destruction complete\n",
+          static_cast<void*>(this));
 }
 
 void AqlQueue::Destroy() {
+  fprintf(stderr, "DEBUG: AqlQueue::Destroy() ENTRY this=%p queue_id=%lu type=%d\n",
+          static_cast<void*>(this), amd_queue_.hsa_queue.id, amd_queue_.hsa_queue.type);
+
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
+    fprintf(stderr, "DEBUG: AqlQueue::Destroy() - cooperative queue, releasing GWS\n");
     agent_->GWSRelease();
     return;
   }
+
+  fprintf(stderr, "DEBUG: AqlQueue::Destroy() - deleting this=%p queue_id=%lu\n",
+          static_cast<void*>(this), amd_queue_.hsa_queue.id);
   delete this;
 }
 

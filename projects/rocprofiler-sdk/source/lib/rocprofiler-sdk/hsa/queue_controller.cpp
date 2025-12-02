@@ -223,20 +223,48 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    if(!id) return;
+    ROCP_ERROR << fmt::format("DEBUG: ENTRY destroy_queue() hsa_queue_ptr={} queue_id={:#x}",
+                              fmt::ptr(id), id ? id->id : 0);
+
+    if(!id)
+    {
+        ROCP_ERROR << "DEBUG: destroy_queue() - id is NULL, returning early";
+        return;
+    }
 
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
-    if(!queue) return;
+    if(!queue)
+    {
+        ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - queue NOT FOUND for id={:#x}", id->id);
+        return;
+    }
 
-    ROCP_INFO << "destroying queue...";
+    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - calling sync() for queue_id={:#x} "
+                              "active_kernels={}",
+                              queue->get_id().handle,
+                              queue->active_async_packets());
 
     queue->sync();
-    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+
+    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - sync() complete for queue_id={:#x} "
+                              "active_kernels={}",
+                              queue->get_id().handle,
+                              queue->active_async_packets());
+
+    if(queue->block_signal.handle != 0)
+    {
+        ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - destroying block_signal={:#x}",
+                                  queue->block_signal.handle);
+        get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    }
+
+    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - erasing queue from map, queue_id={:#x}",
+                              id->id);
     _queues.wlock([&](auto& map) { map.erase(id); });
 
-    ROCP_INFO << "queue destroyed";
+    ROCP_ERROR << fmt::format("DEBUG: EXIT destroy_queue() queue_id={:#x}", id->id);
 }
 
 ClientID
