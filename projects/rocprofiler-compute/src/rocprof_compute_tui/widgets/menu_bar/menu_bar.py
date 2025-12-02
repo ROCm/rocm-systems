@@ -22,9 +22,11 @@
 # THE SOFTWARE.
 ##############################################################################
 
+from __future__ import annotations
+
 from typing import Any
 
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
@@ -32,12 +34,11 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Button
 
+from rocprof_compute_tui.widgets.directory_picker import DirectoryPicker
 from rocprof_compute_tui.widgets.recent_directories import RecentDirectoriesScreen
 
 
 class DropdownMenu(Container):
-    """Dropdown menu container with robust visibility / hit-testing control."""
-
     BINDINGS = [
         Binding("escape", "close_menu", "Close", show=False),
     ]
@@ -53,7 +54,6 @@ class DropdownMenu(Container):
         yield Button("Exit", id="menu-exit", classes="menu-item")
 
     def on_mount(self) -> None:
-        # Start fully hidden and non-hit-testable.
         self.display = False
         self._apply_hidden_state()
 
@@ -63,24 +63,16 @@ class DropdownMenu(Container):
     def _apply_visible_state(self) -> None:
         """Ensure the menu is visible and hit-testable."""
         styles = self.styles
-        styles.offset = (0, 0)
         styles.pointer_events = "auto"
         styles.visibility = "visible"
         styles.opacity = 1.0
-        styles.height = "auto"
-        styles.width = "auto"
 
     def _apply_hidden_state(self) -> None:
         """Ensure the menu is completely removed from hit-testing."""
         styles = self.styles
-        # Move off-screen to avoid any stale geometry being hit.
-        styles.offset = (-10000, -10000)
         styles.pointer_events = "none"
         styles.visibility = "hidden"
         styles.opacity = 0.0
-        # Let display=False remove it from layout; dimensions are defensive.
-        styles.height = 0
-        styles.width = 0
 
     # -------------------------------------------------------------------------
     # Public show/hide API
@@ -133,7 +125,7 @@ class DropdownMenu(Container):
 
 
 class MenuButton(Button):
-    """Menu button with reactive open state and proper sync."""
+    """Menu button with reactive open state and proper sync with DropdownMenu."""
 
     is_open: reactive[bool] = reactive(False, init=False)
 
@@ -143,17 +135,26 @@ class MenuButton(Button):
         self._dropdown: DropdownMenu | None = None
 
     def on_mount(self) -> None:
-        self._dropdown = self.app.query_one(f"#{self.menu_id}", DropdownMenu)
+        # IMPORTANT: delay lookup until after the full DOM is built
+        def late_init() -> None:
+            try:
+                self._dropdown = self.app.query_one(f"#{self.menu_id}", DropdownMenu)
+            except Exception:
+                self._dropdown = None
+
+        self.call_later(late_init)
 
     def watch_is_open(self, value: bool) -> None:
+        """React to is_open changes by showing/hiding the dropdown."""
         if self._dropdown is None:
             return
+
         if value:
             self._dropdown.show()
-            self.add_class("active")
+            self.add_class("-active")
         else:
             self._dropdown.hide()
-            self.remove_class("active")
+            self.remove_class("-active")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Toggle dropdown on press."""
@@ -180,6 +181,7 @@ class MenuBar(Container):
             id="menu-buttons",
         )
         with Container(id="dropdown-container"):
+            # This ID is used everywhere; do not change lightly
             yield DropdownMenu(id="file-dropdown")
 
     def on_mount(self) -> None:
@@ -199,8 +201,15 @@ class MenuBar(Container):
     # -------------------------------------------------------------------------
     # Menu item actions
     # -------------------------------------------------------------------------
+    @on(Button.Pressed, "#menu-open-workload")
+    def open_workload(self, event: Button.Pressed) -> None:
+        """Open the directory picker for workload selection."""
+        event.stop()
+        self.close_dropdown()
+        self._start_pick_directory()
+
     @on(Button.Pressed, "#menu-open-recent")
-    def show_recent(self) -> None:
+    def show_recent(self, event: Button.Pressed) -> None:  # noqa: ARG002
         """Open the Recent Directories screen."""
         if not self.app.recent_dirs:
             self.notify("No recent directories found", severity="warning")
@@ -215,9 +224,38 @@ class MenuBar(Container):
         )
 
     @on(Button.Pressed, "#menu-exit")
-    def exit_app(self) -> None:
+    def exit_app(self, event: Button.Pressed) -> None:  # noqa: ARG002
         """Exit the application."""
         self.app.exit()
+
+    # -------------------------------------------------------------------------
+    # Asynchronous directory picker workflow (moved from App into MenuBar)
+    # -------------------------------------------------------------------------
+    @work
+    async def _start_pick_directory(self) -> None:
+        """Open directory picker and handle selection."""
+        app = self.app
+
+        try:
+            picker = DirectoryPicker()
+            opened = await app.push_screen_wait(picker)
+            if opened:
+                app.log(f"Directory selected: {opened}")
+                app.notify(f"Selected directory: {opened}", severity="information")
+
+                app.add_recent_dir(str(opened))
+                app.main_view.selected_path = opened
+
+                app.notify("Running analysis…", severity="information")
+                app.main_view.run_analysis()
+                app.notify("Analysis completed", severity="information")
+            else:
+                app.log("Directory selection cancelled")
+                app.notify("Directory selection cancelled", severity="information")
+
+        except Exception as e:  # noqa: BLE001
+            app.log(f"Error in directory picker: {e}")
+            app.notify(f"Error opening directory picker: {e}", severity="error")
 
     # -------------------------------------------------------------------------
     # Click outside to close menu
@@ -227,7 +265,7 @@ class MenuBar(Container):
         menu_btn = self.query_one("#menu-file", MenuButton)
         dropdown = self.query_one("#file-dropdown", DropdownMenu)
 
-        if menu_btn.is_open:
+        if menu_btn.is_open and dropdown.display:
             # Get click coordinates relative to widgets
             click_in_dropdown = dropdown.region.contains_point(event.screen_offset)
             click_in_button = menu_btn.region.contains_point(event.screen_offset)

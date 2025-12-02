@@ -39,6 +39,7 @@ class InstantMenuButton(InstantButton):
         self.menu_id = menu_id  # id of the DropdownMenu widget
 
     def watch_is_open(self, value: bool) -> None:
+        """Show/hide the associated dropdown and update visual state."""
         try:
             dropdown = self.app.query_one(f"#{self.menu_id}")
         except Exception:
@@ -52,7 +53,7 @@ class InstantMenuButton(InstantButton):
             dropdown.styles.height = "auto"
             dropdown.styles.width = "auto"
 
-            self.add_class("active")
+            self.add_class("-active")
         else:
             dropdown.styles.display = "none"
             dropdown.styles.visibility = "hidden"
@@ -61,7 +62,7 @@ class InstantMenuButton(InstantButton):
             dropdown.styles.height = 0
             dropdown.styles.width = 0
 
-            self.remove_class("active")
+            self.remove_class("-active")
 
     def on_instant_button_instant_pressed(
         self, event: InstantButton.InstantPressed

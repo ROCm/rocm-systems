@@ -117,10 +117,6 @@ class DirectoryPicker(ModalScreen[Optional[Path]]):
     }
     """
 
-    # Don't capture pointer at the modal root, let children receive events directly.
-    CAN_CAPTURE_POINTER = False
-    BUBBLE = True
-
     def __init__(self, start_path: Optional[Path] = None) -> None:
         super().__init__()
         self.start_path = start_path or Path.cwd()

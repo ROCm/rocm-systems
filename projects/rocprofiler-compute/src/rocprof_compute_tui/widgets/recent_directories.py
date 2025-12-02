@@ -72,9 +72,6 @@ class ClickableListItem(ListItem):
 class RecentDirectoriesScreen(ModalScreen):
     """Modal screen to display recent directories as clickable list items."""
 
-    CAN_CAPTURE_POINTER = False
-    BUBBLE = True
-
     def __init__(self, recent_dirs: list[str], current_dir: str | None = None) -> None:
         super().__init__()
         self.recent_dirs = recent_dirs
