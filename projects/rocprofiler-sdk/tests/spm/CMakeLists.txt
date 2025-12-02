@@ -29,7 +29,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION"
-        "ROCPROFILER_SPM_BETA_ENABLED=True"
+        "ROCPROFILER_SPM_BETA_ENABLED=true"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP test-spm-dispatch-collection
     DISABLED ${IS_DISABLED})

@@ -1073,8 +1073,8 @@ generate_csv(const output_config&                        cfg,
                 auto counter_name_dim = std::stringstream{};
                 auto dimensions       = tool_metadata.get_counter_dimension_info();
                 counter_name_dim << counter_id_to_name.at(count.id) << "[";
-                size_t dim_count = -1;
-                auto   delim     = ",";
+                size_t      dim_count = -1;
+                const auto* delim     = ",";
                 for(auto dim : dimensions)
                 {
                     size_t pos = 0;
@@ -1082,7 +1082,7 @@ generate_csv(const output_config&                        cfg,
                     ROCPROFILER_CHECK(rocprofiler_query_record_dimension_position(
                         count.instance_id, dim.id, &pos));
                     counter_name_dim << std::string(dim.name).erase(0, 10) << ":" << pos;
-                    if(dim_count != dimensions.size() - 1) counter_name_dim << delim;
+                    if(dim_count != dimensions.size() - 1) counter_name_dim << *delim;
                 }
                 counter_name_dim << "]";
 

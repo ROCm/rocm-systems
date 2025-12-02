@@ -21,13 +21,10 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/spm/spm_dispatch_handlers.hpp"
-
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
-//#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
@@ -38,75 +35,6 @@ namespace rocprofiler
 {
 namespace SPM
 {
-void
-start_context(const context::context* ctx)
-{
-    if(!ctx || !ctx->dispatch_spm) return;
-
-    auto* controller = hsa::get_queue_controller();
-
-    bool already_enabled = true;
-    CHECK_NOTNULL(controller)->enable_serialization();
-    ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
-        if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
-    });
-
-    if(!already_enabled)
-    {
-        for(auto& cb : ctx->dispatch_spm->callbacks)
-        {
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) return;
-            // Insert our callbacks into HSA Interceptor. This
-            // turns on counter instrumentation.
-
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                [=](const hsa::Queue&                                               q,
-                    const hsa::rocprofiler_packet&                                  kern_pkt,
-                    rocprofiler_kernel_id_t                                         kernel_id,
-                    rocprofiler_dispatch_id_t                                       dispatch_id,
-                    rocprofiler_user_data_t*                                        user_data,
-                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                    const context::correlation_id* correlation_id) {
-                    return pre_kernel_call(ctx,
-                                           cb,
-                                           q,
-                                           kern_pkt,
-                                           kernel_id,
-                                           dispatch_id,
-                                           user_data,
-                                           extern_corr_ids,
-                                           correlation_id);
-                },
-                // Completion CB
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                    inst_pkt_t&                                        aql,
-                    kernel_dispatch::profiling_time                    dispatch_time) {
-                    post_kernel_call(ctx, cb, session, aql, dispatch_time);
-                });
-        }
-    }
-}
-
-void
-stop_context(const context::context* ctx)
-{
-    if(!ctx || !ctx->dispatch_spm) return;
-
-    auto* controller = hsa::get_queue_controller();
-
-    ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
-        if(!enabled) return;
-        enabled = false;
-    });
-
-    if(controller) controller->disable_serialization();
-}
-
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
