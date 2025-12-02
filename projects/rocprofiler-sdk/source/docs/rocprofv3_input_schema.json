@@ -15,7 +15,7 @@
                       "type" : "array",
                       "description": "list of counters to collect"
                      },
-                    
+
                     "pmc_groups": {
                          "type" : "array",
                          "description": "An array containing lists of PMC counters to collect in a multiplexing fashion (e.x. [[counter1, counter2], [counter3, counter4]])"
@@ -24,7 +24,7 @@
                          "type" : "integer",
                           "description": "Number of kernel launches between selecting the next group of counters to collect"
                      },
-                     
+
                      "kernel_include_regex":{
                         "type": "string",
                         "description": "Include the kernels matching this filter"

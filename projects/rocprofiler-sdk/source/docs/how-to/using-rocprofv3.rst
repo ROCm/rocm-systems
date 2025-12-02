@@ -214,7 +214,7 @@ The version command provides comprehensive build and system information includin
           system_version: 6.8.0-57-generic
              compiler_id: GNU
         compiler_version: 11.4.0
-            rocm_version: 6.2.0  
+            rocm_version: 6.2.0
 
 Application tracing
 ---------------------
@@ -232,7 +232,7 @@ To use ``rocprofv3`` for application tracing, run:
 
   All the tracing examples below use the ``--output-format csv`` option to generate output in CSV format.
   However, the default output format is ``rocpd`` (SQLite3 database). You can simply omit the ``--output-format`` option to generate output in the default format.
-  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module. 
+  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module.
   To understand how to convert ``rocpd`` output to other formats, see :ref:`using-rocpd-output-format`.
 
 HIP trace
@@ -773,8 +773,8 @@ Example configuration output structure:
         }
       ]
     }
-	
-The configuration output file provides complete transparency into ``rocprofv3`` operation, documenting all settings, defaults, and environmental context required for profiling sessions.	
+
+The configuration output file provides complete transparency into ``rocprofv3`` operation, documenting all settings, defaults, and environmental context required for profiling sessions.
 
 Collecting traces using input file
 ++++++++++++++++++++++++++++++++++++
@@ -1421,7 +1421,7 @@ If your application has a custom segmentation fault handler:
 
     int main() {
         signal(SIGSEGV, custom_sigsegv_handler);
-        
+
         // Application code that might trigger SIGSEGV
         return 0;
     }
@@ -1494,7 +1494,7 @@ You can also specify this option in YAML or JSON input files:
     jobs:
       - hip_trace: true
         kernel_trace: true
-        preload: 
+        preload:
           - "/usr/lib/x86_64-linux-gnu/libasan.so.5"
           - "/opt/custom/libprofiler.so"
         output_format: ["csv"]
@@ -1519,7 +1519,7 @@ You can also specify this option in YAML or JSON input files:
 
 **Sanitizer libraries:**
 - AddressSanitizer (``libasan.so``) for memory error detection
-- ThreadSanitizer (``libtsan.so``) for race condition detection  
+- ThreadSanitizer (``libtsan.so``) for race condition detection
 - MemorySanitizer (``libmsan.so``) for uninitialized memory detection
 - UndefinedBehaviorSanitizer (``libubsan.so``) for undefined behavior detection
 
@@ -1748,7 +1748,7 @@ The preceding command uses ``librocprofiler-sdk.so.1.2.3`` if available.
     # Test with specific patch version for bug verification
     rocprofv3 --sdk-version 2.1.5 --kernel-trace -- ./bug_reproduction_case
 
-    # Test with fixed version  
+    # Test with fixed version
     rocprofv3 --sdk-version 2.1.6 --kernel-trace -- ./bug_verification_case
 
 **Scenario 2: Reproducible profiling**
@@ -1782,7 +1782,7 @@ While typically used from command line, it can be scripted:
     #!/bin/bash
     # version_matrix_test.sh
     VERSIONS=("2.1.0" "2.1.1" "2.1.2" "2.2.0")
-    
+
     for version in "${VERSIONS[@]}"; do
         echo "Testing SDK version $version"
         rocprofv3 --sdk-version "$version" --hip-trace --output-directory "results_$version" -- ./test_app
@@ -2247,7 +2247,7 @@ Output formats
 - OTF2 (Open Trace Format for visualization with compatible third-party tools)
 
 
-The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`. 
+The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`.
 To specify the particular output format, use the ``--output-format`` option followed by the desired format.
 
 .. code-block::

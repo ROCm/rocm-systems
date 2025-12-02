@@ -9,4 +9,4 @@ Counters
 
 .. doxygengroup:: COUNTERS
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: rocprofiler-sdk

@@ -96,20 +96,20 @@ reduce_dim_args: NAME                     { $$ = new LinkedList($1, NULL);
 
 
 
-select_dim_args: NAME EQUALS O_SQ NUMBER C_SQ { 
+select_dim_args: NAME EQUALS O_SQ NUMBER C_SQ {
                                             $$ = new LinkedList($1, $4, NULL);
                                             free($1);
                                           }
- | NAME EQUALS O_SQ NUMBER C_SQ CM select_dim_args { 
+ | NAME EQUALS O_SQ NUMBER C_SQ CM select_dim_args {
                                             $$ = new LinkedList($1, $4, $7);
                                             free($1);
                                           }
- | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ { 
+ | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ {
                                             $$ = new LinkedList($1, $4, NULL);
                                             free($1);
                                             free($4);
                                           }
- | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ CM select_dim_args { 
+ | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ CM select_dim_args {
                                             $$ = new LinkedList($1, $4, $7);
                                             free($1);
                                             free($4);

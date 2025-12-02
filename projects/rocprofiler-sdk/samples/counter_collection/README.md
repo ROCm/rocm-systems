@@ -5,7 +5,7 @@
 - Dispatch counting
 - Device Counting async
 - Device Counting sync
-  
+
 ## Properties
 
 - Initializes tool and setup for counting service.
@@ -17,5 +17,5 @@
 
 - Dispatch callback
   - This sample creates a profile to collect the counter SQ_WAVES for all kernel dispatch packets.
-  
+
 - Prints all functional counters.

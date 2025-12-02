@@ -3,7 +3,7 @@
 ## Services
 
 - code object tracing.
-  
+
 ## Properties
 
 - This tool hooks into ROCProfiler's callback and buffer tracing mechanisms to:

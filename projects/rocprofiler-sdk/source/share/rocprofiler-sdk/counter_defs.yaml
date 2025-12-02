@@ -5617,8 +5617,8 @@ rocprofiler-sdk:
       block: SQ
       event: 16
   - name: SQ_INST_CYCLES_VALU
-    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1 
-     and V_OP32_T instruction, count them separately. 
+    description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is overlapping V_OP32_1
+     and V_OP32_T instruction, count them separately.
     properties: []
     definitions:
     - architectures:

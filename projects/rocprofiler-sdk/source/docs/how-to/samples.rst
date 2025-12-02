@@ -17,13 +17,13 @@ The ROCm installation provides sample programs and ``rocprofv3`` tool.
 - Sample programs are installed here:
 
 .. code-block:: bash
-    
+
     /opt/rocm/share/rocprofiler-sdk/samples
 
 - ``rocprofv3`` tool is installed here:
 
 .. code-block:: bash
-    
+
     /opt/rocm/bin
 
 Building Samples
@@ -43,7 +43,7 @@ Running samples
 To run the built samples, ``cd`` into the ``build-rocprofiler-sdk-samples`` directory and run:
 
 .. code-block:: bash
-    
+
     ctest -V
 
 The `-V` option enables verbose output, providing detailed information about the test execution.

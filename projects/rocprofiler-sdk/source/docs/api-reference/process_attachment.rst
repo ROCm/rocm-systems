@@ -86,7 +86,7 @@ The initial attachment process roughly follows this sequence:
 8. detach() ← Your tool calls this
 9. ptrace calls rocprofiler_register_detach()
 10. tool_library::tool_detach(...)
-11. [Program ends]   
+11. [Program ends]
 12. tool_library::tool_fini(...)
 
 Reattachment Sequence

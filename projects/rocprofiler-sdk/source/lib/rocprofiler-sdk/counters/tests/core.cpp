@@ -775,7 +775,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10
@@ -821,12 +821,12 @@ TEST(core, check_load_counter_def)
     const std::string test_yaml = R"(
 rocprofiler-sdk:
   counters-schema-version: 1
-  counters:  
+  counters:
     - name: GRBM_GUI_ACTIVE
       description: The GUI is Active
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx941
@@ -856,7 +856,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10
