@@ -1446,7 +1446,7 @@ write_rocpd(
     auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
 
-        using kfd_pmc_info_t = struct
+        using kfd_pmc_info_t = struct kfd_pmc_info
         {
             rocprofiler_buffer_tracing_kind_t kind;
             std::string_view                  description;
@@ -1493,7 +1493,7 @@ write_rocpd(
             auto _deferred = sql::deferred_transaction{conn};
             for(const auto& itr : _gen.get(pitr))
             {
-                using kfd_pmc_event_data_t = struct
+                using kfd_pmc_event_data_t = struct kfd_pmc_event_data
                 {
                     rocprofiler_buffer_tracing_kind_t kind;
                     std::string_view                  name;
