@@ -140,9 +140,9 @@ struct RocpdImportData
     RocpdImportData()  = default;
     ~RocpdImportData() = default;
 
-    RocpdImportData(const RocpdImportData&)                = default;
-    RocpdImportData(RocpdImportData&&) noexcept            = default;
-    RocpdImportData& operator=(const RocpdImportData&)     = default;
+    RocpdImportData(const RocpdImportData&)     = default;
+    RocpdImportData(RocpdImportData&&) noexcept = default;
+    RocpdImportData& operator=(const RocpdImportData&) = default;
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
@@ -536,23 +536,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             for(auto obj : {data.connection})
             {
                 // Suggestions for the future schema updates:
-                // - Add short_description field to provide Perfetto track names via database schema
-                // to eliminate hardcoded mappings.
-                // - Ensure rocpd_info_pmc is properly joinable with rocpd_sample to facilitate unit
-                // type retrieval per track and not per each event as it is in the current schema
-                // version.
-                const std::string create_samples_view = R"(
-                            CREATE TEMP VIEW IF NOT EXISTS
-                                `samples_schema_3_0` AS
+                // - Make info_pmc joinable with samples via the name field
+                // - Add short_description for perfetto counter tracks.
+                const std::string create_info_pmc_table = R"(
+                            CREATE TEMP TABLE IF NOT EXISTS
+                                `info_pmc_schema_3_0` AS
                             SELECT
-                                R.id,
-                                R.guid,
-                                PMC_I.name,
+                                CASE A.type
+                                    WHEN 'GPU' THEN PMC_I.name || ' [' || A.type_index || ']'
+                                    ELSE  PMC_I.name
+                                END
+                                AS name,
                                 PMC_I.symbol,
-                                T.nid,
-                                P.pid,
-                                T.tid,
-                                R.timestamp,
                                 CASE PMC_I.units
                                     WHEN 'W' THEN 'watts'
                                     WHEN '°C' THEN 'deg C'
@@ -579,7 +574,32 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                     ELSE PMC_I.description
                                 END AS short_description,
                                 A.absolute_index AS agent_abs_index,
+                                PMC_I.guid
+                            FROM
+                                `rocpd_info_pmc` PMC_I
+                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
+                                AND A.guid = PMC_I.guid
+                        )";
+
+                execute_raw_sql_statements(conn, create_info_pmc_table);
+
+                const std::string create_samples_view = R"(
+                            CREATE TEMP VIEW IF NOT EXISTS
+                                `samples_schema_3_0` AS
+                            SELECT
+                                P.pid,
+                                R.id,
+                                R.guid,
+                                R.timestamp,
                                 R.event_id,
+                                T.nid,
+                                T.tid,
+                                PMC_I.name,
+                                PMC_I.symbol,
+                                PMC_I.units,
+                                PMC_I.description,
+                                PMC_I.short_description,
+                                PMC_I.agent_abs_index AS agent_abs_index,
                                 E.stack_id AS stack_id,
                                 E.parent_stack_id AS parent_stack_id,
                                 E.correlation_id AS corr_id,
@@ -598,17 +618,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 AND SN.guid = T.guid
                                 INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
                                 AND CN.guid = T.guid
-                                INNER JOIN `rocpd_info_pmc` PMC_I ON SN.string =
-                                CASE CN.string
-                                    WHEN 'amd_smi' THEN PMC_I.name || ' [' ||
-                                    (SELECT type_index
-                                        FROM `rocpd_info_agent` A
-                                        WHERE A.id = PMC_I.agent_id) || ']'
-                                    ELSE  PMC_I.name
-                                END
+                                INNER JOIN `info_pmc_schema_3_0` PMC_I ON SN.string = PMC_I.name
                                 AND PMC_I.guid = T.guid
-                                INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
-                                AND A.guid = T.guid
                                 LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
                                 AND TH.guid = T.guid;
                         )";
