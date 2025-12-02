@@ -1604,6 +1604,7 @@ rocprofiler_set_api_table(const char* name,
     (void) lib_instance;
     (void) tables;
     (void) num_tables;
+    (void) num_tables;
 
     return 0;
 }
