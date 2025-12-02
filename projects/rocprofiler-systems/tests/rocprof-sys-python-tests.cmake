@@ -90,6 +90,9 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         DEPENDS code-coverage-basic-blocks-binary-rewrite
                 code-coverage-basic-blocks-binary-rewrite-run
                 code-coverage-basic-blocks-hybrid-runtime-instrument
+        FIXTURES_REQUIRED
+            code-coverage-basic-blocks-binary-rewrite-fixture
+            code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
         LABELS "code-coverage"
         ENVIRONMENT "${_python_environment}"
     )

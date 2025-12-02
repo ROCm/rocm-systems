@@ -22,6 +22,7 @@
 
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/agent_manager.hpp"
+#include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/gpu_metrics.hpp"
@@ -234,48 +235,6 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    static auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
-        rocprofiler_sdk::function_args_t args;
-        const std::string                delimiter = ";;";
-
-        auto split = [](const std::string& str, const std::string& _delimiter) {
-            std::vector<std::string> tokens;
-            size_t                   start = 0;
-            size_t                   end   = str.find(_delimiter);
-
-            while(end != std::string::npos)
-            {
-                tokens.push_back(str.substr(start, end - start));
-                start = end + _delimiter.length();
-                end   = str.find(_delimiter, start);
-            }
-
-            return tokens;
-        };
-
-        if(arg_str.empty())
-        {
-            return args;
-        }
-
-        auto tokens = split(arg_str, delimiter);
-
-        // Ensure the number of tokens is a multiple of 4
-        if(tokens.size() % 4 != 0)
-        {
-            throw std::invalid_argument("Malformed argument string.");
-        }
-
-        for(auto it = tokens.begin(); it != tokens.end(); it += 4)
-        {
-            rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
-                                                   *(it + 1), *(it + 2), *(it + 3) };
-            args.push_back(arg);
-        }
-
-        return args;
-    };
-
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -292,7 +251,7 @@ rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
         m_data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
                                        correlation_id, _rs.call_stack.c_str());
 
-    auto args = parse_args(_rs.args_str);
+    auto args = process_arguments_string(_rs.args_str);
     for(const auto& arg : args)
     {
         m_data_processor->insert_args(event_primary_key, arg.arg_number,
