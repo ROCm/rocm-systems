@@ -25,6 +25,7 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/rocpd/data_processor.hpp"
@@ -90,8 +91,10 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
 
-    auto region_name_primary_key = m_data_processor->insert_string(
-        tim::demangle(kernel_symbol->kernel_name).c_str());
+    auto region_name_primary_key =
+        m_data_processor->insert_string(rocprofsys::utility::get_demangler()
+                                            .demangle(kernel_symbol->kernel_name)
+                                            .c_str());
 
     auto stack_id        = _kds.correlation_id_internal;
     auto parent_stack_id = _kds.correlation_id_ancestor;
@@ -698,7 +701,7 @@ rocpd_processor_t::post_process_metadata()
     auto _kernel_symbols_list = m_metadata->get_kernel_symbol_list();
     for(const auto& kernel_symbol : _kernel_symbols_list)
     {
-        auto kernel_name = tim::demangle(kernel_symbol.kernel_name);
+        auto kernel_name = rocprofsys::utility::demangle(kernel_symbol.kernel_name);
         m_data_processor->insert_kernel_symbol(
             kernel_symbol.kernel_id, n_info.id, process_info.pid,
             kernel_symbol.code_object_id, kernel_symbol.kernel_name, kernel_name.c_str(),
