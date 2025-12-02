@@ -32,12 +32,16 @@ if(UNIX)
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
-      hipMemGetHandleForAddressRange.cc)
+      hipMemGetHandleForAddressRange.cc
+      hipMemGetHandleForAddressRangeMultiPtocDeviceMem.cc
+      hipMemGetHandleForAddressRangeMultiProcVirt.cc)
 endif()
   set(TEST_SRC
       ${TEST_SRC}
       hipMemExportToShareableHandle.cc
-      hipMemImportFromShareableHandle.cc)
+      hipMemImportFromShareableHandle.cc
+      hipMemImportFromShareableHandleGrandChild.cc
+      hipMemImportFromShareableHandleParentChild.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
