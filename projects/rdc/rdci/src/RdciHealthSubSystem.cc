@@ -398,7 +398,7 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response
     std::cout <<  "\"Health\" : \"" << gpu_health_str << "\", ";
     std::cout <<  "\"Error\" : [";
 
-    unsigned int i = 0; 
+    unsigned int i = 0;
     for (auto ite : component_detail_map) {
       component_str = component_string(ite.first);
       health_str = health_string(ite.second.component_health);
@@ -407,7 +407,7 @@ unsigned int RdciHealthSubSystem::handle_one_gpu(rdc_health_response_t &response
       std::cout << "\"Health\" : \"" << health_str << "\", ";
 
       std::cout << "\"Message\" : [";
-      unsigned int j = 0; 
+      unsigned int j = 0;
       for (auto err_ite : ite.second.err_str) {
         std::cout << "\"" << err_ite << "\"";
         j++;

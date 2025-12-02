@@ -56,10 +56,10 @@ def create_query_criteria():
         data = request.json
         if not data or "metrics" not in data:
             return jsonify({"error": "Invalid request payload"}), 400
-        
+
         gpu_indexes = data.get("gpu_index", rdc_util.get_all_gpu_indexes(rdc_reader.rdc_handle))
         metrics = data.get("metrics", [])
-        
+
         # Create rdc group and fieldgroup
         gpu_group_id, _ = rdc_util.create_gpu_group(rdc_reader.rdc_handle, b"query_gpu_group", gpu_indexes)
         field_group_id, _ = rdc_util.create_field_group(rdc_reader.rdc_handle, b"query_field_group", [rdc.get_field_id_from_name(m.encode('utf-8')).value for m in metrics])
@@ -68,7 +68,7 @@ def create_query_criteria():
         result = rdc.rdc_field_watch(rdc_reader.rdc_handle, gpu_group_id, field_group_id, 1000000, 3600.0, 1000)
         if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
             return jsonify({"error": "Failed to watch fields"}), 500
-        
+
         query_id = f"G-{gpu_group_id.value}-F-{field_group_id.value}"
         gpu_queries[query_id] = {"gpu_index": gpu_indexes, "metrics": metrics, "query_id": query_id}
         return jsonify({"query_id": query_id})
@@ -106,16 +106,16 @@ def delete_query_criteria(query_id):
         if query_id in gpu_queries:
             gpu_group_id = rdc_reader.field_group_id
             field_group_id = rdc_reader.field_group_id
-            
+
             # Call rdc_field_unwatch to stop fetching metrics
             result = rdc.rdc_field_unwatch(rdc_reader.rdc_handle, gpu_group_id, field_group_id)
             if rdc_status_t(result) != rdc_status_t.RDC_ST_OK:
                 return jsonify({"error": "Failed to unwatch fields"}), 500
-            
+
             # Delete GPU and field groups
             rdc.rdc_group_gpu_destroy(rdc_reader.rdc_handle, gpu_group_id)
             rdc.rdc_group_field_destroy(rdc_reader.rdc_handle, field_group_id)
-            
+
             # Remove the query from storage
             del gpu_queries[query_id]
             return jsonify({"message": "Deleted successfully"})
@@ -130,7 +130,7 @@ def get_gpu_metrics(query_id):
     try:
         if query_id not in gpu_queries:
             return jsonify({"error": "Query ID not found"}), 404
-        
+
         query = gpu_queries[query_id]
         gpu_metrics = []  # List to store GPU metric results
         for gpu in query["gpu_index"]:

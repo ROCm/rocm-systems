@@ -16,7 +16,7 @@ Download the latest AMDSMI and RDC repositories using the following commands:
 git clone https://github.com/ROCm/amdsmi.git
 ```
 
-### RDC 
+### RDC
 
 ```bash
 git clone https://github.com/ROCm/rocm-systems.git --recursive

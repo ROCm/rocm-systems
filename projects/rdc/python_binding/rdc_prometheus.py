@@ -60,7 +60,7 @@ class PrometheusReader(RdcReader):
                 self.counters[fid] = Counter(field_name, field_name, labelnames=['gpu_index'])
             else:
                 self.infos[fid] = Info(field_name, field_name, labelnames=['gpu_index'])
-            
+
 
 
     def handle_field(self, gpu_index, value):
