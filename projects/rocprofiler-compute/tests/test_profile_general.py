@@ -586,8 +586,116 @@ def test_path_rocpd(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
-def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
+@pytest.mark.path
+def test_path_csv(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--format-rocprof-output", "csv"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    all_csvs_mi100 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi200 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi300 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+    ])
+    all_csvs_mi350 = sorted([
+        "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+        "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_11.csv",
+        "pmc_perf_12.csv",
+        "sysinfo.csv",
+    ])
+
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == all_csvs_mi100
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == all_csvs_mi200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == all_csvs_mi300
+    elif "MI350" in soc:
+        assert sorted(list(file_dict.keys())) == all_csvs_mi350
+    else:
+        print(f"This test is not supported for {soc}")
+        assert 0
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_1
+def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
+    """
+    Test basic roofline PDF generation with full validation pipeline.
+    This test runs the complete validation flow including counter logging
+    and metric comparison (if enabled in config). Validates that roofline PDFs
+    are generated with the integrated multi-subplot layout (roofline plot +
+    plot points table + kernel names table).
+    """
     if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
@@ -615,7 +723,7 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
     """Test roofline with multiple data types"""
     if soc in ("MI100"):
@@ -653,7 +761,7 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
             test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
     """Test roofline with invalid data type"""
     if soc in ("MI100"):
@@ -683,7 +791,7 @@ def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     """Test file validation paths in roofline"""
     if soc in ("MI100"):
@@ -712,7 +820,7 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_rocpd(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         pytest.skip("Roofline not supported on MI100")
@@ -793,7 +901,7 @@ def test_analyze_rocpd(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
@@ -852,7 +960,7 @@ def test_roofline_workload_dir_not_set_error():
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -876,7 +984,7 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
     """
     Test empirical_roofline() when num_kernels == 0
@@ -903,7 +1011,7 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
@@ -942,7 +1050,7 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_1
 def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_compute):
     """
     Test datatype validation error in empirical_roofline()
@@ -968,7 +1076,7 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1015,7 +1123,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1041,7 +1149,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         pytest.skip("plotext not available for CLI testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         assert True
@@ -1061,7 +1169,7 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
     """
     Test handling of missing roofline.csv file
@@ -1115,7 +1223,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
     """
     Test CLI plot generation with invalid datatype
@@ -1167,7 +1275,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
         pytest.skip("Could not import roofline module for direct testing")
 
 
-@pytest.mark.roofline
+@pytest.mark.roofline_2
 def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute):
     """
     Test ceiling data validation in generate_plot()
@@ -1183,6 +1291,223 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.roofline_2
+def test_roofline_plot_points_data_generation():
+    """
+    Test that plot points data structure is correctly generated with:
+    - Symbol assignments
+    - AI values (FLOPs/Byte)
+    - Performance values (GFLOPs/s)
+    - Memory/Compute bound status
+    - Cache level information
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    try:
+        from roofline import Roofline
+        from utils.specs import generate_machine_specs
+
+        class MockArgs:
+            def __init__(self):
+                self.roof_only = True
+                self.mem_level = "ALL"
+                self.sort = "ALL"
+                self.roofline_data_type = ["FP32"]
+
+        args = MockArgs()
+        mspec = generate_machine_specs(None, None)
+
+        mock_ai_data = {
+            "ai_l1": [[0.5, 1.2], [100.0, 150.0]],
+            "ai_l2": [[0.3, 0.8], [80.0, 120.0]],
+            "ai_hbm": [[0.1, 0.4], [50.0, 90.0]],
+            "kernelNames": ["kernel_A", "kernel_B"],
+        }
+
+        mock_ceiling_data = {
+            "l1": [[0.01, 10], [10, 1000], 100],
+            "l2": [[0.01, 10], [10, 800], 80],
+            "hbm": [[0.01, 10], [10, 500], 50],
+            "valu": [[1, 100], [200, 200], 200],
+            "mfma": [[1, 100], [500, 500], 500],
+        }
+
+        plot_points_data = []
+        cache_colors = {
+            "ai_l1": "blue",
+            "ai_l2": "green",
+            "ai_hbm": "red",
+        }
+
+        roofline_instance = Roofline(args, mspec)
+
+        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+            if cache_level in mock_ai_data:
+                x_vals = mock_ai_data[cache_level][0]
+                y_vals = mock_ai_data[cache_level][1]
+                num_kernels = len(mock_ai_data["kernelNames"])
+
+                for i in range(min(len(x_vals), num_kernels)):
+                    if x_vals[i] > 0 and y_vals[i] > 0:
+                        status = roofline_instance._determine_kernel_bound_status(
+                            ai_value=x_vals[i],
+                            performance=y_vals[i],
+                            cache_level=cache_level,
+                            ceiling_data=mock_ceiling_data,
+                        )
+
+                        plot_points_data.append({
+                            "symbol": None,
+                            "color": cache_colors.get(cache_level, "gray"),
+                            "cache_level": cache_level.replace("ai_", "", 1).upper(),
+                            "ai": f"{x_vals[i]:.2f}",
+                            "performance": f"{y_vals[i]:.2f}",
+                            "status": status,
+                            "kernel_idx": i,
+                        })
+
+        assert len(plot_points_data) > 0, "Plot points data should not be empty"
+
+        for point in plot_points_data:
+            assert "cache_level" in point
+            assert "ai" in point
+            assert "performance" in point
+            assert "status" in point
+            assert "kernel_idx" in point
+            assert "color" in point
+
+            assert point["cache_level"] in ["L1", "L2", "HBM"]
+
+            assert point["status"] in ["Memory Bound", "Compute Bound", "Unknown"]
+
+            assert isinstance(point["ai"], str)
+            assert isinstance(point["performance"], str)
+
+    except ImportError:
+        pytest.skip("Could not import roofline module for direct testing")
+
+
+@pytest.mark.roofline_2
+def test_roofline_bound_status_calculation():
+    """
+    Test _determine_kernel_bound_status() correctly classifies kernels as
+    Memory Bound or Compute Bound based on their AI and performance vs ceilings.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    try:
+        from roofline import Roofline
+        from utils.specs import generate_machine_specs
+
+        class MockArgs:
+            def __init__(self):
+                self.roof_only = True
+                self.mem_level = "ALL"
+                self.sort = "ALL"
+                self.roofline_data_type = ["FP32"]
+
+        args = MockArgs()
+        mspec = generate_machine_specs(None, None)
+        roofline_instance = Roofline(args, mspec)
+
+        ceiling_data = {
+            "hbm": [[0.01, 10], [10, 1000], 100],
+            "valu": [[1, 100], [200, 200], 200],
+            "mfma": [[1, 100], [500, 500], 500],
+        }
+
+        status1 = roofline_instance._determine_kernel_bound_status(
+            ai_value=1.0,
+            performance=100.0,
+            cache_level="ai_hbm",
+            ceiling_data=ceiling_data,
+        )
+        assert status1 == "Memory Bound", f"Expected Memory Bound, got {status1}"
+
+        status2 = roofline_instance._determine_kernel_bound_status(
+            ai_value=5.0,
+            performance=150.0,
+            cache_level="ai_hbm",
+            ceiling_data=ceiling_data,
+        )
+        assert status2 == "Compute Bound", f"Expected Compute Bound, got {status2}"
+
+        status3 = roofline_instance._determine_kernel_bound_status(
+            ai_value=1.0,
+            performance=100.0,
+            cache_level="ai_l1",
+            ceiling_data=ceiling_data,
+        )
+        assert status3 == "Unknown", f"Expected Unknown, got {status3}"
+
+        bad_ceiling_data = {
+            "hbm": [100],
+        }
+        status4 = roofline_instance._determine_kernel_bound_status(
+            ai_value=1.0,
+            performance=100.0,
+            cache_level="ai_hbm",
+            ceiling_data=bad_ceiling_data,
+        )
+        assert status4 == "Unknown", f"Expected Unknown for bad data, got {status4}"
+
+    except ImportError:
+        pytest.skip("Could not import roofline module for direct testing")
+
+
+@pytest.mark.roofline_2
+def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
+    """
+    Test roofline PDF generation with many kernels (10+) to verify:
+    - Dynamic height calculation works
+    - PDF is generated successfully
+    - File size is reasonable
+
+    Note: This test uses a regular workload but validates the PDF structure
+    can handle the multi-subplot layout properly.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = ["--device", "0", "--roof-only"]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    assert returncode == 0, "Roofline profiling should succeed"
+
+    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
+    assert len(pdf_files) > 0, "At least one roofline PDF should be generated"
+
+    for pdf_file in pdf_files:
+        assert pdf_file.exists(), f"PDF file {pdf_file} should exist"
+        file_size = pdf_file.stat().st_size
+
+        # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
+        assert file_size > 10000, (
+            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+        )
+        assert file_size < 50000000, (
+            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+        )
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 

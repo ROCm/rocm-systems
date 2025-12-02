@@ -131,29 +131,6 @@ get_cache_files()
     return cache_map;
 }
 
-std::vector<std::string>
-get_all_cache_files()
-{
-    const auto               tmp_files = list_dir_files(tmp_directory);
-    std::vector<std::string> result{};
-    auto                     parse_and_fill_cache = [&](const std::string& filename) {
-        const std::regex buff_regex(R"(buffered_storage.*\.bin)");
-        const std::regex meta_regex(R"(metadata.*\.json)");
-        std::smatch      match;
-
-        if(std::regex_match(filename, match, buff_regex))
-        {
-            result.push_back(tmp_directory + filename);
-        }
-        else if(std::regex_match(filename, match, meta_regex))
-        {
-            result.push_back(tmp_directory + filename);
-        }
-    };
-    std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
-    return result;
-}
-
 }  // namespace
 
 cache_manager&
@@ -238,13 +215,16 @@ cache_manager::post_process_bulk()
             }
         }
 
-        ROCPROFSYS_PRINT("Removing all cached temporary files...\n");
+        ROCPROFSYS_PRINT("Removing cached temporary files...\n");
 
-        auto all_cache_files = get_all_cache_files();
-        for(const auto& filename : all_cache_files)
+        for(const auto& [pid, files] : _cache_files)
         {
-            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n", filename.c_str());
-            remove_if_exists(filename);
+            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n",
+                             files.buff_storage.c_str());
+            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n",
+                             files.metadata.c_str());
+            remove_if_exists(files.buff_storage.c_str());
+            remove_if_exists(files.metadata.c_str());
         }
     }
 }

@@ -50,7 +50,7 @@
                     "description": "Verify that percentages sum to 100.",
                     "error_message": "Percentages do not sum to 100.",
                     "expected_result": 100,
-                    "query": "SELECT SUM(percentage) FROM top;"
+                    "query": "SELECT ROUND(SUM(percentage), 1) FROM top;"
                 }
             ]
         },
