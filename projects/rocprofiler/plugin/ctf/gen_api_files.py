@@ -662,7 +662,7 @@ def _process_file(api_prefix, path):
         # Check if the struct_name starts with 'union '.
         if re.match(r'^union \w+', struct_name) is not None:
             parts = struct_name.split('::')
-            simplified = parts[-1] 
+            simplified = parts[-1]
             if simplified != "union ":
                 new_items.append((simplified, cpp_header.classes.get(struct_name)))
 

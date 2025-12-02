@@ -2342,7 +2342,7 @@ rocprofiler_codeobj_capture_free(rocprofiler_record_id_t id);
  * \param[in] id record handle.
  * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
  * \retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS invalid ID.
- */ 
+ */
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_codeobj_capture_start(rocprofiler_record_id_t id);
 

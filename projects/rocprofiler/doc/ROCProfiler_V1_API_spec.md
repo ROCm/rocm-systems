@@ -26,7 +26,7 @@ The library has C API and is based on AQLprofile AMD specific HSA extension.
   7. The library implementation is abstracted from the specific GFXIP.
   8. The library implementation is extensible:
     - Easy adding of counters and metrics
-    - Counters enumeration 
+    - Counters enumeration
     - Counters and metrics can be dynamically configured using XML configuration files with
     counters and metrics tables:
       o Counters table entry, basic metric: counter name, block name, event id
@@ -115,7 +115,7 @@ Returned API status:
 
 Loading and Configuring, loadable plugin on-load/unload methods:
 - rocprofiler_settings_t – global properties
-- OnLoadTool 
+- OnLoadTool
 - OnLoadToolProp
 - OnUnloadTool
 
@@ -124,7 +124,7 @@ Info API:
 - rocprofiler_info_query_t - profiling info query
 - rocprofiler_info_data_t - profiling info data
 - rocprofiler_get_info - return the info for a given info kind
-- rocprofiler_iterate_inf_ - iterate over the info for a given info kind 
+- rocprofiler_iterate_inf_ - iterate over the info for a given info kind
 - rocprofiler_query_info - iterate over the info for a given info query
 
 Context API:
@@ -252,7 +252,7 @@ has_status_t rocprofiler_iterate_info(
 	                                                // GPU agents
 	rocprofiler info_kind_t kind,			// kind of iterated info
 	hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
-	void *data);	
+	void *data);
 
 Iterate over the info for a given info query, and invoke an application-defined callback on
 every iteration. The query
@@ -456,7 +456,7 @@ hsa_status_t rocprofiler_start(
 hsa_status_t rocprofiler_stop(
 	rocprofiler_t* context,			// [in/out] profiling context
 	uint32_t group_index = 0);		// group index
-	
+
 hsa_status_t rocprofiler_read(
 	rocprofiler_t* context,			// [in/out] profiling context
 	uint32_t group_index = 0);		// group index
@@ -475,7 +475,7 @@ hsa_status_t rocprofiler_group_start(
 hsa_status_t rocprofiler_group_stop(
 	rocprofiler_group_t* group);		// [in/out] profiling group
 
-	
+
 hsa_status_t rocprofiler_group_read(
 	rocprofiler_group_t* group);		// [in/out] profiling group
 
@@ -483,7 +483,7 @@ hsa_status_t rocprofiler_group_read(
 hsa_status_t rocprofiler_group_get_data(
 	rocprofiler_group_t* group);		// [in/out] profiling group
 ```
-### 4.6.  Intercepting API 
+### 4.6.  Intercepting API
 ```
 The library provides a callback API for enabling profiling for the kernels dispatched to
 HSA AQL queues. The API enables per-kernel profiling data collection.
@@ -578,7 +578,7 @@ hsa_status_t rocprofiler_pool_release(
 Iterate fetched profiling pool entries:
 hsa_status_t rocprofiler_pool_iterate(
    rocprofiler_pool_t* pool,           // profiling pool handle
-   hsa_status_t (*callback)(rocprofiler_pool_entry_t* entry, void* data), 	            
+   hsa_status_t (*callback)(rocprofiler_pool_entry_t* entry, void* data),
                                        // callback
    void *data); 		               // [in/out] data passed to callback
 
@@ -658,7 +658,7 @@ hsa_status_t dispatch_callback(
     status = rocprofiler_open(callback_data->dispatch.agent, features, 2, &context,
         ROCPROFILER_MODE_SINGLEGROUP, NULL);
     <check status>
-    
+
     // Get the profiling group
     // For general case with many groups there is rocprofiler_group_count() API
     const uint32_t group_index = 0
@@ -728,7 +728,7 @@ Creating profiling contexts pool:
    rocprofiler_pool_properties_t properties{};
    properties.num_entries = 100;
    properties.payload_bytes = sizeof(context_entry_t);
-   properties.handler = context_handler; 
+   properties.handler = context_handler;
    properties.handler_arg = handler_arg;
    status = rocprofiler_pool_open(agent, features, 3, &context,
 		ROCPROFILER_MODE_SINGLEGROUP, properties);
@@ -741,7 +741,7 @@ Fetching a context entry:
    <check status>
    // Profiling context entry
    rocprofiler_t* context = pool_entry.context;
-   context_entry_t* entry = reinterpret_cast <context_entry_t*>               
+   context_entry_t* entry = reinterpret_cast <context_entry_t*>
                             (pool_entry.payload);
 ```
 ### 5.5. Standalone Sampling Usage Code Example
@@ -764,11 +764,11 @@ library to HSA runtime using the environment variable HSA_TOOLS_LIB for all shel
 
    // Getting HSA agent
    <query for HSA agent by ‘hsa_iterate_agents()’>
- 
+
    // Profiling feature objects
    const unsigned feature_count = 2;
    rocprofiler_feature_t feature[feature_count];
-  	
+
    // Counters and metrics
    feature[0].kind = ROCPROFILER_FEATURE_KIND_METRIC;
    feature[0].name = "GPUBusy";
@@ -804,31 +804,31 @@ library to HSA runtime using the environment variable HSA_TOOLS_LIB for all shel
 
    // Finishing cleanup
    // Deleting profiling context will delete all allocated resources
-   status = rocprofiler_close(context); 
+   status = rocprofiler_close(context);
    <check status>
 ```
 ### 5.6. Printing Out Profiling Results
 ```
 Below  is a code example for printing out the profiling results from profiling features array:
 void print_results(rocprofiler_feature_t* feature, uint32_t feature_count) {
-   for (rocprofiler_feature_t* p = feature; p < feature + feature_count; ++p) 
+   for (rocprofiler_feature_t* p = feature; p < feature + feature_count; ++p)
    {
       std::cout << (p - feature) << ": " << p->name;
       switch (p->data.kind) {
          case ROCPROFILER_DATA_KIND_INT64:
-            std::cout << " result_int64 (" << p->data.result_int64 << ")" 
+            std::cout << " result_int64 (" << p->data.result_int64 << ")"
                       << std::endl;
             break;
 
          case ROCPROFILER_DATA_KIND_BYTES: {
-            std::cout << " result_bytes ptr(" << p->data.result_bytes.ptr << 
+            std::cout << " result_bytes ptr(" << p->data.result_bytes.ptr <<
                  ") " << " size(" << p->data.result_bytes.size << ")"
-                 << " instance_count(" << p->data.result_bytes.instance_count 
+                 << " instance_count(" << p->data.result_bytes.instance_count
                  << ")";
             break;
          }
          default:
-            std::cout << "bad result kind (" << p->data.kind << ")" 
+            std::cout << "bad result kind (" << p->data.kind << ")"
                       << std::endl;
             <abort>
       }

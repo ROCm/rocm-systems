@@ -375,7 +375,7 @@ extern "C"
   PUBLIC_API const char* getSymbolName(uint64_t addr)
   {
     C_API_BEGIN
-  
+
     return table.getSymbolName(addr);
 
     C_API_END(nullptr)

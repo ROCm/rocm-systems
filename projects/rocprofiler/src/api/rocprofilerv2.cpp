@@ -344,7 +344,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
     case ROCPROFILER_SPM_COLLECTION:
     case ROCPROFILER_API_TRACE:
       break;
-  }  
+  }
   if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
   *filter_id = rocprofiler_singleton

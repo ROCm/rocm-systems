@@ -247,7 +247,7 @@ class Context {
     size_t index;
     char* ptr;
     size_t single_xcc_buff_size;
-    size_t cb_invocation_count; 
+    size_t cb_invocation_count;
   };
 
   void RestoreSignals(const profile_tuple_t& tuple) {

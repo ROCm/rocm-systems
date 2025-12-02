@@ -22,7 +22,7 @@
 #include <pciaccess.h>
 
 namespace rocprofiler {
-    typedef struct pci_device * (*pci_device_find_by_slot_handler_t)(uint32_t, 
+    typedef struct pci_device * (*pci_device_find_by_slot_handler_t)(uint32_t,
         uint32_t, uint32_t, uint32_t);
     typedef int (*pci_device_probe_handler_t)(struct pci_device *);
     typedef int (*pci_device_map_range_handler_t)(struct pci_device *, pciaddr_t,
@@ -41,7 +41,7 @@ namespace rocprofiler {
         pci_system_cleanup_handler_t pci_system_cleanup;
     };
 
-    
+
     // A function just to load all the libpciaccess symbols
     PcieAccessApi* LoadPcieAccessLibAPI();
     // A simple getter function for easy access to the API table

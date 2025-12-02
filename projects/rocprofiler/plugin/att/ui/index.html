@@ -62,7 +62,7 @@
 			ctx.lineTo(posx+8, posy);
 			ctx.fill();
 		}
-		
+
 		var canvas_waitcnt = 0
 		function DrawCanvas() {
 			if (canvas_waitcnt == 0) return;
@@ -72,13 +72,13 @@
 			if (canvas.getContext) {
 				const ctx = canvas.getContext("2d");
 				ctx.clearRect(0, 0, canvas.width, canvas.height);
-				
+
 				var elem = 0;
 				var elements = document.getElementsByClassName("line_"+elem);
 				if (elements == undefined || !elements || elements.length == 0)
 					return;
 				var y0 = elements[0].getBoundingClientRect().top;
-				
+
 				var offsets = []
 				while(elements.length > 0) {
 					var yN = elements[0].getBoundingClientRect().top;
@@ -663,7 +663,7 @@
 						.attr("d", 'M 60 68 L 60 74 L 70 71 Z')
 						.attr("fill", "#0096FF")
 
-					
+
 					d3.select('#top_n')
 						.selectAll("li")
 						.data(code_data.top_n)
@@ -672,7 +672,7 @@
 						.datum((d) => { return {data:d} })
 						.on('click', (e, d) => {
 							const line_num = d.data[0]
-							
+
 							if (line_num in L2FirstToken) {
 								d3.selectAll('.highlight').classed('highlight', false)
 								d3.select('.line_' + line_num).classed("highlight", true)

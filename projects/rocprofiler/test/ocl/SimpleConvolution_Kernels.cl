@@ -15,8 +15,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ********************************************************************/
 
 /**
- * The kernel has two implementation of convolution. 
- * 1. Non-Separable Convolution 
+ * The kernel has two implementation of convolution.
+ * 1. Non-Separable Convolution
  * 2. Separable Convolution
 */
 
@@ -25,7 +25,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
  * NonSeparableConvolution
  * is where each pixel of the output image
  * is the weighted sum of the neighbourhood pixels of the input image
- * The neighbourhood is defined by the dimensions of the mask and 
+ * The neighbourhood is defined by the dimensions of the mask and
  * weight of each neighbour is defined by the mask itself.
  * @param input  Padded Input  matrix on which convolution is to be performed
  * @param mask   mask matrix using which convolution was to be performed
@@ -43,13 +43,13 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
 											const     uint	 nExWidth)
 {
     uint tid   = get_global_id(0);
-    
+
     uint width  = inputDimensions.x;
     uint height = inputDimensions.y;
-    
+
     uint x      = tid%width;
     uint y      = tid/width;
-    
+
     uint maskWidth  = maskDimensions.x;
     uint maskHeight = maskDimensions.y;
 
@@ -61,16 +61,16 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
      */
     float sumFX = 0.0f;
 	int m = 0, n = 0;
-  
+
     //performing weighted sum within the mask boundaries
-    for(uint j = y ; j < (y + maskHeight); ++j, m++)    
+    for(uint j = y ; j < (y + maskHeight); ++j, m++)
     {
 		n = 0;
 		for(uint i = x; i < (x + maskWidth); ++i, n++)
-		{ 
+		{
             uint maskIndex = m * maskWidth  + n;
             uint index     = j * nExWidth + i;
-            
+
             sumFX += ((float)input[index] * mask[maskIndex]);
         }
 	}
@@ -83,7 +83,7 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
 
 
 /**
- * SeparableConvolution 
+ * SeparableConvolution
  * is product of 2 one-dimensional convolution.
  * A 2-dimensional convolution operation is separated into 2 one one-dimensional convolution.
  * SeparableConvolution is implemented in two passes.
@@ -108,14 +108,14 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
 											   const	 uint2  exInputDimensions)
 {
 	int i = 0, cnt = 0;
-	
+
     uint width  = inputDimensions.x;
     uint height = inputDimensions.y;
-    
+
 	uint tid    = get_global_id(0);
     uint x      = tid%width;
     uint y      = tid/width;
-   
+
    if(x >= width || y >= (height+filterSize-1))
 		return;
 
@@ -125,7 +125,7 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
     float sum = 0.0f;
 
     for(uint i = x; i < (x + filterSize); ++i) {
-        sum = mad((float)input[y * exInputDimensions.x + i], rowFilter[cnt++], sum);        
+        sum = mad((float)input[y * exInputDimensions.x + i], rowFilter[cnt++], sum);
     }
 
     /* Transposed save */
@@ -149,14 +149,14 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
 											   const     uint2  exInputDimensions)
 {
 	int i = 0, cnt = 0;
-	
+
     uint width  = inputDimensions.x;
     uint height = inputDimensions.y;
-    
+
 	uint tid    = get_global_id(0);
 	uint x      = tid%height;
     uint y      = tid/height;
-   
+
 	if(y >= width || x >= height)
 		return;
 
@@ -166,7 +166,7 @@ __kernel void simpleNonSeparableConvolution(__global  uint  * input,
     float sum = 0.0f;
 
 	for(uint i = x; i < (x + filterSize); ++i) {
-        sum = mad(input[y * exInputDimensions.y + i], colFilter[cnt++], sum);        
+        sum = mad(input[y * exInputDimensions.y + i], colFilter[cnt++], sum);
     }
 
     /* Tranposed save */

@@ -75,7 +75,7 @@ void terminate_current_profiler_instance() {
       << "allowed.\nCheck " << ROCPROFILER_PID_FILE
       << " and kill the process, delete this .pid file and try again.\nTerminating "
          "...\n";
-  throw std::runtime_error(oss.str()); 
+  throw std::runtime_error(oss.str());
 }
 
 

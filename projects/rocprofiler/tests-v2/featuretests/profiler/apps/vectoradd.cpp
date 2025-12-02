@@ -140,7 +140,7 @@ void run(int NUM_QUEUE) {
         HIP_ASSERT(hipHostMalloc(&hostA[q], NUM * sizeof(float), 0));
         HIP_ASSERT(hipHostMalloc(&hostB[q], NUM * sizeof(float), 0));
         HIP_ASSERT(hipHostMalloc(&hostC[q], NUM * sizeof(float), 0));
-        
+
         // initialize the input data
         for (i = 0; i < NUM; i++) {
             hostB[q][i] = (float)i;
@@ -150,7 +150,7 @@ void run(int NUM_QUEUE) {
         HIP_ASSERT(hipMalloc((void**)(&deviceA[q]), NUM * sizeof(float)));
         HIP_ASSERT(hipMalloc((void**)(&deviceB[q]), NUM * sizeof(float)));
         HIP_ASSERT(hipMalloc((void**)(&deviceC[q]), NUM * sizeof(float)));
-        
+
         HIP_ASSERT(hipMemcpyAsync(deviceB[q], hostB[q], NUM*sizeof(float), hipMemcpyHostToDevice, streams[q]));
         HIP_ASSERT(hipMemcpyAsync(deviceC[q], hostC[q], NUM*sizeof(float), hipMemcpyHostToDevice, streams[q]));
     }

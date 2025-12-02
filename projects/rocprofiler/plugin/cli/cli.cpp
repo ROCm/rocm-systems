@@ -137,8 +137,8 @@ class file_plugin_t {
   }
 
  public:
-  file_plugin_t() { 
-    valid_ = true; 
+  file_plugin_t() {
+    valid_ = true;
     kernel_filters_ = GetKernelFilters();
   }
 

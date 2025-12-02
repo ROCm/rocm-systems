@@ -52,7 +52,7 @@ void histogram256(
     size_t globalId = hipThreadIdx_x + hipBlockIdx_x*hipBlockDim_x;
     size_t groupId = hipBlockIdx_x;
     size_t groupSize = hipBlockDim_x;
-    int offSet1 = localId & 31;    
+    int offSet1 = localId & 31;
     int offSet2 = 4 * offSet1;      //which element to access in one bank.
     int offSet3 = localId >> 5;     //bank number
     /* initialize shared array to zero */
@@ -68,7 +68,7 @@ void histogram256(
 	for(int i = 0; i < 128; i++)
     {
 #ifdef LINEAR_MEM_ACCESS
-       uint value =  data[groupId * (groupSize * (BIN_SIZE/2)) + i * groupSize + localId]; 
+       uint value =  data[groupId * (groupSize * (BIN_SIZE/2)) + i * groupSize + localId];
 #else
        uint  value = data[globalId + i*4096];
 
@@ -76,7 +76,7 @@ void histogram256(
 	   sharedArray[value * 128 + offSet2 + offSet3]++;
     }
     __syncthreads();
-    
+
     /* merge all thread-histograms into block-histogram */
 
 	uint4 binCount;

@@ -239,7 +239,7 @@ amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbo
 std::map<uint64_t, SymbolInfo>& DisassemblyInstance::GetKernelMap() {
   symbol_map = {};
   THROW_COMGR(amd_comgr_iterate_symbols(data, &DisassemblyInstance::symbol_callback, this));
-    
+
   return symbol_map;
 }
 

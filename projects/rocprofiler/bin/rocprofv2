@@ -312,7 +312,7 @@ if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
 
   for i in ${!PMC_LINES[@]}; do
     if [[ ${PMC_LINES[$i]} =~ "kernel:" ]]; then
-      echo ${PMC_LINES[$i]} 
+      echo ${PMC_LINES[$i]}
       export ROCPROFILER_KERNEL_FILTER="${PMC_LINES[$i]}"
     fi
   done
