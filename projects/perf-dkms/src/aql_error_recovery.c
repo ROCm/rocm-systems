@@ -35,7 +35,7 @@ static void aql_perf_disable_gpu(struct aql_perf_session *session, uint32_t gpu_
     list_for_each_entry_safe(measurement, tmp, &session->active_measurements, list) {
         if (measurement->gpu_id == gpu_id) {
             measurement->state = MEASUREMENT_ERROR;
-            list_del(&measurement->list);
+            list_del_init(&measurement->list);
             atomic_dec(&session->active_gpu_count);
 
             aql_debug("Session %llu: Stopped measurement on disabled GPU %u",
@@ -64,7 +64,7 @@ static void aql_perf_stop_all_measurements(struct aql_perf_session *session)
 
     list_for_each_entry_safe(measurement, tmp, &session->active_measurements, list) {
         measurement->state = MEASUREMENT_ERROR;
-        list_del(&measurement->list);
+        list_del_init(&measurement->list);
         atomic_dec(&session->active_gpu_count);
     }
 

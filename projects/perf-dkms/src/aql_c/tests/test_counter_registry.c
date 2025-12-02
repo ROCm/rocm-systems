@@ -95,42 +95,44 @@ void test_lookup_event_id(void) {
     }
 
     /* Test valid GFX12 event lookups */
+    uint32_t event_id;
+    int ret;
     const counter_def_t* counter = lookup_counter_by_id(COUNTER_SQ_WAVES);
     TEST_ASSERT(counter != NULL, "SQ_WAVES counter found");
     if (counter) {
-        uint32_t event_id = lookup_event_id(counter, arch);
-        TEST_ASSERT(event_id == 4, "lookup_event_id: SQ_WAVES GFX12 event ID is 4");
+        ret = lookup_event_id(counter, arch, &event_id);
+        TEST_ASSERT(ret == 0 && event_id == 4, "lookup_event_id: SQ_WAVES GFX12 event ID is 4");
     }
 
     counter = lookup_counter_by_id(COUNTER_GL2C_HIT);
     TEST_ASSERT(counter != NULL, "GL2C_HIT counter found");
     if (counter) {
-        uint32_t event_id = lookup_event_id(counter, arch);
-        TEST_ASSERT(event_id == 41, "lookup_event_id: GL2C_HIT GFX12 event ID is 41");
+        ret = lookup_event_id(counter, arch, &event_id);
+        TEST_ASSERT(ret == 0 && event_id == 41, "lookup_event_id: GL2C_HIT GFX12 event ID is 41");
     }
 
     counter = lookup_counter_by_id(COUNTER_SQ_BUSY_CYCLES);
     TEST_ASSERT(counter != NULL, "SQ_BUSY_CYCLES counter found");
     if (counter) {
-        uint32_t event_id = lookup_event_id(counter, arch);
-        TEST_ASSERT(event_id == 3, "lookup_event_id: SQ_BUSY_CYCLES GFX12 event ID is 3");
+        ret = lookup_event_id(counter, arch, &event_id);
+        TEST_ASSERT(ret == 0 && event_id == 3, "lookup_event_id: SQ_BUSY_CYCLES GFX12 event ID is 3");
     }
 
     counter = lookup_counter_by_id(COUNTER_GRBM_COUNT);
     TEST_ASSERT(counter != NULL, "GRBM_COUNT counter found");
     if (counter) {
-        uint32_t event_id = lookup_event_id(counter, arch);
-        TEST_ASSERT(event_id == 0, "lookup_event_id: GRBM_COUNT GFX12 event ID is 0");
+        ret = lookup_event_id(counter, arch, &event_id);
+        TEST_ASSERT(ret == 0 && event_id == 0, "lookup_event_id: GRBM_COUNT GFX12 event ID is 0");
     }
 
     /* Test with NULL parameters */
-    uint32_t event_id = lookup_event_id(NULL, arch);
-    TEST_ASSERT(event_id == 0, "lookup_event_id: NULL counter returns 0");
+    ret = lookup_event_id(NULL, arch, &event_id);
+    TEST_ASSERT(ret < 0, "lookup_event_id: NULL counter returns error");
 
     counter = lookup_counter_by_id(COUNTER_SQ_WAVES);
     if (counter) {
-        event_id = lookup_event_id(counter, NULL);
-        TEST_ASSERT(event_id == 0, "lookup_event_id: NULL architecture returns 0");
+        ret = lookup_event_id(counter, NULL, &event_id);
+        TEST_ASSERT(ret < 0, "lookup_event_id: NULL architecture returns error");
     }
 
     /* Clean up */

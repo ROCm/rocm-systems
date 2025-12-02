@@ -573,13 +573,9 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
         if (counter->block_id == HW_IP_BLOCK_GRBM) {
           /* GRBM: Read LO and HI separately as 32-bit values
            *
-           * GRBM registers have BASE_IDX=1 in gc_12_0_0_offset.h, which means
-           * they need an offset adjustment of -0x2000 to convert from the defined
-           * register offset to the UCONFIG register space offset.
-           *
-           * Example: regGRBM_PERFCOUNTER0_LO = 0x3040 (BASE_IDX=1)
-           *          UCONFIG offset = 0x3040 - 0x2000 = 0x1040
-           *          Absolute UCONFIG address = 0xc000 + 0x1040 = 0xd040
+           * GRBM register addresses in gfx12_creator.c are already absolute UCONFIG
+           * addresses (e.g., 0xd040 for GRBM_PERFCOUNTER0_LO). No runtime adjustment
+           * is needed - use them directly with pm4_append_copy_data.
            *
            * This matches how aqlprofile handles GRBM registers on GFX12.
            */
@@ -591,20 +587,15 @@ int generate_read_packet(pm4_buffer_t *buffer, const arch_t *arch,
                        .count_sel = 0,    /* 32-bit data */
                        .wr_confirm = 0}};
 
-          /* GRBM register offset adjustment for BASE_IDX=1 */
-          const uint32_t grbm_base_offset = 0x2000;
-          uint32_t grbm_reg_lo = reg_info->register_addr_lo - grbm_base_offset;
-          uint32_t grbm_reg_hi = reg_info->register_addr_hi - grbm_base_offset;
-
-          /* Read LO register (32-bit) */
-          ret = pm4_append_copy_data(buffer, flags, grbm_reg_lo,
+          /* Read LO register (32-bit) - use absolute address directly */
+          ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_lo,
                                      0, current_addr);
           if (ret < 0)
             return ret;
           current_addr += 4; /* 32-bit value */
 
-          /* Read HI register (32-bit) */
-          ret = pm4_append_copy_data(buffer, flags, grbm_reg_hi,
+          /* Read HI register (32-bit) - use absolute address directly */
+          ret = pm4_append_copy_data(buffer, flags, reg_info->register_addr_hi,
                                      0, current_addr);
           if (ret < 0)
             return ret;

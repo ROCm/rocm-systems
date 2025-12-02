@@ -121,9 +121,10 @@ static int parse_counter_name(const char *counter_name, const arch_t *arch, coun
     const counter_def_t *counter_def = lookup_counter_by_name(counter_name);
     if (counter_def) {
         /* Found by name - get the event ID from architecture */
-        uint32_t event_id = lookup_event_id(counter_def, arch);
-        if (event_id == 0 && counter_def->id != COUNTER_GRBM_COUNT) {
-            printf("Warning: No event mapping found for counter '%s' in architecture\n", counter_name);
+        uint32_t event_id;
+        int ret = lookup_event_id(counter_def, arch, &event_id);
+        if (ret < 0) {
+            printf("Warning: No event mapping found for counter '%s' in architecture (err=%d)\n", counter_name, ret);
             return -ENOENT;
         }
 

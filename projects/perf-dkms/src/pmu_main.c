@@ -175,14 +175,66 @@ static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
     NULL,
 };
 
+/**
+ * amdgpu_pmu_poll_measurements - Poll active measurements and schedule background reads
+ * @session: AQL performance session
+ * @wq: Workqueue to schedule work on
+ *
+ * Returns: Number of measurements successfully scheduled for polling
+ */
+static int amdgpu_pmu_poll_measurements(struct aql_perf_session *session,
+                                        struct workqueue_struct *wq)
+{
+    struct aql_measurement *measurement, *tmp;
+    unsigned long flags;
+    int polled_count = 0;
+
+    if (!session || !wq)
+        return 0;
+
+    /* Iterate through active measurements and trigger background reads */
+    spin_lock_irqsave(&session->measurement_lock, flags);
+
+    list_for_each_entry_safe(measurement, tmp, &session->active_measurements, list) {
+        if (measurement->state == MEASUREMENT_ACTIVE) {
+            /* Trigger background read to refresh cache on global workqueue */
+            struct aql_work_item *work_item = aql_create_work_item(measurement, AQL_WORK_READ);
+            if (!IS_ERR(work_item)) {
+                if (queue_work(wq, &work_item->work)) {
+                    polled_count++;
+                    pmu_debug("Timer: Scheduled read for GPU %u\n", measurement->gpu_id);
+                    pmu_info("Timer: ===== SCHEDULED READ for GPU %u =====\n", measurement->gpu_id);
+                } else {
+                    /* Work already queued - release our reference and free work_item */
+                    aql_measurement_put(measurement);
+                    kfree(work_item);
+                }
+            }
+        }
+    }
+
+    spin_unlock_irqrestore(&session->measurement_lock, flags);
+
+    pmu_debug("Timer: Polled %d active measurements\n", polled_count);
+    return polled_count;
+}
+
 /* Timer handler - Periodic polling for background counter refresh */
 enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
 {
     struct amdgpu_pmu *pmu = container_of(timer, struct amdgpu_pmu, timer);
     struct aql_perf_session *session;
-    unsigned long flags;
+    struct workqueue_struct *wq;
+    int count;
 
     pmu_debug("Timer handler fired - polling active measurements\n");
+
+    /* Get global workqueue */
+    wq = aql_get_global_workqueue();
+    if (!wq) {
+        pmu_debug("Timer: Global workqueue not available\n");
+        goto reschedule;
+    }
 
     /* Get AQL session to poll measurements */
     session = aql_pmu_get_session();
@@ -191,31 +243,9 @@ enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
         goto reschedule;
     }
 
-    /* Iterate through active measurements and trigger background reads */
-    spin_lock_irqsave(&session->measurement_lock, flags);
-    {
-        struct aql_measurement *measurement;
-        int polled_count = 0;
-
-        list_for_each_entry(measurement, &session->active_measurements, list) {
-            if (measurement->state == MEASUREMENT_ACTIVE) {
-                /* Trigger background read to refresh cache */
-                struct aql_work_item *work_item = aql_create_work_item(measurement, AQL_WORK_READ);
-                if (!IS_ERR(work_item)) {
-                    if (queue_work(measurement->work_queue, &work_item->work)) {
-                        polled_count++;
-                        pmu_debug("Timer: Scheduled read for GPU %u\n", measurement->gpu_id);
-                        pmu_info("Timer: ===== SCHEDULED READ for GPU %u =====\n", measurement->gpu_id);
-                    } else {
-                        kfree(work_item); /* Work already queued */
-                    }
-                }
-            }
-        }
-
-        pmu_debug("Timer: Polled %d active measurements\n", polled_count);
-    }
-    spin_unlock_irqrestore(&session->measurement_lock, flags);
+    /* Poll all active measurements */
+    count = amdgpu_pmu_poll_measurements(session, wq);
+    pmu_debug("Timer: Updated %d active measurements\n", count);
 
     aql_pmu_put_session(session);
 

@@ -226,11 +226,13 @@ struct aql_measurement {
     bool dimension_specific;                  /* True if targeting specific dimensions */
 
     /* Work queue support for atomic context handling */
-    struct workqueue_struct *work_queue;
     spinlock_t cache_lock;           /* Protects cached_counter_value */
     uint64_t cached_counter_value;   /* Cached value for atomic reads */
     bool cache_valid;                /* Whether cached value is valid */
     bool pending_destroy;            /* Measurement should be freed after async work */
+
+    /* Reference counting to prevent use-after-free with work items */
+    struct kref refcount;            /* Reference count for safe async operations */
 };
 
 /* Main AQL Performance Session Structure */
@@ -277,6 +279,9 @@ struct aql_perf_session {
 };
 
 /* Function prototypes */
+
+/* Global Workqueue Access */
+struct workqueue_struct *aql_get_global_workqueue(void);
 
 /* Session Management */
 struct aql_perf_session *aql_perf_session_create(void);
@@ -326,6 +331,10 @@ int aql_perf_measurement_start(struct aql_measurement *measurement);
 int aql_perf_measurement_stop(struct aql_measurement *measurement);
 uint64_t aql_perf_measurement_read(struct aql_measurement *measurement);
 void aql_perf_measurement_destroy(struct aql_measurement *measurement);
+
+/* Measurement Reference Counting */
+void aql_measurement_get(struct aql_measurement *m);
+void aql_measurement_put(struct aql_measurement *m);
 
 /* Atomic Context Support - New Functions */
 int aql_perf_measurement_start_atomic(struct aql_measurement *measurement);

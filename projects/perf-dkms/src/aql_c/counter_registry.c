@@ -181,21 +181,38 @@ const counter_def_t* lookup_counter_by_id(counter_id_t id) {
  *
  * @note Event ID 0 typically indicates an error or unmapped counter
  * @note The event map is architecture-specific (e.g., GFX12 has different IDs than GFX11)
+ * @note Event IDs are validated against the 9-bit hardware limit (0-511)
  * @see lookup_counter_by_name(), GpuBlockInfo::select_value in
  *      projects/aqlprofile/def/gpu_block_info.h
  */
-uint32_t lookup_event_id(const counter_def_t* counter, const arch_t* arch) {
-    if (!counter || !arch) return 0;
+int lookup_event_id(const counter_def_t* counter, const arch_t* arch, uint32_t* out_event_id) {
+    uint32_t event_id;
+
+    if (!counter || !arch || !out_event_id) return -EINVAL;
 
     /* Use the event map from the architecture structure */
-    if (!arch->event_map || arch->event_count == 0) return 0;
+    if (!arch->event_map || arch->event_count == 0) return -ENOENT;
 
     for (size_t i = 0; i < arch->event_count; i++) {
         if (arch->event_map[i].counter_id == counter->id) {
-            return arch->event_map[i].event_id;
+            event_id = arch->event_map[i].event_id;
+
+            /* Validate 9-bit limit - event IDs are programmed into SELECT registers
+             * which only have 9 bits for event selection. Values exceeding this will
+             * be silently truncated, causing wrong events to be counted. */
+            if (event_id > EVENT_ID_MAX) {
+#ifdef __KERNEL__
+                printk(KERN_ERR "AQL_PERF: Event ID 0x%x for counter '%s' exceeds 9-bit limit (max=0x%x)\n",
+                       event_id, counter->name, EVENT_ID_MAX);
+#endif
+                return -ERANGE;  /* Invalid event ID */
+            }
+
+            *out_event_id = event_id;
+            return 0;  /* Success */
         }
     }
-    return 0;
+    return -ENOENT;  /* Counter not found in event map */
 }
 
 /**
