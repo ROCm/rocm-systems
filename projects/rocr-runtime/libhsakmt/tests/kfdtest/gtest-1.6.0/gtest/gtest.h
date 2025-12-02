@@ -2465,35 +2465,35 @@ class ThreadLocal {
 
 class Mutex {
  public:
-  Mutex():owner_(0), handle_() 
+  Mutex():owner_(0), handle_()
   {
     ::InitializeCriticalSection(&handle_);
   }
-  
+
   ~Mutex()
   {
     ::DeleteCriticalSection(&handle_);
   }
-  
-  void Lock() 
+
+  void Lock()
   {
     ::EnterCriticalSection(&handle_);
     owner_ = ::GetCurrentThreadId();
   }
-  
-  void Unlock() 
+
+  void Unlock()
   {
     ::LeaveCriticalSection(&handle_);
     owner_ = 0;
   }
-  
+
  // Does nothing if the current thread holds the mutex. Otherwise, crashes
 // with high probability.
   void AssertHeld() const {
     GTEST_CHECK_(owner_ == ::GetCurrentThreadId())
        << "The current thread is not holding the mutex @" << this;
   }
-  
+
   private:
   DWORD              owner_;
   CRITICAL_SECTION   handle_;

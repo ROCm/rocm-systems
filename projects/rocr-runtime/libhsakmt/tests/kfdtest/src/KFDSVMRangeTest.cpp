@@ -1057,7 +1057,7 @@ void KFDSVMRangeTest::MigratePolicyTest(int gpuNode) {
 
     for (HSAuint64 i = 0; i < BufferSize / 8; i += 512) {
         Dispatch dispatch(isaBuffer);
-        
+
         dispatch.SetArgs(pBuf + i, pData + i);
         dispatch.Submit(queue);
         dispatch.Sync(HSA_EVENTTIMEOUT_INFINITE);

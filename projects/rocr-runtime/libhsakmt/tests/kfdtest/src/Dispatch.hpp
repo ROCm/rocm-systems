@@ -45,7 +45,7 @@ class Dispatch {
     void SetScratch(int numWaves, int waveSize, HSAuint64 scratch_base);
 
     void SetSpiPriority(unsigned int priority);
-    
+
     void SetPriv(bool priv);
 
     HsaEvent *GetHsaEvent() { return m_pEop; }

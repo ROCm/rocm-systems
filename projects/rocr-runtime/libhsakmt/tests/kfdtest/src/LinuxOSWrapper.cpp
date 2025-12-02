@@ -221,7 +221,7 @@ bool GetCommandLineArguments(int argc, char **argv, CommandLineArguments& rArgs)
             {
                 rArgs.ConcurrentNodes = optarg;
             }
-            break;  
+            break;
         case 8:
             {
                 int testNodeNum = atoi(optarg);

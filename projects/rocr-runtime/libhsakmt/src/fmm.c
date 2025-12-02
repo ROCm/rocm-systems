@@ -4675,7 +4675,7 @@ static void fmm_clear_aperture(manageable_aperture_t *app)
 void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 {
 	uint32_t i;
-	
+
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
@@ -4696,7 +4696,7 @@ void hsakmt_fmm_clear_all_aperture(HsaKFDContext *ctx)
 {
 	uint32_t i;
 	void *map_addr;
-	
+
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	fmm_clear_aperture(&fmm_ctx->mem_handle_aperture);

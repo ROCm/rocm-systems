@@ -103,7 +103,7 @@ GTEST_API_ int main(int argc, char **argv) {
             g_TestNodeId = args.NodeId;
             g_TestGPUsNum = 1;
         }
-        
+
         g_IsEmuMode = CheckEmuModeEnabled();
 
         LOG() << "Profile: " << (TESTPROFILE)g_TestRunProfile << std::endl;

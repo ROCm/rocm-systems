@@ -146,7 +146,7 @@ TEST_F(KFDGraphicsInterop, RegisterGraphicsHandle) {
 
 #if 0
 /* This test isn't testing things the way we wanted it to. It is flaky and
- * will end up failing if the memory is evicted, which isn't possible for what 
+ * will end up failing if the memory is evicted, which isn't possible for what
  * it is intended to test. It needs a rework
  */
 
