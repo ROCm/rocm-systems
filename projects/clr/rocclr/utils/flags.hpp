@@ -118,7 +118,7 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 4*16384,                                      \
+release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
         "set SVM space size for discrete GPU")                                \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \
@@ -179,7 +179,7 @@ release(uint, HIP_HOST_COHERENT, 0,                                           \
 release(uint, AMD_OPT_FLUSH, 1,                                               \
         "Kernel flush option , 0x0 = Use system-scope fence operations."      \
         "0x1 = Use device-scope fence operations when possible.")             \
-release(bool, AMD_DIRECT_DISPATCH, false,                                     \
+release(bool, AMD_DIRECT_DISPATCH, IS_LINUX,                                  \
         "Enable direct kernel dispatch.")                                     \
 release(uint, HIP_HIDDEN_FREE_MEM, 0,                                         \
         "Reserve free mem reporting in Mb"                                    \
@@ -237,8 +237,6 @@ release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
          "Force device mem for kernel args.")                                 \
-release(bool, DEBUG_CLR_GRAPH_PACKET_CAPTURE, true,                           \
-         "Enable/Disable graph packet capturing")                             \
 release(bool, GPU_DEBUG_ENABLE, false,                                        \
         "Enables collection of extra info for debugger at some perf cost")    \
 release(cstring, HIPRTC_COMPILE_OPTIONS_APPEND, "",                           \
@@ -255,6 +253,8 @@ release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
+release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
+        "0 = Disable, 1 = Enable, 2 = Force")                                 \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

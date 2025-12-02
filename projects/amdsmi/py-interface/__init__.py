@@ -266,6 +266,12 @@ from .amdsmi_interface import amdsmi_get_gpu_pm_metrics_info
 # # Virtualization Mode Detection
 from .amdsmi_interface import amdsmi_get_gpu_virtualization_mode
 
+# # PTL implementation
+from .amdsmi_interface import amdsmi_get_gpu_ptl_state
+from .amdsmi_interface import amdsmi_set_gpu_ptl_state
+from .amdsmi_interface import amdsmi_get_gpu_ptl_formats
+from .amdsmi_interface import amdsmi_set_gpu_ptl_formats
+
 # # Functions where library initialization is not needed
 # # Version information
 from .amdsmi_interface import amdsmi_get_lib_version
@@ -306,6 +312,7 @@ from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
+from .amdsmi_interface import AmdSmiPtlData
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException
