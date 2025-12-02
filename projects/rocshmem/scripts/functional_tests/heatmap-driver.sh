@@ -191,21 +191,24 @@ TestHeatMapRMA() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  ExecTest  "get"              2       1            16        4294967296
-  ExecTest  "wgget"            2       16           64        4294967296
-  ExecTest  "waveget"          2       16           128       4294967296
+  ExecTest  "get"              2       1            16        1073741824
+  ExecTest  "wgget"            2       16           64        1073741824
+  ExecTest  "waveget"          2       16           128       1073741824
 
-  ExecTest  "put"              2       1            16        4294967296
-  ExecTest  "wgput"            2       16           64        4294967296
-  ExecTest  "waveput"          2       16           128       4294967296
+  ExecTest  "put"              2       1            16        1073741824
+  ExecTest  "wgput"            2       16           64        1073741824
+  ExecTest  "waveput"          2       16           128       1073741824
 }
 
 TestHeatMap() {
   TestHeatMapRMA
 
-  ExecTest  "alltoall"         2       1            1         1048576
-  ExecTest  "alltoall"         4       1            1         1048576
-  ExecTest  "alltoall"         8       1            1         1048576
+  ExecTest  "alltoall"         2       1            1         1073741824
+  ExecTest  "alltoall"         4       1            1         1073741824
+  ExecTest  "alltoall"         8       1            1         1073741824
+  ExecTest  "alltoall"         16      1            1         1073741824
+  ExecTest  "alltoall"         32      1            1         1073741824
+  ExecTest  "alltoall"         64      1            1         1073741824
 }
 
 
