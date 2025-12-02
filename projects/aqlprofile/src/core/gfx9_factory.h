@@ -55,9 +55,9 @@ class Gfx9Factory : public Pm4Factory {
 class Mi100Factory : public Gfx9Factory {
  public:
   explicit Mi100Factory(const AgentInfo* agent_info);
- 
+
  virtual int GetAccumLowID() const override { return 1; }
- 
+
  virtual int GetAccumHiID() const override { return 158; }
 
  virtual uint32_t GetSpmSampleDelayMax() { return 0x34; }

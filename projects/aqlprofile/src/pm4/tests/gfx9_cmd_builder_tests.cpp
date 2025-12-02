@@ -55,7 +55,7 @@ public:
             commands.push_back(words[i]);
         }
     }
-    
+
     size_t Size() const override { return commands.size() * sizeof(uint32_t); }
     const void* Data() const override { return commands.data(); }
     void Clear() override { commands.clear(); }
@@ -85,7 +85,7 @@ protected:
 // Test barrier command generation
 TEST_F(Gfx9CmdBuilderTest, BarrierCommand) {
     builder->BuildBarrierCommand(&cmd_buffer);
-    
+
     ASSERT_EQ(cmd_buffer.commands.size(), 2u);
     VerifyPacketHeader(0x14, 2); // EVENT_WRITE opcode
     EXPECT_EQ(cmd_buffer.commands[1] & 0x3f, 0x4); // CS_PARTIAL_FLUSH event type
@@ -94,7 +94,7 @@ TEST_F(Gfx9CmdBuilderTest, BarrierCommand) {
 // Test wait idle packet generation
 TEST_F(Gfx9CmdBuilderTest, WaitIdlePacket) {
     builder->BuildWriteWaitIdlePacket(&cmd_buffer);
-    
+
     ASSERT_EQ(cmd_buffer.commands.size(), 2u);
     VerifyPacketHeader(0x14, 2); // EVENT_WRITE opcode
 }
@@ -103,9 +103,9 @@ TEST_F(Gfx9CmdBuilderTest, WaitIdlePacket) {
 TEST_F(Gfx9CmdBuilderTest, WriteShRegPacket) {
     const uint32_t test_addr = 0x2000;
     const uint32_t test_value = 0x12345678;
-    
+
     builder->BuildWriteShRegPacket(&cmd_buffer, test_addr, test_value);
-    
+
     ASSERT_EQ(cmd_buffer.commands.size(), 3u);
     VerifyPacketHeader(0x4, 3); // SET_SH_REG opcode
     EXPECT_EQ(cmd_buffer.commands[2], test_value);
@@ -115,9 +115,9 @@ TEST_F(Gfx9CmdBuilderTest, WriteShRegPacket) {
 TEST_F(Gfx9CmdBuilderTest, CacheFlushPacket) {
     const size_t test_addr = 0x1000;
     const size_t test_size = 0x100;
-    
+
     builder->BuildCacheFlushPacket(&cmd_buffer, test_addr, test_size);
-    
+
     ASSERT_EQ(cmd_buffer.commands.size(), 7u);
     VerifyPacketHeader(0x49, 7); // ACQUIRE_MEM opcode
 }
@@ -125,12 +125,12 @@ TEST_F(Gfx9CmdBuilderTest, CacheFlushPacket) {
 // Test NOP packet generation
 TEST_F(Gfx9CmdBuilderTest, NopPacket) {
     const uint32_t num_dwords = 3;
-    
+
     builder->BuildNopPacket(&cmd_buffer, num_dwords);
-    
+
     ASSERT_EQ(cmd_buffer.commands.size(), num_dwords);
     VerifyPacketHeader(0x10, num_dwords); // NOP opcode
-    
+
     // Verify remaining dwords are zeros
     for (uint32_t i = 1; i < num_dwords; ++i) {
         EXPECT_EQ(cmd_buffer.commands[i], 0u);
@@ -177,7 +177,7 @@ void pm4_builder::Gfx9CmdBuilder::BuildCacheFlushPacket(CmdBuffer* cmdBuf, size_
 void pm4_builder::Gfx9CmdBuilder::BuildNopPacket(CmdBuffer* cmdBuf, uint32_t num_dwords) {
     uint32_t header = (3u << 30) | (0x10u << 8) | (num_dwords - 2u);  // type3, NOP
     cmdBuf->Append(&header, sizeof(header));
-    
+
     std::vector<uint32_t> nops(num_dwords - 1, 0);
     if (num_dwords > 1) {
         cmdBuf->Append(nops.data(), nops.size() * sizeof(uint32_t));

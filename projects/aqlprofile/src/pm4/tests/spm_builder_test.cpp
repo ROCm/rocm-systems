@@ -31,12 +31,12 @@ protected:
     void SetUp() override {
         // Initialize test data structures
         memset(&test_config_, 0, sizeof(test_config_));
-        
+
         // Set up default SPM config
         test_config_.sampleRate = 1000;
         test_config_.data_buffer_ptr = test_buffer_.data();
         test_config_.data_buffer_size = test_buffer_.size() * sizeof(uint32_t);
-        
+
         // Initialize agent info for creating concrete SpmBuilder
         memset(&agent_info_, 0, sizeof(agent_info_));
         strncpy(agent_info_.name, "gfx90a", sizeof(agent_info_.name) - 1);
@@ -62,14 +62,14 @@ TEST_F(SpmBuilderTest, BeginWithValidParameters) {
     // Create a mock SpmBuilder
     MockSpmBuilder mock_spm_builder;
     CmdBuffer cmd_buffer;
-    
+
     // Set up expectations - Begin should be called once with the provided parameters
     EXPECT_CALL(mock_spm_builder, Begin(&cmd_buffer, &test_config_, ::testing::Ref(test_counters_)))
         .Times(1);
-    
+
     // Call Begin method
     mock_spm_builder.Begin(&cmd_buffer, &test_config_, test_counters_);
-    
+
     // Verify that the command buffer is still valid after the call
     EXPECT_GE(cmd_buffer.DwSize(), 0);
 }
@@ -79,14 +79,14 @@ TEST_F(SpmBuilderTest, EndWithValidParameters) {
     // Create a mock SpmBuilder
     MockSpmBuilder mock_spm_builder;
     CmdBuffer cmd_buffer;
-    
+
     // Set up expectations - End should be called once with the provided parameters
     EXPECT_CALL(mock_spm_builder, End(&cmd_buffer, &test_config_))
         .Times(1);
-    
+
     // Call End method
     mock_spm_builder.End(&cmd_buffer, &test_config_);
-    
+
     // Verify that the command buffer is still valid after the call
     EXPECT_GE(cmd_buffer.DwSize(), 0);
 }
@@ -95,18 +95,18 @@ TEST_F(SpmBuilderTest, EndWithValidParameters) {
 TEST_F(SpmBuilderTest, BeginEndSequenceWithMock) {
     MockSpmBuilder mock_spm_builder;
     CmdBuffer cmd_buffer;
-    
+
     // Set up expectations for a complete Begin-End sequence
     ::testing::InSequence seq;
     EXPECT_CALL(mock_spm_builder, Begin(&cmd_buffer, &test_config_, ::testing::Ref(test_counters_)))
         .Times(1);
     EXPECT_CALL(mock_spm_builder, End(&cmd_buffer, &test_config_))
         .Times(1);
-    
+
     // Execute the sequence
     mock_spm_builder.Begin(&cmd_buffer, &test_config_, test_counters_);
     mock_spm_builder.End(&cmd_buffer, &test_config_);
-    
+
     // Verify buffer state after complete sequence
     EXPECT_GE(cmd_buffer.DwSize(), 0);
 }
@@ -114,16 +114,16 @@ TEST_F(SpmBuilderTest, BeginEndSequenceWithMock) {
 // Test 6: Null parameter handling (defensive programming)
 TEST_F(SpmBuilderTest, NullParameterHandling) {
     MockSpmBuilder mock_spm_builder;
-    
+
     // These tests verify that the mock can handle null parameters
     // In a real implementation, these should be handled gracefully or throw exceptions
-    
+
     // Test with null command buffer - should be handled by implementation
     EXPECT_CALL(mock_spm_builder, Begin(nullptr, &test_config_, ::testing::Ref(test_counters_)))
         .Times(1);
     mock_spm_builder.Begin(nullptr, &test_config_, test_counters_);
-    
-    // Test with null config - should be handled by implementation  
+
+    // Test with null config - should be handled by implementation
     CmdBuffer cmd_buffer;
     EXPECT_CALL(mock_spm_builder, Begin(&cmd_buffer, nullptr, ::testing::Ref(test_counters_)))
         .Times(1);

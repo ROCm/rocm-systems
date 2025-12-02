@@ -24,7 +24,7 @@ AQLprofile is open source and hosted at `AQLprofile on GitHub <https://github.co
   .. grid-item-card:: Install
 
     * :doc:`Install AQLprofile <install/aqlprofile-install>`
-  
+
   .. grid-item-card:: Examples
 
     * :doc:`Performance Monitor Control (PMC) workflow <examples/pmc-workflow>`

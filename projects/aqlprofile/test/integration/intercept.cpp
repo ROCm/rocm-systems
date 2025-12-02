@@ -74,7 +74,7 @@ hsa_status_t iterate_agent_cb(hsa_agent_t agent, void* userdata)
 
     CHECK_HSA(hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type));
     if (type != HSA_DEVICE_TYPE_CPU) return HSA_STATUS_SUCCESS;
-    
+
     CHECK_HSA(hsa_amd_agent_iterate_memory_pools_fn(agent, FindGlobalPool, nullptr));
     return HSA_STATUS_SUCCESS;
 }
@@ -123,7 +123,7 @@ void set_profiler_active_on_queue(
     const size_t mask = 0x1000 - 1;
     auto         size = (profile.command_buffer.size + mask) & ~mask;
 
-    CHECK_HSA(hsa_amd_memory_pool_allocate_fn(cpu_pool, size, 
+    CHECK_HSA(hsa_amd_memory_pool_allocate_fn(cpu_pool, size,
                                               HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile.command_buffer.ptr));
     CHECK_HSA(hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, profile.command_buffer.ptr));
 

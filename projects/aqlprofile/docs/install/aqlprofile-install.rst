@@ -26,10 +26,10 @@ You can build AQLprofile using either the provided build script (recommended for
 Option 1: Use the build script (Recommended)
 --------------------------------------------
 
-This configures and builds the project with the default settings: 
+This configures and builds the project with the default settings:
 
-.. code:: bash 
-  
+.. code:: bash
+
   ./build.sh
 
 
@@ -54,13 +54,13 @@ For more control over the build process, you can set the CMake options manually:
       make -j
 
 
-Enable debug tracing (Optional) 
+Enable debug tracing (Optional)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To enable debug tracing, set this environment variable before running CMake: 
+To enable debug tracing, set this environment variable before running CMake:
 
 .. code:: bash
-  
+
   export CMAKE_DEBUG_TRACE=1
 
 This enables verbose debug output of the command packets while this library executes.

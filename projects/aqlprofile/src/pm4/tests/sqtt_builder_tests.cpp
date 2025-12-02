@@ -27,7 +27,7 @@ struct TestPrimitives {
   static constexpr uint32_t TT_CONTROL_FULL_MASK = 0x2;
   static constexpr uint32_t TT_WRITE_PTR_MASK = 0x4;
   static constexpr uint32_t SQ_THREAD_TRACE_USERDATA_2 = 0x1000;
-  
+
   static uint32_t grbm_broadcast_value() { return 0xFFFFFFFF; }
   static uint32_t sqtt_mode_off_value() { return 0; }
   static uint32_t sqtt_mode_on_value() { return 1; }
@@ -50,12 +50,12 @@ public:
 class TestBuilder {
 public:
   TestBuilder(const AgentInfo*) {}
-  
+
   void BuildWriteUConfigRegPacket(CmdBuffer* cmd_buffer, uint32_t addr, uint32_t value) {
     cmd_buffer->commands.push_back(addr);
     cmd_buffer->commands.push_back(value);
   }
-  
+
   void BuildPredExecPacket(CmdBuffer*, uint32_t, uint32_t) {}
   void BuildWriteWaitIdlePacket(CmdBuffer*) {}
   void BuildCacheFlushPacket(CmdBuffer*, size_t, size_t) {}
@@ -65,7 +65,7 @@ public:
 template <typename Builder, typename Primitives>
 class GpuSqttBuilder {
 public:
-  explicit GpuSqttBuilder(const AgentInfo* agent_info) 
+  explicit GpuSqttBuilder(const AgentInfo* agent_info)
     : xcc_number_(agent_info->xcc_num)
     , se_number_total(agent_info->se_num)
     , builder_(agent_info) {}
@@ -117,7 +117,7 @@ TEST_F(SqttBuilderTest, DISABLED_BufferStepCalculation) {
 
   // Test with different buffer sizes and SE masks
   const uint64_t total_buffer = 1024 * 1024;  // 1MB total
-  
+
   // Test case 1: All SEs enabled (4 SEs)
   uint64_t mask1 = 0xF;  // 0b1111
   uint64_t step1 = builder.GetBaseStep(total_buffer, mask1);
@@ -149,7 +149,7 @@ TEST_F(SqttBuilderTest, ThreadTraceStatusMasks) {
   EXPECT_EQ(builder.GetUTCErrorMask(), TestPrimitives::TT_CONTROL_UTC_ERR_MASK);
   EXPECT_EQ(builder.GetBufferFullMask(), TestPrimitives::TT_CONTROL_FULL_MASK);
   EXPECT_EQ(builder.GetWritePtrMask(), TestPrimitives::TT_WRITE_PTR_MASK);
-  
+
   // Verify masks are unique
   EXPECT_NE(builder.GetUTCErrorMask(), builder.GetBufferFullMask());
   EXPECT_NE(builder.GetUTCErrorMask(), builder.GetWritePtrMask());
@@ -161,7 +161,7 @@ TEST_F(SqttBuilderTest, XCCConfiguration) {
 
   // Test XCC number configuration
   EXPECT_EQ(builder.GetXCCNumber(), agent_info.xcc_num);
-  
+
   // Test with different XCC configurations
   agent_info.xcc_num = 1;
   GpuSqttBuilder<TestBuilder, TestPrimitives> single_xcc(&agent_info);

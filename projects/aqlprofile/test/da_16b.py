@@ -206,7 +206,7 @@ while index < len(lines):
     line = event0 + "," + event1 + "," + event2 + "," + event3 + "," + event4 + "," + event5 + "," + event6 + "," + event7 + "," + event8 + "," + event9+ "," + event10 + "," + event11 + "," + event12 + "," + event13 + "," + event14 + "," + event15
     se1s.append(line)
     index += 160
-sums = str(sum0) + "," + str(sum1) + "," + str(sum2) + "," + str(sum3) + "," + str(sum4) + "," + str(sum5) + "," + str(sum6) + "," + str(sum7) + "," + str(sum8) + "," + str(sum9) + "," + str(sum10) + "," + str(sum11) + "," + str(sum12) + "," + str(sum13) + "," + str(sum14) + "," + str(sum15) 
+sums = str(sum0) + "," + str(sum1) + "," + str(sum2) + "," + str(sum3) + "," + str(sum4) + "," + str(sum5) + "," + str(sum6) + "," + str(sum7) + "," + str(sum8) + "," + str(sum9) + "," + str(sum10) + "," + str(sum11) + "," + str(sum12) + "," + str(sum13) + "," + str(sum14) + "," + str(sum15)
 
 def save_samples(output_file, tss, se1s):
     file = open(output_file, "w")

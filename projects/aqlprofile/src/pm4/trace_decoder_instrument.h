@@ -88,7 +88,7 @@ typedef union rocprof_trace_decoder_packet_header_t
 
 typedef enum rocprof_trace_decoder_packet_opcode_t
 {
-    ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ = 4, 
+    ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ = 4,
     ROCPROF_TRACE_DECODER_PACKET_OPCODE_RT_TIMESTAMP,
     ROCPROF_TRACE_DECODER_PACKET_OPCODE_AGENT_INFO     ///< Agent info, passed in data20. No payload.
 

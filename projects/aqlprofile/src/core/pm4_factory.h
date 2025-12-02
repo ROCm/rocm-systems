@@ -258,9 +258,9 @@ class Pm4Factory {
   // PM4 factory instance map type
   struct instances_fncomp_t {
     bool operator()(const AgentInfo& a, const AgentInfo& b) const {
-      // using name instead of gfxip due to backward compatability with rocprofv2, 
+      // using name instead of gfxip due to backward compatability with rocprofv2,
       // as in newer api which rocprofv3 uses both name and gfxip strings are same for a agent.
-      int cmp = strcmp(a.name, b.name); 
+      int cmp = strcmp(a.name, b.name);
       if (cmp < 0) return true;
       if (cmp > 0) return false;
       // If gfxip strings are equal, compare cu_num

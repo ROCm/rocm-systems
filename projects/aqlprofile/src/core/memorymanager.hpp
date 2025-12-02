@@ -203,7 +203,7 @@ class TraceMemoryManager : public MemoryManager {
     extra_output_buffers.emplace_back(AllocMemory(outputbuf_size, flags));
     return extra_output_buffers.back().get();
   }
-  
+
   void* AddExtraCmdBuf(size_t size)
   {
     aqlprofile_buffer_desc_flags_t flags{};
@@ -261,7 +261,7 @@ class TraceMemoryManager : public MemoryManager {
   aqlprofile_memory_copy_t copy_fn;
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   std::unique_ptr<void, MemoryDeleter> trace_control_buf = nullptr;
-  
+
   std::vector<std::unique_ptr<void, MemoryDeleter>> extra_output_buffers{};
   std::vector<std::unique_ptr<void, MemoryDeleter>> extra_cmd_buffers{};
 };

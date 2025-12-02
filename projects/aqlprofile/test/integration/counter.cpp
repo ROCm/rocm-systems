@@ -46,14 +46,14 @@ AQLPacket::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     assert(packet && "Invalid aql packet");
     if (flags.memory_hint != AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED)
     {
-        CHECK_HSA(hsa_amd_memory_pool_allocate(AgentInfo::cpu_pool, size, 
+        CHECK_HSA(hsa_amd_memory_pool_allocate(AgentInfo::cpu_pool, size,
                                                HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, ptr));
         CHECK_HSA(hsa_amd_memory_fill(*ptr, 0u, size / sizeof(uint32_t)));
         return hsa_amd_agents_allow_access(1, &packet->hsa_agent, nullptr, *ptr);
     }
     else
     {
-        CHECK_HSA(hsa_amd_memory_pool_allocate(AgentInfo::kernarg_pool, size, 
+        CHECK_HSA(hsa_amd_memory_pool_allocate(AgentInfo::kernarg_pool, size,
                                                HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, ptr));
         CHECK_HSA(hsa_amd_memory_fill(*ptr, 0u, size / sizeof(uint32_t)));
         return hsa_amd_agents_allow_access(1, &packet->hsa_agent, nullptr, *ptr);

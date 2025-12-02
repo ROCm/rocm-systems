@@ -609,7 +609,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, data);
     return HSA_STATUS_SUCCESS;
   }
-  
+
   virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) override
   {
     rocprof_trace_decoder_packet_header_t header{};

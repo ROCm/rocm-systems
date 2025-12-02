@@ -79,7 +79,7 @@ hsa_status_t AgentInfo::get_agent_handle_cb(hsa_agent_t agent, void* userdata)
     info->add_event(sq, "SQ_WAVES", 1, 4);
     info->add_event(sq, "SQ_BUSY_CYCLES", 1, 3);
     info->add_event(sq, "SQ_INSTS_VALU", 1, (info->gfxip.find("gfx1")==0) ? 62 : 26);
-    
+
     info->add_event(ta, "TA_BUSY", 16, (info->gfxip.find("gfx94") != 0 || info->gfxip.find("gfx95") != 0) ? 13 : 15);
 
     if (info->gfxip.find("gfx1") == 0)

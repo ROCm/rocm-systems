@@ -14,7 +14,7 @@ target_sources(command-builder-test PRIVATE ${AQLPROFILE_COMMAND_BUILDER_SOURCES
 target_include_directories(command-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     command-builder-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -37,9 +37,9 @@ SET(AQLPROFILE_PMC_BUILDER_SOURCES
 )
 target_sources(pmc-builder-test PRIVATE ${AQLPROFILE_PMC_BUILDER_SOURCES})
 target_include_directories(pmc-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
-target_link_libraries(  
+target_link_libraries(
     pmc-builder-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -52,7 +52,7 @@ gtest_add_tests(
     SOURCES ${AQLPROFILE_PMC_BUILDER_SOURCES}
     TEST_LIST pmc-builder-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(   
+set_tests_properties(
     ${pmc-builder-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
@@ -65,7 +65,7 @@ target_sources(gfx9-command-builder-test PRIVATE ${AQLPROFILE_GFX9_COMMAND_BUILD
 target_include_directories(gfx9-command-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     gfx9-command-builder-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -150,7 +150,7 @@ target_link_libraries(
             GTest::gtest_main
             GTest::gmock
             GTest::gmock_main
-            ${CMAKE_DL_LIBS})  
+            ${CMAKE_DL_LIBS})
 gtest_add_tests(
     TARGET sqtt-builder-test
     SOURCES ${AQLPROFILE_SQTT_BUILDER_SOURCES}

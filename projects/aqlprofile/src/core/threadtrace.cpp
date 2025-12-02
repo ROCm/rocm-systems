@@ -80,7 +80,7 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
   for (size_t se_index = 0; se_index < se_number_total; se_index++) {
     bool bMaskedIn = memorymgr->config.GetTargetCU(se_index) >= 0;
     if (!bMaskedIn) continue;
-  
+
     if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
       ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
       status = HSA_STATUS_ERROR_EXCEPTION;

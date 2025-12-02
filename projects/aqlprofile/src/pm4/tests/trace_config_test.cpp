@@ -22,7 +22,7 @@ protected:
 
 TEST_F(TraceConfigTest, DefaultValues) {
   TraceConfig default_config;
-  
+
   // Check default initialization values
   EXPECT_EQ(default_config.targetCu, 0);
   EXPECT_EQ(default_config.vmIdMask, 0);
@@ -103,7 +103,7 @@ TEST_F(TraceConfigTest, PerformanceConfiguration) {
   // Test performance counter configuration
   config.perfMASK = 0xF0F0;
   config.perfCTRL = 0x1234;
-  
+
   // Add some performance counters
   config.perfcounters.push_back({0, 1});  // Counter 0, Instance 1
   config.perfcounters.push_back({2, 3});  // Counter 2, Instance 3

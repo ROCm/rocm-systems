@@ -29,7 +29,7 @@ public:
     size_t Size() const override { return commands; }
     const void* Data() const override { return nullptr; }
     void Clear() override { commands = 0; }
-    
+
     size_t commands = 0;
 };
 
@@ -37,19 +37,19 @@ public:
 class PmcBuilder {
 public:
     virtual ~PmcBuilder() = default;
-    
+
     void Enable(CmdBuffer* cmd_buffer) {
         if (cmd_buffer) {
             cmd_buffer->Append(nullptr, sizeof(uint32_t));
         }
     }
-    
+
     void Disable(CmdBuffer* cmd_buffer) {
         if (cmd_buffer) {
             cmd_buffer->Append(nullptr, sizeof(uint32_t));
         }
     }
-    
+
     int GetNumWGPs(const AgentInfo& info) {
         if (info.se_num == 0 || info.shader_arrays_per_se == 0) return 0;
         return (info.cu_num / 2) / (info.se_num * info.shader_arrays_per_se);
@@ -59,11 +59,11 @@ public:
 TEST(PmcBuilderTest, BasicOperations) {
     TestCmdBuffer cmd_buffer;
     PmcBuilder builder;
-    
+
     // Test Enable
     builder.Enable(&cmd_buffer);
     EXPECT_EQ(cmd_buffer.commands, 1);
-    
+
     // Test Disable
     builder.Disable(&cmd_buffer);
     EXPECT_EQ(cmd_buffer.commands, 2);
@@ -72,11 +72,11 @@ TEST(PmcBuilderTest, BasicOperations) {
 TEST(PmcBuilderTest, WGPCalculation) {
     PmcBuilder builder;
     AgentInfo info;
-    
+
     // Test edge case - zero CUs
     info.cu_num = 0;
     EXPECT_EQ(builder.GetNumWGPs(info), 0);
-    
+
     // Test edge case - zero shader arrays
     info.cu_num = 64;
     info.shader_arrays_per_se = 0;
@@ -85,19 +85,19 @@ TEST(PmcBuilderTest, WGPCalculation) {
 
 TEST(PmcBuilderTest, CommandBufferOperations) {
     TestCmdBuffer cmd_buffer;
-    
+
     // Test append
     cmd_buffer.Append(nullptr, sizeof(uint32_t));
     EXPECT_EQ(cmd_buffer.commands, 1);
-    
+
     // Test clear
     cmd_buffer.Clear();
     EXPECT_EQ(cmd_buffer.commands, 0);
-    
+
     // Test size
     cmd_buffer.Append(nullptr, sizeof(uint32_t));
     EXPECT_EQ(cmd_buffer.Size(), 1);
-    
+
     // Test data
     EXPECT_EQ(cmd_buffer.Data(), nullptr);
 }
