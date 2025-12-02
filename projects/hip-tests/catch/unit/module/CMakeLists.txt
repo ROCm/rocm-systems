@@ -318,34 +318,11 @@ endif()
 hip_add_exe_to_target(NAME module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-<<<<<<< HEAD
 add_custom_target(managed_kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/managed_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 
 add_custom_target(vcpy_kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/vcpy_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 
 add_custom_target(matmul.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
-=======
-
-add_custom_target(managed_kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/managed_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
-
-hip_add_exe_to_target(NAME managedKernel
-                      TEST_SRC ${LINUX_TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS ${CMAKE_DL_LIBS})
-
-add_custom_target(vcpy_kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/vcpy_kernel.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
-
-hip_add_exe_to_target(NAME VcpyKernel
-                      TEST_SRC ${LINUX_TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS ${CMAKE_DL_LIBS})
-
-<<<<<<< HEAD
-add_custom_target(matmul.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}  ${SPIRV_WARP_SIZE_FLAG} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
->>>>>>> 6d8a3a55e9 (SWDEV-514499 - add spirv mode to hip-tests)
-=======
-add_custom_target(matmul.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/matmul.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
->>>>>>> 92f7ec3d7f (more WARP_SIZE cleanup)
 
 add_custom_target(kernel_count.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../module/kernel_count.code -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
 
