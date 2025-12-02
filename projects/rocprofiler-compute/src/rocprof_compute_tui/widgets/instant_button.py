@@ -27,15 +27,22 @@ from textual.widgets import Button
 
 
 class InstantButton(Button):
-    """A button that fires exactly once on mouse-down."""
+    """
+    A button that fires exactly once per *click* using Textual's press semantics.
+    """
 
     class InstantPressed(Message):
-        """Custom message fired exactly once per physical mouse press."""
+        """Custom message fired once for each successful button press."""
 
         def __init__(self, button: "InstantButton") -> None:
             super().__init__()
             self.button = button  # the button that was pressed
 
-    def on_mouse_down(self, event) -> None:  # noqa: ANN001
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Translate Textual's `Button.Pressed` into `InstantPressed`."""
+        if event.button is not self:
+            return
+
         event.stop()
+
         self.post_message(self.InstantPressed(self))
