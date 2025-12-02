@@ -328,7 +328,7 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
 bool KernelParameters::boundToSvmPointer(const Device& device, const_address capturedParameter,
                                          size_t index) const {
   if (!device.info().svmCapabilities_) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
             "The device: 0x%x does not have SVM Capabilities \n", &device);
     return false;
   }

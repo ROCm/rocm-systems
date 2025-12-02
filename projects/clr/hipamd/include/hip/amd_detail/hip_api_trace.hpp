@@ -1697,7 +1697,7 @@ struct HipDispatchTable {
   t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
   t_hipKernelGetLibrary hipKernelGetLibrary_fn;
   t_hipKernelGetName hipKernelGetName_fn;
-  
+
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
   t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
 

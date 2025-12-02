@@ -50,7 +50,7 @@ hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel
 
   for (const auto &it : kernels_) {
     if (it.second == kernel) {
-      *name = it.first.first.c_str(); 
+      *name = it.first.first.c_str();
       return hipSuccess;
     }
   }

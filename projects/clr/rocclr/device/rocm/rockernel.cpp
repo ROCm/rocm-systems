@@ -93,7 +93,7 @@ bool Kernel::postLoad() {
     hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
           "[ROC][Kernel] Cannot get Kernel Symbol Info, failed with hsa_status: %d \n", hsaStatus);
       return false;
     }

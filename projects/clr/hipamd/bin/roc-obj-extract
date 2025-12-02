@@ -150,7 +150,7 @@ foreach my $uri_str(@ARGV) {
 
     # get pid filename:
     $extract_file = "/proc/$extract_pid/mem";
-   
+
     # verify file exists:
     if (! -e $extract_file) {
       print(STDERR "Error: can't find file: $extract_file\n"); $error++;

@@ -48,7 +48,7 @@ set (OPENCL_ICD_LOADER_SOURCES
     loader/icd_platform.h)
 
 if (WIN32)
-    list (APPEND OPENCL_ICD_LOADER_SOURCES 
+    list (APPEND OPENCL_ICD_LOADER_SOURCES
         loader/windows/icd_windows.c
         loader/windows/icd_windows.h
         loader/windows/icd_windows_dxgk.c

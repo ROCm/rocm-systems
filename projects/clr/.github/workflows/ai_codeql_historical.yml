@@ -33,4 +33,4 @@ jobs:
     secrets:
       gh_token: ${{ secrets.AI_GH_TOKEN }}
       codeql_token: ${{ secrets.AI_CODEQL_API_KEY }}
- 
+

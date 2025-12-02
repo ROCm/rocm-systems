@@ -395,7 +395,7 @@ struct clUnloadPlatformCompiler_st {
 };
 
 #if 0
-struct clUnloadCompiler_st 
+struct clUnloadCompiler_st
 {
     void ;
 };
@@ -574,7 +574,7 @@ struct clEnqueueCopyImage_st {
 };
 
 #if 0
-struct clGetMemObjectInfo_st 
+struct clGetMemObjectInfo_st
 {
     cl_mem memobj;
     cl_mem_info param_name;
@@ -956,55 +956,55 @@ struct clGetGLContextInfoKHR_st {
 #define NUM_ITEMS_clEnqueueAcquireD3D10ObjectsKHR 1
 #define NUM_ITEMS_clEnqueueReleaseD3D10ObjectsKHR 1
 
-struct clGetDeviceIDsFromD3D10KHR_st 
+struct clGetDeviceIDsFromD3D10KHR_st
 {
     cl_platform_id platform;
     cl_d3d10_device_source_khr d3d_device_source;
-    void *d3d_object; 
-    cl_d3d10_device_set_khr d3d_device_set; 
+    void *d3d_object;
+    cl_d3d10_device_set_khr d3d_device_set;
     cl_uint num_entries;
     cl_device_id *devices; cl_uint *num_devices;
 };
 
-struct clCreateFromD3D10BufferKHR_st 
+struct clCreateFromD3D10BufferKHR_st
 {
-    cl_context context; 
+    cl_context context;
     cl_mem_flags flags;
-    ID3D10Buffer *resource; 
+    ID3D10Buffer *resource;
     cl_int *errcode_ret;
 };
 
-struct clCreateFromD3D10Texture2DKHR_st 
+struct clCreateFromD3D10Texture2DKHR_st
 {
-    cl_context context; 
+    cl_context context;
     cl_mem_flags flags;
-    ID3D10Texture2D *resource; 
+    ID3D10Texture2D *resource;
     UINT subresource;
     cl_int *errcode_ret;
 };
 
-struct clCreateFromD3D10Texture3DKHR_st 
+struct clCreateFromD3D10Texture3DKHR_st
 {
-    cl_context context; 
+    cl_context context;
     cl_mem_flags flags;
     ID3D10Texture3D *resource;
     UINT subresource;
     cl_int *errcode_ret;
 };
 
-struct clEnqueueAcquireD3D10ObjectsKHR_st 
+struct clEnqueueAcquireD3D10ObjectsKHR_st
 {
     cl_command_queue command_queue;
-    cl_uint num_objects; 
+    cl_uint num_objects;
     const cl_mem *mem_objects;
     cl_uint num_events_in_wait_list;
     const cl_event *event_wait_list;
     cl_event *event;};
 
-struct clEnqueueReleaseD3D10ObjectsKHR_st 
+struct clEnqueueReleaseD3D10ObjectsKHR_st
 {
     cl_command_queue command_queue;
-    cl_uint num_objects; 
+    cl_uint num_objects;
     const cl_mem *mem_objects;
     cl_uint num_events_in_wait_list;
     const cl_event *event_wait_list;

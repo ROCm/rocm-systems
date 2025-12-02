@@ -109,7 +109,7 @@ void Runtime::tearDown() {
 // runtime_tear_down.
 amd::Monitor listenerLock{};
 std::vector<ReferenceCountedObject*> RuntimeTearDown::external_{};
-std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>> 
+std::vector<std::pair<std::string, RuntimeTearDown::TearDownCallback>>
   RuntimeTearDown::tear_down_funcs_{};
 class RuntimeTearDown runtime_tear_down{};
 
