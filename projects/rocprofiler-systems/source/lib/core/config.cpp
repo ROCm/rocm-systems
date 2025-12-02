@@ -299,16 +299,22 @@ configure_settings(bool _init)
         get_env<size_t>("ROCPROFSYS_NUM_THREADS", 1), "threading", "performance",
         "sampling", "parallelism", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE", "Enable perfetto backend",
-                              _default_perfetto_v, "backend", "perfetto");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE", "Enable perfetto backend", false,
+                              "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_PERFETTO",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE",
-                              _default_perfetto_v, "backend", "perfetto", "deprecated");
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
+                              "backend", "perfetto", "deprecated");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
+                              "Enable perfetto backend with deferred trace generation "
+                              "for minimal runtime overhead",
+                              _default_perfetto_v, "backend", "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE", "Enable timemory backend",
-                              !_config->get<bool>("ROCPROFSYS_TRACE"), "backend",
-                              "timemory");
+                              !(_config->get<bool>("ROCPROFSYS_TRACE") ||
+                                _config->get<bool>("ROCPROFSYS_TRACE_CACHED")),
+                              "backend", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_TIMEMORY", "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
@@ -320,10 +326,6 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
-                              "Enable perfetto with trace cache", false, "backend",
-                              "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",

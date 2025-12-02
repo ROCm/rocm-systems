@@ -33,6 +33,7 @@ endif()
 set(_thread_limit_environment
     "${_base_environment}"
     "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_CACHED=OFF"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_COUT_OUTPUT=ON"
     "ROCPROFSYS_USE_SAMPLING=ON"
