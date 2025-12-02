@@ -168,10 +168,7 @@ InterceptQueue::~InterceptQueue() {
   hsa_signal_value_t val = async_doorbell_->ExchRelaxed(1);
   if (val != 0)
     async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
-  
-  // Properly cleanup the signal (DestroySignal handles the deletion internally)
   async_doorbell_->DestroySignal();
-  async_doorbell_ = nullptr;
 }
 
 bool InterceptQueue::HandleAsyncDoorbell(hsa_signal_value_t value, void* arg) {
@@ -371,66 +368,59 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
   if (end > next_packet_ + amd_queue_.hsa_queue.size)
     end = next_packet_ + amd_queue_.hsa_queue.size;
 
-  // Count valid contiguous packets
-  uint64_t valid_count = 0;
-  uint64_t scan_idx = next_packet_;
-  
-  // Scan for contiguous valid packets
-  while (scan_idx < end && valid_count < amd_queue_.hsa_queue.size) {
-    uint64_t ring_idx = scan_idx & mask;
-    uint16_t header = atomic::Load(&ring[ring_idx].packet.header, std::memory_order_acquire);
-    
-    if (!AqlPacket::IsValid(header)) break;
-    
-    valid_count++;
-    scan_idx++;
-    
-    // Stop if overflow queue is not empty to maintain packet ordering
+  uint64_t i = next_packet_;
+  uint64_t invalid_header_i = end;
+
+  while (i < end) {
+    // Load the packet header as atomic acquire as it may have been written by
+    // another thread as atomic release. This ensures the rest of the packet
+    // fields are visible. Once loaded and proven not to be INVALID, further
+    // loads by this thread can be non-atomic.
+    uint16_t header = atomic::Load(&ring[i & mask].packet.header, std::memory_order_acquire);
+    if (!AqlPacket::IsValid(header)) {
+      invalid_header_i = i;
+      break;
+    }
+    ++i;
+
+    // Only allow the rewrite of one packet to be on the overflow queue. When
+    // packets are put on the overflow queue a barrier packet will also be
+    // added which has an async handler that will ring the doorbell, That
+    // doorbell ring will ensure this function is re-invoked to put the
+    // overflow packets on the hardware queue and continue rewriting packets on
+    // the intercept queue.
     if (!overflow_.empty()) break;
   }
 
-  // Process valid packets
-  if (valid_count > 0) {
+  // Process callbacks.
+  uint64_t packet_count = i - next_packet_;
+  if (packet_count) {
+    // FIX: Limit packet count to avoid wraparound issues
     uint64_t start_idx = next_packet_ & mask;
-    uint64_t packet_count = valid_count;
-    
-    // Handle ring buffer wraparound - limit to non-wrapped portion
     if (start_idx + packet_count > amd_queue_.hsa_queue.size) {
       packet_count = amd_queue_.hsa_queue.size - start_idx;
+      i = next_packet_ + packet_count;  // Adjust i to match the limited packet count
     }
     
-    // Re-validate packets immediately before callback
-    for (uint64_t i = 0; i < packet_count; i++) {
-      uint64_t idx = (next_packet_ + i) & mask;
-      if (!AqlPacket::IsValid(atomic::Load(&ring[idx].packet.header, std::memory_order_acquire))) {
-        packet_count = i;  // Truncate at first invalid packet
-        break;
-      }
-    }
-    
-    // Invoke interceptor callback
-    if (packet_count > 0) {
-      Cursor.interceptor_index = interceptors.size() - 1;
-      Cursor.pkt_index = next_packet_;
-      auto& handler = interceptors[Cursor.interceptor_index];
-      
-      if (handler.first) {
-        handler.first(&ring[start_idx], packet_count, next_packet_,
-                     handler.second, PacketWriter);
-        if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
-          _mm_sfence();
-        }
-      }
-      
-      // Invalidate processed packets
-      for (uint64_t i = 0; i < packet_count; i++) {
-        atomic::Store(&ring[(next_packet_ + i) & mask].packet.header, 
-                     kInvalidHeader, std::memory_order_release);
-      }
-      
-      next_packet_ += packet_count;
+    Cursor.interceptor_index = interceptors.size() - 1;
+    Cursor.pkt_index = next_packet_;
+    auto& handler = interceptors[Cursor.interceptor_index];
+    handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
+                                                handler.second, PacketWriter);
+    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
+      // Ensure the packet body is written as header may get reordered when writing over PCIE
+      _mm_sfence();
     }
   }
+  i = next_packet_;
+  while (i < std::min(end, invalid_header_i)) {
+    // Invalidate consumed packets.
+    atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
+    // Packet has now been processed so advance the read index.
+    ++i;
+  }
+
+  next_packet_ = i;
   Cursor.queue = nullptr;
   atomic::Store(&amd_queue_.read_dispatch_id, next_packet_, std::memory_order_release);
 }
