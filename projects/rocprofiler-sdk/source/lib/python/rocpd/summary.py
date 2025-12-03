@@ -365,7 +365,13 @@ def create_summary_region_queries(
 
     category_prefixes = ["rocm_"]
 
-    if region_categories is None:
+    # Convert all categories and prefixes to lowercase for correct comparison
+    categories = [(cat[0].lower(),) for cat in categories]
+    category_prefixes = [prefix.lower() for prefix in category_prefixes]
+
+    if region_categories is not None:
+        region_categories = [cat.lower() for cat in region_categories]
+    else:
         # Automatically retrieve region categories from the database
         region_categories = set()
         for cat in categories:
@@ -374,7 +380,7 @@ def create_summary_region_queries(
                 (
                     prefix
                     for prefix in category_prefixes
-                    if category_name.lower().startswith(prefix.lower())
+                    if category_name.startswith(prefix)
                 ),
                 "",
             )
@@ -382,8 +388,8 @@ def create_summary_region_queries(
             region_categories.add(f"{matching_prefix}{first_part}")
 
     category_map = {
-        cat.lower(): [
-            c[0] for c in categories if c[0] == cat or c[0].lower().startswith(cat.lower() + "_")
+        cat: [
+            c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")
         ]
         for cat in region_categories
         if "MARKER" not in cat.upper()
