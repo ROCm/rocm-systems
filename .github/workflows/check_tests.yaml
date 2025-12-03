@@ -1,0 +1,30 @@
+name: Check test categories
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set base branch for diff
+        run: |
+          echo "BASE_REF=${{ github.event.pull_request.base.ref }}" >> $GITHUB_ENV
+
+      - name: Run test category validation
+        run: |
+          python .github/scripts/check_tests_categories.py
+
+      - name: Publish summary to workflow
+        if: always()
+        run: |
+          cat summary.txt >> "$GITHUB_STEP_SUMMARY"
