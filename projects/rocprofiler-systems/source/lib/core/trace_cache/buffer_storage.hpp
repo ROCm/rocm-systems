@@ -25,16 +25,19 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
-#include "core/debug.hpp"
 
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 
 #include <unistd.h>
@@ -134,7 +137,6 @@ public:
         {
             throw std::runtime_error(
                 "Worker is null - unable to shutdown buffered storage.");
-            return;
         }
 
         if(!is_running())
@@ -213,11 +215,9 @@ private:
         }
         if(ofs.fail())
         {
-            ROCPROFSYS_WARNING(1, "Error flushing buffered storage to file for pid: %d",
-                               m_worker_synchronization->origin_pid);
-            ROCPROFSYS_CI_THROW(true,
-                                "Error flushing buffered storage to file for pid: %d",
-                                m_worker_synchronization->origin_pid);
+            throw std::runtime_error(
+                std::string("Error flushing buffered storage to file for pid: ") +
+                std::to_string(m_worker_synchronization->origin_pid) + "\n");
         }
     }
 

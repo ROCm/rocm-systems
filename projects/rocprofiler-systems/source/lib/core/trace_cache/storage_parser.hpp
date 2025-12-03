@@ -23,7 +23,7 @@
 #pragma once
 
 #include "common/defines.h"
-#include "core/debug.hpp"
+
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
@@ -31,7 +31,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -67,9 +67,6 @@ public:
             throw std::runtime_error("TypeProcessing is nullptr");
         }
 
-        ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s\n",
-                         m_filename.c_str());
-
         std::ifstream ifs(m_filename, std::ios::binary);
         if(!ifs.good())
         {
@@ -94,10 +91,9 @@ public:
         {
             if(!ifs.good())
             {
-                ROCPROFSYS_WARNING(0,
-                                   "Stream not in good state, stopping parse. File: %s\n",
-                                   m_filename.c_str());
-                break;
+                throw std::runtime_error(
+                    std::string("Stream not in good state, stopping parse. File: ") +
+                    m_filename + "\n");
             }
 
             ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
@@ -118,11 +114,10 @@ public:
 
             if(ifs.fail())
             {
-                ROCPROFSYS_WARNING(1,
-                                   "Bad read while consuming buffered storage. Filename: "
-                                   "%s Bytes read: %d\n",
-                                   m_filename.c_str(), static_cast<int>(ifs.tellg()));
-                continue;
+                throw std::runtime_error(
+                    std::string("Bad read while consuming buffered storage. Filename: ") +
+                    m_filename + " Bytes read: " +
+                    std::to_string(static_cast<int>(ifs.tellg())) + "\n");
             }
 
             if(header.type == TypeIdentifierEnum::fragmented_space)
@@ -144,7 +139,6 @@ public:
             }
             else
             {
-                ROCPROFSYS_DEBUG("Unsupported type detected. Skipping current sample.\n");
                 continue;
             }
         }
