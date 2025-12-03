@@ -184,3 +184,36 @@ TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
   HIP_CHECK(hipFree(A_d.ptr));
   free(A_h);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset3D while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset3D.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemset3D_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr int memsetval = 0x22;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  constexpr size_t depth = 10;
+  size_t width = numW * sizeof(char);
+
+  hipExtent extent = make_hipExtent(width, numH, depth);
+  hipPitchedPtr devPitchedPtr;
+
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset3D(devPitchedPtr, memsetval, extent), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(devPitchedPtr.ptr));
+}
