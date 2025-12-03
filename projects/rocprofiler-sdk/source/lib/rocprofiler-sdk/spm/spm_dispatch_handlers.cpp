@@ -35,17 +35,17 @@ namespace rocprofiler
 {
 namespace SPM
 {
+/**
+ * @brief Async Handler for barrier=packet1 completion signal
+ * Destroys the barrier-packet1 completion signal
+ * Sets the dependency signal of barrier packet-2 to 0, so that barrier-packet2 can complete
+ * This guarantees that SPM has been started before the dispatch
+ **/
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    auto* packet = CHECK_NOTNULL(static_cast<hsa::SPMPacket*>(data));
-    // auto& before_krn = packet->before_krn_pkt;
-
-    //  if(before_krn.size() < 2)
-    // {
-    //     ROCP_ERROR << "Invalid before_krn packet" << std::endl;
-    //     return true;
-    //  }
+    auto* pkt    = CHECK_NOTNULL(static_cast<hsa::AQLPacket*>(data));
+    auto* packet = CHECK_NOTNULL(dynamic_cast<hsa::SPMPacket*>(pkt));
 
     packet->kfd_start();
 
@@ -59,8 +59,14 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 }
 
 /**
- * Callback we get from HSA interceptor when a kernel packet is being enqueued.
- * We return an AQLPacket containing the start/stop/read packets for injection.
+ * @brief Callback we get from HSA interceptor when a kernel packet is being enqueued.
+ * We return an AQLPacket containing the start/stop .
+ * Barrier_packet1-barrier_packet2-SPM Start Packet - kernel packets- SPM stop packet
+ * AsyncSignalHandler - barrier-packet1 completion signal handler
+ * barrier-packet2 - dependency signal- initialized to value -1
+ * Update callback, user data, and dispatch data in the SPM packet
+ * handshake protocol with aqlprofile SPM start kfd - SPM start packet- kernel dispatch - SPM stop
+ * packet - SPM stop KFD
  */
 hsa::Queue::pkt_and_serialize_t
 pre_kernel_call(const context::context*                                         ctx,
@@ -74,13 +80,21 @@ pre_kernel_call(const context::context*                                         
                 const context::correlation_id*                                  correlation_id)
 {
     CHECK(info && ctx);
+    auto no_instrumentation = [&]() {
+        auto ret_pkt = std::make_unique<rocprofiler::hsa::EmptyAQLPacket>();
+        info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), nullptr); });
+        // If we have a SPM counter collection context but it is not enabled, we still might need
+        // to add barrier packets to transition from serialized -> unserialized execution. This
+        // transition is coordinated by the serializer.
+        return ret_pkt;
+    };
 
     if(!ctx || !ctx->dispatch_spm) return {nullptr, false};
 
     bool is_enabled = false;
     ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
-    if(!is_enabled || !info->user_cb) return {nullptr, false};
+    if(!is_enabled || !info->user_cb) return {no_instrumentation(), false};
 
     auto _corr_id_v =
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
@@ -123,24 +137,27 @@ pre_kernel_call(const context::context*                                         
     auto prof_config = spm_get_controller().get_profile_cfg(req_profile);
     CHECK(prof_config);
 
-    std::unique_ptr<rocprofiler::hsa::SPMPacket> ret_pkt;
+    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt = nullptr;
     auto ret_status = info->get_spm_packet(ret_pkt, prof_config);
+
     CHECK_EQ(ret_status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(ret_status);
 
     if(!ret_pkt->empty)
     {
-        ret_pkt->clear();
-        ret_pkt->populate_before();
-        ret_pkt->populate_after();
+        auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
+        // ROCP_FATAL_IF(pkt == nullptr)  << "NULL Packet returned from get spm packet: ";
+        spm_pkt->clear();
+        spm_pkt->populate_before();
+        spm_pkt->populate_after();
 
-        ret_pkt->dispatch_data = dispatch_data;
-        ret_pkt->user_data     = user_data;
-        // ROCP_FATAL_IF(ret_pkt->before_krn_pkt.size() < 3) << "SPM Requires at least 3 packets";
-        auto& signal_to_start_kfd    = ret_pkt->before_krn_barrier_pkt.at(0).completion_signal;
-        auto& signal_kfd_has_started = ret_pkt->before_krn_barrier_pkt.at(1).dep_signal[0];
+        spm_pkt->dispatch_data        = dispatch_data;
+        spm_pkt->user_data            = user_data;
+        spm_pkt->record_cb            = info->record_callback;
+        spm_pkt->record_callback_args = info->record_callback_args;
 
-        // queue.create_signal(0, &signal_to_start_kfd);
-        //  queue.create_signal(0, &signal_kfd_has_started);
+        auto& signal_to_start_kfd    = spm_pkt->before_krn_barrier_pkt.at(0).completion_signal;
+        auto& signal_kfd_has_started = spm_pkt->before_krn_barrier_pkt.at(1).dep_signal[0];
+
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->get_ext_table()
             .hsa_amd_signal_create_fn(1, 0, nullptr, 0, &signal_to_start_kfd);
@@ -170,7 +187,11 @@ pre_kernel_call(const context::context*                                         
 }
 
 /**
- * Callback called by HSA interceptor when the kernel has completed processing.
+ * @brief Callback called by HSA interceptor when the kernel has completed processing.
+ * Destroys the depedency signal of barrier packet2
+ * Invokes KFD SPM stop
+ * Removes entry in packet_return_map
+ * Puts the aql packet into config's packets cache for re-use
  */
 void
 post_kernel_call(const context::context*                           ctx,
@@ -193,11 +214,15 @@ post_kernel_call(const context::context*                           ctx,
                 data.erase(aql_pkt.get());
 
                 auto* pkt = dynamic_cast<hsa::SPMPacket*>(aql_pkt.get());
+                if(!pkt) continue;
+
                 CHECK_NOTNULL(hsa::get_queue_controller())
                     ->get_core_table()
                     .hsa_signal_destroy_fn(pkt->before_krn_barrier_pkt.at(1).dep_signal[0]);
                 pkt->kfd_stop();
                 auto rel_pkt = std::move(aql_pkt);
+                prof_config->packets.wlock(
+                    [&](auto& pkt_vector) { pkt_vector.emplace_back(std::move(rel_pkt)); });
                 return;
             }
         }

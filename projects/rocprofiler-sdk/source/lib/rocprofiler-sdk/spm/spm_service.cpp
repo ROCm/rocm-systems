@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <glog/logging.h>
-#include <hsa/hsa_api_trace.h>
-#include <rocprofiler-sdk/dispatch_counting_service.h>
-#include <rocprofiler-sdk/experimental/spm.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include <cstdint>
-
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -36,6 +29,14 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
+
+#include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/spm.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <glog/logging.h>
+#include <hsa/hsa_api_trace.h>
+#include <cstdint>
 
 namespace rocprofiler
 {
@@ -70,6 +71,11 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
                                       size_t                               parameter_count,
                                       rocprofiler_spm_counter_config_id_t* config_id)
 {
+    if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+
+    if(!rocprofiler::SPM::is_spm_explicitly_enabled())
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
     std::unordered_set<uint64_t> already_added;
     const auto*                  agent = ::rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
@@ -107,7 +113,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
             case ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE:
                 config->buffer_size = parameters[i].value;
                 break;
-            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY:
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT:
                 config->sample_freq = parameters[i].value;
                 break;
             default: break;
@@ -124,6 +130,11 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
                 if(!already_added.emplace(metric.id()).second) continue;
                 config->metrics.push_back(metric);
             }
+            if(existing->sample_freq != config->sample_freq)
+                config->sample_freq = existing->sample_freq;
+            if(existing->buffer_size != config->buffer_size)
+                config->buffer_size = existing->buffer_size;
+            if(existing->timeout != config->timeout) config->timeout = existing->timeout;
         }
     }
 
@@ -131,7 +142,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
     if(auto status = rocprofiler::SPM::create_spm_counter_profile(config);
        status != ROCPROFILER_STATUS_SUCCESS)
     {
-        return status;
+        return ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT;
     }
     *config_id = config->id;
 
@@ -153,25 +164,22 @@ rocprofiler_configure_spm_dispatch_service(
     rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
     void*                                          record_callback_args)
 {
+    if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+
     if(!rocprofiler::SPM::is_spm_explicitly_enabled())
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
-    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    if(!dispatch_callback || !record_callback) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-
-    rocprofiler::SPM::configure_spm_dispatch(context_id,
-                                             dispatch_callback,
-                                             dispatch_callback_args,
-                                             record_callback,
-                                             record_callback_args);
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    return rocprofiler::SPM::configure_spm_dispatch(context_id,
+                                                    dispatch_callback,
+                                                    dispatch_callback_args,
+                                                    record_callback,
+                                                    record_callback_args);
 }
 
 /**
@@ -187,15 +195,14 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
                                            rocprofiler_available_counters_cb_t cb,
                                            void*                               user_data)
 {
-    if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-    auto agent = rocprofiler::agent::get_agent(agent_id);
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
     auto metrics = rocprofiler::counters::getMetricsForAgent(agent);
 
     auto ids = std::vector<rocprofiler_counter_id_t>{};
 
-    for(auto m : metrics)
+    for(const auto& m : metrics)
     {
         if(m.spm())
         {

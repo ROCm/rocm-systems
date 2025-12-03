@@ -173,8 +173,6 @@ struct metadata
     // PMC event ids start at this number
     uint64_t pmc_event_offset = 1;
 
-    std::shared_mutex spm_mut = {};
-
     metadata() = default;
     metadata(inprocess);
 

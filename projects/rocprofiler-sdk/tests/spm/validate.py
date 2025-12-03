@@ -59,9 +59,19 @@ def test_spm_counter_values(input_data):
             if itr["id"]["handle"] == counter_id:
                 return itr["name"]
 
-    for record in counter_data:
+    def add_entry(record):
+        agent_counter_map[record["agent_id"]["handle"]].append(
+            {
+                "name": get_name(record["counter_id"]["handle"]),
+                "value": record["value"],
+            }
+        )
 
-        if record["agent_id"]["handle"] in agent_counter_map.keys():
+    for record in counter_data:
+        # If the agent is found in the agent map
+        # Search for counter name, update it if present
+        # If not counter name or agent not present add a new entry
+        if record["agent_id"]["handle"] in agent_counter_map:
             found = 0
             for i in range(0, len(agent_counter_map[record["agent_id"]["handle"]])):
                 if agent_counter_map[record["agent_id"]["handle"]][i]["name"] == get_name(
@@ -72,29 +82,20 @@ def test_spm_counter_values(input_data):
                     ]
                     found = 1
             if not found:
-                agent_counter_map[record["agent_id"]["handle"]].append(
-                    {
-                        "name": get_name(record["counter_id"]["handle"]),
-                        "value": record["value"],
-                    }
-                )
-        else:
-            agent_counter_map[record["agent_id"]["handle"]].append(
-                {
-                    "name": get_name(record["counter_id"]["handle"]),
-                    "value": record["value"],
-                }
-            )
+                add_entry(record)
 
+        else:
+            add_entry(record)
+    # some samples can have 0 value, so aggreegate for validation
     for agent, counters in agent_counter_map.items():
 
-        assert 1.0 * get_counter_value(counters, "SQ_INSTS_SALU") > get_counter_value(
+        assert float(get_counter_value(counters, "SQ_INSTS_SALU")) > get_counter_value(
             counters, "SQ_WAVES"
         )
-        assert 1.0 * get_counter_value(counters, "SQ_INSTS_VALU") > get_counter_value(
+        assert float(get_counter_value(counters, "SQ_INSTS_VALU")) > get_counter_value(
             counters, "SQ_WAVES"
         )
-        assert 1.0 * get_counter_value(counters, "TA_TA_BUSY") > get_counter_value(
+        assert float(get_counter_value(counters, "TA_TA_BUSY")) > get_counter_value(
             counters, "TA_TOTAL_WAVEFRONTS"
         )
 
