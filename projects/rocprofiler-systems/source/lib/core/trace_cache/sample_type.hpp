@@ -22,6 +22,7 @@
 
 #pragma once
 #include "core/trace_cache/cacheable.hpp"
+
 #include <cstdint>
 #include <stdint.h>
 #include <string>
@@ -407,7 +408,7 @@ inline void
 serialize(uint8_t* buffer, const in_time_sample& item)
 {
     utility::store_value(
-        buffer, std::string_view(item.track_name),
+        buffer, item.category_enum_id, std::string_view(item.track_name),
         static_cast<uint64_t>(item.timestamp_ns), std::string_view(item.event_metadata),
         static_cast<uint64_t>(item.stack_id), static_cast<uint64_t>(item.parent_stack_id),
         static_cast<uint64_t>(item.correlation_id), std::string_view(item.call_stack),

@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
 
   Catch::Session session;
 
-  using namespace Catch::clara;
+  using namespace Catch::Clara;
   // clang-format off
   auto cli = session.cli()
     | Opt(cmd_options.iterations, "iterations")

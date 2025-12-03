@@ -29,11 +29,11 @@ set(TEST_SRC
 if(UNIX)
     set(TEST_SRC ${TEST_SRC} hipKernelNameRefByPtr.cc)
 
-    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
-                      ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
+    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                      -x hip ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
-                      -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                      --hip-path=${HIP_PATH})
+                      -I${HIP_INCLUDE_DIR}
+                      -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code)
 endif()
 

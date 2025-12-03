@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <iostream>
 #include "hip/hip_runtime_api.h"
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 
 #define HIP_CHECK(error)                                                                           \
   {                                                                                                \
