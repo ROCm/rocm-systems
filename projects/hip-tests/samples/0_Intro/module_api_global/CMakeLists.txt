@@ -53,7 +53,7 @@ add_executable(runKernel1.hip.out ${EXCLUDE_OPTION} runKernel.cpp)
 # Generate code object
 add_custom_target(
   codeobj1
-  COMMAND  ${HIP_HIPCC_EXECUTABLE} --genco  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
+  COMMAND  ${HIP_HIPCC_EXECUTABLE} --cuda-device-only  ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o vcpy_kernel.code
   COMMENT "codeobj1 generated"
 )
 

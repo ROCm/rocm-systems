@@ -48,3 +48,7 @@ target_include_directories(
     rocprofiler-systems-core-library
     PUBLIC ${CMAKE_CURRENT_LIST_DIR}
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
