@@ -687,6 +687,14 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   amd::Memory* srcDeviceMemory = getMemoryObject(src, sOffset);
   size_t dOffset = 0;
   amd::Memory* dstDeviceMemory = getMemoryObject(dst, dOffset);
+  
+  // Handle kind vs memobject miss matches
+  if (kind == hipMemcpyDeviceToHost && (srcDeviceMemory == nullptr || dstDeviceMemory != nullptr)) {
+      return hipErrorInvalidValue;
+  }
+  if (kind == hipMemcpyHostToDevice && (srcDeviceMemory != nullptr || dstDeviceMemory == nullptr)) {
+      return hipErrorInvalidValue;
+  }
 
   amd::Command* command = nullptr;
   if (srcDeviceMemory == nullptr && dstDeviceMemory == nullptr) {

@@ -1801,7 +1801,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     hip::MemcpyType memType = hipHostToHost;
     if (srcMemory != nullptr && dstMemory == nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dst_);
-    } else if (srcMemory != nullptr && dstMemory != nullptr) {
+    } else if (srcMemory == nullptr && dstMemory != nullptr) {
         memType = ihipGetMemcpyType(src_, dstMemory);
     } else if (srcMemory != nullptr && dstMemory != nullptr) {
         memType = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
@@ -2098,9 +2098,9 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     }
 
     if (dstMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, devMemory, count_, kind_, *stream, dOffset, devOffset, true);
+      status = ihipMemcpyCommand(command, dstMemory, devMemory, count_, kind_, *stream, dOffset, devOffset);
     } else {
-      status = ihipMemcpyCommand(command, dst_, devMemory, count_, kind_, *stream, devOffset, true);
+      status = ihipMemcpyCommand(command, dst_, devMemory, count_, kind_, *stream, devOffset);
     }
 
     if (status != hipSuccess) {
@@ -2200,16 +2200,16 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
 
     size_t devOffset, sOffset;
     amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* srcMemory = getMemoryObject(dst_, sOffset);
+    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
 
     if (devMemory == nullptr) {
         return hipErrorInvalidValue;
     }
 
     if (srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, devMemory, srcMemory, count_, kind_, *stream, devOffset, sOffset, true);
+      status = ihipMemcpyCommand(command, devMemory, srcMemory, count_, kind_, *stream, devOffset, sOffset);
     } else {
-      status = ihipMemcpyCommand(command, devMemory, src_, count_, kind_, *stream, devOffset, true);
+      status = ihipMemcpyCommand(command, devMemory, src_, count_, kind_, *stream, devOffset);
     }
 
     if (status != hipSuccess) {
