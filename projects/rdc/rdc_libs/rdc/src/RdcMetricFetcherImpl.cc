@@ -522,6 +522,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
         {RDC_FI_XGMI_TOTAL_WRITE_KB, sum_xgmi_write(gpu_metrics)},
         {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
+        {RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY, gpu_metrics.pcie_lc_perf_other_end_recovery},
+        {RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, gpu_metrics.pcie_nak_rcvd_count_acc},
+        {RDC_FI_PCIE_NAK_SENT_COUNT_ACC, gpu_metrics.pcie_nak_sent_count_acc},
     };
 
     // In gpu_metrics,the max value means not supported
@@ -899,6 +902,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     case RDC_FI_XGMI_7_WRITE_KB:
     case RDC_FI_XGMI_TOTAL_WRITE_KB:
     case RDC_FI_PCIE_BANDWIDTH:
+    case RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY:
+    case RDC_FI_PCIE_NAK_RCVD_COUNT_ACC:
+    case RDC_FI_PCIE_NAK_SENT_COUNT_ACC:
       read_gpu_metrics_uint64_t();
       break;
     case RDC_HEALTH_XGMI_ERROR: {
