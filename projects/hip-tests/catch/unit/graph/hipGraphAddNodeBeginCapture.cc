@@ -114,6 +114,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+// hipStreamGetCaptureInfo_v2 is removed in CUDA 13.0
+#if HT_AMD || (CUDA_VERSION >= CUDA_11030 && CUDA_VERSION < 13000)
 /**
  * Test Description
  * ------------------------
@@ -459,6 +461,8 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   HIP_CHECK(hipGraphDestroy(capGraph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+#endif
 
 /**
  * Test Description
@@ -837,6 +841,9 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+// hipStreamGetCaptureInfo_v2 is removed in CUDA 13.0
+#if HT_AMD || (CUDA_VERSION >= CUDA_11030 && CUDA_VERSION < 13000)
+
 /**
  * Test Description
  * ------------------------
@@ -918,6 +925,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+#endif
 
 /**
  * End doxygen group GraphTest.

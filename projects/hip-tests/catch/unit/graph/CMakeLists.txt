@@ -179,6 +179,13 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemcpyNode.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
+elseif(HIP_PLATFORM MATCHES "nvidia" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
+  # cudaStreamGetCaptureInfo_v2 is removed in CUDA 13.0
+  list(REMOVE_ITEM TEST_SRC
+    hipStreamGetCaptureInfo_v2_old.cc
+    hipStreamGetCaptureInfo_v2.cc
+    hipStreamUpdateCaptureDependencies.cc
+  )
 endif()
 
 add_custom_target(add_Kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code -I${HIP_PATH}/include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})

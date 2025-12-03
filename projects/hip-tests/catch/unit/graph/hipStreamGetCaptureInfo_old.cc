@@ -253,6 +253,10 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation") {
 
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+// hipStreamGetCaptureInfo_v2 is removed in CUDA 13.0
+#if HT_AMD || (CUDA_VERSION >= CUDA_11030 && CUDA_VERSION < 13000)
+
 /*
  * Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and
  * wait for event e1 on s2. Queue some operations in s1 and s2. Invoke
@@ -611,3 +615,5 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo") {
   free(C_h);
   free(D_h);
 }
+
+#endif

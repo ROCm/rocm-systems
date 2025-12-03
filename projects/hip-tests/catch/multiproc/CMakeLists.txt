@@ -34,7 +34,10 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
-  set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  # sm_70 is not supported in CUDA 13.0. On CUDA 13.0+ it would default to sm_75.
+  if (CUDA_VERSION VERSION_LESS 13.0)
+    set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  endif()
 elseif(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME MultiProc
                       TEST_SRC ${TEST_SRC}

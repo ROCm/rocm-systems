@@ -296,7 +296,8 @@ hip_add_exe_to_target(NAME SVMAtomicTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-if(HIP_PLATFORM MATCHES "nvidia")
+# sm_70 is not supported in CUDA 13.0. On CUDA 13.0+ it would default to sm_75.
+if(HIP_PLATFORM MATCHES "nvidia" AND CUDA_VERSION VERSION_LESS 13.0)
   set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
   set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
   set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)

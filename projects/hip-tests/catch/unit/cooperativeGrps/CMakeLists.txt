@@ -21,18 +21,25 @@ set(TEST_SRC
   cg_ballot.cc
   cg_any_all.cc
 )
-
 if(HIP_PLATFORM STREQUAL "nvidia")
-  set_source_files_properties(hipCGMultiGridGroupType_old.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80")
-  set_source_files_properties(hipLaunchCooperativeKernelMultiDevice_old.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80")
-  set_source_files_properties(multi_grid_group.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80")
-  set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
-  set_source_files_properties(cg_any_all.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
-  set_source_files_properties(binary_partition.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  # sm_70 is not supported in CUDA 13.0. On CUDA 13.0+ it would default to sm_75.
+  if (CUDA_VERSION VERSION_LESS 13.0)
+    set_source_files_properties(hipCGMultiGridGroupType_old.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -arch=sm_70")
+    set_source_files_properties(hipLaunchCooperativeKernelMultiDevice_old.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -arch=sm_70")
+    set_source_files_properties(multi_grid_group.cc PROPERTIES COMPILE_FLAGS "-D_CG_ABI_EXPERIMENTAL -rdc=true -arch=sm_70")
+    set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+    set_source_files_properties(cg_any_all.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+    set_source_files_properties(binary_partition.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  else()
+    # hipLaunchCooperativeKernelMultiDevice is removed in CUDA 13.0
+    list(REMOVE_ITEM TEST_SRC
+      hipCGMultiGridGroupType_old.cc
+      hipLaunchCooperativeKernelMultiDevice_old.cc
+      multi_grid_group.cc)
+  endif()
   hip_add_exe_to_target(NAME coopGrpTest
                       TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS "-rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70 -gencode arch=compute_80,code=sm_80, -gencode arch=compute_86,code=sm_86, -gencode=arch=compute_86,code=compute_86")
+                      TEST_TARGET_NAME build_tests)
 else()
   set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")
   set_source_files_properties(cg_any_all.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")

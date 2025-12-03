@@ -13,7 +13,13 @@ if(HIP_PLATFORM MATCHES "amd")
         launch_api.cc
         hipGetProcAddressLaunchCbExecCtrlApis.cc
     )
-else()
+elseif(HIP_PLATFORM MATCHES "nvidia")
+    # cudaLaunchCooperativeKernelMultiDevice is removed in CUDA 13.0
+    if (CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
+        list(REMOVE_ITEM TEST_SRC
+            hipLaunchCooperativeKernelMultiDevice.cc
+        )
+    endif()
     # These functions are currently unimplemented on AMD
     set(TEST_SRC ${TEST_SRC}
         hipFuncSetCacheConfig.cc

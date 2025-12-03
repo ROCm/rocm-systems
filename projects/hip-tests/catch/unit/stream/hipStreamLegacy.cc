@@ -67,6 +67,9 @@ TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, A_Ph, B_Ph, nullptr, true);
 }
 
+// hipStreamGetCaptureInfo_v2 is removed in CUDA 13.0
+#if HT_AMD || (CUDA_VERSION >= CUDA_11030 && CUDA_VERSION < 13000)
+
 TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
@@ -161,6 +164,8 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo") {
   free(C_h);
   free(D_h);
 }
+
+#endif
 
 __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);

@@ -2051,8 +2051,8 @@ inline static hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemo
                                       int device) {
 #if CUDA_VERSION >= 13000
   // CUDA 13+ uses cudaMemLocation instead of int device
-  cudaMemLocation location;
-  location.type = cudaMemLocationTypeDevice;
+  struct cudaMemLocation location;
+  location.type = device == hipCpuDeviceId ? cudaMemLocationTypeHost : cudaMemLocationTypeDevice;
   location.id = device;
   return hipCUDAErrorTohipError(
       cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
@@ -2067,8 +2067,8 @@ inline static hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, 
                                              hipStream_t stream __dparm(0)) {
 #if CUDA_VERSION >= 13000
   // CUDA 13+ uses cudaMemLocation and flags parameter
-  cudaMemLocation location;
-  location.type = cudaMemLocationTypeDevice;
+  struct cudaMemLocation location;
+  location.type = device == hipCpuDeviceId ? cudaMemLocationTypeHost : cudaMemLocationTypeDevice;
   location.id = device;
   return hipCUDAErrorTohipError(cudaMemPrefetchAsync(dev_ptr, count, location, 0, stream));
 #else
@@ -2435,9 +2435,6 @@ inline static hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* s
                                              size_t numAttrs, size_t* failIdx, hipStream_t stream) {
 #if CUDA_VERSION >= 13000
   // CUDA 13+ signature: failIdx removed, const qualifiers added
-  if (failIdx != nullptr) {
-    *failIdx = 0;
-  }
   return hipCUDAErrorTohipError(
       cudaMemcpyBatchAsync((void *const *)dsts, (const void *const *)srcs, (const size_t *)sizes, count, attrs, attrsIdxs, numAttrs, stream));
 #else
@@ -2452,9 +2449,6 @@ inline static hipError_t hipMemcpy3DBatchAsync(size_t numOps, hipMemcpy3DBatchOp
                                                hipStream_t stream) {
 #if CUDA_VERSION >= 13000
   // CUDA 13+ signature: failIdx removed
-  if (failIdx != nullptr) {
-    *failIdx = 0;
-  }
   return hipCUDAErrorTohipError(cudaMemcpy3DBatchAsync(numOps, opList, flags, stream));
 #else
   // CUDA < 13 signature: failIdx supported
@@ -3908,17 +3902,14 @@ inline static hipError_t hipModuleLaunchCooperativeKernel(
                                                          stream, kernelParams));
 }
 
+#if CUDA_VERSION < 13000
 inline static hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList,
                                                                int numDevices, unsigned int flags) {
-#if CUDA_VERSION < 13000
   // cudaLaunchCooperativeKernelMultiDevice available in CUDA < 13
   return hipCUDAErrorTohipError(
       cudaLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags));
-#else
-  // cudaLaunchCooperativeKernelMultiDevice removed in CUDA 13+
-  return hipErrorNotSupported;
-#endif
 }
+#endif
 
 inline static hipError_t hipModuleLaunchCooperativeKernelMultiDevice(
     hipFunctionLaunchParams* launchParamsList, unsigned int numDevices, unsigned int flags) {
@@ -4663,7 +4654,7 @@ inline static hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipG
                                                     const hipGraphNode_t* to,
                                                     size_t numDependencies) {
 #if CUDA_VERSION >= 13000
-// CUDA 13+ signature update:edgeData is optional array of edge data. 
+// CUDA 13+ signature update:edgeData is optional array of edge data.
 // If NULL, edge data is assumed to be default (zeroed).
   return hipCUDAErrorTohipError(cudaGraphRemoveDependencies(graph, from, to, NULL, numDependencies));
 #else

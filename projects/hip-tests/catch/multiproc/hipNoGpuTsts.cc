@@ -987,6 +987,8 @@ static bool NoGpuTst_hipLaunchCooperativeKernel() {
   return passed;
 }
 
+// hipLaunchCooperativeKernelMultiDevice is removed in CUDA 13.0
+#if HT_AMD || (CUDA_VERSION >= CUDA_11030 && CUDA_VERSION < 13000)
 // No GPU test for hipLaunchCooperativeKernelMultiDevice() API
 static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
   bool passed = false;
@@ -1017,6 +1019,7 @@ static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
   }
   return passed;
 }
+#endif
 
 // No GPU test for hipExtLaunchMultiKernelMultiDevice() API
 #if HT_AMD
@@ -1523,9 +1526,12 @@ TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernel") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernel));
 }
 
+// cudaLaunchCooperativeKernelMultiDevice is removed in CUDA 13.0
+#if HT_AMD || CUDA_VERSION < 13000
 TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernelMultiDevice") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernelMultiDevice));
 }
+#endif
 #if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipExtLaunchMultiKernelMultiDevice") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtLaunchMultiKernelMultiDevice));

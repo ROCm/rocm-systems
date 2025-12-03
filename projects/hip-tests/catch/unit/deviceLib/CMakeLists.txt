@@ -64,6 +64,12 @@ if(HIP_PLATFORM MATCHES "nvidia")
   set_source_files_properties(hipTestHost.cc PROPERTIES COMPILE_OPTIONS "--expt-relaxed-constexpr")
 endif()
 
+# __any, __all and __ballot are not supported on target architecture sm_70 and above.
+# CUDA 13.0+ defaults to sm_75
+if(HIP_PLATFORM MATCHES "nvidia" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
+  list(REMOVE_ITEM TEST_SRC anyAll.cc ballot.cc)
+endif()
+
 # AMD only tests
 set(AMD_TEST_SRC
     unsafeAtomicAdd.cc
