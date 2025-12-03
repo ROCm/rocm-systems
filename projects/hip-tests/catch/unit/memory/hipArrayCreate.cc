@@ -335,7 +335,7 @@ TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
   hipArray_t array;
 
   INFO("Format: " << formatToString(desc.Format) << " NumChannels: " << desc.NumChannels
-                  << " Height: " << desc.Height)
+                  << " Height: " << desc.Height);
   HIP_CHECK_ERROR(hipArrayCreate(&array, &desc), hipErrorInvalidValue);
 }
 
@@ -360,6 +360,6 @@ TEST_CASE("Unit_hipArrayCreate_BadChannelFormat") {
 
   hipArray_t array;
 
-  INFO("Format: " << formatToString(desc.Format) << " Height: " << desc.Height)
+  INFO("Format: " << formatToString(desc.Format) << " Height: " << desc.Height);
   HIP_CHECK_ERROR(hipArrayCreate(&array, &desc), hipErrorInvalidValue);
 }

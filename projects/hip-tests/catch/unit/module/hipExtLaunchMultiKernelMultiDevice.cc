@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional", "[multigpu]") {
     launchParamsList[i].args = args + i * NUM_KERNEL_ARGS;
   }
 
-  INFO("info: launch vector_square kernel with")
+  INFO("info: launch vector_square kernel with");
   INFO("hipExtLaunchMultiKernelMultiDevice API\n");
   HIP_CHECK(hipExtLaunchMultiKernelMultiDevice(launchParamsList, nGpu, 0));
 

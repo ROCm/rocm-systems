@@ -227,3 +227,35 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   free(A_h);
   free(B_h);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset2D while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset2D.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemset2D_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr int memsetval = 0x24;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  size_t pitch_A;
+  size_t width = numW * sizeof(char);
+  void* dst = nullptr;
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dst), &pitch_A, width,
+                          numH));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset2D(dst, pitch_A, memsetval, numW, numH), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}

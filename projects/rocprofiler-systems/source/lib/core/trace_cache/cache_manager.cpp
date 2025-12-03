@@ -37,6 +37,7 @@
 #include <cstring>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 namespace rocprofsys
@@ -444,7 +445,14 @@ process_buffered_storage(
     storage_parser_t _parser(_storage_filename);
 
     _processor_coordinator->prepare_for_processing();
-    _parser.load(_processor_coordinator);
+    try
+    {
+        _parser.load(_processor_coordinator);
+
+    } catch(const std::runtime_error& exp)
+    {
+        ROCPROFSYS_WARNING(1, "Error parsing buffered storage: %s\n", exp.what());
+    }
     _processor_coordinator->finalize_processing();
 }
 
