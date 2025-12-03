@@ -31,6 +31,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -124,48 +125,89 @@ init_logging(std::string_view env_prefix, logging_config cfg)
         cfg.logtostderr  = cfg.logdir.empty();  // log to stderr if no log dir set
         // cfg.alsologtostderr = !cfg.logdir.empty();  // log to file if log dir set
 
-        auto loglvl = to_lower(common::get_env(fmt::format("{}_LOG_LEVEL", env_prefix), ""));
-        // default to warning
+        // Helper to parse a log level string and return {google_level, verbose_level, is_set}
+        auto parse_log_level = [&](std::string_view env_var_name)
+            -> std::tuple<int32_t, int32_t, bool> {
+            auto loglvl_str = to_lower(common::get_env(env_var_name, ""));
+            if(loglvl_str.empty()) return {cfg.loglevel, cfg.vlog_level, false};
+
+            if(loglvl_str.find_first_not_of("-0123456789") == std::string::npos)
+            {
+                auto val = std::stol(loglvl_str);
+                if(val < 0)
+                {
+                    return {google::FATAL, static_cast<int32_t>(val), true};
+                }
+                else
+                {
+                    // default to trace in case val > ROCP_LOG_LEVEL_TRACE
+                    auto itr = env_opts.at("trace");
+                    for(auto oitr : env_opts)
+                    {
+                        if(oitr.second.verbose_level == val)
+                        {
+                            itr = oitr.second;
+                            break;
+                        }
+                    }
+                    return {itr.google_level, itr.verbose_level, true};
+                }
+            }
+            else
+            {
+                if(env_opts.find(loglvl_str) == env_opts.end())
+                    throw std::runtime_error{fmt::format(
+                        "invalid specifier for {}: {}. Supported: {}",
+                        env_var_name,
+                        loglvl_str,
+                        fmt::format("{}", fmt::join(supported.begin(), supported.end(), ", ")))};
+                auto info = env_opts.at(loglvl_str);
+                return {info.google_level, info.verbose_level, true};
+            }
+        };
+
+        // First check ROCPROFILER_LOG_LEVEL as the master setting
+        auto [master_loglvl, master_vlog, master_set] =
+            parse_log_level("ROCPROFILER_LOG_LEVEL");
+
+        // Then check component-specific env var (e.g., ROCPROF_LOG_LEVEL)
+        // Skip if prefix is already ROCPROFILER to avoid parsing same var twice
+        auto component_env_var     = fmt::format("{}_LOG_LEVEL", env_prefix);
+        auto [component_loglvl, component_vlog, component_set] =
+            (env_prefix == "ROCPROFILER")
+                ? std::make_tuple(cfg.loglevel, cfg.vlog_level, false)
+                : parse_log_level(component_env_var);
+
+        // Use the more verbose level (higher vlog_level = more verbose)
+        // Component-specific can only make it MORE verbose, not less
         auto& loglvl_v   = cfg.loglevel;
         auto& vlog_level = cfg.vlog_level;
-        if(!loglvl.empty() && loglvl.find_first_not_of("-0123456789") == std::string::npos)
+
+        if(master_set && component_set)
         {
-            auto val = std::stol(loglvl);
-            if(val < 0)
+            // Both set: use the more verbose one
+            if(component_vlog > master_vlog)
             {
-                loglvl_v   = google::FATAL;
-                vlog_level = val;
+                loglvl_v   = component_loglvl;
+                vlog_level = component_vlog;
             }
             else
             {
-                // default to trace in case val > ROCP_LOG_LEVEL_TRACE
-                auto itr = env_opts.at("trace");
-                for(auto oitr : env_opts)
-                {
-                    if(oitr.second.verbose_level == val)
-                    {
-                        itr = oitr.second;
-                        break;
-                    }
-                }
-                loglvl_v   = itr.google_level;
-                vlog_level = itr.verbose_level;
+                loglvl_v   = master_loglvl;
+                vlog_level = master_vlog;
             }
         }
-        else if(!loglvl.empty())
+        else if(master_set)
         {
-            if(env_opts.find(loglvl) == env_opts.end())
-                throw std::runtime_error{fmt::format(
-                    "invalid specifier for {}_LOG_LEVEL: {}. Supported: {}",
-                    env_prefix,
-                    loglvl,
-                    fmt::format("{}", fmt::join(supported.begin(), supported.end(), ", ")))};
-            else
-            {
-                loglvl_v   = env_opts.at(loglvl).google_level;
-                vlog_level = env_opts.at(loglvl).verbose_level;
-            }
+            loglvl_v   = master_loglvl;
+            vlog_level = master_vlog;
         }
+        else if(component_set)
+        {
+            loglvl_v   = component_loglvl;
+            vlog_level = component_vlog;
+        }
+        // else: neither set, use defaults from cfg
 
         auto _env_store = get_glog_env_config(cfg);
 
@@ -187,8 +229,10 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 
         update_logging(cfg);
 
-        ROCP_INFO << "logging initialized via " << fmt::format("{}_LOG_LEVEL", env_prefix)
-                  << ". Log Level: " << loglvl << ". Verbose Log Level: " << vlog_level;
+        ROCP_INFO << "logging initialized. Verbose Log Level: " << vlog_level
+                  << " (ROCPROFILER_LOG_LEVEL=" << (master_set ? "set" : "unset")
+                  << ", " << component_env_var << "=" << (component_set ? "set" : "unset")
+                  << ")";
 
         _env_store.pop(false);
     });
