@@ -2110,7 +2110,6 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
         validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     finally:
-        # ⭐ Guaranteed cleanup if ANYTHING goes wrong
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
@@ -2180,7 +2179,6 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
         assert test_utils.check_file_pattern("- 5.1.1", config_file)
 
     finally:
-        # ⭐ Guaranteed cleanup
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
@@ -2189,7 +2187,6 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.live_attach_detach
 @pytest.mark.live_attach_detach
 def test_live_attach_detach_singlepath_launch_stats(
     binary_handler_profile_rocprof_compute,
@@ -2255,7 +2252,6 @@ def test_live_attach_detach_singlepath_launch_stats(
             assert test_utils.check_file_pattern(f"- {tag}", config_file)
 
     finally:
-        # ⭐ Always cleanup workload
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
