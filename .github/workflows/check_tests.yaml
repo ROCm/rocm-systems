@@ -3,6 +3,8 @@ name: Check test categories
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+    paths:
+      - "projects/hip-tests/**"
 
 jobs:
   check-tests:
