@@ -81,10 +81,17 @@ destroy_queue(hsa_queue_t* hsa_queue)
     auto* qc = get_queue_controller();
     if(qc)
     {
-        // Clean up our tracking (sync, signals, remove from map)
+        // Sync queue first to ensure all async handlers complete
+        const auto* queue = qc->get_queue(*hsa_queue);
+        if(queue) queue->sync();
+
+        // Call the original HSA destroy function first
+        auto status = qc->get_core_table().hsa_queue_destroy_fn(hsa_queue);
+
+        // Then clean up our tracking (signals, remove from map)
         qc->destroy_queue(hsa_queue);
-        // Call the original HSA destroy function to actually destroy the queue
-        return qc->get_core_table().hsa_queue_destroy_fn(hsa_queue);
+
+        return status;
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -239,7 +246,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
     ROCP_INFO << "destroying queue...";
 
-    queue->sync();
+    // Note: sync() is called by the caller before HSA destroy
+    // We only clean up our signals and remove from map here
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
 
