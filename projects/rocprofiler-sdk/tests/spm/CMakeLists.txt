@@ -29,9 +29,9 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION"
-        "ROCPROFILER_SPM_BETA_ENABLED=true"
+        "ROCPROFILER_SPM_BETA_ENABLED=True"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_SETUP test-spm-dispatch-collection
+    FIXTURES_SETUP spm-dispatch
     DISABLED ${IS_DISABLED})
 
 rocprofiler_add_integration_validate_test(
@@ -43,5 +43,5 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_REQUIRED test-spm-dispatch-collection-execute
+    FIXTURES_REQUIRED spm-dispatch
     DISABLED ${IS_DISABLED})

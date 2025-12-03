@@ -176,3 +176,11 @@ set_property(
         IMPORTED_LOCATION
         ${@PACKAGE_NAME@_ROOT_DIR}/share/@PACKAGE_NAME@/convert-counters-collection-format.py
     )
+
+add_executable(@PACKAGE_NAME@::agent_hasco_targets IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::agent_hasco_targets
+    PROPERTY
+        IMPORTED_LOCATION
+        ${@PACKAGE_NAME@_ROOT_DIR}/${PACKAGE_NAME}/tests/unit-tests/bin
+    )

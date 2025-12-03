@@ -203,7 +203,7 @@ TEST(spm_core, check_packet_generation)
             ROCP_ERROR << fmt::format("Generating packet for {}", metric);
 
             auto params = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY, 640000});
+            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
             ROCPROFILER_CALL(
@@ -217,8 +217,7 @@ TEST(spm_core, check_packet_generation)
                 << fmt::format("Could not build profile for {}", metric.name());
 
             /**
-             * Check that a packet generator was created and there is an AST with constructed
-             * dimensions
+             * Check that a packet generator was created
              */
             EXPECT_TRUE(profile->pkt_generator) << "No packet generator created";
 
@@ -226,7 +225,7 @@ TEST(spm_core, check_packet_generation)
              * Check packet generation
              */
             SPM::spm_counter_callback_info  cb_info;
-            std::unique_ptr<hsa::SPMPacket> pkt;
+            std::unique_ptr<hsa::AQLPacket> pkt;
             EXPECT_EQ(cb_info.get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                 << "Unable to generate packet";
             EXPECT_TRUE(pkt) << "Expected a packet to be generated";
@@ -355,10 +354,6 @@ TEST(spm_core, check_callbacks)
         ASSERT_TRUE(agent.get_rocp_agent());
         for(auto& metric : metrics)
         {
-            /**
-             * Do not check expression evaluation here. This is checked as part of evaluate_ast
-             * tests in a more controlled manner (aka, not requiring construction of the AST here).
-             */
             if(!metric.expression().empty()) continue;
 
             /**
@@ -367,7 +362,7 @@ TEST(spm_core, check_callbacks)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             auto                     params   = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY, 640000});
+            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
             ROCPROFILER_CALL(
@@ -456,7 +451,7 @@ TEST(spm_core, destroy_counter_profile)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             auto                     params   = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY, 640000});
+            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
             ROCPROFILER_CALL(
@@ -508,12 +503,11 @@ TEST(spm_core, start_stop_callback_ctx)
     auto& ctx = *ctx_p;
 
     ASSERT_TRUE(ctx.dispatch_spm);
-    ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->user_cb, null_dispatch_callback);
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->callback_args, (void*) 0x12345);
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->record_callback, null_record_callback);
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->record_callback_args, (void*) 0x54321);
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->context.handle, get_client_ctx().handle);
+    EXPECT_EQ(ctx.dispatch_spm->callback->user_cb, null_dispatch_callback);
+    EXPECT_EQ(ctx.dispatch_spm->callback->callback_args, (void*) 0x12345);
+    EXPECT_EQ(ctx.dispatch_spm->callback->record_callback, null_record_callback);
+    EXPECT_EQ(ctx.dispatch_spm->callback->record_callback_args, (void*) 0x54321);
+    EXPECT_EQ(ctx.dispatch_spm->callback->context.handle, get_client_ctx().handle);
 
     bool found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
@@ -521,7 +515,7 @@ TEST(spm_core, start_stop_callback_ctx)
 
     found = false;
     hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
+        if(cid == ctx.dispatch_spm->callback->queue_id)
         {
             found = true;
         }
@@ -574,7 +568,7 @@ TEST(spm_core, test_profile_incremental)
             rocprofiler_spm_counter_config_id_t old_id = cfg_id;
             rocprofiler_counter_id_t            id     = {.handle = block_metrics.front().id()};
             auto                                params = std::vector<rocprofiler_spm_parameter_t>{};
-            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY, 640000});
+            params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 640000});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
             params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
             ROCPROFILER_CALL(

@@ -8,6 +8,7 @@ import pandas as pd
 import re
 
 
+# JSON size will become large with several counters.
 def test_validate_spm_json(json_data):
 
     def get_agent(agent_id):
@@ -56,6 +57,7 @@ def test_validate_spm(pmc_csv: pd.DataFrame, spm_csv: pd.DataFrame):
     within_tolerance = lambda x, y: abs(x - y) < TOLERANCE * max(x, y)
 
     # Filter both CSVs with matrixTranspose kernel and dispatch ID
+    # matrixTranspose is launched only once in the application
     pmc_csv = pmc_csv[pmc_csv["Kernel_Name"].str.contains("matrixTranspose")]
     spm_csv = spm_csv[spm_csv["Kernel_Name"].str.contains("matrixTranspose")]
 

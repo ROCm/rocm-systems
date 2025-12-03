@@ -142,7 +142,6 @@ struct tool_spm_counter_record_t
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
-        // should be removed when moving to buffered tracing
         auto tmp = read();
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));

@@ -34,12 +34,6 @@ namespace rocprofiler
 {
 namespace counters
 {
-// union counter_instance_id
-// {
-//     uint64_t counter_id : 16;
-//     uint64_t dimension_encoding : 48;
-// };
-
 constexpr uint64_t COUNTER_BIT_LENGTH = 16;
 constexpr uint64_t DIM_BIT_LENGTH     = 48;
 constexpr uint64_t MAX_64             = std::numeric_limits<uint64_t>::max();
