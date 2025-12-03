@@ -41,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventQuery_DifferentDevice", "[multigpu]") {
+TEST_CASE("Unit_hipEventQuery_DifferentDevice", "[event][sync][multigpu]") {
   hipEvent_t event1{}, event2{};
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventCreate(&event2));

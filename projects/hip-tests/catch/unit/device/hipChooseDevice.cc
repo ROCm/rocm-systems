@@ -41,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipChooseDevice_ValidateDevId") {
+TEST_CASE("Unit_hipChooseDevice_ValidateDevId", "[device_mgmt][query]") {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   int numDevices = 0;
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipChooseDevice_ValidateDevId") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipChooseDevice_NegTst") {
+TEST_CASE("Unit_hipChooseDevice_NegTst", "[device_mgmt][query]") {
   hipDeviceProp_t prop;
   int dev = -1;
 

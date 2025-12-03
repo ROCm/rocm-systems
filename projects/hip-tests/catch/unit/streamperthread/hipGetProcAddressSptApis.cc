@@ -37,7 +37,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_MemCpy") {
+TEST_CASE("Unit_hipGetProcAddress_spt_MemCpy", "[stream][stream_per_thread]") {
   void* hipMemcpy_spt_ptr = nullptr;
   void* hipMemcpyAsync_spt_ptr = nullptr;
 
@@ -527,7 +527,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_MemCpy") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Memset") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Memset", "[stream][stream_per_thread]") {
   void* hipMemset_spt_ptr = nullptr;
   void* hipMemsetAsync_spt_ptr = nullptr;
 
@@ -617,7 +617,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memset") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Memset2D3D") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Memset2D3D", "[stream][stream_per_thread]") {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemset2D_spt_ptr = nullptr;
@@ -793,7 +793,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memset2D3D") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy2D") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy2D", "[stream][stream_per_thread]") {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy2D_spt_ptr = nullptr;
@@ -1873,7 +1873,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy2D") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy3D") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy3D", "[stream][stream_per_thread]") {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy3D_spt_ptr = nullptr;
@@ -2434,7 +2434,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy3D") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_LaunchKernel") {
+TEST_CASE("Unit_hipGetProcAddress_spt_LaunchKernel", "[stream][stream_per_thread]") {
   void* hipLaunchKernel_spt_ptr = nullptr;
   void* hipLaunchHostFunc_spt_ptr = nullptr;
 
@@ -2517,7 +2517,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_LaunchKernel") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_LaunchCooperativeKernel") {
+TEST_CASE("Unit_hipGetProcAddress_spt_LaunchCooperativeKernel", "[stream][stream_per_thread]") {
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDeviceProperties(&device_properties, 0));
 
@@ -2587,7 +2587,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_LaunchCooperativeKernel") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Stream") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Stream", "[stream][stream_per_thread]") {
   void* hipStreamGetFlags_spt_ptr = nullptr;
   void* hipStreamGetPriority_spt_ptr = nullptr;
   void* hipStreamSynchronize_spt_ptr = nullptr;
@@ -2687,7 +2687,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Stream") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Graph") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Graph", "[stream][stream_per_thread]") {
   void* hipStreamBeginCapture_spt_ptr = nullptr;
   void* hipStreamIsCapturing_spt_ptr = nullptr;
   void* hipStreamEndCapture_spt_ptr = nullptr;
@@ -2855,7 +2855,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Graph") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Event") {
+TEST_CASE("Unit_hipGetProcAddress_spt_Event", "[stream][stream_per_thread]") {
   void* hipEventRecord_spt_ptr = nullptr;
   void* hipStreamWaitEvent_spt_ptr = nullptr;
 

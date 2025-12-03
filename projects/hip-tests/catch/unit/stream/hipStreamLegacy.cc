@@ -35,7 +35,7 @@ constexpr unsigned blocks = 512;
 constexpr unsigned threadsPerBlock = 256;
 size_t Nbytes = N * sizeof(float);
 
-TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
+TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem", "[stream]") {
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
   int *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, A_Ph, B_Ph, nullptr, true);
 }
 
-TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo", "[stream]") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;
@@ -170,7 +170,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Basic") {
+TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[stream]") {
   LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize);
   const auto count = kPageSize / sizeof(*alloc1.ptr());
   constexpr auto fill_value = 42;
@@ -193,7 +193,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic") {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Basic") {
+TEST_CASE("Unit_hipMemPoolApi_Basic", "[stream]") {
   int numElements = 64 * 1024 * 1024;
   float* A = nullptr;
 
