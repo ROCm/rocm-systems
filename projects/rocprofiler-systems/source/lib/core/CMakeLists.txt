@@ -137,3 +137,7 @@ set_target_properties(
     rocprofiler-systems-core-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

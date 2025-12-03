@@ -36,6 +36,16 @@ namespace rocprofsys
 namespace utility
 {
 
+struct cxa_demangle_wrapper_impl
+{
+    static char* demangle(const char* _mangled_name, char* _output_buffer,
+                          size_t* _length, int* _status)
+    {
+        return abi::__cxa_demangle(_mangled_name, _output_buffer, _length, _status);
+    }
+};
+
+template <typename DemanglerTp = cxa_demangle_wrapper_impl>
 struct demangler
 {
     template <typename Tp>
@@ -66,7 +76,7 @@ private:
     {
         int                                         _status = 0;
         std::unique_ptr<char, decltype(&std::free)> _demangled(
-            abi::__cxa_demangle(_mangled_name, nullptr, nullptr, &_status), &std::free);
+            DemanglerTp::demangle(_mangled_name, nullptr, nullptr, &_status), &std::free);
 
         if(_status != 0 || !_demangled) return std::string{ _mangled_name };
 
@@ -74,7 +84,7 @@ private:
     }
 };
 
-inline demangler&
+inline demangler<>&
 get_demangler()
 {
     static demangler g_demangler;
