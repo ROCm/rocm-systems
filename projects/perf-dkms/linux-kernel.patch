@@ -1,0 +1,452 @@
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+index 828a9ceef1e7..91794a58865e 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c
+@@ -36,12 +36,16 @@
+ #include <linux/ptrace.h>
+ #include <linux/dma-buf.h>
+ #include <linux/processor.h>
++#include <linux/jiffies.h>
++#include <linux/dma-fence.h>
+ #include "kfd_priv.h"
+ #include "kfd_device_queue_manager.h"
+ #include "kfd_svm.h"
+ #include "amdgpu_amdkfd.h"
+ #include "kfd_smi_events.h"
+ #include "amdgpu_dma_buf.h"
++#include "../amdgpu/amdgpu.h"
++#include "../amdgpu/amdgpu_ring.h"
+ #include "kfd_debug.h"
+ 
+ static long kfd_ioctl(struct file *, unsigned int, unsigned long);
+@@ -124,7 +128,7 @@ void kfd_chardev_exit(void)
+ }
+ 
+ 
+-static int kfd_open(struct inode *inode, struct file *filep)
++int kfd_open(struct inode *inode, struct file *filep)
+ {
+ 	struct kfd_process *process;
+ 	bool is_32bit_user_mode;
+@@ -170,7 +174,7 @@ static int kfd_release(struct inode *inode, struct file *filep)
+ 	return 0;
+ }
+ 
+-static int kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
++int kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
+ 					void *data)
+ {
+ 	struct kfd_ioctl_get_version_args *args = data;
+@@ -180,6 +184,7 @@ static int kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
+ 
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(kfd_ioctl_get_version);
+ 
+ static int set_queue_properties_from_user(struct queue_properties *q_properties,
+ 				struct kfd_ioctl_create_queue_args *args)
+@@ -3427,3 +3432,332 @@ static int kfd_mmap(struct file *filp, struct vm_area_struct *vma)
+ 
+ 	return -EFAULT;
+ }
++
++/**
++ * struct kfd_data_alloc - Data structure for KFD device memory allocation
++ * @cpu_addr: CPU-accessible virtual address
++ * @gpu_addr: GPU-accessible virtual address
++ * @ib: Pointer to AMDGPU indirect buffer structure
++ * @size: Size of allocated memory in bytes
++ *
++ * This structure is used to manage memory allocations that are accessible
++ * by both CPU and GPU, typically used for profiling counter data storage.
++ */
++struct kfd_data_alloc {
++	void *cpu_addr;
++	void *gpu_addr;
++	struct amdgpu_ib *ib;
++	size_t size;
++};
++
++int kfd_allocate_sa (struct amdgpu_device *adev, struct amdgpu_vm *vm,
++		  			 unsigned int size, enum amdgpu_ib_pool_type pool_type, struct amdgpu_ib* ib) {
++	int r;
++	memset(ib, 0, sizeof(*ib));
++	if (size) {
++		r = amdgpu_sa_bo_new(&adev->ib_pools[pool_type],
++				     &ib->sa_bo, size);
++		if (r) {
++			dev_err(adev->dev, "failed to get a new IB (%d)\n", r);
++			return r;
++		}
++
++		ib->ptr = amdgpu_sa_bo_cpu_addr(ib->sa_bo);
++		/* flush the cache before commit the IB */
++		ib->flags = AMDGPU_IB_FLAG_EMIT_MEM_SYNC;
++
++		if (!vm)
++			ib->gpu_addr = amdgpu_sa_bo_gpu_addr(ib->sa_bo);
++	}
++	return 0;
++}
++/**
++ * kfd_alloc_device - Allocate device-visible memory for CPU/GPU sharing
++ * @filep: File pointer for the KFD device
++ * @p: KFD process structure
++ * @gpu_id: GPU device ID to allocate memory on
++ * @data_size: Size of memory to allocate in bytes
++ * @data_alloc: Output structure containing allocation details
++ *
++ * Allocates memory from the AMDGPU indirect buffer pool that is accessible
++ * by both CPU and GPU. The memory is coherent and suitable for passing
++ * data between CPU and GPU components.
++ *
++ * Return: 0 on success, negative error code on failure
++ */
++int kfd_alloc_device(struct file *filep,
++					 struct kfd_process *p, uint32_t gpu_id, size_t data_size, struct kfd_data_alloc *data_alloc) {
++	struct kfd_process_device *pdd;
++
++	mutex_lock(&p->mutex);
++	pdd = kfd_process_device_data_by_id(p, gpu_id);
++
++	if (!pdd) {
++		pr_err("Could not find gpu id 0x%x\n", gpu_id);
++		mutex_unlock(&p->mutex);
++		return -EINVAL;
++	}
++	if (!data_alloc->ib) {
++		data_alloc->ib = kzalloc(sizeof(struct amdgpu_ib), GFP_KERNEL);
++	}
++	int r = kfd_allocate_sa(pdd->dev->adev, NULL,
++						   data_size, AMDGPU_IB_POOL_DIRECT, data_alloc->ib);
++
++	if (r) {
++		pr_err("Failed to allocate SA for GPU %d, ret = %d\n", gpu_id, r);
++		mutex_unlock(&p->mutex);
++		return r;
++	}
++	data_alloc->cpu_addr = data_alloc->ib->ptr;
++	data_alloc->gpu_addr = data_alloc->ib->gpu_addr;
++	data_alloc->size = data_size;
++	for (int i = 0; i < data_size / sizeof(uint64_t); i++) {
++		((uint64_t*)data_alloc->cpu_addr)[i] = 0x7;
++	}
++	pr_err("Allocated SA for GPU %d, cpu_addr = %p, gpu_addr = %p, size = %zu\n",
++		   gpu_id, data_alloc->cpu_addr, data_alloc->gpu_addr, data_alloc->size);
++	mutex_unlock(&p->mutex);
++	return 0;
++}
++
++/**
++ * kfd_destroy_device_mem - Free previously allocated device memory
++ * @filep: File pointer for the KFD device
++ * @p: KFD process structure
++ * @gpu_id: GPU device ID where memory was allocated
++ * @data_alloc: Allocation structure containing memory to free
++ *
++ * Frees memory that was previously allocated with kfd_alloc_device().
++ * This includes freeing the indirect buffer and returning memory to the pool.
++ *
++ * Return: 0 on success, negative error code on failure
++ */
++int kfd_destroy_device_mem(struct file *filep,
++						   struct kfd_process *p, uint32_t gpu_id, struct kfd_data_alloc *data_alloc) {
++	struct kfd_process_device *pdd;
++
++	mutex_lock(&p->mutex);
++	pdd = kfd_process_device_data_by_id(p, gpu_id);
++
++	if (!pdd) {
++		pr_err("Could not find gpu id 0x%x\n", gpu_id);
++		mutex_unlock(&p->mutex);
++		return -EINVAL;
++	}
++
++	if (data_alloc->ib) {
++		if (data_alloc->ib->sa_bo) {
++			amdgpu_ib_free(data_alloc->ib, NULL);
++		}
++		kfree(data_alloc->ib);
++	}
++
++	pr_err("Destroyed SA for GPU %d, cpu_addr = %p, gpu_addr = %p, size = %zu\n",
++		   gpu_id, data_alloc->cpu_addr, data_alloc->gpu_addr, data_alloc->size);
++	mutex_unlock(&p->mutex);
++	return 0;
++}
++
++/**
++ * kfd_submit_ib_packet - Generic IB submission function for KFD driver
++ * @adev: AMD GPU device
++ * @ring: GPU ring to submit to
++ * @packet_data: Pointer to PM4 packet data
++ * @packet_size_dw: Size of packet in DWORDs
++ * @timeout_ms: Timeout in milliseconds
++ *
++ * This function implements a generic IB submission pattern that:
++ * 1. Sets up writeback buffer for synchronization (GPU address available to packets)
++ * 2. Allocates and initializes indirect buffer
++ * 3. Submits IB to GPU ring with fence
++ * 4. Waits for completion with timeout handling
++ *
++ * Note: The writeback buffer is allocated and initialized but packet-specific
++ * validation should be implemented by the caller based on expected GPU behavior.
++ *
++ * Return: 0 on success, negative error code on failure
++ */
++static int kfd_submit_ib_packet(struct amdgpu_device *adev, struct amdgpu_ring *ring,
++				uint32_t *packet_data, size_t packet_size_dw, long timeout_ms)
++{
++	struct amdgpu_ib ib = {0};
++	struct dma_fence *fence = NULL;
++	unsigned long timeout_jiffies;
++	uint32_t wb_index = 0;
++	volatile uint32_t *wb_ptr;
++	uint64_t wb_gpu_addr;
++	signed long remaining_jiffies;
++	int ret;
++
++	if (!adev || !ring || !packet_data || packet_size_dw == 0) {
++		pr_err("Invalid parameters for IB submission\n");
++		return -EINVAL;
++	}
++
++	/* Convert timeout from milliseconds to jiffies */
++	if (timeout_ms <= 0) {
++		timeout_jiffies = MAX_SCHEDULE_TIMEOUT;
++	} else {
++		timeout_jiffies = msecs_to_jiffies(timeout_ms);
++	}
++
++	/* Step 1: Allocate writeback buffer for synchronization */
++	ret = amdgpu_device_wb_get(adev, &wb_index);
++	if (ret) {
++		pr_err("Failed to allocate writeback buffer: %d\n", ret);
++		return ret;
++	}
++
++	/* Get writeback buffer pointers */
++	wb_ptr = (volatile uint32_t *)&adev->wb.wb[wb_index];
++	wb_gpu_addr = adev->wb.gpu_addr + (wb_index * 4);
++
++	/* Initialize writeback memory with marker value */
++	*wb_ptr = cpu_to_le32(0xCAFEDEAD);
++
++	/* Step 2: Allocate indirect buffer */
++	ret = amdgpu_ib_get(adev, NULL, packet_size_dw * 4 + 256,
++			    AMDGPU_IB_POOL_DIRECT, &ib);
++	if (ret) {
++		pr_err("Failed to allocate IB: %d\n", ret);
++		goto cleanup_wb;
++	}
++
++	/* Step 3: Copy packet data to IB and set length */
++	memcpy(ib.ptr, packet_data, packet_size_dw * 4);
++	ib.length_dw = packet_size_dw;
++
++	/* Step 4: Submit IB to ring with fence creation */
++	ret = amdgpu_ib_schedule(ring, 1, &ib, NULL, &fence);
++	if (ret) {
++		pr_err("Failed to schedule IB: %d\n", ret);
++		goto cleanup_ib;
++	}
++
++	if (!fence) {
++		pr_err("Failed to create fence for IB submission\n");
++		ret = -EFAULT;
++		goto cleanup_ib;
++	}
++
++	/* Step 5: Wait for fence with timeout */
++	remaining_jiffies = dma_fence_wait_timeout(fence, false, timeout_jiffies);
++	if (remaining_jiffies == 0) {
++		pr_err("IB submission timed out after %ld ms\n", timeout_ms);
++		ret = -ETIMEDOUT;
++		goto cleanup_fence;
++	} else if (remaining_jiffies < 0) {
++		pr_err("Error waiting for IB completion: %ld\n", remaining_jiffies);
++		ret = (int)remaining_jiffies;
++		goto cleanup_fence;
++	}
++
++	/* Step 6: IB execution completed successfully */
++	/* Note: Writeback buffer (wb_gpu_addr) is available for packets to use
++	 * for completion signaling. Packet-specific validation can be added
++	 * by checking the writeback buffer value (*wb_ptr) if needed. */
++
++	pr_debug("IB submission completed successfully\n");
++	ret = 0;
++
++cleanup_fence:
++	if (fence) {
++		dma_fence_put(fence);
++	}
++cleanup_ib:
++	amdgpu_ib_free(&ib, NULL);
++cleanup_wb:
++	amdgpu_device_wb_free(adev, wb_index);
++
++	return ret;
++}
++
++/**
++ * kfd_ioctl_submit_ib_packet - Submit indirect buffer packet to GPU
++ * @filep: File pointer for the KFD device
++ * @p: KFD process structure
++ * @gpu_id: GPU device ID to submit packet to
++ * @packet: Pointer to PM4 packet data
++ * @ib_len: Length of packet in DWORDs
++ *
++ * Submits a PM4 command packet to the GPU for execution. This is used
++ * by the Rust profiling code to submit commands for counter collection.
++ * Uses the generic kfd_submit_ib_packet function for hardware-agnostic submission.
++ *
++ * Return: 0 on success, negative error code on failure
++ */
++int kfd_ioctl_submit_ib_packet(struct file *filep,
++							   struct kfd_process *p, uint32_t gpu_id, const uint32_t* packet, size_t ib_len)
++{
++	struct kfd_process_device *pdd;
++	int ret;
++
++	mutex_lock(&p->mutex);
++	pdd = kfd_process_device_data_by_id(p, gpu_id);
++
++
++	if (!pdd) {
++		pr_err("Could not find gpu id 0x%x\n", gpu_id);
++		goto out_no_job;
++	}
++
++	pr_debug("Writing IB Packet %x %x %x %x %x\n", packet[0], packet[1], packet[2], packet[3], packet[4]);
++
++	/* Use generic IB submission function instead of hardware-specific call */
++	ret = kfd_submit_ib_packet(pdd->dev->adev, &pdd->dev->adev->gfx.compute_ring[0],
++				   (uint32_t *)packet, ib_len, 0);
++	if (ret) {
++		pr_err("Failed to submit IB on GPU %d, ret = %d\n", gpu_id, ret);
++		goto out_no_fence;
++	}
++
++	pr_debug("Successfully submitted IB packet to GPU %d\n", gpu_id);
++out_with_fence:
++out_no_fence:
++out_no_job:
++	mutex_unlock(&p->mutex);
++	return ret;
++}
++
++
++/**
++* kfd_process_get_all_gpuids - Get all GPU IDs associated with a process
++* @p: The KFD process
++* @gpu_ids: Output array to store GPU IDs
++* @num_gpus: Output parameter for number of GPUs found
++*
++* Returns: 0 on success, negative error code on failure
++*/
++int kfd_process_get_all_gpuids(struct kfd_process *p, uint32_t *gpu_ids, 
++								uint32_t *num_gpus)
++{
++	int i;
++	uint32_t count = 0;
++	int ret = -EINVAL;
++
++	if (!p || !gpu_ids || !num_gpus)
++		return -EINVAL;
++
++	mutex_lock(&p->mutex);
++
++	if (*num_gpus >= p->n_pdds) {
++		for (i = 0; i < p->n_pdds; i++) {
++			if (p->pdds[i]) {
++				gpu_ids[count] = p->pdds[i]->user_gpu_id;
++				count++;
++			}
++		}
++		ret = 0;
++		*num_gpus = count;
++	}
++
++	mutex_unlock(&p->mutex);
++
++	return ret;
++}
++
++/* Export symbols for external modules */
++EXPORT_SYMBOL(kfd_alloc_device);
++EXPORT_SYMBOL(kfd_destroy_device_mem);
++EXPORT_SYMBOL(kfd_ioctl_submit_ib_packet);
++EXPORT_SYMBOL(kfd_process_get_all_gpuids);
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_cik.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_cik.c
+index 05f3ac2eaef9..23b360274df1 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_cik.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_cik.c
+@@ -99,6 +99,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 	m->compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v10.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v10.c
+index 1695dd78ede8..1541c056fd12 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v10.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v10.c
+@@ -99,6 +99,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 	m->compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v11.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v11.c
+index 3c0ae28c5923..4d2fe0faa0e6 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v11.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v11.c
+@@ -141,6 +141,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 
+ 	m->compute_static_thread_mgmt_se0 = wa_mask;
+ 	m->compute_static_thread_mgmt_se1 = wa_mask;
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v12.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v12.c
+index 565858b9044d..0c038690ccc6 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v12.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v12.c
+@@ -109,6 +109,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 	m->compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v9.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v9.c
+index f2dee320fada..f24357a20f97 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v9.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_v9.c
+@@ -171,6 +171,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 	m->compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_vi.c b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_vi.c
+index c1fafc502515..e7b00734ad58 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_vi.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_mqd_manager_vi.c
+@@ -102,6 +102,7 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
+ 
+ 	m->header = 0xC0310800;
+ 	m->compute_pipelinestat_enable = 1;
++	m->compute_perfcount_enable = 1;
+ 	m->compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+ 	m->compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
