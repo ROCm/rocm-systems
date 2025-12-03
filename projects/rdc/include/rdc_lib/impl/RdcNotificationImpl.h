@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <map>
 #include <memory>
 #include <mutex>
+#include <semaphore>
 #include <vector>
 
 #include "rdc/rdc.h"
@@ -33,6 +34,30 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+
+// Maximum concurrent AMD SMI event notification calls
+// Increase this value if more concurrent notification calls are needed
+static constexpr std::size_t kMaxConcurrentNotifCalls = 4;
+
+// RAII guard for counting_semaphore to ensure release on all exit paths
+class ScopedSemaphore {
+  std::counting_semaphore<kMaxConcurrentNotifCalls>& sem_;
+  bool acquired_;
+
+ public:
+  ScopedSemaphore(ScopedSemaphore&&) = delete;
+  ScopedSemaphore& operator=(ScopedSemaphore&&) = delete;
+  // NOTE: try_acquire() is non-blocking.
+  // this can be changed to timeout based try_acquire_for() if needed.
+  explicit ScopedSemaphore(std::counting_semaphore<kMaxConcurrentNotifCalls>& sem)
+      : sem_(sem), acquired_(sem.try_acquire()) {}
+  ~ScopedSemaphore() {
+    if (acquired_) sem_.release();
+  }
+  bool acquired() const { return acquired_; }
+  ScopedSemaphore(const ScopedSemaphore&) = delete;
+  ScopedSemaphore& operator=(const ScopedSemaphore&) = delete;
+};
 
 class RdcNotificationImpl : public RdcNotification {
  public:
@@ -49,6 +74,7 @@ class RdcNotificationImpl : public RdcNotification {
  private:
   std::map<uint32_t, uint64_t> gpu_evnt_notif_masks_;
   std::mutex notif_mutex_;
+  std::counting_semaphore<kMaxConcurrentNotifCalls> notif_sem_{kMaxConcurrentNotifCalls};
 };
 
 }  // namespace rdc

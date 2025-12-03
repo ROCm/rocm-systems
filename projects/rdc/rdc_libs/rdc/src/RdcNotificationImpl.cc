@@ -161,6 +161,13 @@ rdc_status_t RdcNotificationImpl::listen(rdc_evnt_notification_t* events, uint32
     return RDC_ST_BAD_PARAMETER;
   }
 
+  // Limit concurrent AMD SMI calls with a RAII semaphore
+  ScopedSemaphore sem_guard(notif_sem_);
+  if (!sem_guard.acquired()) {
+    RDC_LOG(RDC_ERROR, "Failed to acquire notification semaphore");
+    return RDC_ST_INSUFF_RESOURCES;
+  }
+
   uint32_t f_cnt = std::min(*num_events, kMaxRSMIEvents);
   amdsmi_evt_notification_data_t smi_events[kMaxRSMIEvents];
 
