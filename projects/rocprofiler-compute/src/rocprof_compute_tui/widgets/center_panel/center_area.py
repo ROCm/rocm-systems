@@ -37,10 +37,6 @@ from rocprof_compute_tui.widgets.tabbed_content import TabsTabbedContent
 
 
 class CenterPanel(Vertical):
-    """
-    The response area.
-    """
-
     COMPONENT_CLASSES = {
         "border-title-status",
     }

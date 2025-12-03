@@ -20,6 +20,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+
 ##############################################################################
 """
 ROCm Compute Profiler TUI - Main Application with Analysis Methods
@@ -38,6 +39,7 @@ from textual.widgets import Footer, Header
 
 import config
 from rocprof_compute_tui.config import APP_TITLE
+from rocprof_compute_tui.tui_debug import dbg
 from rocprof_compute_tui.views.main_view import MainView
 from utils.specs import generate_machine_specs
 from utils.utils import get_version
@@ -64,7 +66,7 @@ class RocprofTUIApp(App):
         supported_archs: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__()
-        self.main_view = MainView()
+        self.main_view: Optional[MainView] = None
         self.recent_dirs = self._load_recent_dirs()
 
         # Analysis attributes
@@ -75,6 +77,7 @@ class RocprofTUIApp(App):
         self.mouse = True
 
     def compose(self) -> ComposeResult:
+        self.main_view = MainView()
         yield Header()
         yield self.main_view
         yield Footer()
@@ -133,6 +136,26 @@ class RocprofTUIApp(App):
 
         self.notify(f"Selected: {selected_dir}", severity="information")
         self.main_view.run_analysis()
+
+    from textual import on
+    from textual.events import Key
+
+    @on(Key)
+    def dump_dom_key(self, event: Key) -> None:
+        if event.key == "w":
+            dbg("\n================ DOM DUMP ================\n")
+            self.dump_dom()
+            dbg("\n==========================================\n")
+
+    def dump_dom(self, widget=None, depth=0) -> None:  # noqa: ANN001
+        if widget is None:
+            widget = self
+
+        prefix = " " * depth
+        dbg(f"{prefix}- {widget.__class__.__name__}(id={widget.id})")
+
+        for child in widget.children:
+            self.dump_dom(child, depth + 2)
 
 
 def run_tui(

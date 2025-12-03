@@ -34,13 +34,15 @@ from typing import Any, Optional
 
 from textual import on, work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from rocprof_compute_tui.analysis_tui import tui_analysis
+from rocprof_compute_tui.tui_debug import dbg
 from rocprof_compute_tui.utils.tui_utils import Logger, LogLevel
-from rocprof_compute_tui.widgets.center_panel.center_area import CenterPanel
+from rocprof_compute_tui.views.kernel_view import OpenMemTree
+from rocprof_compute_tui.widgets.center_panel.center_tabs import CenterTabs
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import MenuBar
 from rocprof_compute_tui.widgets.right_panel.right import RightPanel
 from rocprof_compute_tui.widgets.tabs.tabs_area import TabsArea
@@ -64,24 +66,27 @@ class MainView(Horizontal):
         pass
 
     def compose(self) -> ComposeResult:
+        dbg("MainView.compose CALLED")
+
         self.logger.info("Composing main view layout", update_ui=False)
         yield MenuBar()
 
         # Center Container - Holds both analysis results and output tabs
         with Horizontal(id="center-container"):
-            with Vertical(id="activity-container"):
-                # Center Panel - Analysis results display
-                yield CenterPanel()
+            with Container(id="center-left", classes="vstack"):
+                center_tabs = CenterTabs()
+                dbg(f"Creating CenterTabs instance: {id(center_tabs)}")
+                self.center_tabs = center_tabs
+                yield center_tabs
 
-                # Bottom Panel - Output, terminal, and metric description
                 tabs = TabsArea()
+                self.tabs = tabs
                 yield tabs
 
-                # Store references to text areas
                 self.metric_description = tabs.description_area
                 self.output = tabs.output_area
-
                 self.logger.set_output_area(self.output)
+
                 self.logger.info("Main view layout composed")
 
             # Right Panel - Additional tools/features
@@ -103,7 +108,6 @@ class MainView(Horizontal):
             )
 
     def _get_row_description(self, table: DataTable, row_idx: int) -> str:
-        """Get description for a table row with safe attribute access."""
         try:
             if hasattr(table, "_df") and table._df is not None:
                 return str(table._df.iloc[row_idx].get("Description", "No description"))
@@ -118,7 +122,6 @@ class MainView(Horizontal):
         All UI updates are marshalled back onto the main thread.
         """
 
-        # Capture selected path at the beginning to avoid races
         selected = self.selected_path
 
         # -----------------------------
@@ -258,9 +261,12 @@ class MainView(Horizontal):
         in_ui_thread = threading.get_ident() == app._thread_id
 
         def apply() -> None:
-            view = self.query_one("#kernel-view")
-            if view:
-                view.update_view(message, log_level)
+            view = getattr(self, "center_tabs", None)
+            if view is None:
+                return
+            kernel_view = view.get_kernel_view()
+            if kernel_view is not None:
+                kernel_view.update_view(message, log_level)
 
         if in_ui_thread:
             apply()
@@ -268,7 +274,17 @@ class MainView(Horizontal):
             app.call_from_thread(apply)
 
     def refresh_results(self) -> None:
-        kernel_view = self.query_one("#kernel-view")
+        center_tabs = getattr(self, "center_tabs", None)
+        if center_tabs is None:
+            self.logger.error("CenterTabs not available; cannot refresh results")
+            return
+
+        kernel_view = self.center_tabs.get_kernel_view()
+        dbg(
+            f"refresh_results called, kernel_view: {id(kernel_view)}"
+            f" mounted={kernel_view.is_mounted if kernel_view else None}"
+        )
+
         if kernel_view:
             kernel_view.update_results(
                 self.kernel_to_df_dict, self.top_kernel_to_df_list
@@ -282,3 +298,11 @@ class MainView(Horizontal):
             self.refresh_results()
         else:
             self.logger.warning("No data available for refresh")
+
+    @on(OpenMemTree)
+    def on_open_mem_tree(self, event: OpenMemTree) -> None:
+        kernel_name = event.kernel_name
+        kernel_data = self.kernel_to_df_dict.get(kernel_name, {})
+
+        self.center_tabs.show_mem_tree_for_kernel(kernel_name, kernel_data)
+        self.logger.info(f"Opened Mem Tree for kernel: {kernel_name}")

@@ -48,8 +48,8 @@ def create_table(
     if df.empty:
         return Label("No table data generated")
 
-    table._df = df  # type: ignore[attr-defined]
-    table._visible_cols = [col for col in df.columns if col not in hidden_columns]  # type: ignore[attr-defined]
+    table._df = df  # type: ignore
+    table._visible_cols = [col for col in df.columns if col not in hidden_columns]  # type: ignore
 
     table.add_columns(*table._visible_cols)
     for _, row in df.iterrows():
