@@ -631,6 +631,13 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
 
+set(
+    STANDALONEBINARY_EXTRACT_DIR
+    "/tmp"
+    CACHE PATH
+    "Prefix path for standalone binary extraction"
+)
+
 # Standalone binary creation
 add_custom_target(
     standalonebinary
@@ -652,6 +659,8 @@ add_custom_target(
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
         ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
+        --product-name=${STANDALONEBINARY_EXTRACT_DIR}
+        --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID}
         --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
         --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
         --include-package=dash_svg --include-package-data=dash_svg
