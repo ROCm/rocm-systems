@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,12 @@
 // SOFTWARE.
 
 #pragma once
+
+#include <rocprofiler-sdk/fwd.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-
-#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {
@@ -37,11 +38,25 @@ typedef struct values_vec_t
     std::vector<uint64_t> values;
 } values_vec_t;
 
+/** @brief SPM values for a counter
+ * 2D vector - values per shader
+ * Flag to indicate if the counter is global
+ */
 typedef struct instances_t
 {
     std::vector<values_vec_t> shaders;
     bool                      is_global = false;
 } instances_t;
+
+/**
+ * @brief hsa::SPMPacket contains spm_descriptor_t
+ * aqlprofile_spm_buffer_desc_t is returned from aqlprofile
+ * aqlprofile_spm_buffer_desc_t has the metadata needed to decode the packet
+ * Data contains spm_desc_v0_t + event_map + data in aqlprofile_spm_buffer_desc_t
+ * size = sizeof(spm_desc_v0_t) + sizeof(spm_counter_instance_t)*num_events + aql_desc.size
+ * seg_size = output segment size
+ * buffer_num = number of XCCs
+ */
 
 typedef struct spm_descriptor_t
 {
@@ -59,15 +74,16 @@ typedef struct spm_counter_instance_t
     uint64_t                 instance;
 } spm_counter_instance_t;
 
-// event_map = (char*)this + this->size
-// aql_desc = event_map + num_events * aql_desc_size;
+/** @brief defines the layout of data buffer from spm_descriptor_t
+ * Event map is the list of spm_counter_instance_t
+ */
 typedef struct spm_desc_v0_t
 {
     uint64_t version{0};
-    uint64_t struct_size{sizeof(spm_desc_v0_t)};
+    size_t   struct_size{sizeof(spm_desc_v0_t)};
     uint64_t aql_desc_size{0};
     uint64_t num_events{0};
-    uint64_t event_elem_size{sizeof(spm_counter_instance_t)};
+    size_t   event_elem_size{sizeof(spm_counter_instance_t)};
     uint64_t reserved{0};
 
     bool valid() const
@@ -75,10 +91,8 @@ typedef struct spm_desc_v0_t
         return version == 0 && aql_desc_size != 0 && struct_size == sizeof(spm_desc_v0_t) &&
                event_elem_size == sizeof(spm_counter_instance_t);
     }
-
     spm_counter_instance_t* events() { return reinterpret_cast<spm_counter_instance_t*>(this + 1); }
-
-    void* aqlprofile_desc() { return events() + num_events; }
+    void*                   aqlprofile_desc() { return events() + num_events; }
 } spm_desc_v0_t;
 
 static_assert((sizeof(spm_desc_v0_t) % sizeof(spm_counter_instance_t)) == 0,

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,6 +54,13 @@ class AQLPacket;
 };
 namespace SPM
 {
+/**
+ * @brief  SPM counter config contains SPM parameters and counters
+ * SPM config is per agent
+ * Pkt generator is used to construct the packet, pkt generator can be created before HSA init
+ * Has a packet cache to store the AQLpackets for SPM, it is constructed using the pkt generator.
+ * Its valid function checks if config has parameters and metrics initialized
+ */
 struct spm_counter_config
 {
     const rocprofiler_agent_t*    agent = nullptr;
@@ -68,7 +75,7 @@ struct spm_counter_config
     std::unique_ptr<rocprofiler::aql::SPMPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
-    std::unique_ptr<rocprofiler::hsa::SPMPacket> packet;
+    common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets;
 
     bool valid() const
     {
@@ -76,6 +83,12 @@ struct spm_counter_config
     }
 };
 
+/**
+ * @brief spm_counter_callback_info has the callbacks and user data associated with a context
+ * It has a cache of AQLPackets associated with configs which is used in post kernel callback
+ *    to retrieve the config information for the given AQLPacket
+ *
+ */
 struct spm_counter_callback_info
 {
     rocprofiler_spm_dispatch_counting_service_cb_t user_cb{nullptr};
@@ -86,6 +99,7 @@ struct spm_counter_callback_info
     // HSA queue interceptor. This ID can be used to disable the callback.
     rocprofiler::hsa::ClientID queue_id{-1};
     // Link to the internal context this is associated with
+    // Internal context is used as a key to obtain external correlation id in pre kernel call
     const context::context*                       internal_context;
     rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
     void*                                         record_callback_args;
@@ -93,10 +107,13 @@ struct spm_counter_callback_info
         std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
                                 packet_return_map{};
     static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
-    rocprofiler_status_t        get_spm_packet(std::unique_ptr<rocprofiler::hsa::SPMPacket>&,
+    rocprofiler_status_t        get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
                                                std::shared_ptr<spm_counter_config>&);
 };
 
+/**
+ *This is a singleton class with lazy initialization
+ */
 class SpmCounterController
 {
 public:
@@ -104,25 +121,25 @@ public:
     // Adds a counter collection profile to our global cache.
     // Note: these profiles can be used across multiple contexts
     //       and are independent of the context.
-    uint64_t spm_add_profile(std::shared_ptr<spm_counter_config>&& config);
+    void spm_add_profile(std::shared_ptr<spm_counter_config>&& config);
 
     void spm_destroy_profile(uint64_t id);
-    // Setup the counter collection service. counter_callback_info is created here
-    // to contain the counters that need to be collected (specified in profile_id) and
-    // the AQL packet generator for injecting packets. Note: the service is created
-    // in the stop state.
-    static rocprofiler_status_t configure_dispatch(
-        rocprofiler_context_id_t                       context_id,
-        rocprofiler_spm_dispatch_counting_service_cb_t callback,
-        void*                                          callback_args,
-        rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
-        void*                                          record_callback_args);
+    // Setup the SPM counter collection service. spm_counter_callback_info is created here
+
     std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
 
 private:
+    // Cache to contain the map of config id handle to spm counter config
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>>
         _configs;
 };
+
+rocprofiler_status_t
+configure_dispatch(rocprofiler_context_id_t                       context_id,
+                   rocprofiler_spm_dispatch_counting_service_cb_t callback,
+                   void*                                          callback_args,
+                   rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
+                   void*                                          record_callback_args);
 
 SpmCounterController&
 spm_get_controller();
@@ -136,6 +153,9 @@ destroy_spm_counter_profile(uint64_t id);
 std::shared_ptr<spm_counter_config>
 get_spm_counter_config(rocprofiler_spm_counter_config_id_t id);
 
+/**
+A wrapper that invokes the configure disaptch of SpmCounterController
+*/
 rocprofiler_status_t
 configure_spm_dispatch(rocprofiler_context_id_t                       context_id,
                        rocprofiler_spm_dispatch_counting_service_cb_t callback,
@@ -146,9 +166,15 @@ configure_spm_dispatch(rocprofiler_context_id_t                       context_id
 bool
 is_spm_explicitly_enabled();
 
+/*
+ * start dispatch SPM context
+ */
 void
 start_context(const context::context*);
 
+/*
+ * stop dispatch SPM context
+ */
 void
 stop_context(const context::context*);
 

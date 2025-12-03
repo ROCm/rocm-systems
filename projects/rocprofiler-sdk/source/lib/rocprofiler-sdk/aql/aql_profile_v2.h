@@ -470,7 +470,7 @@ typedef struct
 
 typedef struct
 {
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+    void*  data;  // Valid until delete_packets() is called. Caller must save contents otherwise.
     size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 
@@ -500,20 +500,20 @@ typedef struct
  */
 typedef struct
 {
-    aqlprofile_agent_handle_t     aql_agent;
-    hsa_agent_t                   hsa_agent;
-    const aqlprofile_pmc_event_t* events;
-    size_t                        event_count;
-    aqlprofile_spm_parameter_t*   parameters;
-    size_t                        parameter_count;
-    size_t                        reserved;  // For future use
-
-    aqlprofile_memory_alloc_callback_t
-        alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
+    aqlprofile_agent_handle_t            aql_agent;
+    hsa_agent_t                          hsa_agent;
+    const aqlprofile_pmc_event_t*        events;
+    size_t                               event_count;
+    aqlprofile_spm_parameter_t*          parameters;
+    size_t                               parameter_count;
+    size_t                               reserved;  // For future use
+    aqlprofile_memory_alloc_callback_t   alloc_cb;
     aqlprofile_memory_dealloc_callback_t dealloc_cb;  // Frees memory allocated by alloc_cb
-    aqlprofile_memory_copy_t
-          memcpy_cb;  // Copy memory in and out of GPU memory allocated by alloc_cb
-    void* userdata;   // Passed back to user in the memory callbacks
+    aqlprofile_memory_copy_t             memcpy_cb;
+    void*                                userdata;
+    /// @brief Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
+    /// @brief Copy memory in and out of GPU memory allocated by alloc_cb
+    /// @brief Passed back to user in the memory callbacks
 } aqlprofile_spm_profile_t;
 
 /**
@@ -591,6 +591,15 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle);
 
+/**
+ * @brief Callback where decoded SPM data will be returned to
+ * @param[in] timestamp timestamp of sample
+ * @param[in] value counter value
+ * @param[in] index index into the counter list
+ * @param[in] shader_engine shader engine of the sample
+ * @param[in] userdata userdata from aqlprofile_spm_decode_stream_v1
+ */
+
 typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
                                                     uint64_t value,
                                                     uint64_t index,
@@ -624,10 +633,26 @@ enum aqlprofile_spm_decode_query_t
     AQLPROFILE_SPM_DECODE_QUERY_LAST
 };
 
+/**
+ * @brief Function to query data contained in aqlprofile_spm_buffer_desc_t
+ * @param[in] desc Descriptor returned in create_packets()
+ * @param[in] query  enum of type aqlprofile_spm_decode_query_t
+ * @param[out] data  information output
+ * @retval HSA_STATUS_SUCCESS if decode successful
+ * @retval HSA_STATUS_ERROR for generic error
+ */
+
 hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
                             aqlprofile_spm_decode_query_t query,
                             uint64_t*                     param_out);
+
+/**
+ * @brief Function to query if an event is supported on an agent
+ * @param[in] agent agent on which event needs to be collected
+ * @param[in] event  event to be collected
+ * @retval bool to indicate if the event can be collected on an agent
+ */
 
 bool
 aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);

@@ -24,17 +24,16 @@ set(COUNTER_LIST
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
 
-list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
-
 # SPM
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
-        ${COUNTER_LIST} --kernel-trace -d ${CMAKE_CURRENT_BINARY_DIR}/out_spm
-        --output-format CSV JSON -o spm -- $<TARGET_FILE:simple-transpose>
+        ${COUNTER_LIST} --spm-frequency 50000 --spm-buffer-size 32768 --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV JSON -o spm --
+        $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
-    TIMEOUT 120
+    TIMEOUT 60
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -78,7 +77,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/out_multi --output-format CSV -o multi --
         $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
-    TIMEOUT 120
+    TIMEOUT 60
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"

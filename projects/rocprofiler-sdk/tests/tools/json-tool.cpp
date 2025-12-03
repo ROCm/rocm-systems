@@ -636,11 +636,12 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
                       void* /*callback_data_args*/)
 {
     // Iterate through the agents and get the counters available on that agent
-    static std::shared_mutex                                                 m_mutex       = {};
-    static std::unordered_map<uint64_t, rocprofiler_spm_counter_config_id_t> profile_cache = {};
+    static std::shared_mutex m_mutex = {};
+    static std::unordered_map<rocprofiler_agent_id_t, rocprofiler_spm_counter_config_id_t>
+        profile_cache = {};
 
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
+        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id);
            pos != profile_cache.end())
         {
             *config = pos->second;
@@ -715,8 +716,8 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
 
     auto params = std::vector<rocprofiler_spm_parameter_t>{};
     params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, 30});
-    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768});
-    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY, 50000});
+    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE, 32768 *1024});
+    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SCLK_COUNT, 50000});
     // Look for the counters contained in counters_to_collect in gpu_counters
     // Create a colleciton profile for the counters
     rocprofiler_spm_counter_config_id_t profile = {.handle = 0};
@@ -728,7 +729,7 @@ spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_
                                                            &profile),
                      "Could not construct profile cfg");
 
-    profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
+    profile_cache.emplace(dispatch_data.dispatch_info.agent_id, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }
@@ -2174,16 +2175,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ompt_buffered_ctx, ROCPROFILER_BUFFER_TRACING_OMPT, nullptr, 0, ompt_buffered_buffer),
         "buffer tracing service for ompt configure");
 
-    ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(spm_dispatch_collection_ctx,
-                                                                spm_dispatch_callback,
-                                                                nullptr,
-                                                                spm_data_callback,
-                                                                nullptr),
-                     "Could not setup SPM counting service");
+    if(getenv("ROCPROFILER_SPM_BETA_ENABLED") != nullptr)
+        ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(spm_dispatch_collection_ctx,
+                                                                    spm_dispatch_callback,
+                                                                    nullptr,
+                                                                    spm_data_callback,
+                                                                    nullptr),
+                         "Could not setup SPM counting service");
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_dispatch_counting_service(
             counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
-
         "setup buffered service");
 
     for(auto* itr : buffers)

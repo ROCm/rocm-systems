@@ -279,6 +279,9 @@ CounterPacketConstruct::can_collect()
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
+/** @brief Class contains metrics and input parameters to create AQLPacket for SPM
+ * Also populates data used in can collect function to check if counters can be collected together
+ */
 SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agent_id,
                                        const std::vector<counters::Metric>& metrics,
                                        uint64_t                             sample_freq,
@@ -328,6 +331,9 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t         agen
     }
 }
 
+/** @brief Constructs the packet using the contained input parameters.
+ * Writes into ID map and spm descriptor used to decode SPM data
+ */
 std::unique_ptr<hsa::SPMPacket>
 SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {

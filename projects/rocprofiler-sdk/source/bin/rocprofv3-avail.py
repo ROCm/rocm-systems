@@ -203,9 +203,7 @@ def list_basic_agent(args, list_counters):
 
     def print_agent_counter(counters):
         if len(counters) == 0:
-            msg = "No {counter_type} counters supported".format(
-                counter_type="SPM" if spm else "PMC"
-            )
+            msg = "No PMC counters supported"
             print("{:30}\n".format(msg))
             return
         names_len = [len(counter.name) for counter in counters]
@@ -281,13 +279,13 @@ def info_pc_sampling(args):
         print("\n")
 
 
-def listing(args, spm):
+def listing(args, spm=False):
     from rocprofv3 import avail
 
-    def print_agent_counter(counters):
+    def print_agent_counter(counters, spm_):
         if len(counters) == 0:
             msg = "No {counter_type} counters supported".format(
-                counter_type="SPM" if spm else "PMC"
+                counter_type="SPM" if spm_ else "PMC"
             )
             print("{:30}\n".format(msg))
             return
@@ -297,7 +295,7 @@ def listing(args, spm):
             for counter in counters
         ]
         columns = get_number_columns(max(names_len))
-        msg = "SPM" if spm else "PMC"
+        msg = "SPM" if spm_ else "PMC"
         print("{:30}:\n".format(msg))
         for idx in range(0, len(names), columns):
             print("{:30}".format(" ".join(names[idx : (idx + columns)])))
@@ -319,7 +317,7 @@ def listing(args, spm):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_agent_counter(agent_counters[agent])
+            print_agent_counter(agent_counters[agent], spm)
             print("\n")
             break
         elif info["type"] == 2 and args.device is None:
@@ -328,11 +326,11 @@ def listing(args, spm):
                     "GPU", info["logical_node_type_id"], "Name", info["name"]
                 )
             )
-            print_agent_counter(agent_counters[agent])
+            print_agent_counter(agent_counters[agent], spm)
             print("\n")
 
 
-def info_pmc(args, spm):
+def info_pmc(args, spm=False):
     from rocprofv3 import avail
 
     _args = None
@@ -346,7 +344,7 @@ def info_pmc(args, spm):
 
     def print_pmc_info(_args, pmc_counters):
 
-        if not _args:
+        if _args is None:
             for counter in pmc_counters:
                 print(counter)
                 print("\n")
@@ -383,7 +381,7 @@ def process_info(args):
     if args.pmc is None and args.pc_sampling is None and args.spm is None:
         list_basic_agent(args, True)
     if args.pmc is not None:
-        info_pmc(args, False)
+        info_pmc(args)
     if args.spm is not None:
         info_pmc(args, True)
     if args.pc_sampling is not None:
@@ -398,11 +396,11 @@ def process_list(args):
         and args.pmc is None
         and args.spm is None
     ):
-        listing(args, False)
+        listing(args)
     if args.agent:
         list_basic_agent(args, False)
     if args.pmc:
-        listing(args, False)
+        listing(args)
     if args.spm:
         listing(args, True)
     if args.pc_sampling:
