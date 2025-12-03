@@ -1504,7 +1504,7 @@ NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
   return _v;
 }
-const HipToolsDispatchTable* GetHipToolsDispatchTable() {
+NO_VECTORIZE const HipToolsDispatchTable* GetHipToolsDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
   return _v;
 }
