@@ -88,13 +88,13 @@ def test_spm_counter_values(input_data):
 
     for agent, counters in agent_counter_map.items():
 
-        assert 1.0 * get_counter_value(counters, "SQ_INSTS_SALU") > get_counter_value(
+        assert float(get_counter_value(counters, "SQ_INSTS_SALU")) > get_counter_value(
             counters, "SQ_WAVES"
         )
-        assert 1.0 * get_counter_value(counters, "SQ_INSTS_VALU") > get_counter_value(
+        assert float(get_counter_value(counters, "SQ_INSTS_VALU")) > get_counter_value(
             counters, "SQ_WAVES"
         )
-        assert 1.0 * get_counter_value(counters, "TA_TA_BUSY") > get_counter_value(
+        assert float(get_counter_value(counters, "TA_TA_BUSY")) > get_counter_value(
             counters, "TA_TOTAL_WAVEFRONTS"
         )
 

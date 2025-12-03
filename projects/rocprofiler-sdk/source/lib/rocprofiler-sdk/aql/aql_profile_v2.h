@@ -470,7 +470,7 @@ typedef struct
 
 typedef struct
 {
-    void*  data;  // Valid until delete_packets() is scalled. Caller must save contents otherwise.
+    void*  data;  // Valid until delete_packets() is called. Caller must save contents otherwise.
     size_t size;  // Size of "data"
 } aqlprofile_spm_buffer_desc_t;
 
@@ -507,7 +507,6 @@ typedef struct
     aqlprofile_spm_parameter_t*   parameters;
     size_t                        parameter_count;
     size_t                        reserved;  // For future use
-
     aqlprofile_memory_alloc_callback_t
         alloc_cb;  // Memory allocation, usually a wrapper for hsa_amd_memory_pool_allocate
     aqlprofile_memory_dealloc_callback_t dealloc_cb;  // Frees memory allocated by alloc_cb

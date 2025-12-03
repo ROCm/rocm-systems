@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,12 @@
 // SOFTWARE.
 
 #pragma once
+
+#include <rocprofiler-sdk/fwd.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-
-#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {

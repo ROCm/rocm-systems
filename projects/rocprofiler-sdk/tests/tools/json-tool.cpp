@@ -49,6 +49,7 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 #include <unistd.h>
 #include <algorithm>
 #include <atomic>
@@ -64,7 +65,6 @@
 #include <iostream>
 #include <map>
 #include <mutex>
-#include <rocprofiler-sdk/cxx/utility.hpp>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>

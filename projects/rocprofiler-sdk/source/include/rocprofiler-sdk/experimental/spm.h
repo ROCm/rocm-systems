@@ -45,7 +45,6 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_type_t
  * @brief SPM Profile Configurations
  * @see rocprofiler_spm_create_counter_config for how to create.
  */
-
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_config_id_t
 {
     uint64_t handle;  ///< Opaque handle
@@ -55,7 +54,6 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_config_id_t
  * @brief (experimental) SPM parameter type and value.
  *
  **/
-
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_t
 {
     rocprofiler_spm_parameter_type_t type;   ///< SPM Parameter type
@@ -84,7 +82,12 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_t
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if config created
  * @retval ROCPROFILER_STATUS_ERROR if config could not be created
- *
+ * @retval ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT if agent does not support an input
+ counter
+ * @retval ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT if input counters exceed the hardware limit
+ * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND if agent not found
+ * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if an input counter is not found in metrics
+ file
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
@@ -116,9 +119,9 @@ rocprofiler_spm_destroy_counter_config(rocprofiler_spm_counter_config_id_t confi
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
 {
     ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST = 0,  ///< Set if callback has records with data loss
-    ROCPROFILER_SPM_RECORD_FLAG_END,   ///< Set if callback is for end of dispatch record or end of
-                                       ///< agent service
-    ROCPROFILER_SPM_RECORD_FLAG_DATA,  ///< Set if callback has received data
+    ROCPROFILER_SPM_RECORD_FLAG_DATA,           ///< Set if callback has received data
+    ROCPROFILER_SPM_RECORD_FLAG_END,  ///< Set if callback is for end of dispatch record or end of
+                                      ///< agent service
     ROCPROFILER_SPM_RECORD_FLAG_LAST,
 } rocprofiler_spm_record_flag_t;
 
@@ -139,9 +142,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_dispatch_counting_se
  **/
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
 {
-    uint64_t               size;  ///< Size of this structure. Used for versioning and validation.
-    rocprofiler_agent_id_t agent_id;              ///< Agent on which the record is collected
+    uint64_t size;  ///< Size of this structure. Used for versioning and validation.
     rocprofiler_counter_instance_id_t id;         ///< Counter instance id
+    rocprofiler_agent_id_t            agent_id;   ///< Agent on which the record is collected
     rocprofiler_timestamp_t           timestamp;  ///< timestamp of the sample
     uint64_t value;  ///< SPM sample for the counter with counter instance id: id
 } rocprofiler_spm_counter_record_t;
@@ -217,7 +220,7 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t               
                                            void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
- * @brief (experimental) Configure SPM in system monitoring mode
+ * @brief (experimental) Configure SPM in dispatch monitoring mode
  *
  * @param [in] context_id context id
  * @param [in] dispatch_callback callback to perform when dispatch is enqueued
@@ -227,13 +230,13 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t               
  * @return ::rocprofiler_status_t
  *
  * @return ::rocprofiler_status_t
- * @retval ROCPROFILER_STATUS_SUCCESS if all counters found for agent
- * @retval ROCPROFILER_STATUS_ERROR no counters found for agent
- * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
+ * @retval ROCPROFILER_STATUS_SUCCESS if the context can be configured for SPM dispatch service
+ * @retval ROCPROFILER_STATUS_ERROR if the context cannot be configured for SPM dispatch service
+ * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
  * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
- * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND invalid context
- * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT invalid parameter, counter or argument
- * @retval ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED agent already configured for context
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID invalid input context has not already been
+ * created
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services enabled in the context
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_spm_dispatch_service(

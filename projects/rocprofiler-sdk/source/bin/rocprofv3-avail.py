@@ -281,7 +281,7 @@ def info_pc_sampling(args):
         print("\n")
 
 
-def listing(args, spm):
+def listing(args, spm=False):
     from rocprofv3 import avail
 
     def print_agent_counter(counters):
@@ -332,7 +332,7 @@ def listing(args, spm):
             print("\n")
 
 
-def info_pmc(args, spm):
+def info_pmc(args, spm=False):
     from rocprofv3 import avail
 
     _args = None
@@ -383,7 +383,7 @@ def process_info(args):
     if args.pmc is None and args.pc_sampling is None and args.spm is None:
         list_basic_agent(args, True)
     if args.pmc is not None:
-        info_pmc(args, False)
+        info_pmc(args)
     if args.spm is not None:
         info_pmc(args, True)
     if args.pc_sampling is not None:
@@ -398,11 +398,11 @@ def process_list(args):
         and args.pmc is None
         and args.spm is None
     ):
-        listing(args, False)
+        listing(args)
     if args.agent:
-        list_basic_agent(args, False)
+        list_basic_agent(args)
     if args.pmc:
-        listing(args, False)
+        listing(args)
     if args.spm:
         listing(args, True)
     if args.pc_sampling:

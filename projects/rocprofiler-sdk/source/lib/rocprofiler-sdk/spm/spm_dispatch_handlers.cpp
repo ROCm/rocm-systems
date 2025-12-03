@@ -39,14 +39,6 @@ bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     auto* packet = CHECK_NOTNULL(static_cast<hsa::SPMPacket*>(data));
-    // auto& before_krn = packet->before_krn_pkt;
-
-    //  if(before_krn.size() < 2)
-    // {
-    //     ROCP_ERROR << "Invalid before_krn packet" << std::endl;
-    //     return true;
-    //  }
-
     packet->kfd_start();
 
     CHECK_NOTNULL(hsa::get_queue_controller())

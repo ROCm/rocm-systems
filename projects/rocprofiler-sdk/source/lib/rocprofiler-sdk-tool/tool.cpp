@@ -1641,7 +1641,6 @@ spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data
                   rocprofiler_user_data_t*                         user_data,
                   void* /* record_callback_args*/)
 {
-    auto lk = std::shared_lock{tool_metadata->spm_mut};
     if(record_count == 0) return;
 
     if(flags >> ROCPROFILER_SPM_RECORD_FLAG_DATA)
@@ -1669,8 +1668,7 @@ spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data
 
     if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
     {
-        ROCP_CI_LOG(WARNING) << " SPM data loss in Dispatch_id:"
-                             << dispatch_data.dispatch_info.dispatch_id;
+        ROCP_WARNING << " SPM data loss in Dispatch_id:" << dispatch_data.dispatch_info.dispatch_id;
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
@@ -2356,7 +2354,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 get_client_ctx(), spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
             "Could not setup SPM counting service");
 
-        start_context(get_client_ctx(), "counter collection");
+        start_context(get_client_ctx(), "SPM counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};

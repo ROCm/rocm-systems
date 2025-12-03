@@ -464,14 +464,14 @@ For attachment profiling of running processes:
 
     spm_options.add_argument(
         "--spm-timeout",
-        help="Timeout for SPM, in ms. Larger values may slow down the application, while smaller values may drop data. Default = 30.",
+        help="Timeout for SPM, in ms. Larger values may slow down the application, while smaller values may drop data.",
         default=None,
         type=int,
     )
 
     spm_options.add_argument(
         "--spm-frequency",
-        help="SCLK Sample frequency, in Hz. Default: 500 KHz",
+        help="SCLK Shader clock Sample frequency, in Hz.",
         default=None,
         type=int,
     )

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +67,7 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 {
     auto& counters = *reinterpret_cast<counter_vec*>(userdata);
 
-    // aqlprofile currently reports shadder_engine -1 as global counters
+    // aqlprofile currently reports shader_engine -1 as global counters
     if(shader_engine < 0)
     {
         counters.at(index).is_global = true;
@@ -86,10 +86,9 @@ void
 aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, void* userdata)
 {
     SPM::counter_vec counters{};
-    auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
+    auto*            spm_packet = static_cast<hsa::SPMPacket*>(userdata);
     if(data_size == 0)
     {
-        // spm_packet->record_cb(nullptr, 0, flags, spm_packet->user_data);
         return;
     }
 
@@ -122,7 +121,7 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
             const auto& values = counters.at(i).shaders.at(se).values;
 
             size_t size = std::min(times.size(), values.size());
-            if(!size) continue;
+            if(size == 0u) continue;
 
             if(counters.at(i).is_global)
             {
@@ -140,9 +139,9 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{
                         .size = sizeof(rocprofiler_spm_counter_record_t),
+                        .id   = instance_id,
                         .agent_id =
                             (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
-                        .id        = instance_id,
                         .timestamp = times[it],
                         .value     = values[it]});
                 }
@@ -168,9 +167,9 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{
                         .size = sizeof(rocprofiler_spm_counter_record_t),
+                        .id   = instance_id,
                         .agent_id =
                             (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
-                        .id        = instance_id,
                         .timestamp = times[it],
                         .value     = values[it]});
                 }
@@ -182,7 +181,7 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
                           records.data(),
                           records.size(),
                           1 << ROCPROFILER_SPM_RECORD_FLAG_DATA | flags,
-                          static_cast<rocprofiler_user_data_t*>(spm_packet->user_data),
+                          spm_packet->user_data,
                           spm_packet->record_callback_args);
 }
 

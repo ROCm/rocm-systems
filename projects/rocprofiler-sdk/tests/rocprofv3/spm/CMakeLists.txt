@@ -24,8 +24,6 @@ set(COUNTER_LIST
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 set(IS_DISABLED ${IS_SPM_DISABLED})
 
-list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
-
 # SPM
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-execute
