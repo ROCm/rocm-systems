@@ -228,14 +228,14 @@ write_perfetto(
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
     auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
 
-    auto read_events = [&conn, &process, &ocfg](uint64_t event_id) {
+    auto read_events = [&conn, &process](uint64_t event_id) {
         return rocpd::read_sql_query<types::event>(
             conn,
             fmt::format(
                 "SELECT * FROM rocpd_event WHERE guid='{}' AND id={}", process.guid, event_id));
     };
 
-    auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
+    auto read_pmc_events = [&conn, &process](uint64_t event_id) {
         return rocpd::read_sql_query<types::pmc_event>(
             conn,
             fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
