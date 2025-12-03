@@ -113,8 +113,8 @@ TeamReductionTester<T1, T2>::TeamReductionTester(
     TesterArguments args, std::function<void(T1 &, T1 &)> f1,
     std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2)
     : Tester(args), init_buf{f1}, verify_buf{f2} {
-  s_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
-  r_buf = (T1 *)rocshmem_malloc(args.max_msg_size * sizeof(T1));
+  s_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
+  r_buf = (T1 *)rocshmem_malloc(max_msg_size * sizeof(T1));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -153,7 +153,7 @@ void TeamReductionTester<T1, T2>::postLaunchKernel() {
 
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::resetBuffers(size_t size) {
-  for (uint64_t i = 0; i < args.max_msg_size; i++) {
+  for (uint64_t i = 0; i < max_msg_size; i++) {
     init_buf(s_buf[i], r_buf[i]);
   }
 }

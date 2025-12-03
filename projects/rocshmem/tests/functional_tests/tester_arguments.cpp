@@ -91,10 +91,6 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     }
   }
 
-  if (unified_msg_size) {
-    max_msg_size = max_msg_size / (num_wgs * wg_size);
-  }
-
   TestType type = (TestType)algorithm;
 
   switch (type) {

@@ -101,7 +101,7 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (args.max_msg_size / sizeof(T1)) * args.num_wgs ;
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
   int buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)rocshmem_malloc(buff_size);

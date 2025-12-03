@@ -96,6 +96,52 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipMalloc((void**)&end_time, sizeof(long long int) * num_timers));
   CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
   *verification_error = false;
+
+  max_msg_size = args.max_msg_size;
+  if (args.unified_msg_size) {
+    switch (_type) {
+      case GetTestType:
+      case GetNBITestType:
+      case PutTestType:
+      case PutNBITestType:
+      case PutSignalTestType:
+      case PutSignalNBITestType:
+      case DefaultCTXGetTestType:
+      case DefaultCTXGetNBITestType:
+      case DefaultCTXPutTestType:
+      case DefaultCTXPutNBITestType:
+      case DefaultCTXPTestType:
+      case DefaultCTXGTestType:
+        //TODO pingpong and pingping?
+        max_msg_size = args.max_msg_size / args.num_wgs / args.wg_size;
+        break;
+      case WAVEGetTestType:
+      case WAVEGetNBITestType:
+      case WAVEPutTestType:
+      case WAVEPutNBITestType:
+      case WAVEPutSignalTestType:
+      case WAVEPutSignalNBITestType:
+        max_msg_size = args.max_msg_size / args.num_wgs / num_warps;
+        break;
+      case WGGetTestType:
+      case WGGetNBITestType:
+      case WGPutTestType:
+      case WGPutNBITestType:
+      case WGPutSignalTestType:
+      case WGPutSignalNBITestType:
+        max_msg_size = args.max_msg_size / args.num_wgs;
+        break;
+      default:
+        //TODO collectives?
+        break;
+    }
+    if (max_msg_size == 0) {
+      if (args.myid == 0) {
+        std::cerr << "Requested communication volume is smaller than what is required to send at least 1 byte per operation, adjust -w, -z, and -s to match, or  remove -u.";
+      }
+      exit(-1);
+    }
+  }
 }
 
 Tester::~Tester() {
@@ -572,13 +618,13 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
 void Tester::execute() {
   if (_type == InitTestType) return;
 
-  int num_loops = args.loop;
+  num_loops = args.loop;
 
   /**
    * Some tests loop through data sizes in powers of 2 and report the
    * results for those ranges.
    */
-  for (size_t size = args.min_msg_size; size <= args.max_msg_size;
+  for (size_t size = args.min_msg_size; size <= max_msg_size;
        size <<= 1) {
     resetBuffers(size);
 
@@ -706,16 +752,14 @@ void Tester::print(uint64_t size) {
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
-  double latency_avg = time_us / num_timed_msgs;
+  double latency = time_us / num_loops;
 
-  double avg_msg_rate = num_timed_msgs / time_s;
+  double msg_rate = num_timed_msgs / time_s;
 
-  double bandwidth_avg_gbs =
+  double bandwidth_gbs =
       static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
 
-  if (args.unified_msg_size) {
-    size *= (args.num_wgs * args.wg_size);
-  }
+  size_t volume = size * num_timed_msgs / num_loops;
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
@@ -725,8 +769,9 @@ void Tester::print(uint64_t size) {
   int float_precision = 2;
 
   if (_print_header) {
-    printf("%-*s%-*s%*s%*s%*s",
-           15, "# Size (B)",
+    printf("%-*s%-*s%-*s%*s%*s%*s",
+           15, "# Volume (B)",
+           15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
            field_width, "Bandwidth (GB/s)",
@@ -734,12 +779,13 @@ void Tester::print(uint64_t size) {
     _print_header = 0;
   }
 
-  printf("%-*lu%-*d%*.*f%*.*f%*.*f\n",
+  printf("%-*lu%-*lu%-*d%*.*f%*.*f%*.*f\n",
+         15, volume,
          15, size,
          15, num_timed_msgs,
-         field_width, float_precision, latency_avg,
-         field_width, float_precision, bandwidth_avg_gbs,
-         field_width, float_precision, avg_msg_rate);
+         field_width, float_precision, latency,
+         field_width, float_precision, bandwidth_gbs,
+         field_width, float_precision, msg_rate);
 
   fflush(stdout);
 }

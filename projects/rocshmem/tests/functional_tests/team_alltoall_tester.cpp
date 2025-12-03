@@ -102,7 +102,7 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Number of elements per work group
-  int num_elems_wg = (args.max_msg_size / sizeof(T1)) * n_pes;
+  int num_elems_wg = (max_msg_size / sizeof(T1)) * n_pes;
   // Total number of elements in the GPU kernel
   int total_elems = num_elems_wg * args.num_wgs;
   int buff_size = total_elems * sizeof(T1);
