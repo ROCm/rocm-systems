@@ -323,7 +323,8 @@ class ThunkLoader {
                                       HsaPcSamplingTraceId traceId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPcSamplingSupport))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtModelEnabled))(bool* enable);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueRingDoorbell))(HSA_QUEUEID QueueId);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueRingDoorbell))(HSA_QUEUEID QueueId, \
+                                      HSAuint64 value);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAisReadWriteFile))(void *devicePtr, \
                                       HSAuint64 size, \
                                       HSAint32 fd, \
