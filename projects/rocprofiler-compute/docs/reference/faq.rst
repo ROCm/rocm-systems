@@ -43,10 +43,7 @@ This dual-issue capability can be further investigated via:
 * **ROCm Compute Viewer**: You could see when VALU issues two instructions at the same cycle.
 * **On MI350 and newer platforms**: A new ``Dual-issue VALU Utilization`` metric is added which shows % of time when VALU is dual-issuing.
 
-When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays warning messages:
-
-* **VALU Utilization**: "VALU Utilization can go up to 200% because CU can dual-issue instructions. See this FAQ for more information."
-* **FP64 VALU FLOPs**: "FP64 VALU FLOPs can exceed the peak value because these instructions can be dual-issued in specific circumstances. See this FAQ for more information."
+When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays a warning message indicating this behavior.
 
 How can I SSH tunnel in MobaXterm?
 ==================================
