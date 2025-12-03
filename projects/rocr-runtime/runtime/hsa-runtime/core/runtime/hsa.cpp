@@ -802,25 +802,9 @@ hsa_status_t hsa_queue_destroy(hsa_queue_t* queue) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(queue);
-
-  fprintf(stderr, "DEBUG: hsa_queue_destroy ENTRY queue_ptr=%p queue_id=%lu\n",
-          static_cast<void*>(queue), queue ? queue->id : 0UL);
-
   core::Queue* cmd_queue = core::Queue::Convert(queue);
-
-  fprintf(stderr, "DEBUG: hsa_queue_destroy cmd_queue=%p (converted from queue_ptr=%p)\n",
-          static_cast<void*>(cmd_queue), static_cast<void*>(queue));
-
   IS_VALID(cmd_queue);
-
-  fprintf(stderr, "DEBUG: hsa_queue_destroy calling Destroy() on cmd_queue=%p\n",
-          static_cast<void*>(cmd_queue));
-
   cmd_queue->Destroy();
-
-  fprintf(stderr, "DEBUG: hsa_queue_destroy EXIT queue_id=%lu - success\n",
-          queue ? queue->id : 0UL);
-
   return HSA_STATUS_SUCCESS;
   CATCH;
 }

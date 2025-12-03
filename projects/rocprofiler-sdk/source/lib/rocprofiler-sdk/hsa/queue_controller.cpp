@@ -230,48 +230,20 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    ROCP_ERROR << fmt::format("DEBUG: ENTRY destroy_queue() hsa_queue_ptr={} queue_id={:#x}",
-                              fmt::ptr(id), id ? id->id : 0);
-
-    if(!id)
-    {
-        ROCP_ERROR << "DEBUG: destroy_queue() - id is NULL, returning early";
-        return;
-    }
+    if(!id) return;
 
     const auto* queue = get_queue(*id);
 
     // return if queue does not exist
-    if(!queue)
-    {
-        ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - queue NOT FOUND for id={:#x}", id->id);
-        return;
-    }
+    if(!queue) return;
 
-    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - calling sync() for queue_id={:#x} "
-                              "active_kernels={}",
-                              queue->get_id().handle,
-                              queue->active_async_packets());
+    ROCP_INFO << "destroying queue...";
 
     queue->sync();
-
-    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - sync() complete for queue_id={:#x} "
-                              "active_kernels={}",
-                              queue->get_id().handle,
-                              queue->active_async_packets());
-
-    if(queue->block_signal.handle != 0)
-    {
-        ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - destroying block_signal={:#x}",
-                                  queue->block_signal.handle);
-        get_core_table().hsa_signal_destroy_fn(queue->block_signal);
-    }
-
-    ROCP_ERROR << fmt::format("DEBUG: destroy_queue() - erasing queue from map, queue_id={:#x}",
-                              id->id);
+    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
 
-    ROCP_ERROR << fmt::format("DEBUG: EXIT destroy_queue() queue_id={:#x}", id->id);
+    ROCP_INFO << "queue destroyed";
 }
 
 ClientID
@@ -577,22 +549,8 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    ROCP_ERROR << "DEBUG: ENTRY queue_controller_fini()";
-
     if(get_queue_controller())
-    {
-        size_t queue_count = 0;
-        get_queue_controller()->iterate_queues([&queue_count](const Queue* _queue) {
-            queue_count++;
-            ROCP_ERROR << fmt::format("DEBUG: queue_controller_fini() syncing queue #{} id={:#x}",
-                                      queue_count, _queue->get_id().handle);
-            _queue->sync();
-        });
-
-        ROCP_ERROR << fmt::format("DEBUG: queue_controller_fini() synced {} queues", queue_count);
-    }
-
-    ROCP_ERROR << "DEBUG: EXIT queue_controller_fini()";
+        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
 
 void
