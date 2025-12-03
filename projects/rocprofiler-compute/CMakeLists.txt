@@ -631,8 +631,7 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
 
-set(
-    STANDALONEBINARY_EXTRACT_DIR
+set(STANDALONEBINARY_EXTRACT_DIR
     "/tmp"
     CACHE PATH
     "Prefix path for standalone binary extraction"
