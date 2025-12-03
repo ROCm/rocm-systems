@@ -677,15 +677,19 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    // pMipInfo not needed - set to nullptr and AddrLib will ignore it
-    out.pMipInfo = nullptr;
+    // Allocate persistent mip info storage for level extraction
+    ADDR2_MIP_INFO* mip_info_storage = new ADDR2_MIP_INFO[mipmap.num_levels];
+    memset(mip_info_storage, 0, sizeof(ADDR2_MIP_INFO) * mipmap.num_levels);
+    out.pMipInfo = mip_info_storage;
 
     uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(
                         mipmap.component, mipmap.desc, mipmap.num_levels,
                         mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
+      delete[] mip_info_storage;
       return HSA_STATUS_ERROR;
     }
+    // Store the output including pMipInfo in the cached addr_output
     mipmap.addr_output.addr2 = out;
     mipmap.size = out.surfSize;
 
@@ -915,23 +919,33 @@ hsa_status_t ImageManagerAi::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Populate SRD
+  // Validate pMipInfo is available in cached addr_output
+  if (mipmap_array.addr_output.addr2.pMipInfo == nullptr) {
+    debug_print("ERROR: pMipInfo not available for mipmap array");
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Access pMipInfo from the cached surface info output
+  const ADDR2_MIP_INFO* mip_info = mipmap_array.addr_output.addr2.pMipInfo;
+  const ADDR2_MIP_INFO& level_info = mip_info[mip_level];
+
+  // Update level_view descriptor dimensions to match this mip level
+  level_view.desc.width = level_info.pixelPitch;
+  level_view.desc.height = level_info.pixelHeight;
+  level_view.desc.depth = level_info.depth;
+
+  // Adjust base address to point to this mip level's data
+  const void* level_data_addr = static_cast<const uint8_t*>(mipmap_array.data) + level_info.offset;
+  level_view.data = const_cast<void*>(level_data_addr);
+
+  // Now populate the SRD for this single-level image
   hsa_status_t status = PopulateImageSrd(level_view);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
 
-  // Modify SRD to select only the specific mip level
-  uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
-
-  // SRD WORD3 has BASE_LEVEL and LAST_LEVEL fields
-  sq_img_rsrc_word3_u* word3 = reinterpret_cast<sq_img_rsrc_word3_u*>(&srd_words[3]);
-
-  // Set both to same value - hardware samples only this level
-  word3->f.base_level = mip_level;
-  word3->f.last_level = mip_level;
-
-  debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  debug_print("Created mip level %u view using pMipInfo: offset=%llu, pitch=%u, height=%u, depth=%u",
+              mip_level, level_info.offset, level_info.pixelPitch, level_info.pixelHeight, level_info.depth);
 
   return HSA_STATUS_SUCCESS;
 }
