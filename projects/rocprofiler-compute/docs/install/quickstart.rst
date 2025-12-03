@@ -2,9 +2,10 @@
    :description:  Quickstart guide for ROCm Compute Profiler (rocprofiler-compute)
    :keywords: Omniperf, ROCm, profiler, tool, Instinct, AMD, Profile, Analyze, CLI,  performance counters, quickstart, guide
 
- ***********************************************************
- Quickstart
- ***********************************************************  
+**********
+Quickstart
+**********
+
 This guide will help you quickly start using **rocprof-compute**, AMD’s ROCm Compute Profiler. By following these steps, you’ll learn how to profile GPU workloads and analyze performance data to identify bottlenecks and optimize your applications.
 
 The following sections provide brief steps to get started with rocprof-compute. There are 2 main phases to use the tool:
@@ -13,12 +14,11 @@ The following sections provide brief steps to get started with rocprof-compute. 
 2. Analyzing
 
 Prerequisites
--------------
+=============
 
 Ensure ROCm installation is complete. Check:
 
 **AMD System Management Interface**
-Command:
 
 .. code-block:: shell-session
 
@@ -38,7 +38,6 @@ Check device nodes:
    ls /dev/kfd /dev/dri
 
 **ROCm Info**
-Command:
 
 .. code-block:: shell-session
 
@@ -48,7 +47,6 @@ Purpose: Displays ROCm platform details and GPU properties.
 If fails: Check PATH, permissions (add user to render and video groups), set ``LD_LIBRARY_PATH``, reinstall ROCm if needed.
 
 **Python & rocprof-compute-tool**
-Check:
 
 .. code-block:: shell-session
 
@@ -62,7 +60,6 @@ Install dependencies:
 
 If missing libs: use requirements file at the above path.
 
-
 Profiling
 =========
 
@@ -71,16 +68,13 @@ Profiling is the process of collecting performance counters from your GPU applic
 The following examples will refer to some sample applications which you can get from the samples folder in our GitHub repository:  
 https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/sample
 
-Basic Example
--------------
-
 **Compile HIP sample:: Build the HIP sample into an executable named 'vcopy'**
    
 .. code-block:: shell-session
 
    hipcc vcopy.cpp -o vcopy
 
-**Profile:**
+**Profile Command:**
 
 .. code-block:: shell-session
 
@@ -114,10 +108,10 @@ After profiling, you can find the generated files inside
    workloads/vcopy/MI200/
 
 Above, we are running a basic example. For more details on all the profiling options, refer to the full documentation:  
-:doc:`Profiling <rocprofiler-compute:how-to/profile>`
+:doc:`Profiling </how-to/profile>`
 
 Also, you will notice that during the profiling phase, the roofline will run several iterations as well, to collect roofline data. For details on roofline, refer to the full documentation:
-:doc:`Roofline Mode <rocprofiler-compute:how-to/profile/mode>`
+:doc:`Roofline Mode </how-to/profile/mode>`
 
 For more details and options, run:
 
@@ -126,7 +120,7 @@ For more details and options, run:
    rocprof-compute profile --help
 
 Other Profiling Examples
--------------------------
+------------------------
 
 Profiles the workload and collects only roofline data for performance analysis:
 
@@ -186,7 +180,7 @@ Analysis is the process of examining profiling data to understand GPU kernel per
     - Lightweight, keyboard-driven experience for terminals.
     - `Text-based User Interface (TUI) analysis <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/docs/how-to/analyze/tui.rst>`_
 
-**Basic Analysis Command:**
+**Analysis Command:**
 
 .. code-block:: shell-session
 
@@ -207,11 +201,10 @@ Analysis is the process of examining profiling data to understand GPU kernel per
   - ``MI200``: Device-specific folder profiling auto-created.
 
 For more details on analysis options, refer to the full documentation:   
-
-:doc:`Analyze <rocprofiler-compute:how-to/analyze>`
+:doc:`Analyze </how-to/analyze>`
 
 Other Analysis Examples
-------------------------
+-----------------------
 
 Show a list of metrics supported for analysis:
 
