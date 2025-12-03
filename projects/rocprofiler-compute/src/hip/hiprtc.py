@@ -33,8 +33,9 @@ from ctypes import (
     c_size_t,
     c_void_p,
 )
+import os
 
-_lib = ctypes.CDLL("libhiprtc.so")
+_lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH')}/lib/libhiprtc.so")
 
 
 _lib.hiprtcCreateProgram.restype = c_int

@@ -37,8 +37,9 @@ from ctypes import (
     c_uint8,
     c_void_p,
 )
+import os
 
-_lib = ctypes.CDLL("libamdhip64.so")
+_lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH')}/lib/libamdhip64.so")
 
 
 # Mirrors struct hipUUID_t
