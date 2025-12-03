@@ -33,6 +33,21 @@ locale settings.
    $ export LC_ALL=C.UTF-8
    $ export LANG=C.UTF-8
 
+Why does VALU utilization exceed the theoretical peak?
+======================================================
+
+In specific circumstances, GPU can co-issue two VALU instructions at the same clock. This may result in an observed VALU Utilization and FP64 VALU FLOP values above the theoretical peak. This is expected hardware behavior and not a measurement error.
+
+This dual-issue capability can be further investigated via:
+
+* **ROCm Compute Viewer**: You could see when VALU issues two instructions at the same cycle.
+* **On MI350 and newer platforms**: A new ``Dual-issue VALU Utilization`` metric is added which shows % of time when VALU is dual-issuing.
+
+When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays warning messages:
+
+* **VALU Utilization**: "VALU Utilization can go up to 200% because CU can dual-issue instructions. See this FAQ for more information."
+* **FP64 VALU FLOPs**: "FP64 VALU FLOPs can exceed the peak value because these instructions can be dual-issued in specific circumstances. See this FAQ for more information."
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 
