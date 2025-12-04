@@ -212,7 +212,7 @@ TestHeatMapRMA() {
   #ExecTest  "wgput"            2       32           1024      1073741824
 }
 
-TestHeatColl() {
+TestHeatMapColl() {
   ExecTest  "alltoall"         2       1            256        1073741824
   ExecTest  "alltoall"         4       1            256        1073741824
   ExecTest  "alltoall"         8       1            256        1073741824
