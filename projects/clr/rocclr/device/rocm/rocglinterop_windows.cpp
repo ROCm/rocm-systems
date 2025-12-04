@@ -156,5 +156,27 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
   return wglEndCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
 }
 
+// ================================================================================================
+bool glExport(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
+              int* offset) {
+  const auto* obj = mem->getInteropObj()->asGLObject();
+  const auto GLContext = mem->getContext().info().hCtx_;
+  const auto name = static_cast<uint>(obj->getGLName());
+
+  static_assert(GL_ARRAY_BUFFER == GL_ARRAY_BUFFER, "Only GL_ARRAY_BUFFER is supported");
+  constexpr GLenum type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
+
+  const auto hRC = reinterpret_cast<HGLRC>(GLContext);
+  const GLResource hRes = {.type = type, .name = name};
+  GLResourceData hData = {.version = GL_RESOURCE_DATA_VERSION};
+
+  if (!wglResourceAttachAMD(hRC, &hRes, &hData)) return false;
+
+  *handle = reinterpret_cast<hsa_handle_t>(hData.handle);
+  *offset = static_cast<size_t>(hData.offset);
+
+  return true;
+}
+
 } // namespace GlInterop
 } // namespace amd::roc

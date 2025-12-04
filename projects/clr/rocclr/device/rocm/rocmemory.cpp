@@ -231,9 +231,19 @@ hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 #if IS_WINDOWS
-  return false;
+  hsa_handle_t handle;
+  int offset;
+
+  if (!GlInterop::glExport(owner(), targetType, miplevel, &handle, &offset)) return false;
+  if (interopMapBuffer(handle) != HSA_STATUS_SUCCESS) return false;
+
+  deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
+  return true;
 #else
   assert(owner()->isInterop() && "Object is not an interop object.");
+
+  auto memFlags = owner()->getMemFlags();
+  hsa_agent_t agent = dev().getBackendDevice();
 
   mesa_glinterop_export_in in = {0};
   mesa_glinterop_export_out out = {0};
@@ -241,14 +251,13 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   in.version = MESA_GLINTEROP_EXPORT_IN_VERSION;
   out.version = MESA_GLINTEROP_EXPORT_OUT_VERSION;
 
-  if (owner()->getMemFlags() & CL_MEM_READ_ONLY)
+  if (memFlags & CL_MEM_READ_ONLY)
     in.access = MESA_GLINTEROP_ACCESS_READ_ONLY;
-  else if (owner()->getMemFlags() & CL_MEM_WRITE_ONLY)
+  else if (memFlags & CL_MEM_WRITE_ONLY)
     in.access = MESA_GLINTEROP_ACCESS_WRITE_ONLY;
   else
     in.access = MESA_GLINTEROP_ACCESS_READ_WRITE;
 
-  hsa_agent_t agent = dev().getBackendDevice();
   uint32_t id;
   Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
 
