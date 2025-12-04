@@ -212,15 +212,18 @@ TestHeatMapRMA() {
   #ExecTest  "wgput"            2       32           1024      1073741824
 }
 
+TestHeatColl() {
+  ExecTest  "alltoall"         2       1            256        1073741824
+  ExecTest  "alltoall"         4       1            256        1073741824
+  ExecTest  "alltoall"         8       1            256        1073741824
+  ExecTest  "alltoall"         16      1            256        1073741824
+  ExecTest  "alltoall"         32      1            256        1073741824
+  ExecTest  "alltoall"         64      1            256        1073741824
+}
+
 TestHeatMap() {
   TestHeatMapRMA
-
-  ExecTest  "alltoall"         2       1            1         1073741824
-  ExecTest  "alltoall"         4       1            1         1073741824
-  ExecTest  "alltoall"         8       1            1         1073741824
-  ExecTest  "alltoall"         16      1            1         1073741824
-  ExecTest  "alltoall"         32      1            1         1073741824
-  ExecTest  "alltoall"         64      1            1         1073741824
+  TestHeatMapColl
 }
 
 
@@ -258,6 +261,9 @@ ValidateLogDir $LOG_DIR
 case $TEST in
   *"heatmaprma")
     TestHeatMapRMA
+    ;;
+  *"heatmapcoll")
+    TestHeatMapColl
     ;;
   *"heatmap")
     TestHeatMap
