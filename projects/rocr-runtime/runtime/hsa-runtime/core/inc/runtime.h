@@ -151,6 +151,12 @@ class Runtime {
   // @brief Print known allocations near ptr.
   static void PrintMemoryMapNear(void* ptr);
 
+  /// @brief Query pointer information using available drivers
+  /// @param[in] ptr Pointer to query information about
+  /// @param[out] pointer_info Pointer information structure to populate
+  /// @return HSAKMT_STATUS_SUCCESS if any driver successfully returned pointer info, or error code
+  static HSAKMT_STATUS QueryPointerInfo(const void* ptr, HsaPointerInfo* pointer_info);
+
   /// @brief Singleton object of the runtime.
   static Runtime* runtime_singleton_;
 
