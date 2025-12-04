@@ -972,25 +972,16 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     forced_config = configure_func;
     rocprofiler::registration::initialize();
 
-    // Automatic late-start detection
-    auto hsa_rt = rocprofiler::late_start::detect_hsa_runtime();
-    auto hip_rt = rocprofiler::late_start::detect_hip_runtime();
-
-    if(hsa_rt.initialized || hip_rt.initialized)
+    // Trigger re-propagation of all registered API tables via rocprofiler-register.
+    // This enables late-start profiling where runtimes may have already initialized
+    // and registered their API tables before rocprofiler-sdk was loaded.
+    auto status = rocprofiler::late_start::invoke_register_propagation();
+    if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        ROCP_INFO << "Detected initialized runtime(s), performing automatic late-start";
-
-        if(hsa_rt.initialized)
-        {
-            ROCP_INFO << "Wrapping HSA runtime for late-start";
-            rocprofiler::late_start::wrap_hsa_tables(hsa_rt);
-        }
-
-        if(hip_rt.initialized)
-        {
-            ROCP_INFO << "Wrapping HIP runtime for late-start";
-            rocprofiler::late_start::wrap_hip_tables(hip_rt);
-        }
+        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
+                     << "This is normal if runtimes have not initialized yet, or if "
+                     << "rocprofiler-register is not loaded. Runtimes that initialize "
+                     << "after this call will be automatically profiled.";
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
