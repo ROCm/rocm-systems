@@ -44,16 +44,17 @@ unique="rocSHMEM_MI300_Thor2_Heatmap"
 
 ## cols => no. of consecutive runs
 ## rows => no. of msg sizes in the sweep -- 35 = 1B-16GB
-cols, rows = 1, 19
+cols, rows = 1, 27
 
-#x = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648, 4294967296]
-x = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304]
-#x_str = [16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB', '8MB', '16MB', '32MB', '64MB', '128MB', '256MB', '512MB', '1GB', '2GB', '4GB']
-x_str = [16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB']
+x = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824]
+x_str = [16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB', '8MB', '16MB', '32MB', '64MB', '128MB', '256MB', '512MB', '1GB']
+#x = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304]
+#x_str = [16, 32, 64, 128, 256, 512, '1KB', '2KB', '4KB', '8KB', '16KB', '32KB', '64KB', '128KB', '256KB', '512KB', '1MB', '2MB', '4MB']
 
 
 @dataclass
 class Measurement:
+    volume: int
     msgsize: int
     msgcount: int
     avg_time: float
@@ -64,6 +65,8 @@ class Measurement:
 class Series:
     op: str
     ngpus: int
+    nwgs: int
+    nthreads: int
     data: List[Measurement]
 
 uniq = f"rocshmem_test"
@@ -92,7 +95,12 @@ for dir, file_names in files_in_dir.items():
         procs = elems[1]
         ngpu = int(re.findall("[0-9]+",procs)[0])
 
-        this_series = Series(op, ngpu, [])
+        wgs = elems[2]
+        nwgs = int(re.findall("[0-9]+",wgs)[0])
+        threads = elems[3]
+        nthreads = int(re.findall("[0-9]+",threads)[0])
+
+        this_series = Series(op, ngpu, nwgs, nthreads, [])
 
         with open(f"{filename}", 'r') as file1:
             for lno1, line1 in enumerate(file1, start=0):
@@ -110,16 +118,17 @@ for dir, file_names in files_in_dir.items():
                 values = line1.rstrip().split()
                 #print(values)
 
-                size1 = int(values[0])
-                msgcount1 = int(values[1])
-                avg_time1 = float(values[2])
-                avg_bw1 = float(values[3])
-                msg_rate1 = float(values[4])
+                volume1 = int(values[0])
+                size1 = int(values[1])
+                msgcount1 = int(values[2])
+                avg_time1 = float(values[3])
+                avg_bw1 = float(values[4])
+                msg_rate1 = float(values[5])
 
-                if size1 < minmsgsize:
+                if volume1 < minmsgsize:
                     continue
 
-                datapoint = Measurement(size1, msgcount1, avg_time1, avg_bw1, msg_rate1)
+                datapoint = Measurement(volume1, size1, msgcount1, avg_time1, avg_bw1, msg_rate1)
                 this_series.data.append(datapoint)
         all_data.append(this_series)
 
@@ -146,20 +155,24 @@ for dir, file_names in files_in_dir.items():
 
             worksheet.write(pad_top, pad_left+1, f"{data_series.op}", cell_format)
             worksheet.write(pad_top+1, pad_left, f"num-gpus", cell_format)
+            worksheet.write(pad_top+1, pad_left+1, f"num-wgs", cell_format)
+            worksheet.write(pad_top+1, pad_left+2, f"num-threads", cell_format)
             for i in range(0, rows, 1):
-                worksheet.write(pad_top+1, i+pad_left+1, x_str[i], cell_format)
+                worksheet.write(pad_top+1, i+pad_left+3, x_str[i], cell_format)
 
         top_start = pad_top+2 + dataset_count
         worksheet.write(top_start, pad_left, f"{data_series.ngpus}", cell_format)
+        worksheet.write(top_start, pad_left+1, f"{data_series.nwgs}", cell_format)
+        worksheet.write(top_start, pad_left+2, f"{data_series.nthreads}", cell_format)
 
         for i in range(0, rows, 1):
             msg_size = x[i]
-            data_val = -1.0
+            data_val = None
             for pt in data_series.data:
-                if pt.msgsize == msg_size:
+                if pt.volume == msg_size:
                     data_val = pt.avg_time
                     break
-            worksheet.write(top_start, i+pad_left+1, data_val, num_format)
+            worksheet.write(top_start, i+pad_left+3, data_val, num_format)
 
         dataset_count = dataset_count + 1
 
