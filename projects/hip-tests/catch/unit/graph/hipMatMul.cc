@@ -20,9 +20,9 @@ THE SOFTWARE.
 /*
  This code object should be automatically built via "make build_tests".
  In case it's missing, please type the following to generate it,
-   /opt/rocm/hip/bin/hipcc --genco hipMatMul.cc -o hipMatMul.code
+   /opt/rocm/hip/bin/hipcc --cuda-device-only hipMatMul.cc -o hipMatMul.code
 */
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 __device__ int deviceGlobal = 1;
 
 extern "C" __global__ void matmulK(int* A, int* B, int* C, int N) {

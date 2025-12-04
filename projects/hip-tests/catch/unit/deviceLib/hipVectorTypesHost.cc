@@ -92,41 +92,41 @@ template <typename V> bool TestVectorType() {
   V f1 = MakeVector<V>(1);
   V f2 = MakeVector<V>(1);
   V f3 = f1 + f2;
-  REQUIRE(f3 == v2);
+  REQUIRE((f3 == v2));
   f2 = f3 - f1;
-  REQUIRE(f2 == v1);
+  REQUIRE((f2 == v1));
   f1 = f2 * f3;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f2 = f1 / f3;
-  REQUIRE(f2 == v1);
+  REQUIRE((f2 == v1));
   integer_binary_tests(f1, f2, f3);
 
   f1 = MakeVector<V>(2);
   f2 = MakeVector<V>(1);
   f1 += f2;
-  REQUIRE(f1 == v3);
+  REQUIRE((f1 == v3));
   f1 -= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f1 *= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f1 /= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
 
   integer_unary_tests(f1, f2);
 
   f1 = v2;
   f2 = f1++;
-  REQUIRE(f1 == v3);
-  REQUIRE(f2 == v2);
+  REQUIRE((f1 == v3));
+  REQUIRE((f2 == v2));
   f2 = f1--;
-  REQUIRE(f2 == v3);
-  REQUIRE(f1 == v2);
+  REQUIRE((f2 == v3));
+  REQUIRE((f1 == v2));
   f2 = ++f1;
-  REQUIRE(f1 == v3);
-  REQUIRE(f2 == v3);
+  REQUIRE((f1 == v3));
+  REQUIRE((f2 == v3));
   f2 = --f1;
-  REQUIRE(f1 == v2);
-  REQUIRE(f2 == v2);
+  REQUIRE((f1 == v2));
+  REQUIRE((f2 == v2));
 
   REQUIRE(constructor_tests<V>() == true);
 
@@ -134,7 +134,7 @@ template <typename V> bool TestVectorType() {
   f2 = v4;
   f3 = v3;
   REQUIRE(!(f1 == f2));
-  REQUIRE(f1 != f2);
+  REQUIRE((f1 != f2));
 
   using T = typename V::value_type;
 

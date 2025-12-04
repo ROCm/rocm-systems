@@ -78,7 +78,7 @@
 	url = https://github.com/jrmadsen/pybind11.git
 [submodule "projects/rocprofiler-systems/external/sqlite"]
 	path = projects/rocprofiler-systems/external/sqlite
-	url = https://github.com/sqlite/sqlite
+	url = https://github.com/sqlite/sqlite.git
 [submodule "projects/rocprofiler-systems/examples/openmp/external/ompvv"]
 	path = projects/rocprofiler-systems/examples/openmp/external/ompvv
 	url = https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV.git
