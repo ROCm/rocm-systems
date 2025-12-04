@@ -126,6 +126,9 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
          "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
+  
+  // Pre-allocate staging buffer with queue size
+  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
@@ -399,22 +402,22 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
     
-    // Check if packets wrap around the ring buffer boundary.
+    // Check if packets wrap around the ring buffer boundary using unmasked indices.
     // The interceptor callback expects packets to be contiguous in memory.
-    uint64_t start_index = next_packet_ & mask;
-    uint64_t end_index = start_index + packet_count;
-
-    if (end_index > amd_queue_.hsa_queue.size) {
-      // Packets wrap around - copy to a staging contiguous buffer
-      std::vector<AqlPacket> contiguous_packets(packet_count);
+    if ((next_packet_ + packet_count) > ((next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
+      // Packets wrap around - use pre-allocated staging buffer
       for (uint64_t j = 0; j < packet_count; ++j) {
-        contiguous_packets[j] = ring[(next_packet_ + j) & mask];
+        staging_buffer_[j] = ring[(next_packet_ + j) & mask];
       }
-      handler.first(contiguous_packets.data(), packet_count, next_packet_,
+      handler.first(staging_buffer_.data(), packet_count, next_packet_,
                     handler.second, PacketWriter);
+      // Write back modified packets to the ring buffer
+      for (uint64_t j = 0; j < packet_count; ++j) {
+        ring[(next_packet_ + j) & mask] = staging_buffer_[j];
+      }
     } else {
       // Packets are contiguous in the ring buffer
-      handler.first(&ring[start_index], packet_count, next_packet_,
+      handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
                                                  handler.second, PacketWriter);
     }
 
