@@ -2,6 +2,24 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## Unreleased
+
+### Added
+
+**API:**
+
+- Late-loading support: Ability to load ROCprofiler-SDK after HSA/HIP runtime initialization
+  - `rocprofiler_start_late()` - Start profiling after runtime initialization
+  - `rocprofiler_is_late_start()` - Query whether late-loading mode is active
+  - `rocprofiler_stop_late()` - Stop late-loading profiling and restore original functions
+  - New error codes: `ROCPROFILER_STATUS_ERROR_HSA_NOT_AVAILABLE`, `ROCPROFILER_STATUS_ERROR_HIP_NOT_AVAILABLE`
+  - Late-start flags: `ROCPROFILER_LATE_START_HSA`, `ROCPROFILER_LATE_START_HIP`, `ROCPROFILER_LATE_START_AUTO`
+
+**Documentation:**
+
+- Added "Using Late-Loading" how-to guide with code examples
+- Documented late-loading workflow and limitations
+
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
