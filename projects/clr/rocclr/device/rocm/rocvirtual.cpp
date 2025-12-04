@@ -477,7 +477,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
 
-  bool enqueHandler = false;
+  bool enqueHandler = IS_WINDOWS && gpu_.ForceHandler();
   if (AMD_DIRECT_DISPATCH) {
     if (ts != nullptr) {
       enqueHandler =
@@ -1105,8 +1105,12 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
           Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
-
-  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  // Optimization for native AQL path in windows has problems with PM4 emulation,
+  // skipping the doorbel will not wake up the AQL worker thread
+  //if (IS_WINDOWS && !dev().IsPm4Emulation() && (blocking || !hasPendingDispatch_))
+  {
+    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  }
 
   // Mark the flag indicating if a dispatch is outstanding.
   // We are not waiting after every dispatch.
@@ -1698,6 +1702,11 @@ VirtualGPU::~VirtualGPU() {
     if (gpu_queue_ == nullptr) {
       gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
     }
+    // Windows requires an interrupt in more cases than Linux for OS fence updates
+    force_handler_ = IS_WINDOWS;
+    // Force extra barrier to make sure OS gets an interrupt,
+    // but avoid if the PM4 emulation, since PM4 path can deadlock during device destruction
+    hasPendingDispatch_ |= IS_WINDOWS && !dev().IsPm4Emulation();
     // Release the resources of signal
     releaseGpuMemoryFence();
   }
@@ -4037,7 +4046,9 @@ void VirtualGPU::addPinnedMem(amd::Memory* mem) {
       pinnedMems_.push_back(mem);
     }
   } else {
-    if (command_ != nullptr) {
+    // Optimize pinning path for Linux only(KFD has special tracking for pinned memory) or OpenCL,
+    // since OpenCL always waits for completion on CPU
+    if ((command_ != nullptr) && (IS_LINUX || !amd::IS_HIP)) {
       command_->AddPinnedMemory(mem);
     } else {
       //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait

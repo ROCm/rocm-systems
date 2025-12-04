@@ -217,8 +217,13 @@ void HostQueue::finish(bool cpu_wait) {
     // during finish()
     if (command == lastEnqueueCommand_) {
       device_.removeFromActiveQueues(this);
-      lastEnqueueCommand_->release();
-      lastEnqueueCommand_ = nullptr;
+      // Under Windows runtime can't destroy objects in the callback thread.
+      // Aslo runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
+      // then keep the lastEnqueueCommand_ for the interrupt handling.
+      if (IS_LINUX || cpu_wait) {
+        lastEnqueueCommand_->release();
+        lastEnqueueCommand_ = nullptr;
+      }
     }
   }
   // Release all HW queues, which are idle or nearly idle
