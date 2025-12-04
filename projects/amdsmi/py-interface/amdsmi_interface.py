@@ -2191,7 +2191,7 @@ def amdsmi_get_supported_power_cap(
 
 def amdsmi_get_power_cap_info(
     processor_handle: processor_handle_t,
-    sensor_ind: int = 0
+    sensor_ind: int = AmdSmiPowerCapType.PPT0
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -5578,7 +5578,7 @@ def amdsmi_set_gpu_ptl_state(
 
 def amdsmi_get_gpu_ptl_formats(
     processor_handle: processor_handle_t
-    ) -> tuple[int, int]:
+    ) -> Tuple[int, int]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
     data_format1 = amdsmi_wrapper.amdsmi_ptl_data_format_t()

@@ -170,7 +170,6 @@ DEFAULT_DATASET_SIZE = 512 * 1024 * 1024
 
 
 def show_progress(pct: float) -> None:
-
     bar_char = "|"
     bar_size = 60
 
@@ -182,7 +181,6 @@ def show_progress(pct: float) -> None:
 
 # Returns a named tuple with the mean, std deviation and confidence
 def calc_stats(samples: list) -> Stats:
-
     mean = sum(samples) / len(samples)
 
     stdev = 0.0
@@ -213,7 +211,6 @@ class Program:
         self.module = hip.hipModuleLoadData(self.code)
 
     def get_kernel(self, kernel_name: str) -> POINTER:
-
         # TODO: Why doesn't hiprtcGetLoweredName work with non-template functions?
         if "<" in kernel_name:
             kernel_name = hiprtc.hiprtcGetLoweredName(self.prog, kernel_name)
@@ -230,7 +227,6 @@ def launch_kernel(
     stream: POINTER,
     args: list[Any] = [],
 ) -> None:
-
     # Convert to native types
     args_converted = []
     for arg in args:
@@ -262,7 +258,6 @@ def launch_kernel(
 
 # Retrieve the gfx architecture
 def get_gfx_arch(device: int) -> str:
-
     arch_str = hip.hipGetDeviceProperties(device).gcnArchName
 
     # Parse out only gfx
@@ -280,7 +275,6 @@ def run_get_samples(
     stream: POINTER,
     args: list[Any] = [],
 ) -> list[float]:
-
     event_start = hip.hipEventCreate()
     event_stop = hip.hipEventCreate()
 
@@ -405,8 +399,12 @@ def hbm_bw_benchmark(device: int) -> PerfMetrics:
     perf_metrics = PerfMetrics(mean, mean - stats.confidence, mean + stats.confidence)
 
     event_ms = total_bytes / mean / 1e6
+
     print(
-        f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, workgroups:{workgroups}, experiments:{num_experiments}, traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, mean:{mean:.1f} GB/sec, stdev={stdev:.1f} GB/sec"
+        f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+        f"workgroups:{workgroups}, experiments:{num_experiments}, "
+        f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
+        f"mean:{mean:.1f} GB/sec, stdev:{stdev:.1f} GB/sec"
     )
 
     return perf_metrics
@@ -463,7 +461,10 @@ def cache_bw_bench(device: int, type: str, iters: int) -> PerfMetrics:
     event_ms = total_bytes / mean / 1e6
 
     print(
-        f"{type} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, workgroups:{workgroups}, experiments:{num_experiments}, traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, mean:{mean:.1f} GB/sec, stdev={stdev:1f} GB/sec"
+        f"{type} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+        f"workgroups:{workgroups}, experiments:{num_experiments}, "
+        f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
+        f"mean:{mean:.1f} GB/sec, stdev:{stdev:1f} GB/sec"
     )
 
     return perf_metrics
@@ -511,7 +512,6 @@ extern "C" __global__ void LDS_bw(int numIter, float *dummy)
 
 
 def lds_bw_benchmark(device: int) -> PerfMetrics:
-
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
 
@@ -553,7 +553,10 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
     event_ms = total_bytes / mean / 1e6
 
     print(
-        f"LDS BW, GPU ID: {device}, workgroupSize:{workgroup_size}, workgroups:{workgroups}, experiments:{num_experiments}, traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, mean:{mean:.1f} GB/sec, stdev={stdev:1f} GB/sec"
+        f"LDS BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+        f"workgroups:{workgroups}, experiments:{num_experiments}, "
+        f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
+        f"mean:{mean:.1f} GB/sec, stdev:{stdev:1f} GB/sec"
     )
 
     return perf_metrics
@@ -635,7 +638,9 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     event_ms = total_flops / mean / 1e6
 
     print(
-        f"Peak {unit}s ({type}), GPU ID: {device}, workgroupSize:{workgroup_size}, workgroups:{workgroups}, experiments:{num_experiments}, {unit}:{total_flops}, duration:{event_ms:.1f} ms, mean:{mean:.1f} {rate}, stdev={stdev:.1f} GFLOPS"
+        f"workgroups:{workgroups}, experiments:{num_experiments}, "
+        f"{unit}:{total_flops}, duration:{event_ms:.1f} ms, "
+        f"mean:{mean:.1f} {rate}, stdev={stdev:.1f} GFLOPS"
     )
 
     return perf_metrics
@@ -862,30 +867,80 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
         case FP8_E4M3: // fp8 x fp8
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 0, 0, 0, 0, 0, 0);
-        	}
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                );
+            }
         case BF8_E5M2: // bf8 x bf8
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 1, 1, 0, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0
+                );
             }
             break;
         case FP6_E2M3: // fp6 x fp6
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 2, 2, 0, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    2,
+                    2,
+                    0,
+                    0,
+                    0,
+                    0
+                );
             }
             break;
         case BF6_E3M2: // bf6 x bf6
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 3, 3, 0, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    3,
+                    3,
+                    0,
+                    0,
+                    0,
+                    0
+                );
             }
             break;
         case FP4_E2M1: // fp4 x fp4
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(a, a, result, 4, 4, 0, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    4,
+                    4,
+                    0,
+                    0,
+                    0,
+                    0
+                );
             }
             break;
     }
@@ -954,79 +1009,69 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     event_ms = total_flops / mean / 1e6
 
     print(
-        f"Peak MFMA {unit}s ({type}), GPU ID: {device}, workgroupSize:{workgroup_size}, workgroups:{workgroups}, experiments:{experiments}, {unit}:{total_flops}, duration:{event_ms:.2f} ms, mean:{mean:.1f} {rate}, stdev={stdev:.1f} GFLOPS"
+        f"Peak MFMA {unit}s ({type}), GPU ID: {device}, "
+        f"workgroupSize:{workgroup_size}, workgroups:{workgroups}, "
+        f"experiments:{experiments}, {unit}:{total_flops}, "
+        f"duration:{event_ms:.2f} ms, mean:{mean:.1f} {rate}, "
+        f"stdev:{stdev:.1f} GFLOPS"
     )
 
     return perf_metrics
 
 
 def mfma_f32_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F32", "FLOP", "GFLOPS")
 
 
 def mfma_f16_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F16", "FLOP", "GFLOPS")
 
 
 def mfma_bf16_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "BF16", "FLOP", "GFLOPS")
 
 
 def mfma_f64_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F64", "FLOP", "GFLOPS")
 
 
 def mfma_f8_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F8", "FLOP", "GFLOPS")
 
 
 def mfma_i8_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "I8", "IOP", "GOPS")
 
 
 def mfma_f4_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F4", "FLOP", "GFLOPS")
 
 
 def mfma_f6_bench(device: int) -> PerfMetrics:
-
     return mfma_bench(device, "F6", "FLOP", "GFLOPS")
 
 
 def fp16_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
 
 def fp32_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "FP32", "FLOP", "GFLOPS")
 
 
 def fp64_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "FP64", "FLOP", "GFLOPS")
 
 
 def int8_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "INT8", "IOP", "GOPS")
 
 
 def int32_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "INT32", "IOP", "GOPS")
 
 
 def int64_benchmark(device: int) -> PerfMetrics:
-
     return flops_bench(device, "INT64", "IOP", "GOPS")
 
 
@@ -1055,7 +1100,6 @@ tests = {
 
 # Run the roofine tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
-
     metrics_dict = {}
 
     arch = get_gfx_arch(device)
@@ -1079,7 +1123,6 @@ def run_benchmark(device: int) -> dict[PerfMetrics]:
 # Returns a dictionary mapping device ID to dictionary of
 # metrics
 def run_on_devices(devices: list[int]) -> dict[dict[PerfMetrics]]:
-
     metrics = {}
     for d in devices:
         metrics[d] = run_benchmark(d)

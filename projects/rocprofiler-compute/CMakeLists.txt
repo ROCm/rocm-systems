@@ -657,6 +657,8 @@ add_custom_target(
         --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID}
         --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
         --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
+        --include-data-files=src/lib/helper.cpp=lib/helper.cpp
+        --include-data-files=src/lib/helper.hpp=lib/helper.hpp
         --include-package=dash_svg --include-package-data=dash_svg
         --include-package=dash_bootstrap_components
         --include-package-data=dash_bootstrap_components --include-package=plotly
@@ -667,7 +669,8 @@ add_custom_target(
         --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils src/rocprof-compute
+        --include-package=utils --include-package-data=utils
+        --include-package=hip --include-package-data=hip src/rocprof-compute
     # Remove library rpath from executable
     COMMAND patchelf --remove-rpath rocprof-compute.bin
     # Move to build directory
