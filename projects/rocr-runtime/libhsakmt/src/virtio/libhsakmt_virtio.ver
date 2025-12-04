@@ -3,6 +3,7 @@ global:
 vhsaKmtOpenKFD;
 vhsaKmtCloseKFD;
 vhsaKmtAllocMemory;
+vhsaKmtAllocMemoryAlign;
 vhsaKmtFreeMemory;
 vhsaKmtMapMemoryToGPUNodes;
 vhsaKmtUnmapMemoryToGPU;

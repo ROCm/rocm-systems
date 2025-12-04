@@ -326,6 +326,7 @@ typedef struct _memory_req_alloc_args {
   HsaMemFlags MemFlags;
   uint64_t SizeInBytes;
   uint64_t MemoryAddress;
+  uint64_t Alignment;
 } memory_req_alloc_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_req_alloc_args)
 

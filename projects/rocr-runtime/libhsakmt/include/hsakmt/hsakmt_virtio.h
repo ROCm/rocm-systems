@@ -42,6 +42,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenKFD(void);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCloseKFD(void);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
                                            HsaMemFlags MemFlags, void** MemoryAddress);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                                HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                                void** MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtFreeMemory(void* MemoryAddress, HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                    HSAuint64* AlternateVAGPU,
