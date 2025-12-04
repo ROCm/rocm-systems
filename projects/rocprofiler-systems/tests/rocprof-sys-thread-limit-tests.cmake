@@ -69,7 +69,7 @@ foreach(THREADS IN LISTS THREAD_VALUES)
         SKIP_BASELINE
         NAME ${_test_name}
         TARGET thread-limit
-        LABELS "max-threads"
+        LABELS "max-threads;theRock"
         REWRITE_ARGS -e -v 2 -i 1024 --label return args
         RUNTIME_ARGS -e -v 1 -i 1024 --label return args
         RUN_ARGS 35 2 ${THREADS}

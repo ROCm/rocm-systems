@@ -47,7 +47,7 @@ if(${ROCmVersion_FULL_VERSION} VERSION_GREATER_EQUAL "7.0")
         GPU ON
         NUM_PROCS ${NUM_PROCS}
         ENVIRONMENT "${_base_environment};ROCPROFSYS_ROCM_GROUP_BY_QUEUE=YES"
-        LABEL "group-by-queue"
+        LABEL "group-by-queue;theRock"
         RUNTIME_TIMEOUT 480
     )
 
@@ -59,7 +59,7 @@ if(${ROCmVersion_FULL_VERSION} VERSION_GREATER_EQUAL "7.0")
         GPU ON
         NUM_PROCS ${NUM_PROCS}
         ENVIRONMENT "${_base_environment};ROCPROFSYS_ROCM_GROUP_BY_QUEUE=NO"
-        LABEL "group-by-queue"
+        LABEL "group-by-queue;theRock"
         RUNTIME_TIMEOUT 480
     )
 endif()

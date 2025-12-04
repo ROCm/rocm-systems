@@ -29,40 +29,44 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-external
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${_PYTHON_TEST_FILE_PREFIX}/external.py
         PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
+        LABELS "theRock"
     )
 
     rocprofiler_systems_add_python_test(
         NAME python-external-exclude-inefficient
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${_PYTHON_TEST_FILE_PREFIX}/external.py
         PROFILE_ARGS -E "^inefficient$"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
+        LABELS "theRock"
     )
 
     rocprofiler_systems_add_python_test(
         NAME python-builtin
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
+        FILE ${_PYTHON_TEST_FILE_PREFIX}/builtin.py
         PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
+        LABELS "theRock"
     )
 
     rocprofiler_systems_add_python_test(
         NAME python-builtin-noprofile
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
+        FILE ${_PYTHON_TEST_FILE_PREFIX}/noprofile.py
         PROFILE_ARGS "-b" "--label" "file"
         RUN_ARGS -v 15 -n 5
         ENVIRONMENT "${_python_environment}"
+        LABELS "theRock"
     )
 
     rocprofiler_systems_add_python_test(
@@ -70,9 +74,10 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-source
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
+        FILE ${_PYTHON_TEST_FILE_PREFIX}/source.py
         RUN_ARGS -v 5 -n 5 -s 3
         ENVIRONMENT "${_python_environment}"
+        LABELS "theRock"
     )
 
     rocprofiler_systems_add_python_test(
@@ -80,20 +85,20 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-code-coverage
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/code-coverage/code-coverage.py
+        FILE ${_PYTHON_CODE_COVERAGE_FILE_PREFIX}/code-coverage.py
         RUN_ARGS
             -i
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json
+            ${_OUTPUT_PREFIX}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
+            ${_OUTPUT_PREFIX}/rocprof-sys-tests-output/code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json
             -o
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-summary/coverage.json
+            ${_OUTPUT_PREFIX}/rocprof-sys-tests-output/code-coverage-basic-blocks-summary/coverage.json
         DEPENDS code-coverage-basic-blocks-binary-rewrite
                 code-coverage-basic-blocks-binary-rewrite-run
                 code-coverage-basic-blocks-hybrid-runtime-instrument
         FIXTURES_REQUIRED
             code-coverage-basic-blocks-binary-rewrite-fixture
             code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
-        LABELS "code-coverage"
+        LABELS "code-coverage;theRock"
         ENVIRONMENT "${_python_environment}"
     )
 
@@ -120,6 +125,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
             DEPENDS python-external-${_VERSION}
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
 
         rocprofiler_systems_add_python_test(
@@ -130,6 +136,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-external-exclude-inefficient-${_VERSION}
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
 
         rocprofiler_systems_add_python_test(
@@ -140,6 +147,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:17\\\]"
             DEPENDS python-builtin-${_VERSION}
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
 
         rocprofiler_systems_add_python_test(
@@ -151,6 +159,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FAIL_REGEX ".(fib|inefficient)..(noprofile.py).|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-builtin-noprofile-${_VERSION}
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
     else()
         rocprofiler_systems_message(
@@ -160,6 +169,10 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     endif()
 
     function(ROCPROFILER_SYSTEMS_ADD_PYTHON_VALIDATION_TEST)
+        # Skip validation tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+        if(ROCPROFSYS_INSTALL_TESTS)
+            return()
+        endif()
         cmake_parse_arguments(
             TEST
             ""
@@ -179,6 +192,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE} validated"
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
 
         rocprofiler_systems_add_python_test(
@@ -193,6 +207,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
             ENVIRONMENT "${_python_environment}"
+            LABELS "theRock"
         )
 
         if(
@@ -212,7 +227,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 PASS_REGEX
                     "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
                 ENVIRONMENT "${_python_environment}"
-                LABELS "rocpd"
+                LABELS "rocpd;theRock"
             )
         endif()
     endfunction()
@@ -263,7 +278,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
              ${python_source_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-source-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/python/python-source-rules.json"
     )
 
     set(python_builtin_labels
@@ -319,7 +334,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
              ${python_builtin_depth}
         ROCPD_FILE "rocpd.db"
         ROCPD_RULES
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/python/python-builtin-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/python/python-builtin-rules.json"
     )
 
     list(GET ROCPROFSYS_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)

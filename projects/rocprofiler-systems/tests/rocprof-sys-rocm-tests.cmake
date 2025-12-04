@@ -39,6 +39,7 @@ endif()
 rocprofiler_systems_add_test(
     NAME transpose
     TARGET transpose
+    LABELS "theRock"
     MPI ${TRANSPOSE_USE_MPI}
     GPU ON
     NUM_PROCS ${NUM_PROCS}
@@ -62,6 +63,7 @@ rocprofiler_systems_add_test(
     SKIP_REWRITE SKIP_RUNTIME
     NAME transpose-two-kernels
     TARGET transpose
+    LABELS "theRock"
     MPI OFF
     GPU ON
     NUM_PROCS 1
@@ -73,7 +75,7 @@ rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME
     NAME transpose-loops
     TARGET transpose
-    LABELS "loops"
+    LABELS "loops;theRock"
     MPI ${TRANSPOSE_USE_MPI}
     GPU ON
     NUM_PROCS ${NUM_PROCS}
@@ -100,7 +102,8 @@ rocprofiler_systems_add_test(
 #
 # -------------------------------------------------------------------------------------- #
 
-if(ROCPROFSYS_USE_ROCM)
+# Skip hardware specific tests in install mode (for now)
+if(ROCPROFSYS_USE_ROCM AND NOT ROCPROFSYS_INSTALL_TESTS)
     set(NAVI_REGEX "gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]")
     rocprofiler_systems_get_gfx_archs(NAVI_DETECTED GFX_MATCH ${NAVI_REGEX} ECHO)
 
@@ -164,6 +167,7 @@ endif()
 #
 # -------------------------------------------------------------------------------------- #
 
+# TODO: GPU CHECK
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
     set_property(TEST transpose-sampling APPEND PROPERTY LABELS rocpd)
 
@@ -171,12 +175,12 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST transpose-sampling)
         NAME transpose-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/validation-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/amd-smi-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/transpose/validation-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/default-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/transpose/amd-smi-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/transpose/cpu-metrics-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/transpose/timer-sampling-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/transpose/sdk-metrics-rules.json"
         LABELS "rocpd"
     )
 endif()

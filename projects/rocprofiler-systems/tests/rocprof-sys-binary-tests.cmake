@@ -29,6 +29,7 @@
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-help
     TARGET rocprofiler-systems-instrument
+    LABELS "theRock"
     ARGS --help
     LABELS rocprofiler-systems-instrument
     TIMEOUT 45
@@ -59,13 +60,14 @@ rocprofiler_systems_add_bin_test(
          --
          ${LS_NAME}
          ${LS_ARGS}
-    LABELS "simulate"
+    LABELS "simulate;theRock"
     TIMEOUT 240
 )
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-ls-check
     DEPENDS rocprofiler-systems-instrument-simulate-ls
+    LABELS "theRock"
     COMMAND
         ls
         rocprof-sys-tests-output/rocprofiler-systems-instrument-simulate-ls/instrumentation
@@ -80,7 +82,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-instrument
     ARGS --print-available functions -v 2 --
          $<TARGET_FILE:rocprofiler-systems-user-library>
-    LABELS "simulate"
+    LABELS "simulate;theRock"
     TIMEOUT 120
     PASS_REGEX
         "\\\[rocprof-sys\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[rocprof-sys\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
@@ -99,7 +101,7 @@ rocprofiler_systems_add_bin_test(
          ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
          --
          ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
-    LABELS "simulate"
+    LABELS "simulate;theRock"
     TIMEOUT 120
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp
 )
@@ -116,7 +118,7 @@ rocprofiler_systems_add_bin_test(
          --
          ${LS_NAME}
          ${LS_ARGS}
-    LABELS "log"
+    LABELS "log;theRock"
     TIMEOUT 120
     PASS_REGEX "Opening .*/instrumentation/user.log"
 )
@@ -127,7 +129,7 @@ rocprofiler_systems_add_bin_test(
     COMMAND
         ls
         rocprof-sys-tests-output/rocprofiler-systems-instrument-write-log/instrumentation/user.log
-    LABELS "log"
+    LABELS "log;theRock"
     TIMEOUT 60
     PASS_REGEX "user.log"
     FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX"
@@ -137,7 +139,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-help
     TARGET rocprofiler-systems-avail
     ARGS --help
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX
         ".*\\\[rocprof-sys-avail\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[INFO OPTIONS\\\].*\\\[FILTER OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[DISPLAY OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
@@ -147,7 +149,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all
     TARGET rocprofiler-systems-avail
     ARGS --all
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
 )
 
@@ -155,7 +157,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all-expand-keys
     TARGET rocprofiler-systems-avail
     ARGS --all --expand-keys
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     FAIL_REGEX "%[a-zA-Z_]%|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
@@ -165,7 +167,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-avail
     ARGS --all --available --alphabetical --debug --output
          ${CMAKE_CURRENT_BINARY_DIR}/rocprof-sys-avail-all-only-available-alphabetical.log
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PROPERTIES
         ATTACHED_FILES
@@ -176,7 +178,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all-csv
     TARGET rocprofiler-systems-avail
     ARGS --all --csv --csv-separator "#"
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX
         "COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#.*ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#.*HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
@@ -186,7 +188,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-filter-wall-clock-available
     TARGET rocprofiler-systems-avail
     ARGS -r wall_clock -C --available
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
@@ -196,7 +198,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-category-filter-rocprofiler-systems
     TARGET rocprofiler-systems-avail
     ARGS --categories settings::rocprofsys --brief
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGEX
@@ -207,7 +209,7 @@ rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-category-filter-timemory
     TARGET rocprofiler-systems-avail
     ARGS --categories settings::timemory --brief --advanced
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX
         "ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
@@ -229,7 +231,7 @@ rocprofiler_systems_add_bin_test(
          --csv
          --brief
          --advanced
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     TIMEOUT 45
     PASS_REGEX
         "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
@@ -258,7 +260,7 @@ rocprofiler_systems_add_bin_test(
          -c
          rocprofsys
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}test\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}test\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}test\\\.cfg'(.*)"
 )
@@ -269,7 +271,7 @@ rocprofiler_systems_add_bin_test(
     ARGS -G %env{TWD}%/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-tweak.cfg -F
          txt json xml --force
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     ENVIRONMENT "ROCPROFSYS_TRACE=OFF;ROCPROFSYS_PROFILE=ON"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}tweak\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}tweak\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}tweak\\\.cfg'(.*)"
@@ -280,7 +282,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-avail
     ARGS --list-keys --expand-keys
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     PASS_REGEX "Output Keys:\n(.*)%argv%(.*)%argv_hash%"
 )
 
@@ -289,7 +291,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-avail
     ARGS --list-keys --expand-keys --markdown
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail;markdown"
+    LABELS "rocprofiler-systems-avail;markdown;theRock"
     PASS_REGEX "(.*)`%argv%`(.*)`%argv_hash%`"
 )
 
@@ -298,7 +300,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-avail
     ARGS --list-categories
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     PASS_REGEX " component::(.*) hw_counters::(.*) settings::"
 )
 
@@ -307,7 +309,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-avail
     ARGS -c core
     TIMEOUT 45
-    LABELS "rocprofiler-systems-avail"
+    LABELS "rocprofiler-systems-avail;theRock"
     PASS_REGEX
         "ROCPROFSYS_CONFIG_FILE(.*)ROCPROFSYS_ENABLED(.*)ROCPROFSYS_SUPPRESS_CONFIG(.*)ROCPROFSYS_SUPPRESS_PARSING(.*)ROCPROFSYS_VERBOSE"
 )
@@ -317,7 +319,7 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-run
     ARGS --help
     TIMEOUT 45
-    LABELS "rocprofiler-systems-run"
+    LABELS "rocprofiler-systems-run;theRock"
 )
 
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
@@ -426,7 +428,7 @@ if(SLEEP_CMD)
             ${SLEEP_CMD}
             5
         TIMEOUT 45
-        LABELS "rocprofiler-systems-run"
+        LABELS "rocprofiler-systems-run;theRock"
     )
 else()
     rocprofiler_systems_message(WARNING "Sleep command not found. Disabling rocprofiler-systems-run-args ctest...")

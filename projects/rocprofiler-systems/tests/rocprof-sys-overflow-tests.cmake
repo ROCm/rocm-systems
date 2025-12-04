@@ -50,7 +50,7 @@ if(
         REWRITE_ARGS -e -v 2
         RUNTIME_ARGS -e -v 1
         ENVIRONMENT "${_overflow_environment}"
-        LABELS "perf;overflow"
+        LABELS "perf;overflow;theRock"
         SAMPLING_PASS_REGEX "sampling_wall_clock.txt"
         RUNTIME_PASS_REGEX "sampling_wall_clock.txt"
         REWRITE_RUN_PASS_REGEX "sampling_wall_clock.txt"

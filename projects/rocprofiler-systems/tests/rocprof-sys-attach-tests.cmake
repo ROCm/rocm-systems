@@ -45,6 +45,16 @@ if(NOT _VALID_PTRACE_SCOPE)
     return()
 endif()
 
+if(ROCPROFSYS_INSTALL_TESTS)
+    set(_ATTACH_TEST_EXE "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/parallel-overhead/parallel-overhead")
+else()
+    if(TARGET parallel-overhead)
+        set(_ATTACH_TEST_EXE $<TARGET_FILE:parallel-overhead>)
+    else()
+        return()
+    endif()
+endif()
+
 if(NOT TARGET parallel-overhead)
     return()
 endif()
@@ -52,15 +62,15 @@ endif()
 add_test(
     NAME parallel-overhead-attach
     COMMAND
-        ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
-        $<TARGET_FILE:rocprofiler-systems-instrument> -ME "\.c$" -E fib -e -v 1 --label
-        return args file -l -- $<TARGET_FILE:parallel-overhead> 30 8 1000
+        ${_RUN_PID_SCRIPT_PATH}
+        ${_INSTRUMENT_BINARY} -ME "\.c$" -E fib -e -v 1 --label
+        return args file -l -- ${_ATTACH_TEST_EXE} 30 8 1000
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
 set(_parallel_overhead_attach_environ
     "${_attach_environment}"
-    "ROCPROFSYS_OUTPUT_PATH=rocprof-sys-tests-output"
+    "ROCPROFSYS_OUTPUT_PATH=${_OUTPUT_PATH}"
     "ROCPROFSYS_OUTPUT_PREFIX=parallel-overhead-attach/"
 )
 

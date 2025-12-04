@@ -52,7 +52,7 @@ rocprofiler_systems_add_test(
     NAME roctx-api
     TARGET roctx
     GPU ON
-    LABELS "roctx"
+    LABELS "roctx;theRock"
     ENVIRONMENT "${_roctx_environment}"
 )
 
@@ -102,10 +102,11 @@ rocprofiler_systems_add_validation_test(
     NAME roctx-api-sampling
     PERFETTO_METRIC "rocm_marker_api"
     PERFETTO_FILE "perfetto-trace.proto"
-    LABELS "roctx"
+    LABELS "roctx;theRock"
     ARGS -l ${ROCTX_LABEL} -c ${ROCTX_COUNT} -d ${ROCTX_DEPTH} -p
 )
 
+# TODO: GPU CHECK
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST roctx-api-sampling)
     set_property(TEST roctx-api-sampling APPEND PROPERTY LABELS rocpd)
 
@@ -113,10 +114,10 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST roctx-api-sampling)
         NAME roctx-api-sampling
         ROCPD_FILE "rocpd.db"
         ARGS --validation-rules
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/validation-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/sdk-metrics-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/default-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/roctx/amd-smi-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/roctx/validation-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/roctx/sdk-metrics-rules.json"
         LABELS "roctx;rocpd"
     )
 endif()

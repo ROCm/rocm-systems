@@ -25,6 +25,117 @@
 #
 include_guard(DIRECTORY)
 
+if(ROCPROFSYS_INSTALL_TESTS)
+    # Paths for testing against installed binaries
+    # Tests will run against the installed location, not the build directory
+
+    set(ROCPROFSYS_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" 
+        CACHE STRING "Path where rocprofiler-systems is installed" FORCE)
+    set(ROCPROFSYS_SAMPLES_INSTALL_PREFIX 
+        "${ROCPROFSYS_INSTALL_PREFIX}/share/rocprofiler-systems/samples" 
+        CACHE STRING "Path where samples are installed" FORCE)
+    set(ROCPROFSYS_BIN_INSTALL_PREFIX 
+        "${ROCPROFSYS_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" 
+        CACHE STRING "Path where rocprof-sys binaries are installed" FORCE)
+    set(ROCPROFSYS_TEST_INSTALL_PREFIX
+        "${ROCPROFSYS_INSTALL_PREFIX}/share/rocprofiler-systems/tests"
+        CACHE STRING "Path where test configuration files are installed" FORCE)
+    set(ROCPROFSYS_BIN_INSTALL_PREFIX
+        "${ROCPROFSYS_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+        CACHE STRING "Path where rocprof-sys binaries are installed" FORCE)
+
+    # Instrument binary is sometimes used outside of test functions, so we set it here
+    set(_INSTRUMENT_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-instrument")
+
+    # Other paths that need to be changed for install tests
+    set(_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX "${ROCPROFSYS_INSTALL_PREFIX}/share/rocprofiler-systems/tests")
+    
+    set(_RUN_PID_SCRIPT_PATH "${ROCPROFSYS_TEST_INSTALL_PREFIX}/run-rocprof-sys-pid.sh")
+    set(_OUTPUT_PREFIX "@ROCPROFSYS_TEST_OUTPUT@")
+    set(_OUTPUT_PATH "${_OUTPUT_PREFIX}/rocprof-sys-tests-output")
+    set(_PYTHON_TEST_FILE_PREFIX "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/python")
+    set(_PYTHON_CODE_COVERAGE_FILE_PREFIX "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/code-coverage")
+    
+else()
+    set(_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX "${CMAKE_CURRENT_LIST_DIR}")
+    set(_INSTRUMENT_BINARY "$<TARGET_FILE:rocprofiler-systems-instrument>")
+
+    set(_RUN_PID_SCRIPT_PATH "${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh")
+    set(_OUTPUT_PREFIX "${PROJECT_BINARY_DIR}")
+    set(_OUTPUT_PATH "${_OUTPUT_PREFIX}/rocprof-sys-tests-output")
+    set(_PYTHON_TEST_FILE_PREFIX ${CMAKE_SOURCE_DIR}/examples/python)
+    set(_PYTHON_CODE_COVERAGE_FILE_PREFIX ${CMAKE_SOURCE_DIR}/examples/code-coverage)
+endif()
+
+# -------------------------------------------------------------------------------------- #
+# Helper function to map target names to their installed sample paths
+# -------------------------------------------------------------------------------------- #
+
+function(ROCPROFILER_SYSTEMS_GET_INSTALLED_SAMPLE_PATH OUTPUT_VAR TARGET_NAME)
+    # Strip -exec suffix if present (for ompvv)
+    if("${TARGET_NAME}" MATCHES "-exec$")
+        string(REGEX REPLACE "-exec$" "" TARGET_NAME "${TARGET_NAME}")
+    endif()
+    
+    # Map target names to their sample subdirectories based on naming conventions
+    if("${TARGET_NAME}" MATCHES "^openmp-")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/openmp/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^parallel-overhead")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/parallel-overhead/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^mpi-")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/mpi/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^lulesh") # Lulesh bins are in causal dir
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/causal/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^transpose")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/transpose/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^user-api")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/user-api/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^rccl-")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/rccl/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^code-coverage")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/code-coverage/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^causal-")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/causal/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^fork-" OR "${TARGET_NAME}" MATCHES "^hipMallocConcurrency")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/fork/${TARGET_NAME}" PARENT_SCOPE)
+    elseif("${TARGET_NAME}" MATCHES "^python-")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/python/${TARGET_NAME}" PARENT_SCOPE)
+    else()
+        # Fallback - use target name as subdirectory
+        rocprofiler_systems_message(WARNING 
+            "Unknown target pattern for ${TARGET_NAME}, using fallback path mapping")
+        set(${OUTPUT_VAR} "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/${TARGET_NAME}/${TARGET_NAME}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+# Helper function to collect all lib subdirectories paths from installed samples
+# -------------------------------------------------------------------------------------- #
+
+function(ROCPROFILER_SYSTEMS_GET_SAMPLE_LIB_PATHS OUTPUT_VAR)
+    set(_lib_paths "")
+    
+    if(ROCPROFSYS_INSTALL_TESTS AND EXISTS "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}")
+        # Get all subdirectories in the samples directory
+        file(GLOB _sample_dirs 
+            LIST_DIRECTORIES true 
+            "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/*")
+        
+        # Check each subdirectory for a lib folder
+        foreach(_dir ${_sample_dirs})
+            if(IS_DIRECTORY "${_dir}")
+                set(_lib_dir "${_dir}/lib")
+                if(IS_DIRECTORY "${_lib_dir}")
+                    list(APPEND _lib_paths "${_lib_dir}")
+                endif()
+            endif()
+        endforeach()
+    endif()
+    
+    # Return the list of library paths found
+    set(${OUTPUT_VAR} "${_lib_paths}" PARENT_SCOPE)
+endfunction()
+
 set(ROCPROFSYS_ABORT_FAIL_REGEX
     "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
     CACHE INTERNAL
@@ -98,6 +209,26 @@ else()
     set(_test_library_path
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
     )
+endif()
+
+if(ROCPROFSYS_INSTALL_TESTS)
+    set(INSTALLED_LIBRARY_PATH "${ROCPROFSYS_INSTALL_PREFIX}/lib")
+    
+    # Get all sample lib directories
+    rocprofiler_systems_get_sample_lib_paths(_SAMPLE_LIB_PATHS)
+    
+    # Append the main library path
+    string(APPEND _test_library_path ":${INSTALLED_LIBRARY_PATH}")
+    
+    # Append each sample lib path found
+    foreach(_lib_path ${_SAMPLE_LIB_PATHS})
+        string(APPEND _test_library_path ":${_lib_path}")
+    endforeach()
+    
+    if(_SAMPLE_LIB_PATHS)
+        rocprofiler_systems_message(STATUS 
+            "Found ${CMAKE_MATCH_COUNT} sample lib directories for LD_LIBRARY_PATH")
+    endif()
 endif()
 
 set(_test_openmp_env "OMP_PROC_BIND=spread" "OMP_PLACES=threads" "OMP_NUM_THREADS=2")
@@ -268,6 +399,7 @@ if(EXISTS "/proc/sys/kernel/perf_event_paranoid")
     )
 endif()
 
+# TODO: This will need to be ported to runtime at some point
 execute_process(
     COMMAND
         ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
@@ -412,6 +544,11 @@ ROCPROFSYS_SAMPLING_GPUS          = $env:HIP_VISIBLE_DEVICES
 ${_FILE_CONTENTS}
 "
     )
+
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # Point to the installed config file
+        set(_CONFIG_FILE "${ROCPROFSYS_TEST_INSTALL_PREFIX}/rocprof-sys-tests-config/${_FILE}")
+    endif()
     list(APPEND _ENV_CONTENTS "ROCPROFSYS_CONFIG_FILE=${_CONFIG_FILE}")
     if(_DEBUG_SETTINGS)
         list(APPEND _ENV_CONTENTS "ROCPROFSYS_DEBUG_SETTINGS=1")
@@ -647,251 +784,302 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
         list(APPEND TEST_LABELS "amd-smi")
     endif()
 
-    if(TARGET ${TEST_TARGET})
-        if(DEFINED TEST_MPI AND ${TEST_MPI} AND TEST_NUM_PROCS GREATER 0)
-            if(NOT TEST_NUM_PROCS GREATER NUM_PROCS_REAL)
-                set(COMMAND_PREFIX
-                    ${MPIEXEC_EXECUTABLE}
-                    ${MPIEXEC_EXECUTABLE_ARGS}
-                    ${MPIEXEC_NUMPROC_FLAG}
-                    ${TEST_NUM_PROCS}
-                )
-                list(APPEND TEST_LABELS mpi parallel-${TEST_NUM_PROCS})
-                list(APPEND TEST_PROPERTIES PARALLEL_LEVEL ${TEST_NUM_PROCS})
-            else()
-                set(COMMAND_PREFIX
-                    ${MPIEXEC_EXECUTABLE}
-                    ${MPIEXEC_EXECUTABLE_ARGS}
-                    ${MPIEXEC_NUMPROC_FLAG}
-                    1
-                )
-            endif()
+    # -------------------------------------------------------------------------------------- #
+    # Determine whether to create tests and which binary paths to use
+    # -------------------------------------------------------------------------------------- #
+    
+    set(_USE_INSTALLED_PATHS FALSE)
+    
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # Only tests with "theRock" label are processed
+        if("theRock" IN_LIST TEST_LABELS)
+            set(_USE_INSTALLED_PATHS TRUE)
+            rocprofiler_systems_message(STATUS 
+                "[Install Test] Creating placeholder test for: ${TEST_NAME}")
         else()
-            list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_USE_PID=OFF")
+            return()
         endif()
-
-        if(NOT TEST_SKIP_BASELINE AND NOT ROCPROFSYS_USE_SANITIZER)
-            add_test(
-                NAME ${TEST_NAME}-baseline
-                COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    elseif(NOT TARGET ${TEST_TARGET})
+        return()
+    endif()
+    
+    # -------------------------------------------------------------------------------------- #
+    # Set up binary paths based on mode (build vs install)
+    # -------------------------------------------------------------------------------------- #
+    
+    if(_USE_INSTALLED_PATHS)
+        # Use installed paths (hardcoded, no generator expressions)
+        rocprofiler_systems_get_installed_sample_path(_TEST_BINARY "${TEST_TARGET}")
+        set(_INSTRUMENT_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-instrument")
+        set(_SAMPLE_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-sample")
+        set(_RUN_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-run")
+        set(_CAUSAL_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-causal")
+        
+        # A script will replace @ROCPROFSYS_TEST_TMPDIR@ with actual path
+        set(_REWRITE_OUTPUT "@ROCPROFSYS_TEST_TMPDIR@/${TEST_NAME}.inst")
+        
+        rocprofiler_systems_message(STATUS 
+            "  Sample binary: ${_TEST_BINARY}")
+        
+    else()
+        set(_TEST_BINARY "$<TARGET_FILE:${TEST_TARGET}>")
+        set(_INSTRUMENT_BINARY "$<TARGET_FILE:rocprofiler-systems-instrument>")
+        set(_SAMPLE_BINARY "$<TARGET_FILE:rocprofiler-systems-sample>")
+        set(_RUN_BINARY "$<TARGET_FILE:rocprofiler-systems-run>")
+        set(_CAUSAL_BINARY "$<TARGET_FILE:rocprofiler-systems-causal>")
+        set(_REWRITE_OUTPUT "$<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst")
+    endif()
+    
+    set(_working_directory "${_OUTPUT_PREFIX}")
+    # -------------------------------------------------------------------------------------- #
+    # Now create tests using the determined paths
+    # -------------------------------------------------------------------------------------- #
+    
+    if(DEFINED TEST_MPI AND ${TEST_MPI} AND TEST_NUM_PROCS GREATER 0)
+        if(NOT TEST_NUM_PROCS GREATER NUM_PROCS_REAL)
+            set(COMMAND_PREFIX
+                ${MPIEXEC_EXECUTABLE}
+                ${MPIEXEC_EXECUTABLE_ARGS}
+                ${MPIEXEC_NUMPROC_FLAG}
+                ${TEST_NUM_PROCS}
             )
-        endif()
-
-        if(NOT TEST_SKIP_SAMPLING)
-            add_test(
-                NAME ${TEST_NAME}-sampling
-                COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-sample>
-                    ${TEST_SAMPLE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-        endif()
-
-        if(NOT TEST_SKIP_REWRITE)
-            add_test(
-                NAME ${TEST_NAME}-binary-rewrite
-                COMMAND
-                    $<TARGET_FILE:rocprofiler-systems-instrument> -o
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
-                    ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-
-            add_test(
-                NAME ${TEST_NAME}-binary-rewrite-run
-                COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-run> --
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-
-            add_test(
-                NAME ${TEST_NAME}-binary-rewrite-cleanup
-                COMMAND
-                    ${CMAKE_COMMAND} -E rm -rf
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
-                    ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-binary-rewrite
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-        endif()
-
-        if(NOT TEST_SKIP_RUNTIME AND NOT ROCPROFSYS_USE_SANITIZER)
-            add_test(
-                NAME ${TEST_NAME}-runtime-instrument
-                COMMAND
-                    $<TARGET_FILE:rocprofiler-systems-instrument> ${TEST_RUNTIME_ARGS} --
-                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-
-            add_test(
-                NAME ${TEST_NAME}-runtime-instrument-cleanup
-                COMMAND
-                    ${CMAKE_COMMAND} -E rm -rf
-                    ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-runtime-instrument
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            list(APPEND TEST_LABELS mpi parallel-${TEST_NUM_PROCS})
+            list(APPEND TEST_PROPERTIES PARALLEL_LEVEL ${TEST_NUM_PROCS})
+        else()
+            set(COMMAND_PREFIX
+                ${MPIEXEC_EXECUTABLE}
+                ${MPIEXEC_EXECUTABLE_ARGS}
+                ${MPIEXEC_NUMPROC_FLAG}
+                1
             )
         endif()
+    else()
+        list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_USE_PID=OFF")
+    endif()
 
-        if(NOT TEST_SKIP_SYS_RUN)
-            add_test(
-                NAME ${TEST_NAME}-sys-run
-                COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE:rocprofiler-systems-run> --
-                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
-        endif()
-
-        if(TEST ${TEST_NAME}-binary-rewrite-run)
-            set_tests_properties(
-                ${TEST_NAME}-binary-rewrite-run
-                PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite
-            )
-        endif()
-
-        foreach(
-            _TEST
-            baseline
-            sampling
-            binary-rewrite
-            binary-rewrite-run
-            binary-rewrite-cleanup
-            runtime-instrument
-            runtime-instrument-cleanup
-            sys-run
+    if(NOT TEST_SKIP_BASELINE AND NOT ROCPROFSYS_USE_SANITIZER)
+        add_test(
+            NAME ${TEST_NAME}-baseline
+            COMMAND ${COMMAND_PREFIX} ${_TEST_BINARY} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
         )
-            string(
-                REGEX REPLACE
-                "rewrite-run(-|/)"
-                "rewrite\\1"
-                _prefix
-                "${TEST_NAME}-${_TEST}/"
-            )
-            set(_labels "${_TEST}")
-            string(REPLACE "rewrite-run" "rewrite" _labels "${_TEST}")
-            if(TEST_TARGET)
-                list(APPEND _labels "${TEST_TARGET}")
-            endif()
-            if(TEST_LABELS)
-                list(APPEND _labels "${TEST_LABELS}")
-            endif()
+    endif()
 
-            set(_environ
-                "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS=64"
-                "${TEST_ENVIRONMENT}"
-                "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
-                "ROCPROFSYS_OUTPUT_PREFIX=${_prefix}"
-            )
+    if(NOT TEST_SKIP_SAMPLING)
+        add_test(
+            NAME ${TEST_NAME}-sampling
+            COMMAND
+                ${COMMAND_PREFIX} ${_SAMPLE_BINARY}
+                ${TEST_SAMPLING_ARGS} -- ${_TEST_BINARY} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
+        )
+    endif()
 
-            set(_timeout ${TEST_REWRITE_TIMEOUT})
-            if("${_TEST}" MATCHES "sampling")
-                set(_timeout ${TEST_SAMPLING_TIMEOUT})
-            elseif("${_TEST}" MATCHES "runtime-instrument")
-                set(_timeout ${TEST_RUNTIME_TIMEOUT})
-            elseif("${_TEST}" MATCHES "sys-run")
-                set(_timeout ${TEST_SYS_RUN_TIMEOUT})
+    if(NOT TEST_SKIP_REWRITE)
+        add_test(
+            NAME ${TEST_NAME}-binary-rewrite
+            COMMAND
+                ${_INSTRUMENT_BINARY} -o
+                ${_REWRITE_OUTPUT}
+                ${TEST_REWRITE_ARGS} -- ${_TEST_BINARY}
+            WORKING_DIRECTORY ${_working_directory}
+        )
+
+        add_test(
+            NAME ${TEST_NAME}-binary-rewrite-run
+            COMMAND
+                ${COMMAND_PREFIX} ${_RUN_BINARY} --
+                ${_REWRITE_OUTPUT} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
+        )
+
+        add_test(
+            NAME ${TEST_NAME}-binary-rewrite-cleanup
+            COMMAND
+                ${CMAKE_COMMAND} -E rm -rf
+                ${_REWRITE_OUTPUT}
+                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-binary-rewrite
+            WORKING_DIRECTORY ${_working_directory}
+        )
+    endif()
+
+    if(NOT TEST_SKIP_RUNTIME AND NOT ROCPROFSYS_USE_SANITIZER)
+        add_test(
+            NAME ${TEST_NAME}-runtime-instrument
+            COMMAND
+                ${_INSTRUMENT_BINARY} ${TEST_RUNTIME_ARGS} --
+                ${_TEST_BINARY} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
+        )
+
+        add_test(
+            NAME ${TEST_NAME}-runtime-instrument-cleanup
+            COMMAND
+                ${CMAKE_COMMAND} -E rm -rf
+                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}-runtime-instrument
+            WORKING_DIRECTORY ${_working_directory}
+        )
+    endif()
+
+    if(NOT TEST_SKIP_SYS_RUN)
+        add_test(
+            NAME ${TEST_NAME}-sys-run
+            COMMAND
+                ${COMMAND_PREFIX} ${_RUN_BINARY} --
+                ${_TEST_BINARY} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
+        )
+    endif()
+
+    if(TEST ${TEST_NAME}-binary-rewrite-run)
+        set_tests_properties(
+            ${TEST_NAME}-binary-rewrite-run
+            PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite
+        )
+    endif()
+
+    foreach(
+        _TEST
+        baseline
+        sampling
+        binary-rewrite
+        binary-rewrite-run
+        binary-rewrite-cleanup
+        runtime-instrument
+        runtime-instrument-cleanup
+        sys-run
+    )
+        string(
+            REGEX REPLACE
+            "rewrite-run(-|/)"
+            "rewrite\\1"
+            _prefix
+            "${TEST_NAME}-${_TEST}/"
+        )
+        set(_labels "${_TEST}")
+        string(REPLACE "rewrite-run" "rewrite" _labels "${_TEST}")
+        if(TEST_TARGET)
+            list(APPEND _labels "${TEST_TARGET}")
+        endif()
+        if(TEST_LABELS)
+            list(APPEND _labels "${TEST_LABELS}")
+        endif()
+
+        set(_output_path "${_OUTPUT_PATH}")
+
+        set(_environ
+            "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS=64"
+            "${TEST_ENVIRONMENT}"
+            "ROCPROFSYS_OUTPUT_PATH=${_output_path}"
+            "ROCPROFSYS_OUTPUT_PREFIX=${_prefix}"
+        )
+
+        set(_timeout ${TEST_REWRITE_TIMEOUT})
+        if("${_TEST}" MATCHES "sampling")
+            set(_timeout ${TEST_SAMPLING_TIMEOUT})
+        elseif("${_TEST}" MATCHES "runtime-instrument")
+            set(_timeout ${TEST_RUNTIME_TIMEOUT})
+        elseif("${_TEST}" MATCHES "sys-run")
+            set(_timeout ${TEST_SYS_RUN_TIMEOUT})
+        endif()
+
+        set(_props)
+        if("${_TEST}" MATCHES "sys-run|sampling|baseline")
+            set(_props ${TEST_PROPERTIES})
+            if(NOT "RUN_SERIAL" IN_LIST _props)
+                list(APPEND _props RUN_SERIAL ON)
             endif()
+        endif()
 
-            set(_props)
-            if("${_TEST}" MATCHES "sys-run|sampling|baseline")
-                set(_props ${TEST_PROPERTIES})
-                if(NOT "RUN_SERIAL" IN_LIST _props)
-                    list(APPEND _props RUN_SERIAL ON)
-                endif()
-            endif()
+        if("${_TEST}" MATCHES "-cleanup$")
+            set(_REGEX_VAR)
+        elseif("${_TEST}" MATCHES "binary-rewrite-run")
+            set(_REGEX_VAR REWRITE_RUN)
+        elseif("${_TEST}" MATCHES "runtime-instrument")
+            set(_REGEX_VAR RUNTIME)
+        elseif("${_TEST}" MATCHES "binary-rewrite")
+            set(_REGEX_VAR REWRITE)
+        elseif("${_TEST}" MATCHES "baseline")
+            set(_REGEX_VAR BASELINE)
+        elseif("${_TEST}" MATCHES "sampling")
+            set(_REGEX_VAR SAMPLING)
+        elseif("${_TEST}" MATCHES "sys-run")
+            set(_REGEX_VAR SYS_RUN)
+        else()
+            set(_REGEX_VAR)
+        endif()
 
-            if("${_TEST}" MATCHES "-cleanup$")
-                set(_REGEX_VAR)
-            elseif("${_TEST}" MATCHES "binary-rewrite-run")
-                set(_REGEX_VAR REWRITE_RUN)
-            elseif("${_TEST}" MATCHES "runtime-instrument")
-                set(_REGEX_VAR RUNTIME)
-            elseif("${_TEST}" MATCHES "binary-rewrite")
-                set(_REGEX_VAR REWRITE)
-            elseif("${_TEST}" MATCHES "baseline")
-                set(_REGEX_VAR BASELINE)
-            elseif("${_TEST}" MATCHES "sampling")
-                set(_REGEX_VAR SAMPLING)
-            elseif("${_TEST}" MATCHES "sys-run")
-                set(_REGEX_VAR SYS_RUN)
+        if(
+            "${_TEST}"
+                MATCHES
+                "binary-rewrite-run|runtime-instrument|sampling|sys-run"
+        )
+            rocprofiler_systems_patch_sanitizer_environment(_environ)
+        endif()
+
+        rocprofiler_systems_adjust_timeout_for_sanitizer(_timeout)
+
+        foreach(_TYPE PASS FAIL SKIP)
+            if(_REGEX_VAR)
+                set(_${_TYPE}_REGEX TEST_${_REGEX_VAR}_${_TYPE}_REGEX)
             else()
-                set(_REGEX_VAR)
+                set(_${_TYPE}_REGEX)
             endif()
+        endforeach()
 
-            if(
-                "${_TEST}"
-                    MATCHES
-                    "binary-rewrite-run|runtime-instrument|sampling|sys-run"
+        list(APPEND _environ "ROCPROFSYS_CI_TIMEOUT=${_timeout}")
+
+        rocprofiler_systems_check_pass_fail_regex("${TEST_NAME}-${_TEST}"
+            "${_PASS_REGEX}" "${_FAIL_REGEX}"
+        )
+        if(TEST ${TEST_NAME}-${_TEST})
+            rocprofiler_systems_write_test_config(${TEST_NAME}-${_TEST}.cfg _environ)
+            set_tests_properties(
+                ${TEST_NAME}-${_TEST}
+                PROPERTIES
+                    ENVIRONMENT "${_environ}"
+                    TIMEOUT ${_timeout}
+                    LABELS "${_labels}"
+                    PASS_REGULAR_EXPRESSION "${${_PASS_REGEX}}"
+                    FAIL_REGULAR_EXPRESSION "${${_FAIL_REGEX}}"
+                    SKIP_REGULAR_EXPRESSION "${${_SKIP_REGEX}}"
+                    WILL_FAIL ${TEST_WILL_FAIL}
+                    DISABLED ${TEST_DISABLED}
+                    FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                    ${_props}
             )
-                rocprofiler_systems_patch_sanitizer_environment(_environ)
-            endif()
 
-            rocprofiler_systems_adjust_timeout_for_sanitizer(_timeout)
-
-            foreach(_TYPE PASS FAIL SKIP)
-                if(_REGEX_VAR)
-                    set(_${_TYPE}_REGEX TEST_${_REGEX_VAR}_${_TYPE}_REGEX)
-                else()
-                    set(_${_TYPE}_REGEX)
-                endif()
-            endforeach()
-
-            list(APPEND _environ "ROCPROFSYS_CI_TIMEOUT=${_timeout}")
-
-            rocprofiler_systems_check_pass_fail_regex("${TEST_NAME}-${_TEST}"
-                "${_PASS_REGEX}" "${_FAIL_REGEX}"
-            )
-            if(TEST ${TEST_NAME}-${_TEST})
-                rocprofiler_systems_write_test_config(${TEST_NAME}-${_TEST}.cfg _environ)
+            if("${_TEST}" STREQUAL "binary-rewrite")
+                set_tests_properties(
+                    ${TEST_NAME}-${_TEST}
+                    PROPERTIES FIXTURES_SETUP ${TEST_NAME}-binary-rewrite-fixture
+                )
+            elseif("${_TEST}" STREQUAL "binary-rewrite-run")
                 set_tests_properties(
                     ${TEST_NAME}-${_TEST}
                     PROPERTIES
-                        ENVIRONMENT "${_environ}"
-                        TIMEOUT ${_timeout}
-                        LABELS "${_labels}"
-                        PASS_REGULAR_EXPRESSION "${${_PASS_REGEX}}"
-                        FAIL_REGULAR_EXPRESSION "${${_FAIL_REGEX}}"
-                        SKIP_REGULAR_EXPRESSION "${${_SKIP_REGEX}}"
-                        WILL_FAIL ${TEST_WILL_FAIL}
-                        DISABLED ${TEST_DISABLED}
-                        FIXTURES_REQUIRED rocprofsys-global-tmp-files
-                        ${_props}
+                        FIXTURES_REQUIRED
+                            "rocprofsys-global-tmp-files;${TEST_NAME}-binary-rewrite-fixture"
                 )
-
-                if("${_TEST}" STREQUAL "binary-rewrite")
-                    set_tests_properties(
-                        ${TEST_NAME}-${_TEST}
-                        PROPERTIES FIXTURES_SETUP ${TEST_NAME}-binary-rewrite-fixture
-                    )
-                elseif("${_TEST}" STREQUAL "binary-rewrite-run")
-                    set_tests_properties(
-                        ${TEST_NAME}-${_TEST}
-                        PROPERTIES
-                            FIXTURES_REQUIRED
-                                "rocprofsys-global-tmp-files;${TEST_NAME}-binary-rewrite-fixture"
-                    )
-                elseif("${_TEST}" STREQUAL "binary-rewrite-cleanup")
-                    set_tests_properties(
-                        ${TEST_NAME}-${_TEST}
-                        PROPERTIES FIXTURES_CLEANUP ${TEST_NAME}-binary-rewrite-fixture
-                    )
-                elseif("${_TEST}" STREQUAL "runtime-instrument")
-                    set_tests_properties(
-                        ${TEST_NAME}-${_TEST}
-                        PROPERTIES FIXTURES_SETUP ${TEST_NAME}-runtime-instrument-fixture
-                    )
-                elseif("${_TEST}" STREQUAL "runtime-instrument-cleanup")
-                    set_tests_properties(
-                        ${TEST_NAME}-${_TEST}
-                        PROPERTIES
-                            FIXTURES_CLEANUP ${TEST_NAME}-runtime-instrument-fixture
-                    )
-                endif()
+            elseif("${_TEST}" STREQUAL "binary-rewrite-cleanup")
+                set_tests_properties(
+                    ${TEST_NAME}-${_TEST}
+                    PROPERTIES FIXTURES_CLEANUP ${TEST_NAME}-binary-rewrite-fixture
+                )
+            elseif("${_TEST}" STREQUAL "runtime-instrument")
+                set_tests_properties(
+                    ${TEST_NAME}-${_TEST}
+                    PROPERTIES FIXTURES_SETUP ${TEST_NAME}-runtime-instrument-fixture
+                )
+            elseif("${_TEST}" STREQUAL "runtime-instrument-cleanup")
+                set_tests_properties(
+                    ${TEST_NAME}-${_TEST}
+                    PROPERTIES
+                        FIXTURES_CLEANUP ${TEST_NAME}-runtime-instrument-fixture
+                )
             endif()
-        endforeach()
-    endif()
+        endif()
+    endforeach()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
@@ -939,29 +1127,69 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
         set(TEST_CAUSAL_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
     endif()
 
-    if(TARGET ${TEST_TARGET})
-        set(COMMAND_PREFIX
-            $<TARGET_FILE:rocprofiler-systems-causal>
-            --reset
-            -m
-            ${TEST_CAUSAL_MODE}
-            ${TEST_CAUSAL_ARGS}
-            --
-        )
-
-        if(NOT TEST_SKIP_BASELINE)
-            add_test(
-                NAME ${TEST_NAME}-baseline
-                COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-            )
+    # -------------------------------------------------------------------------------------- #
+    # Determine whether to create tests and which binary paths to use
+    # -------------------------------------------------------------------------------------- #
+    
+    set(_USE_INSTALLED_PATHS FALSE)
+    
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # Only tests with "theRock" label are processed
+        if("theRock" IN_LIST TEST_LABELS)
+            set(_USE_INSTALLED_PATHS TRUE)
+            rocprofiler_systems_message(STATUS 
+                "[Install Test] Creating placeholder causal test for: ${TEST_NAME}")
+        else()
+            return()
         endif()
+    endif()
 
+    # -------------------------------------------------------------------------------------- #
+    # Set up binary paths based on mode (build vs install)
+    # -------------------------------------------------------------------------------------- #
+    
+    if(_USE_INSTALLED_PATHS)
+        # Use installed paths (hardcoded, no generator expressions)
+        rocprofiler_systems_get_installed_sample_path(_TEST_BINARY "${TEST_TARGET}")
+        set(_CAUSAL_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-causal")
+        
+        rocprofiler_systems_message(STATUS 
+            "  Causal test sample binary: ${_TEST_BINARY}")
+    elseif(TARGET ${TEST_TARGET})
+        set(_TEST_BINARY "$<TARGET_FILE:${TEST_TARGET}>")
+        set(_CAUSAL_BINARY "$<TARGET_FILE:rocprofiler-systems-causal>")
+    else()
+        return()
+    endif()
+
+    set(_working_directory "${_OUTPUT_PREFIX}")
+
+    # -------------------------------------------------------------------------------------- #
+    # Now create tests using the determined paths
+    # -------------------------------------------------------------------------------------- #
+
+    set(COMMAND_PREFIX
+        ${_CAUSAL_BINARY}
+        --reset
+        -m
+        ${TEST_CAUSAL_MODE}
+        ${TEST_CAUSAL_ARGS}
+        --
+    )
+
+    if(NOT TEST_SKIP_BASELINE)
         add_test(
-            NAME causal-${TEST_NAME}
-            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            NAME ${TEST_NAME}-baseline
+            COMMAND ${_TEST_BINARY} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${_working_directory}
         )
+    endif()
+
+    add_test(
+        NAME causal-${TEST_NAME}
+        COMMAND ${COMMAND_PREFIX} ${_TEST_BINARY} ${TEST_RUN_ARGS}
+        WORKING_DIRECTORY ${_working_directory}
+    )
 
         if(NOT "${TEST_CAUSAL_VALIDATE_ARGS}" STREQUAL "")
             if(
@@ -979,7 +1207,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                 COMMAND
                     ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py ${_VALIDATE_EXTRA}
                     ${TEST_CAUSAL_VALIDATE_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${_working_directory}
             )
         endif()
 
@@ -1012,9 +1240,10 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                 list(APPEND _labels "${TEST_LABELS}")
             endif()
 
+            set(_output_path "${_OUTPUT_PATH}")
             set(_environ
                 "${_causal_environment}"
-                "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+                "ROCPROFSYS_OUTPUT_PATH=${_output_path}"
                 "ROCPROFSYS_OUTPUT_PREFIX=${_prefix}"
                 "ROCPROFSYS_CI=ON"
                 "ROCPROFSYS_USE_PID=OFF"
@@ -1069,7 +1298,6 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                     ${_props}
             )
         endforeach()
-    endif()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
@@ -1087,6 +1315,30 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         # value args
         ${ARGN}
     )
+
+    set(_USE_INSTALLED_PATHS FALSE)
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # Only tests with "theRock" label are processed
+        if("theRock" IN_LIST TEST_LABELS)
+            set(_USE_INSTALLED_PATHS TRUE)
+            rocprofiler_systems_message(STATUS 
+                "[Install Test] Creating placeholder python test for: ${TEST_NAME}")
+        else()
+            return()
+        endif()
+    endif()
+
+    # -------------------------------------------------------------------------------------- #
+    # Set up output paths based on mode (build vs install)
+    # -------------------------------------------------------------------------------------- #
+    
+    if(_USE_INSTALLED_PATHS)
+        set(_output_path "${_OUTPUT_PATH}")
+        set(_working_directory "${_OUTPUT_PREFIX}")
+    else()
+        set(_output_path "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output")
+        set(_working_directory "${PROJECT_BINARY_DIR}")
+    endif()
 
     if(NOT TEST_TIMEOUT)
         set(TEST_TIMEOUT 120)
@@ -1106,7 +1358,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
         list(
             APPEND TEST_ENVIRONMENT
             "ROCPROFSYS_CI=ON"
-            "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+            "ROCPROFSYS_OUTPUT_PATH=${_output_path}"
         )
         get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
         set(_TEST_FILE
@@ -1124,7 +1376,7 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
                 COMMAND ${TEST_PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${_working_directory}
             )
         else()
             add_test(
@@ -1132,22 +1384,39 @@ function(ROCPROFILER_SYSTEMS_ADD_PYTHON_TEST)
                 COMMAND
                     ${TEST_PYTHON_EXECUTABLE} -m rocprofsys ${TEST_PROFILE_ARGS} --
                     ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${_working_directory}
             )
             add_test(
                 NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated
                 COMMAND
                     ${TEST_PYTHON_EXECUTABLE} -m rocprofsys ${TEST_PROFILE_ARGS}
                     --annotate-trace -- ${_TEST_FILE} ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                WORKING_DIRECTORY ${_working_directory}
             )
         endif()
     else()
         list(APPEND TEST_LABELS "python-check" "python-${TEST_PYTHON_VERSION}-check")
+        
+        # For install tests, substitute hardcoded relative paths with absolute paths
+        if(ROCPROFSYS_INSTALL_TESTS)
+            set(_substituted_command "")
+            foreach(_arg IN LISTS TEST_COMMAND)
+                # Replace "rocprof-sys-tests-output" with the install test output path
+                string(REPLACE "rocprof-sys-tests-output" "${_output_path}" _new_arg "${_arg}")
+                list(APPEND _substituted_command "${_new_arg}")
+            endforeach()
+            
+            set(_substituted_file "${TEST_FILE}")
+            string(REPLACE "rocprof-sys-tests-output" "${_output_path}" _substituted_file "${_substituted_file}")
+        else()
+            set(_substituted_command "${TEST_COMMAND}")
+            set(_substituted_file "${TEST_FILE}")
+        endif()
+        
         add_test(
             NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
-            COMMAND ${TEST_COMMAND} ${TEST_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            COMMAND ${_substituted_command} ${_substituted_file}
+            WORKING_DIRECTORY ${_working_directory}
         )
     endif()
 
@@ -1296,6 +1565,14 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
         return()
     endif()
+    
+    # Skip if parent test doesn't have theRock label in install mode
+    if(ROCPROFSYS_INSTALL_TESTS)
+        get_test_property(${TEST_NAME} LABELS PARENT_TEST_LABELS)
+        if(NOT "theRock" IN_LIST PARENT_TEST_LABELS)
+            return()
+        endif()
+    endif()
 
     if(NOT TEST_TIMEOUT)
         set(TEST_TIMEOUT 30)
@@ -1328,26 +1605,36 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}|${TEST_ROCPD_FILE}) validated"
         )
     endif()
+    
+    # Determine output path based on mode
+    set(_output_path "${_OUTPUT_PATH}/${TEST_NAME}")
+    set(_working_directory "${_OUTPUT_PREFIX}")
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # For install tests, use placeholder that will be replaced
+        set(_VALIDATION_SCRIPT_PATH "${ROCPROFSYS_TEST_INSTALL_PREFIX}")
+    else()
+        set(_VALIDATION_SCRIPT_PATH "${CMAKE_CURRENT_LIST_DIR}")
+    endif()
 
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
             COMMAND
                 test -e
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                ${_output_path}/${_FILE}
+            WORKING_DIRECTORY ${_working_directory}
         )
     endforeach()
 
-    if(TEST_TIMEMORY_FILE)
+    if(TEST_TIMEMORY_FILE AND NOT ROCPROFSYS_INSTALL_TESTS)
         add_test(
             NAME validate-${TEST_NAME}-timemory
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py -m
+                ${_VALIDATION_SCRIPT_PATH}/validate-timemory-json.py -m
                 "${TEST_TIMEMORY_METRIC}" ${TEST_ARGS} -i
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                ${_output_path}/${TEST_TIMEMORY_FILE}
+            WORKING_DIRECTORY ${_working_directory}
         )
     endif()
 
@@ -1356,11 +1643,11 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             NAME validate-${TEST_NAME}-perfetto
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m
+                ${_VALIDATION_SCRIPT_PATH}/validate-perfetto-proto.py -m
                 "${TEST_PERFETTO_METRIC}" ${TEST_ARGS} -i
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_PERFETTO_FILE}
+                ${_output_path}/${TEST_PERFETTO_FILE}
                 -t /opt/trace_processor/bin/trace_processor_shell
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${_working_directory}
         )
     endif()
 
@@ -1369,10 +1656,10 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             NAME validate-${TEST_NAME}-rocpd
             COMMAND
                 ${ROCPROFSYS_VALIDATION_PYTHON}
-                ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py -db
-                ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${TEST_ROCPD_FILE}
+                ${_VALIDATION_SCRIPT_PATH}/validate-rocpd.py -db
+                ${_output_path}/${TEST_ROCPD_FILE}
                 ${TEST_ARGS}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+            WORKING_DIRECTORY ${_working_directory}
         )
     endif()
 
@@ -1450,8 +1737,31 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         ${ARGN}
     )
 
+    # -------------------------------------------------------------------------------------- #
+    # Determine whether to create tests and which binary paths to use
+    # -------------------------------------------------------------------------------------- #
+    
+    set(_USE_INSTALLED_PATHS FALSE)
+    
+    if(ROCPROFSYS_INSTALL_TESTS)
+        # Only tests with "theRock" label are processed
+        if("theRock" IN_LIST TEST_LABELS)
+            set(_USE_INSTALLED_PATHS TRUE)
+            rocprofiler_systems_message(STATUS 
+                "[Install Test] Creating placeholder bin test for: ${TEST_NAME}")
+        else()
+            return()
+        endif()
+    elseif(NOT TEST_COMMAND AND NOT TARGET ${TEST_TARGET})
+        if(ROCPROFSYS_BUILD_TESTING)
+            message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
+        else()
+            return()
+        endif()
+    endif()
+
     if(NOT TEST_WORKING_DIRECTORY)
-        set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        set(TEST_WORKING_DIRECTORY ${_OUTPUT_PREFIX})
     endif()
 
     if(NOT TEST_ENVIRONMENT)
@@ -1460,8 +1770,41 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
             "ROCPROFSYS_PROFILE=ON"
             "ROCPROFSYS_USE_SAMPLING=ON"
             "ROCPROFSYS_TIME_OUTPUT=OFF"
-            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
+            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}" # TODO: fix the path here
         )
+    endif()
+
+    # -------------------------------------------------------------------------------------- #
+    # Set up binary paths based on mode (build vs install)
+    # -------------------------------------------------------------------------------------- #
+    set(_output_path "${_OUTPUT_PATH}")
+    if(_USE_INSTALLED_PATHS)
+        # Use installed paths for tool binaries (not samples)
+        if(TEST_TARGET)
+            # Map tool target names to their installed binary paths
+            if("${TEST_TARGET}" STREQUAL "rocprofiler-systems-instrument")
+                set(_TEST_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-instrument")
+            elseif("${TEST_TARGET}" STREQUAL "rocprofiler-systems-avail")
+                set(_TEST_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-avail")
+            elseif("${TEST_TARGET}" STREQUAL "rocprofiler-systems-run")
+                set(_TEST_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-run")
+            elseif("${TEST_TARGET}" STREQUAL "rocprofiler-systems-sample")
+                set(_TEST_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-sample")
+            elseif("${TEST_TARGET}" STREQUAL "rocprofiler-systems-causal")
+                set(_TEST_BINARY "${ROCPROFSYS_BIN_INSTALL_PREFIX}/rocprof-sys-causal")
+            else()
+                # For other targets, try sample path mapping
+                rocprofiler_systems_get_installed_sample_path(_TEST_BINARY "${TEST_TARGET}")
+            endif()
+            
+            rocprofiler_systems_message(STATUS 
+                "  Bin test binary: ${_TEST_BINARY}")
+        endif()
+    else()
+        # Use build paths (with generator expressions)
+        if(TEST_TARGET)
+            set(_TEST_BINARY "$<TARGET_FILE:${TEST_TARGET}>")
+        endif()
     endif()
 
     # common
@@ -1470,7 +1813,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         "ROCPROFSYS_CI=ON"
         "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
         "ROCPROFSYS_CONFIG_FILE="
-        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
+        "ROCPROFSYS_OUTPUT_PATH=${_output_path}"
         "TWD=${TEST_WORKING_DIRECTORY}"
     )
     # copy for inverse
@@ -1503,10 +1846,36 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         )
     endif()
 
+    # -------------------------------------------------------------------------------------- #
+    # Create the test using determined paths
+    # -------------------------------------------------------------------------------------- #
+
     if(TEST_COMMAND)
+        # For install tests, substitute hardcoded relative paths with absolute paths
+        if(ROCPROFSYS_INSTALL_TESTS)
+            # Substitute in both COMMAND and ARGS
+            set(_substituted_command "")
+            foreach(_arg IN LISTS TEST_COMMAND)
+                # Replace "rocprof-sys-tests-output" with the install test output path
+                string(REPLACE "rocprof-sys-tests-output" "${_output_path}" _new_arg "${_arg}")
+                list(APPEND _substituted_command "${_new_arg}")
+            endforeach()
+            
+            set(_substituted_args "")
+            foreach(_arg IN LISTS TEST_ARGS)
+                # Replace "rocprof-sys-tests-output" with the install test output path
+                string(REPLACE "rocprof-sys-tests-output" "${_output_path}" _new_arg "${_arg}")
+                list(APPEND _substituted_args "${_new_arg}")
+            endforeach()
+        else()
+            # For build tests, use args as-is (relative paths are correct)
+            set(_substituted_command "${TEST_COMMAND}")
+            set(_substituted_args "${TEST_ARGS}")
+        endif()
+        
         add_test(
             NAME ${TEST_NAME}
-            COMMAND ${TEST_COMMAND} ${TEST_ARGS}
+            COMMAND ${_substituted_command} ${_substituted_args}
             WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
         )
 
@@ -1523,10 +1892,10 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${TEST_PROPERTIES}
         )
-    elseif(TARGET ${TEST_TARGET})
+    elseif(_TEST_BINARY)
         add_test(
             NAME ${TEST_NAME}
-            COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
+            COMMAND ${_TEST_BINARY} ${TEST_ARGS}
             WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
         )
 
@@ -1543,7 +1912,5 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
                 ${TEST_PROPERTIES}
         )
-    elseif(ROCPROFSYS_BUILD_TESTING)
-        message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
     endif()
 endfunction()

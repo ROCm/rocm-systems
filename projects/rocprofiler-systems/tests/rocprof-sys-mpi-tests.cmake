@@ -34,6 +34,7 @@ rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME "mpi"
     TARGET mpi-example
+    LABELS "theRock"
     MPI ON
     NUM_PROCS 2
     REWRITE_ARGS
@@ -60,7 +61,7 @@ rocprofiler_systems_add_test(
     TARGET mpi-example
     MPI ON
     NUM_PROCS 2
-    LABELS "perfetto-merge"
+    LABELS "perfetto-merge;theRock"
     REWRITE_ARGS
         -e
         -v
@@ -83,7 +84,7 @@ rocprofiler_systems_add_test(
     TARGET mpi-example
     MPI ON
     NUM_PROCS 2
-    LABELS "mpip"
+    LABELS "mpip;theRock"
     REWRITE_ARGS
         -e
         -v
@@ -106,7 +107,7 @@ rocprofiler_systems_add_test(
     TARGET mpi-example
     MPI ON
     NUM_PROCS 2
-    LABELS "mpip"
+    LABELS "mpip;theRock"
     REWRITE_ARGS
         -e
         -v
@@ -171,7 +172,7 @@ foreach(
         TARGET mpi-${_EXAMPLE}
         MPI ON
         NUM_PROCS 2
-        LABELS "mpip"
+        LABELS "mpip;theRock"
         REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
         RUN_ARGS 30
         ENVIRONMENT "${_mpip_${_EXAMPLE}_environment}"
@@ -207,7 +208,7 @@ if(ENABLE_FORTRAN_MPI_CTESTS)
             TARGET mpi-fortran-${_FORTRAN_EXAMPLE}
             MPI ON
             NUM_PROCS 2
-            LABELS "mpip;fortran"
+            LABELS "mpip;fortran;theRock"
             REWRITE_ARGS
                 -e
                 -v

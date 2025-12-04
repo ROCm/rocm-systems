@@ -30,7 +30,7 @@ rocprofiler_systems_add_test(
     SKIP_SAMPLING SKIP_RUNTIME
     NAME rewrite-caller
     TARGET rewrite-caller
-    LABELS "caller-include"
+    LABELS "caller-include;theRock"
     REWRITE_ARGS
         -e
         -i
@@ -51,6 +51,7 @@ rocprofiler_systems_add_test(
 rocprofiler_systems_add_test(
     NAME parallel-overhead
     TARGET parallel-overhead
+    LABELS "theRock"
     REWRITE_ARGS -e -v 2 --min-instructions=8
     RUNTIME_ARGS
         -e
@@ -70,7 +71,7 @@ rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME
     NAME parallel-overhead-locks-perfetto
     TARGET parallel-overhead-locks
-    LABELS "locks"
+    LABELS "locks;theRock"
     REWRITE_ARGS -e -v 2 --min-instructions=8
     RUN_ARGS 10 4 1000
     ENVIRONMENT

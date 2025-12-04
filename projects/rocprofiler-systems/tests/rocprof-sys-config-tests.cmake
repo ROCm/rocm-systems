@@ -26,23 +26,29 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+if(ROCPROFSYS_INSTALL_TESTS)
+    set(_CONFIG_TEST_EXE "${ROCPROFSYS_SAMPLES_INSTALL_PREFIX}/parallel-overhead/parallel-overhead")
+    set(_CONFIG_FILE_PATH "${ROCPROFSYS_TEST_INSTALL_PREFIX}/rocprof-sys-tests-config")
+else()
+    if(TARGET parallel-overhead)
+        set(_CONFIG_TEST_EXE $<TARGET_FILE:parallel-overhead>)
+    else()
+        set(_CONFIG_TEST_EXE ls)
+    endif()
+    set(_CONFIG_FILE_PATH "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
+endif()
+
 file(
-    WRITE ${CMAKE_CURRENT_BINARY_DIR}/invalid.cfg
+    WRITE ${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/invalid.cfg
     "
 ROCPROFSYS_CONFIG_FILE =
 FOOBAR = ON
 "
 )
 
-if(TARGET parallel-overhead)
-    set(_CONFIG_TEST_EXE $<TARGET_FILE:parallel-overhead>)
-else()
-    set(_CONFIG_TEST_EXE ls)
-endif()
-
 add_test(
     NAME rocprofiler-systems-invalid-config
-    COMMAND $<TARGET_FILE:rocprofiler-systems-instrument> -- ${_CONFIG_TEST_EXE}
+    COMMAND ${_INSTRUMENT_BINARY} -- ${_CONFIG_TEST_EXE}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
@@ -50,7 +56,7 @@ set_tests_properties(
     rocprofiler-systems-invalid-config
     PROPERTIES
         ENVIRONMENT
-            "ROCPROFSYS_CONFIG_FILE=${CMAKE_CURRENT_BINARY_DIR}/invalid.cfg;ROCPROFSYS_CI=ON;ROCPROFSYS_CI_TIMEOUT=120"
+            "ROCPROFSYS_CONFIG_FILE=${_CONFIG_FILE_PATH}/invalid.cfg;ROCPROFSYS_CI=ON;ROCPROFSYS_CI_TIMEOUT=120"
         TIMEOUT 120
         LABELS "config"
         WILL_FAIL ON
@@ -58,7 +64,7 @@ set_tests_properties(
 
 add_test(
     NAME rocprofiler-systems-missing-config
-    COMMAND $<TARGET_FILE:rocprofiler-systems-instrument> -- ${_CONFIG_TEST_EXE}
+    COMMAND ${_INSTRUMENT_BINARY} -- ${_CONFIG_TEST_EXE}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
@@ -66,7 +72,7 @@ set_tests_properties(
     rocprofiler-systems-missing-config
     PROPERTIES
         ENVIRONMENT
-            "ROCPROFSYS_CONFIG_FILE=${CMAKE_CURRENT_BINARY_DIR}/missing.cfg;ROCPROFSYS_CI=ON;ROCPROFSYS_CI_TIMEOUT=120"
+            "ROCPROFSYS_CONFIG_FILE=${_CONFIG_FILE_PATH}/missing.cfg;ROCPROFSYS_CI=ON;ROCPROFSYS_CI_TIMEOUT=120"
         TIMEOUT 120
         LABELS "config"
         WILL_FAIL ON

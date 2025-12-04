@@ -32,7 +32,7 @@ rocprofiler_systems_add_test(
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
     RUNTIME_ARGS -e -v 1 --caller-include inner -i 4096
-    LABELS "time-window"
+    LABELS "time-window;theRock"
     ENVIRONMENT "${_window_environment};ROCPROFSYS_TRACE_DURATION=1.25"
 )
 
@@ -68,7 +68,7 @@ rocprofiler_systems_add_validation_test(
     TIMEMORY_FILE "wall_clock.json"
     PERFETTO_METRIC "host"
     PERFETTO_FILE "perfetto-trace.proto"
-    LABELS "time-window"
+    LABELS "time-window;theRock"
     FAIL_REGEX "outer_d|ROCPROFSYS_ABORT_FAIL_REGEX"
     ARGS -l
          trace-time-window
@@ -94,7 +94,7 @@ rocprofiler_systems_add_test(
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
     RUNTIME_ARGS -e -v 1 --caller-include inner -i 4096
-    LABELS "time-window"
+    LABELS "time-window;theRock"
     ENVIRONMENT
         "${_window_environment};ROCPROFSYS_TRACE_DELAY=0.75;ROCPROFSYS_TRACE_DURATION=0.75"
 )
@@ -105,7 +105,7 @@ rocprofiler_systems_add_validation_test(
     TIMEMORY_FILE "wall_clock.json"
     PERFETTO_METRIC "host"
     PERFETTO_FILE "perfetto-trace.proto"
-    LABELS "time-window"
+    LABELS "time-window;theRock"
     ARGS -l
          outer_c
          outer_d
@@ -124,7 +124,7 @@ rocprofiler_systems_add_validation_test(
     TIMEMORY_FILE "wall_clock.json"
     PERFETTO_METRIC "host"
     PERFETTO_FILE "perfetto-trace.proto"
-    LABELS "time-window"
+    LABELS "time-window;theRock"
     ARGS -l
          outer_c
          outer_d

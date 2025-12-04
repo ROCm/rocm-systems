@@ -48,7 +48,7 @@ rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME openmp-cg
     TARGET openmp-cg
-    LABELS "openmp"
+    LABELS "openmp;theRock"
     REWRITE_ARGS -e -v 2 --instrument-loops
     RUNTIME_ARGS -e -v 1 --label return args
     REWRITE_TIMEOUT 180
@@ -64,7 +64,7 @@ rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME openmp-lu
     TARGET openmp-lu
-    LABELS "openmp"
+    LABELS "openmp;theRock"
     REWRITE_ARGS -e -v 2 --instrument-loops
     RUNTIME_ARGS -e -v 1 --label return args -E ^GOMP
     REWRITE_TIMEOUT 180
@@ -108,8 +108,8 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST openmp-target-sampling)
         ROCPD_FILE "rocpd.db"
         LABELS "openmp;openmp-target;rocpd"
         ARGS --validation-rules
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/kernel-rules.json"
-            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/sdk-metrics-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/openmp-target/kernel-rules.json"
+            "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/openmp-target/sdk-metrics-rules.json"
     )
 endif()
 
@@ -119,7 +119,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
         rocprofiler_systems_add_test(
             NAME ${HOST_TEST_NAME}
             TARGET ${HOST_TEST_NAME}-exec
-            LABELS "openmp;ompvv"
+            LABELS "openmp;ompvv;theRock"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
@@ -147,7 +147,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
             NAME ${OFFLOAD_TEST_NAME}
             TARGET ${OFFLOAD_TEST_NAME}-exec
             GPU ON
-            LABELS "openmp;ompvv;openmp-target"
+            LABELS "openmp;ompvv;openmp-target;theRock"
             REWRITE_ARGS -e -v 2
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
@@ -202,7 +202,7 @@ rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
     NAME openmp-cg-sampling-duration
     TARGET openmp-cg
-    LABELS "openmp;sampling-duration"
+    LABELS "openmp;sampling-duration;theRock"
     ENVIRONMENT "${_ompt_sampling_environ}"
     SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
 )
@@ -211,7 +211,7 @@ rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
     NAME openmp-lu-sampling-duration
     TARGET openmp-lu
-    LABELS "openmp;sampling-duration"
+    LABELS "openmp;sampling-duration;theRock"
     ENVIRONMENT "${_ompt_sampling_environ}"
     SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
 )
@@ -220,7 +220,7 @@ rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
     NAME openmp-cg-sampling-no-tmp-files
     TARGET openmp-cg
-    LABELS "openmp;no-tmp-files"
+    LABELS "openmp;no-tmp-files;theRock"
     ENVIRONMENT "${_ompt_sample_no_tmpfiles_environ}"
     SAMPLING_PASS_REGEX "${_notmp_sampling_file_regex}"
 )

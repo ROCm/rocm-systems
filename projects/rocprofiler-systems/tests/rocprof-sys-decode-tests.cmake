@@ -26,6 +26,11 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Skip video decode tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+if(ROCPROFSYS_INSTALL_TESTS)
+    return()
+endif()
+
 set(_video_decode_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage"
@@ -38,14 +43,14 @@ set(_jpeg_decode_environment
 )
 
 set(_vcn_rocpd_validation_rules
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/validation-rules.json"
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/sdk-metrics-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/video-decode/validation-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/video-decode/sdk-metrics-rules.json"
 )
 
 set(_jpeg_rocpd_validation_rules
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/default-rules.json"
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/jpeg-decode/validation-rules.json"
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/jpeg-decode/sdk-metrics-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/default-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/jpeg-decode/validation-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/jpeg-decode/sdk-metrics-rules.json"
 )
 
 # Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
@@ -62,11 +67,11 @@ if(MI300_DETECTED)
     list(APPEND _jpeg_counter_names --counter-names "JPEG Activity")
     list(
         APPEND _vcn_rocpd_validation_rules
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/video-decode/amd-smi-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/video-decode/amd-smi-rules.json"
     )
     list(
         APPEND _jpeg_rocpd_validation_rules
-        "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/jpeg-decode/amd-smi-rules.json"
+        "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/jpeg-decode/amd-smi-rules.json"
     )
 endif()
 

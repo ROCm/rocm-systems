@@ -12,6 +12,7 @@ rocprofiler_systems_add_causal_test(
     TARGET causal-cpu-rocprofsys
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "function"
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -22,6 +23,7 @@ rocprofiler_systems_add_causal_test(
     TARGET causal-cpu-rocprofsys-ndebug
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "function"
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -32,6 +34,7 @@ rocprofiler_systems_add_causal_test(
     TARGET causal-cpu-rocprofsys
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "line"
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -58,6 +61,7 @@ rocprofiler_systems_add_causal_test(
         -b
         timer
     ENVIRONMENT "ROCPROFSYS_STRICT_CONFIG=OFF"
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -68,6 +72,7 @@ rocprofiler_systems_add_causal_test(
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "function"
     CAUSAL_ARGS -s 0,10,25,50,75
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -79,6 +84,7 @@ rocprofiler_systems_add_causal_test(
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "function"
     CAUSAL_ARGS -s 0,10,25,50,75
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -90,6 +96,7 @@ rocprofiler_systems_add_causal_test(
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "line"
     CAUSAL_ARGS -s 0,10,25,50,75 -S lulesh.cc
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
 )
@@ -115,9 +122,20 @@ macro(
     # arguments to rocprofiler-systems-causal
     set(${_NAME}_args "${_causal_common_args} ${_MODE} ${_EXPER}")
 
+    # Determine the output path and binary name based on whether using installed tests
+    if(ROCPROFSYS_INSTALL_TESTS)
+        set(_causal_output_base "@ROCPROFSYS_TEST_OUTPUT@/rocprof-sys-tests-output")
+        # For install tests, get the installed binary path and extract the basename
+        rocprofiler_systems_get_installed_sample_path(_binary_path "causal-cpu-rocprofsys")
+        get_filename_component(_binary_name "${_binary_path}" NAME)
+    else()
+        set(_causal_output_base "rocprof-sys-tests-output")
+        set(_binary_name "$<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys>")
+    endif()
+
     # arguments to validate-causal-json.py
     set(${_NAME}_valid
-        "-n 0 -i rocprof-sys-tests-output/causal-cpu-rocprofsys-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 10 ${_V10} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 20 ${_V20} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 30 ${_V30} ${_TOL}"
+        "-n 0 -i ${_causal_output_base}/causal-cpu-rocprofsys-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} ${_binary_name} 10 ${_V10} ${_TOL} ${_EXPER} ${_binary_name} 20 ${_V20} ${_TOL} ${_EXPER} ${_binary_name} 30 ${_V30} ${_TOL}"
     )
 
     # patch string for command-line
@@ -147,6 +165,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_slow_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_slow_func_valid}
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
@@ -162,6 +181,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_fast_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_fast_func_valid}
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
@@ -177,6 +197,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_103_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_103_valid}
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
@@ -192,6 +213,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_113_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_113_valid}
+    LABELS "theRock"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"

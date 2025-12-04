@@ -7,6 +7,11 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Skip NIC performance tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+if(ROCPROFSYS_INSTALL_TESTS)
+    return()
+endif()
+
 # Get the name of the default NIC and write it to _network_interface.
 execute_process(
     COMMAND "${CMAKE_SOURCE_DIR}/tests/get_default_nic.sh"

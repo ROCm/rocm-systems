@@ -63,20 +63,20 @@ if(
             functions
             --print-instructions
         ENVIRONMENT "${_annotate_environment}"
-        LABELS "annotate;papi"
+        LABELS "annotate;papi;theRock"
     )
 
     rocprofiler_systems_add_validation_test(
         NAME annotate-binary-rewrite
         PERFETTO_FILE "perfetto-trace.proto"
-        LABELS "annotate;papi"
+        LABELS "annotate;papi;theRock"
         ARGS --key-names perf::PERF_COUNT_SW_CPU_CLOCK thread_cpu_clock --key-counts 8 8
     )
 
     rocprofiler_systems_add_validation_test(
         NAME annotate-sampling
         PERFETTO_FILE "perfetto-trace.proto"
-        LABELS "papi"
+        LABELS "papi;theRock"
         ARGS --key-names thread_cpu_clock --key-counts 6
     )
 else()
@@ -108,20 +108,20 @@ else()
             functions
             --print-instructions
         ENVIRONMENT "${_annotate_environment}"
-        LABELS "annotate"
+        LABELS "annotate;theRock"
     )
 
     rocprofiler_systems_add_validation_test(
         NAME annotate-binary-rewrite
         PERFETTO_FILE "perfetto-trace.proto"
-        LABELS "annotate"
+        LABELS "annotate;theRock"
         ARGS --key-names thread_cpu_clock --key-counts 8
     )
 
     rocprofiler_systems_add_validation_test(
         NAME annotate-sampling
         PERFETTO_FILE "perfetto-trace.proto"
-        LABELS "annotate"
+        LABELS "annotate;theRock"
         ARGS --key-names thread_cpu_clock --key-counts 6
     )
 endif()

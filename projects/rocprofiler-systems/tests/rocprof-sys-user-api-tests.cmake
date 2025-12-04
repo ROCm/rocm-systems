@@ -29,7 +29,7 @@
 rocprofiler_systems_add_test(
     NAME user-api
     TARGET user-api
-    LABELS "loops"
+    LABELS "loops;theRock"
     REWRITE_ARGS -e -v 2 -l --min-instructions=8 -E custom_push_region
     RUNTIME_ARGS
         -e

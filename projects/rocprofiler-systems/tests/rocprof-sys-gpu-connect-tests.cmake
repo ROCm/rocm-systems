@@ -26,6 +26,11 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Skip GPU connectivity tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+if (ROCPROFSYS_INSTALL_TESTS)
+    return()
+endif()
+
 set(_gpu_connect_environment
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api"
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,xgmi,pcie"
@@ -36,8 +41,8 @@ set(_gpu_connect_environment
 )
 
 set(_gpu_connect_rocpd_validation_rules
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/gpu-connect/validation-rules.json"
-    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/gpu-connect/amd-smi-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/gpu-connect/validation-rules.json"
+    "${_ROCPROFSYS_ROCPD_RULE_PATH_PREFIX}/rocpd-validation-rules/gpu-connect/amd-smi-rules.json"
 )
 
 # Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
@@ -60,6 +65,8 @@ if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
     if(_transfer_output MATCHES "Error: No valid transfers created")
         set(skip_validation TRUE)
     endif()
+else()
+    set(skip_validation TRUE)
 endif()
 
 rocprofiler_systems_add_test(

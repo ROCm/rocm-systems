@@ -29,7 +29,7 @@
 rocprofiler_systems_add_test(
     NAME parallel-overhead-locks
     TARGET parallel-overhead-locks
-    LABELS "locks"
+    LABELS "locks;theRock"
     REWRITE_ARGS -e -i 256
     RUNTIME_ARGS -e -i 256
     RUN_ARGS 30 4 1000
@@ -45,7 +45,7 @@ rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME parallel-overhead-locks-timemory
     TARGET parallel-overhead-locks
-    LABELS "locks"
+    LABELS "locks;theRock"
     REWRITE_ARGS -e -v 2 --min-instructions=32 --dyninst-options InstrStackFrames SaveFPR
                  TrampRecursive
     RUN_ARGS 10 4 1000

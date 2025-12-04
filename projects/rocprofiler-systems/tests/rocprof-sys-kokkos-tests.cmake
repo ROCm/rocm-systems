@@ -32,7 +32,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos"
+    LABELS "kokkos;theRock"
     REWRITE_ARGS -e -v 2 --label file line return args
     RUNTIME_ARGS
         -e
@@ -45,7 +45,7 @@ rocprofiler_systems_add_test(
         args
         -ME
         [==[lib(gomp|m-)]==]
-    LABELS "kokkos;kokkos-profile-library"
+    LABELS "kokkos;kokkos-profile-library;theRock"
     RUN_ARGS -i 5 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
@@ -60,7 +60,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos;kokkos-profile-library"
+    LABELS "kokkos;kokkos-profile-library;theRock"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys.so"
@@ -74,7 +74,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos;kokkos-profile-library"
+    LABELS "kokkos;kokkos-profile-library;theRock"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
@@ -88,7 +88,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos"
+    LABELS "kokkos;theRock"
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
@@ -112,7 +112,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos;loops"
+    LABELS "kokkos;loops;theRock"
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
@@ -134,7 +134,7 @@ rocprofiler_systems_add_test(
     MPI ${LULESH_USE_MPI}
     GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
-    LABELS "kokkos;loops"
+    LABELS "kokkos;loops;theRock"
     REWRITE_ARGS -e -v 2 -l --dynamic-callsites --traps --allow-overlapping
     RUNTIME_ARGS
         -e

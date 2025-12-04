@@ -25,34 +25,43 @@
 #
 include_guard(GLOBAL)
 
+# TODO: As of now, installing once with ROCPROFSYS_INSTALL_TESTS disabled is required. Then one can use it...
+rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTS "Create tests that link to the installed examples" OFF)
+if(NOT ROCPROFSYS_INSTALL_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_TESTS)
+        set(ROCPROFSYS_INSTALL_TESTS OFF CACHE BOOL "Create tests that link to the installed examples" FORCE)
+        rocprofiler_systems_message(STATUS "ROCPROFSYS_INSTALL_TESTS requires ROCPROFSYS_INSTALL_EXAMPLES to be enabled. Disabling...")
+    endif()
+endif()
+
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
 # test groups
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unit-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unit-tests.cmake) # Excluded for now
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake) # Uses parallel overhead
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake) # Failures detected
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake) # Failures detected
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-time-window-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake) # Uses parallel overhead | Fails on every system I try it on
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake) # Cannot find a way to compile rccl-tests
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-gpu-connect-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake) # GPU NOT TESTED
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-gpu-connect-tests.cmake) # GPU NOT TESTED
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake) # Requires shenanigans to run on the rock
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake) # One failure, but not because of my changes
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake) 
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake) 
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -65,7 +74,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
 add_test(
     NAME rocprofsys-cleanup-tmp-files
     COMMAND sh -c "rm -f /tmp/buffered_storage*.bin /tmp/metadata*.json"
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    WORKING_DIRECTORY ${_OUTPUT_PREFIX}
 )
 
 set_tests_properties(
@@ -75,3 +84,38 @@ set_tests_properties(
         LABELS "cleanup;global"
         TIMEOUT 30
 )
+
+# -------------------------------------------------------------------------------------- #
+#
+# Test installs
+#
+# -------------------------------------------------------------------------------------- #
+
+if(ROCPROFSYS_INSTALL_TESTS)
+    # Python Validation scripts
+    install(
+        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
+              ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+              ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Install the test configuration files
+    install(
+        DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-config
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Scripts
+    install(
+        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # TODO: Nic
+endif()
