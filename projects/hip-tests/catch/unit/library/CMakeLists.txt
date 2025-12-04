@@ -1,6 +1,6 @@
 set(TEST_SRC
     loadlib_rtc.cc
-    #loadlib_co.cc TODO
+    loadlib_co.cc
     library_negative.cc
 )
 

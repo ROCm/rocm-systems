@@ -121,9 +121,7 @@ __global__ static void test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_
     tmpBuf[blockIdx.x] = sum;
   }
 
-  // TODO: remove syncthreads with grid sync when compiler issue is fixed
-  // gg.sync();
-  __syncthreads();
+  gg.sync();
 
   if (offset == 0) {
     for (uint i = 1; i < gridDim.x; ++i) {

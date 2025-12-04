@@ -29,10 +29,7 @@ __global__ void cooperativeKernelEx(int* output, int totalThreads) {
   if (tid < totalThreads) {
     output[tid] = tid * 3;
   }
-  // TODO: remove syncthreads with grid sync when compiler issue is fixed
-  // grid.sync();
-  __syncthreads();
-
+  grid.sync();
   if (tid == 0) {
     output[0] = 2222;
   }
@@ -54,9 +51,7 @@ __global__ void argKernel(int* val) { *val = 100; }
  */
 __global__ void coopEmptykernel() {
   cooperative_groups::grid_group grid = cooperative_groups::this_grid();
-  // TODO: remove syncthreads with grid sync when compiler issue is fixed
-  // grid.sync();
-  __syncthreads();
+  grid.sync();
 }
 
 /*
@@ -91,9 +86,7 @@ __global__ void coopFillArrayKernel(int* arr, int* output, int N) {
   else if (blockIdx.x == 9)
     arr[9] = 100;
 
-  // TODO: remove syncthreads with grid sync when compiler issue is fixed
-  // grid.sync();
-  __syncthreads();
+  grid.sync();
 
   for (int i = 0; i < N; i++) {
     output[blockIdx.x] = output[blockIdx.x] + arr[i];
