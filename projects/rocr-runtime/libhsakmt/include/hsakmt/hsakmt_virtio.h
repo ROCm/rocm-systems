@@ -108,7 +108,19 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
 
+int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
+                             amdgpu_device_handle* device_handle);
+int vamdgpu_device_deinitialize(amdgpu_device_handle device_handle);
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
+int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu);
+int vamdgpu_bo_free(amdgpu_bo_handle buf_handle);
+int vamdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type type,
+                     uint32_t* shared_handle);
+int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
+                     uint32_t shared_handle, struct amdgpu_bo_import_result* output);
+int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64_t addr,
+                    uint64_t flags, uint32_t ops);
+int vdrmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data, unsigned long size);
 
 #ifdef __cplusplus
 }
