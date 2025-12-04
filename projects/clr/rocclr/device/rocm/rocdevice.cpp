@@ -307,7 +307,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   }
 
   if (dev_type == HSA_DEVICE_TYPE_CPU) {
-    AgentInfo info = {agent, {0}, {0}, {0}};
+    AgentInfo info = {agent, {0}, {0}, {0}, {0}, static_cast<uint32_t>(cpu_agents_.size())};
     stat = Hsa::agent_iterate_memory_pools(agent, Device::iterateCpuMemoryPoolCallback,
                                            reinterpret_cast<void*>(&info));
     if (stat == HSA_STATUS_SUCCESS) {
@@ -2014,21 +2014,23 @@ hsa_amd_memory_pool_t Device::getHostMemoryPool(MemorySegment mem_seg,
 
 // ================================================================================================
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agent_info) const {
   void* ptr = nullptr;
   uint32_t memFlags = 0;
   if (mem_seg == kKernArg) {
     memFlags |= HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
   }
-
-  hsa_amd_memory_pool_t pool =
-      getHostMemoryPool(mem_seg, static_cast<const amd::roc::AgentInfo*>(agentInfo));
+  auto cpu_agent_info = static_cast<const amd::roc::AgentInfo*>(agent_info);
+  if (cpu_agent_info == nullptr) {
+    cpu_agent_info = cpu_agent_info_;
+  }
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, cpu_agent_info);
   hsa_status_t stat = Hsa::memory_pool_allocate(pool, size, memFlags, &ptr);
 
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Allocate hsa host memory %p, size 0x%zx,"
-          " numa_node = %d, mem_seg = %d",
-          ptr, size, preferred_numa_node_, static_cast<int>(mem_seg));
+          " numa_node = %u, mem_seg = %d",
+          ptr, size, cpu_agent_info->id, static_cast<int>(mem_seg));
   if (stat != HSA_STATUS_SUCCESS) {
     LogPrintfError("Fail allocation host memory with err %d", stat);
     return nullptr;

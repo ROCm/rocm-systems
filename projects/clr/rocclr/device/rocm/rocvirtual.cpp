@@ -166,7 +166,7 @@ void Timestamp::checkGpuTime() {
 
         ClPrint(amd::LOG_INFO, amd::LOG_TS,
                 "Signal = (0x%lx), Translated start/end = %ld / %ld, Elapsed = %ld ns, "
-                "ticks start/end = %ld / %ld, Ticks elapsed = %ld, Engine = %u",
+                "ticks start/end = %ld / %ld, Ticks elapsed = %ld, Engine Type = %u",
                 it->signal_.handle, time.start, time.end, time.end - time.start,
                 amdSignal->start_ts, amdSignal->end_ts, amdSignal->end_ts - amdSignal->start_ts,
                 it->engine_);

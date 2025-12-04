@@ -325,6 +325,7 @@ struct AgentInfo {
   hsa_amd_memory_pool_t coarse_grain_pool;
   hsa_amd_memory_pool_t kern_arg_pool;
   hsa_amd_memory_pool_t ext_fine_grain_pool;
+  uint32_t id;
 };
 
 //! A HSA device ordinal (physical HSA device)
@@ -418,7 +419,7 @@ class Device : public NullDevice {
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = MemorySegment::kNoAtomics,
-                          const void* agentInfo = nullptr) const override;  // nullptr uses default CPU agent
+                          const void* agent_info = nullptr) const override;  // nullptr uses default CPU agent
   virtual void hostFree(void* ptr, size_t size = 0) const override;
 
   virtual bool amdFileRead(amd::Os::FileDesc handle, void* devicePtr, uint64_t size, int64_t file_offset,

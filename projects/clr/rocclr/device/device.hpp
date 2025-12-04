@@ -1803,7 +1803,7 @@ class Device : public RuntimeObject {
    */
   virtual void* hostAlloc(size_t size, size_t alignment,
                           MemorySegment mem_seg = kNoAtomics,
-                          const void* agentInfo = nullptr) const {
+                          const void* agent_info = nullptr) const {
     ShouldNotCallThis();
     return NULL;
   }
