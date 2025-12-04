@@ -344,10 +344,6 @@ class OmniSoC_Base:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
 
-        # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
-        if self.__arch in ("gfx940", "gfx941", "gfx942"):
-            counters = counters - {"TCP_TCP_LATENCY_sum"}
-
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
 
