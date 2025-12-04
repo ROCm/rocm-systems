@@ -40,6 +40,7 @@ void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
     ctx->queue_context = NULL;
     ctx->fmm_context = NULL;
     ctx->event_context = NULL;
+    ctx->debug_context = NULL;
 }
 
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)
@@ -58,6 +59,10 @@ void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)
     if (ctx->event_context) {
         free(ctx->event_context);
         ctx->event_context = NULL;
+    }
+    if (ctx->debug_context) {
+        free(ctx->debug_context);
+        ctx->debug_context = NULL;
     }
     ctx->fd = -1;
 }

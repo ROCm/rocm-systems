@@ -740,6 +740,93 @@ hsaKmtAllocQueueGWSCtx(
     HSAuint32          *firstGWS       //OUT
     );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRuntimeEnableCtx(
+    HsaKFDContext      *ctx,           //IN
+    void*              rDebug,         //IN
+    bool               setupTtmp       //IN
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRuntimeDisableCtx(
+    HsaKFDContext      *ctx           //IN
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetRuntimeCapabilitiesCtx(
+    HsaKFDContext      *ctx,           //IN
+    HSAuint32	         *caps_mask      //OUT
+    );
+
+/**
+  Enable debug trap.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDbgEnableCtx(
+    HsaKFDContext      *ctx,           //IN
+    void               **runtime_info, //Out
+    HSAuint32          *data_size      //Out
+    );
+
+/**
+  Disable debug trap.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDbgDisableCtx(
+    HsaKFDContext      *ctx          //IN
+    );
+
+/**
+  Get device snapshot.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDbgGetDeviceDataCtx(
+    HsaKFDContext     *ctx,          //IN
+    void              **data,        //Out
+    HSAuint32         *n_entries,    //Out
+    HSAuint32         *entry_size    //Out
+    );
+
+/**
+  Get queues snapshot.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDbgGetQueueDataCtx(
+    HsaKFDContext     *ctx,           //IN
+    void              **data,         //Out
+    HSAuint32         *n_entries,     //Out
+    HSAuint32         *entry_size,    //Out
+    bool              suspend_queues  //In
+    );
+
+/**
+  Check whether gpu firmware and kernel support debugging
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCheckRuntimeDebugSupportCtx(
+    HsaKFDContext     *ctx           //IN
+    );
+
+/**
+  Debug ops call primarily used for KFD testing
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctlCtx(
+    HsaKFDContext                  *ctx,           //IN
+    struct kfd_ioctl_dbg_trap_args *args,          //IN/OUT
+    HSA_QUEUEID                    *Queues,        //IN
+    HSAuint64                      *DebugReturn    //OUT
+    );
+
 /**
   Gets GPU and CPU clock counters for particular Node
 */

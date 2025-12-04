@@ -221,9 +221,9 @@ void hsakmt_free_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx,
 					   unsigned int NumNodes);
 void hsakmt_destroy_process_doorbells(HsaKFDContext *ctx);
-HSAKMT_STATUS hsakmt_init_device_debugging_memory(unsigned int NumNodes);
-void hsakmt_destroy_device_debugging_memory(void);
-bool hsakmt_debug_get_reg_status(uint32_t node_id);
+HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned int NumNodes);
+void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx);
+bool hsakmt_debug_get_reg_status(HsaKFDContext *ctx, uint32_t node_id);
 HSAKMT_STATUS hsakmt_init_counter_props(unsigned int NumNodes);
 void hsakmt_destroy_counter_props(void);
 uint32_t *hsakmt_convert_queue_ids(HSAuint32 NumQueues, HSA_QUEUEID *Queues);

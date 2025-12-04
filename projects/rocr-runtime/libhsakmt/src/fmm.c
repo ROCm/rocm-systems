@@ -3427,7 +3427,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_scratch(HsaKFDContext *ctx,
 	    VOID_PTR_ADD(address, size - 1) > aperture->limit)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	is_debugger = hsakmt_debug_get_reg_status(fmm_ctx->gpu_mem[gpu_mem_id].node_id);
+	is_debugger = hsakmt_debug_get_reg_status(ctx, fmm_ctx->gpu_mem[gpu_mem_id].node_id);
 	flags = is_debugger ? KFD_IOC_ALLOC_MEM_FLAGS_GTT :
 			      KFD_IOC_ALLOC_MEM_FLAGS_VRAM;
 	flags |= KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;

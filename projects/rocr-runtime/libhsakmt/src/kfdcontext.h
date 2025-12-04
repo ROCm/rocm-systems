@@ -31,6 +31,7 @@
 struct hsa_kfd_queue_context;
 struct hsa_kfd_fmm_context;
 struct hsa_kfd_event_context;
+struct hsa_kfd_debug_context;
 
 /*
  * HsaKFDContext
@@ -60,6 +61,9 @@ typedef struct _HsaKFDContext
 
     /* Event context for managing events */
     struct hsa_kfd_event_context *event_context;
+
+    /* Debug context for managing debug operations */
+    struct hsa_kfd_debug_context *debug_context;
 } HsaKFDContext;
 
 // Initialize a pre-allocated HsaKFDContext with the given file descriptor
@@ -70,5 +74,6 @@ void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);
+struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx);
 
 #endif /* _KFDCONTEXT_H_ */
