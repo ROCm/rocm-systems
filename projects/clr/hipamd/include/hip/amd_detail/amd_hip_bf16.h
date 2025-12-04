@@ -1660,7 +1660,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hcos(const __hip_bfloat16 h) {
  * \brief Calculate exponential of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp_f32(__bfloat162float(h)));
+  // FIXME: Manual promotion to float unnecessary
+  return __float2bfloat16(__builtin_elementwise_exp(__bfloat162float(h)));
 }
 
 /**
@@ -1676,7 +1677,8 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp10(const __hip_bfloat16 h) {
  * \brief Calculate exponential 2 of bfloat16
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat16 hexp2(const __hip_bfloat16 h) {
-  return __float2bfloat16(__ocml_exp2_f32(__bfloat162float(h)));
+  // FIXME: Manual promotion to float unnecessary
+  return __float2bfloat16(__builtin_elementwise_exp2(__bfloat162float(h)));
 }
 
 /**

@@ -33,7 +33,7 @@ THE SOFTWARE.
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(xs[i]);                                                                    \
     }                                                                                              \
   }
@@ -359,7 +359,7 @@ MATH_UNARY_SP_TEST_DEF_IMPL(__sincosf_cos, static_cast<double (*)(double)>(std::
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i]);                                                           \
     }                                                                                              \
   }
@@ -493,7 +493,7 @@ MATH_BINARY_SP_TEST_DEF(__fdividef, __fdiv_rn_ref);
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i], x3s[i]);                                                   \
     }                                                                                              \
   }

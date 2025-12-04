@@ -71,8 +71,9 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr),
         "code object tracing service configure");
 
-    std::vector<rocprofiler_thread_trace_parameter_t> params{};
-    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, {1}});
+    auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, {1}});
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
 
     std::vector<rocprofiler_agent_id_t> agents{};
 
@@ -97,8 +98,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
         ROCPROFILER_CALL(
             rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
                                                                 id,
-                                                                params.data(),
-                                                                params.size(),
+                                                                parameters.data(),
+                                                                parameters.size(),
                                                                 dispatch_callback,
                                                                 Callbacks::shader_data_callback,
                                                                 nullptr),

@@ -781,6 +781,10 @@ class AMDSMIHelpers():
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
         return perf_levels_str, perf_levels_int
 
+    def get_ptl_values(self):
+        ptl_values_str = [ptl.name for ptl in amdsmi_interface.AmdSmiPtlData]
+        ptl_values_int = list(set(ptl.name for ptl in amdsmi_interface.AmdSmiPtlData))
+        return ptl_values_str,ptl_values_int
 
     def get_accelerator_partition_profile_config(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
@@ -1932,3 +1936,190 @@ class AMDSMIHelpers():
             'num_partition': num_partition,
             'num_xcp': num_xcp
         }    
+
+    def get_gpu_board_temperatures(self, device_handle, gpu_id, logger):
+        """Get GPU board temperature readings
+
+        Args:
+            device_handle: GPU device handle
+            gpu_id: GPU identifier for logging
+            logger: AMDSMILogger instance
+
+        Returns:
+            dict: GPU board temperature data or empty dict if all values are N/A
+        """
+        gpu_board_temp_dict = {}
+        gpu_board_temp_types = [
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_RETIMER_X,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_IBC,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_IBC_2,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_VDD18_VR,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_04_HBM_B_VR,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_04_HBM_D_VR,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD0,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD1,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD2,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD3,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOC_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOC_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOCIO_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOCIO_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_085_HBM,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32
+        ]
+
+        for temp_type in gpu_board_temp_types:
+            type_name = temp_type.name.replace("GPUBOARD_", "")
+            try:
+                gpu_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
+                    device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                if gpu_board_temp_holder != "N/A":
+                    gpu_board_temp_dict[f'{type_name}'] = self.unit_format(
+                        logger, gpu_board_temp_holder, '\N{DEGREE SIGN}C')
+                else:
+                    gpu_board_temp_dict[f'{type_name}'] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                gpu_board_temp_dict[f'{type_name}'] = "N/A"
+                logging.debug("Failed to get gpu_board %s for gpu %s | %s",
+                            type_name, gpu_id, e.get_error_info())
+
+        return gpu_board_temp_dict
+
+    def get_base_board_temperatures(self, device_handle, gpu_id, logger):
+        """Get base board temperature readings
+
+        Args:
+            device_handle: GPU device handle
+            gpu_id: GPU identifier for logging
+            logger: AMDSMILogger instance
+
+        Returns:
+            dict: Base board temperature data or empty dict if all values are N/A
+        """
+        base_board_temp_dict = {}
+        base_board_temp_types = [
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FRONT,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_BACK,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_OAM7,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_IBC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_UFPGA,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_OAM1,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_0_1_HSC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_2_3_HSC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_4_5_HSC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_6_7_HSC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA_0V72_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA_3V3_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_0_1_2_3_1V2_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_4_5_6_7_1V2_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_0_1_0V9_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_4_5_0V9_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_2_3_0V9_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_6_7_0V9_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_0_1_2_3_3V3_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_4_5_6_7_3V3_VR,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC_HSC,
+            amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC
+        ]
+
+        for temp_type in base_board_temp_types:
+            type_name = temp_type.name.replace("BASEBOARD_", "")
+            try:
+                base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
+                    device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                if base_board_temp_holder != "N/A":
+                    base_board_temp_dict[f'{type_name}'] = self.unit_format(
+                        logger, base_board_temp_holder, '\N{DEGREE SIGN}C')
+                else:
+                    base_board_temp_dict[f'{type_name}'] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                base_board_temp_dict[f'{type_name}'] = "N/A"
+                logging.debug("Failed to get base_board %s for gpu %s | %s",
+                            type_name, gpu_id, e.get_error_info())
+
+        return base_board_temp_dict
+
+    def validate_and_set_power_cap(self, device_handle, power_type, power_type_key, requested_power_cap, logger):
+        """Validate and set power cap for a specific sensor.
+
+        Args:
+            device_handle: GPU device handle
+            power_type: Sensor ID (0 for ppt0, 1 for ppt1)
+            power_type_key: Display name for the sensor (e.g., "PPT0")
+            requested_power_cap: Requested power cap value in watts
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        try:
+            power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(device_handle, power_type)
+            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            logging.debug(f"Power cap info for gpu {gpu_id} {power_type_key} | {power_cap_info}")
+
+            min_power_cap = self.convert_SI_unit(power_cap_info["min_power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+            max_power_cap = self.convert_SI_unit(power_cap_info["max_power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+            current_power_cap = self.convert_SI_unit(power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+
+            # Return structured data for JSON/CSV or formatted string for human-readable
+            if requested_power_cap == current_power_cap:
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "already_set",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
+                        "message": f"{power_type_key} power cap is already set to {requested_power_cap}W"
+                    }
+                return f"{power_type_key} power cap is already set to {requested_power_cap}W"
+            elif current_power_cap == 0:
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
+                        "message": f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
+                    }
+                return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
+            elif not (min_power_cap < requested_power_cap <= max_power_cap and requested_power_cap > 0):
+                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
+                min_cap_display = 1 if min_power_cap == 0 else min_power_cap
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "min_power_cap": self.unit_format(logger, min_cap_display, "W"),
+                        "max_power_cap": self.unit_format(logger, max_power_cap, "W"),
+                        "message": f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+                    }
+                return f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+            # Set the power cap
+            new_power_cap = self.convert_SI_unit(requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO)
+            amdsmi_interface.amdsmi_set_power_cap(device_handle, power_type, new_power_cap)
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "success",
+                    "sensor": power_type_key,
+                    "power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "message": f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+                }
+            return f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError('Command requires elevation') from e
+            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap}W"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "sensor": power_type_key,
+                    "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "error": e.get_error_info(detailed=False),
+                    "message": error_msg
+                }
+            return error_msg

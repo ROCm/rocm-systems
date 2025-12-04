@@ -2,12 +2,11 @@
 set(TEST_SRC
     copy_coherency.cc
 )
-add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
-                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco -I
-                  ${HIP_PATH}/include -I
-                  ${CMAKE_CURRENT_SOURCE_DIR}/../../include -L
-                  ${HIP_PATH}/${CMAKE_INSTALL_LIBDIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
+                  ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
+                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")

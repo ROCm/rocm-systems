@@ -793,8 +793,9 @@ bool CopyMemoryP2PCommand::validateMemory() {
       device::Memory* mem =
           devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
       if (nullptr == mem) {
-        DevLogPrintfError("Cannot get P2P stage Device Memory for device: 0x%x \n",
-                          devices[0]->GlbCtx().devices()[d]);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+                "Cannot get P2P stage Device Memory for device: 0x%x \n",
+                devices[0]->GlbCtx().devices()[d]);
         return false;
       }
     }
