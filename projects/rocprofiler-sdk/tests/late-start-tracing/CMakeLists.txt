@@ -17,58 +17,39 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(
-    rocprofiler-sdk-tests-late-start-tracing
-    LANGUAGES CXX HIP
-    VERSION 0.0.0)
+project(rocprofiler-sdk-tests-late-start-tracing LANGUAGES CXX HIP)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_HIP_STANDARD 17)
-set(CMAKE_HIP_EXTENSIONS OFF)
-set(CMAKE_HIP_STANDARD_REQUIRED ON)
+# Build the tool configuration library
+add_library(late-start-dynamic-client SHARED)
+target_sources(late-start-dynamic-client PRIVATE late_start_tool.cpp)
+target_link_libraries(late-start-dynamic-client PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
-# Mark source file as HIP language
-set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
+# Build the dynamic test executable (does NOT link to rocprofiler-sdk)
+set_source_files_properties(main_dynamic.cpp PROPERTIES LANGUAGE HIP)
 
-# Create the test application executable
-add_executable(late-start-test-app main.cpp)
+add_executable(late-start-dynamic-test)
+target_sources(late-start-dynamic-test PRIVATE main_dynamic.cpp)
+target_link_libraries(late-start-dynamic-test PRIVATE ${CMAKE_DL_LIBS})
 
-target_link_libraries(late-start-test-app
-    PRIVATE
-        ${CMAKE_DL_LIBS}  # For dlopen/dlsym
+# Export symbols so the dynamically loaded tool library can access them
+target_link_options(late-start-dynamic-test PRIVATE "-Wl,--export-dynamic")
+
+# Set up environment for test execution
+set(late-start-dynamic-env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$<TARGET_FILE_DIR:late-start-dynamic-client>:$ENV{LD_LIBRARY_PATH}"
 )
 
-# The test application initializes HIP first, then loads rocprofiler-sdk dynamically
-# and calls rocprofiler_start_late()
-
-set(late-start-env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-)
-
-# Execute test - runs the late-start application
+# Execute dynamic late-start test - validates via PASS/FAIL in output
 rocprofiler_add_integration_execute_test(
-    late-start-tracing
-    COMMAND $<TARGET_FILE:late-start-test-app>
-    DEPENDS late-start-test-app rocprofiler-sdk::rocprofiler-sdk-shared-library
+    late-start-dynamic
+    COMMAND $<TARGET_FILE:late-start-dynamic-test>
+    DEPENDS late-start-dynamic-client
     TIMEOUT 120
     LABELS "integration-tests;late-start"
-    ENVIRONMENT "${late-start-env}"
-    SKIP_REGULAR_EXPRESSION "This test is skipped."
-    FIXTURES_SETUP late-start-tracing
-    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-# Validate test - validates the output
-rocprofiler_add_integration_validate_test(
-    late-start-tracing
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    LABELS "integration-tests;late-start"
-    TIMEOUT 45
-    SKIP_REGULAR_EXPRESSION "SKIPPED"
-    FIXTURES_REQUIRED late-start-tracing
-    ARGS --skip-if ${CMAKE_CURRENT_BINARY_DIR}/skipped)
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${late-start-dynamic-env}"
+    SKIP_REGULAR_EXPRESSION "Test SKIPPED"
+    PASS_REGULAR_EXPRESSION "Test PASSED"
+    FAIL_REGULAR_EXPRESSION "Test FAILED|${ROCPROFILER_DEFAULT_FAIL_REGEX}")

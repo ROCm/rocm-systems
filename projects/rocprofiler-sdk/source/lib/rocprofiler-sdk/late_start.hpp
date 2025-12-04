@@ -30,58 +30,28 @@ namespace late_start
 {
 
 /**
- * @brief Information about a detected runtime
- */
-struct runtime_info
-{
-    void*       handle      = nullptr;  ///< dlopen handle to the runtime library
-    const char* name        = nullptr;  ///< Name of the runtime library
-    bool        initialized = false;    ///< Whether runtime is initialized
-};
-
-/**
- * @brief Detect if HSA runtime is loaded and initialized
- */
-runtime_info
-detect_hsa_runtime();
-
-/**
- * @brief Detect if HIP runtime is loaded and initialized
- */
-runtime_info
-detect_hip_runtime();
-
-/**
- * @brief Wrap HSA API tables for late-start profiling
+ * @brief Invoke rocprofiler-register to re-propagate all registered API tables
+ *
+ * This function calls rocprofiler_register_invoke_all_registrations() which triggers
+ * rocprofiler-register to re-send all previously registered runtime API tables to
+ * rocprofiler-sdk via the rocprofiler_set_api_table() entry point.
+ *
+ * This enables "late-start" profiling where rocprofiler-sdk is loaded after runtimes
+ * (HSA, HIP, ROCTX, RCCL, etc.) have already initialized and registered their API
+ * tables with rocprofiler-register.
+ *
+ * The function works by:
+ * 1. Loading rocprofiler-register library (if not already loaded)
+ * 2. Finding rocprofiler_register_invoke_all_registrations() symbol
+ * 3. Calling it to trigger re-propagation of stored registrations
+ * 4. Each registered runtime's API tables are sent via rocprofiler_set_api_table()
+ *
+ * @return ROCPROFILER_STATUS_SUCCESS if successful or no runtimes registered yet
+ * @return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE if rocprofiler-register not loaded
+ * @return ROCPROFILER_STATUS_ERROR on other failures
  */
 rocprofiler_status_t
-wrap_hsa_tables(runtime_info& info);
-
-/**
- * @brief Wrap HIP API tables for late-start profiling
- */
-rocprofiler_status_t
-wrap_hip_tables(runtime_info& info);
-
-/**
- * @brief Get current late-start state
- * @return 0=not started, 1=starting, 2=started
- */
-int
-get_state();
-
-/**
- * @brief Check if late-start is active
- * @return true if state == 2
- */
-bool
-is_active();
-
-/**
- * @brief Restore original runtime tables
- */
-rocprofiler_status_t
-restore_tables();
+invoke_register_propagation();
 
 }  // namespace late_start
 }  // namespace rocprofiler
