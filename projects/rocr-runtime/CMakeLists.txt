@@ -109,7 +109,7 @@ if (HSA_DEP_ROCPROFILER_REGISTER)
 endif()
 
 if (NOT DEFINED BUILD_THUNK_VIRTIO)
-  set(BUILD_THUNK_VIRTIO OFF)
+  set(BUILD_THUNK_VIRTIO ON)
 endif()
 
 add_rocm_subdir(libhsakmt "${THUNK_DEFINITIONS}")
