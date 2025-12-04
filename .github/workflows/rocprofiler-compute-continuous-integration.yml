@@ -93,7 +93,7 @@ jobs:
             EXCLUDED_TESTS=""
           else
             MODE=Continuous
-            EXCLUDED_TESTS="test_profile_live_attach_detach|test_profile_roofline"
+            EXCLUDED_TESTS="test_profile_live_attach_detach"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
