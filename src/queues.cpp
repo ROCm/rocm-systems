@@ -201,7 +201,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId) {
+HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, ...) {
   CHECK_DXG_OPEN();
 
   auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
