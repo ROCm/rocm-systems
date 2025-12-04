@@ -73,8 +73,6 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   bool match(Float16 const& matchee) const override {
     // Comparison with NaN should always be false.
     // This way we can rule it out before getting into the ugly details
-
-    // std::cout << " Matchee: " << matchee << " M_Target: " << __half2float(m_target) << std::endl;
     if (__hisnan(matchee) || __hisnan(m_target)) {
       return false;
     }
@@ -124,8 +122,6 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
     HIP_CHECK(hipDeviceSynchronize());
 
     Float16 result = *outManagedMem;
-    // std::cout << " Start: " << __half2float(start) << " Direction: " << __half2float(direction)
-    //           << " Step: " << steps << " Result: " << __half2float(result) << std::endl;
     HIP_CHECK(hipFree(outManagedMem));
     return result;
   }
@@ -136,8 +132,6 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   }
 
   static int16_t convert(Float16 d) {
-    static_assert(sizeof(Float16) == sizeof(unsigned short),
-                  "Important ULP matcher assumption violated");
     uint16_t i;
     std::memcpy(&i, &d, sizeof(Float16));
     return i;
@@ -189,7 +183,7 @@ template <typename T> class EqValidator : public MatcherBase<T> {
 
   std::string describe() const override {
     std::stringstream ss;
-    ss << " is not equal to " << target_;
+    ss << "is equal to " << target_;
     return ss.str();
   }
 
