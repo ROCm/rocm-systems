@@ -1537,6 +1537,8 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
   int64_t value;                     //!< The current value that meet the condition
+  uint32_t gpu_index;                //!< GPU index that hit the condition
+  bool  reset_triggered;             //!< if reset was attempted
 } rdc_policy_callback_response_t;
 
 /**
