@@ -473,6 +473,16 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
