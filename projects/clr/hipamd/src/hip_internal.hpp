@@ -47,6 +47,8 @@
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
 
+template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
+
 namespace hip{
   extern std::once_flag g_ihipInitialized;
 }

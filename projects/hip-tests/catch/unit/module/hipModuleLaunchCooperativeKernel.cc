@@ -214,6 +214,39 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters") {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Test `hipModuleLaunchCooperativeKernel` when it is captured.
+ * Test source
+ * ------------------------
+ *  - unit/module/hipModuleLaunchCooperativeKernel.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.5
+ */
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Verify_Capture") {
+  if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
+  }
+
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  hipFunction_t f = GetKernel(mg.module(), "CoopKernel");
+  HIP_CHECK(hipModuleLaunchCooperativeKernel(f, 2, 2, 1, 1, 1, 1, 0, stream, nullptr));
+
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
  * End doxygen group ModuleTest.
  * @}
  */

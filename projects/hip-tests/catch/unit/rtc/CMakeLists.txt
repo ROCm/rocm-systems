@@ -58,16 +58,18 @@ elseif(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME RTC
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
-                      LINKER_LIBS hiprtc)
+                      LINKER_LIBS hiprtc::hiprtc)
 endif()
 
+set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE HIP)
 add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
+set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE HIP)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
 
 if(HIP_PLATFORM MATCHES "nvidia")
   target_link_libraries(ChkPtrdiff_t_Exe nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  target_link_libraries(ChkPtrdiff_t_Exe hiprtc)
+  target_link_libraries(ChkPtrdiff_t_Exe hiprtc::hiprtc hip::host hip::device)
 endif()
 
-add_dependencies(build_tests copyRtcHeaders ChkPtrdiff_t_Exe)
+add_dependencies(RTC copyRtcHeaders ChkPtrdiff_t_Exe)

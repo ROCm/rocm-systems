@@ -352,7 +352,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     }
   }
 
-  // The hsa copy api would result in a dirty cache state
+  // The ROCR copy api guarantees coherency after the copy
   gpu().setFenceDirty(false);
   return true;
 }
@@ -590,7 +590,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
   if (status == HSA_STATUS_SUCCESS) {
     gpu().addSystemScope();
-    // The hsa copy api would result in a dirty cache state
+    // The ROCR copy api guarantees coherency after the copy
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
