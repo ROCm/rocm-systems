@@ -157,6 +157,17 @@ class Runtime {
   /// @return HSAKMT_STATUS_SUCCESS if any driver successfully returned pointer info, or error code
   static HSAKMT_STATUS QueryPointerInfo(const void* ptr, HsaPointerInfo* pointer_info);
 
+  /// @brief Allocate memory with alignment using available drivers
+  /// @param[in] PreferredNode Preferred NUMA node for allocation
+  /// @param[in] SizeInBytes Size of memory to allocate
+  /// @param[in] Alignment Alignment requirement for the allocation
+  /// @param[in] MemFlags Memory allocation flags
+  /// @param[out] MemoryAddress Pointer to receive the allocated memory address
+  /// @return HSAKMT_STATUS_SUCCESS if allocation succeeded, or error code
+  static HSAKMT_STATUS AllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                        HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                        void** MemoryAddress);
+
   /// @brief Singleton object of the runtime.
   static Runtime* runtime_singleton_;
 
