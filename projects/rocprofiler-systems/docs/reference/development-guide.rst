@@ -336,6 +336,43 @@ a segmentation fault occurs. To fix this issue,
 a new model is being adopted which has all the benefits of this model
 but permits dynamic expansion.
 
+Configuring thread limits
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler provides two CMake configuration options to control thread-related memory allocation:
+
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported by the application (default: calculated based on CPU cores, minimum 128)
+* ``ROCPROFSYS_MAX_STORAGE_THREADS``: Maximum number of storage slots for thread-local data (default: matches ``ROCPROFSYS_MAX_THREADS``)
+
+These settings control two distinct aspects:
+
+* ``ROCPROFSYS_MAX_THREADS`` controls the thread ID manager capacity - the maximum number of threads the application can create
+* ``ROCPROFSYS_MAX_STORAGE_THREADS`` controls the storage array size - how many slots are allocated for thread-local data storage
+
+By default, ``ROCPROFSYS_MAX_STORAGE_THREADS`` is set equal to ``ROCPROFSYS_MAX_THREADS`` to prevent segmentation faults.
+However, for memory optimization, you can set ``ROCPROFSYS_MAX_STORAGE_THREADS`` to a higher value only when needed.
+
+**Example: Building with custom thread limits**
+
+.. code-block:: shell
+
+   # Build with support for 8192 threads
+   cmake -B build \
+         -DROCPROFSYS_MAX_THREADS=8192 \
+         -DROCPROFSYS_MAX_STORAGE_THREADS=8192 \
+         ..
+   cmake --build build
+
+**Important considerations**
+.. warning::
+
+   Setting ``ROCPROFSYS_MAX_STORAGE_THREADS`` below ``ROCPROFSYS_MAX_THREADS`` will cause CMake to auto-adjust ROCPROFSYS_MAX_STORAGE_THREADS to upward to prevent runtime crashes. Setting it above ``ROCPROFSYS_MAX_THREADS`` wastes memory and will generate a warning.
+
+.. note::
+
+   The conditional expansion logic ensures that storage arrays only expand beyond 2048 slots when explicitly configured,
+   helping to minimize memory overhead for typical applications while supporting high-thread-count workloads when needed.
+
 Sampling model
 ========================================
 

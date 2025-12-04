@@ -850,6 +850,15 @@ set(TIMEMORY_MAX_THREADS
     "Max statically-allocated threads"
     FORCE
 )
+
+# Add option for maximum storage threads
+set(TIMEMORY_MAX_STORAGE_THREADS
+    "${ROCPROFSYS_MAX_STORAGE_THREADS}"
+    CACHE STRING
+    "Maximum threads for storage array allocation in timemory operations"
+    FORCE
+)
+
 set(TIMEMORY_SETTINGS_PREFIX
     "ROCPROFSYS_"
     CACHE STRING
@@ -1174,6 +1183,7 @@ endif()
 target_compile_definitions(
     rocprofiler-systems-compile-definitions
     INTERFACE ROCPROFSYS_MAX_THREADS=${ROCPROFSYS_MAX_THREADS}
+              ROCPROFSYS_MAX_STORAGE_THREADS=${ROCPROFSYS_MAX_STORAGE_THREADS}
 )
 
 foreach(_LIB ${ROCPROFSYS_EXTENSION_LIBRARIES})
