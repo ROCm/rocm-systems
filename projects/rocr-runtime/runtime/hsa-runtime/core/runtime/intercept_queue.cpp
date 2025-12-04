@@ -126,9 +126,9 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
          "Packet intercept error: initial retry index is incompatible with IsPendingRetryPoint.\n");
   buffer_ = SharedArray<AqlPacket, 4096>(wrapped->amd_queue_.hsa_queue.size);
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
-  
+
   // Pre-allocate staging buffer with queue size
-  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
+  staging_buffer_.resize(256*sizeof(AqlPacket));
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
@@ -401,7 +401,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
-    
+
     // Check if packets wrap around the ring buffer boundary using unmasked indices.
     // The interceptor callback expects packets to be contiguous in memory.
     if ((next_packet_ + packet_count) > ((next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
@@ -411,10 +411,6 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
       }
       handler.first(staging_buffer_.data(), packet_count, next_packet_,
                     handler.second, PacketWriter);
-      // Write back modified packets to the ring buffer
-      for (uint64_t j = 0; j < packet_count; ++j) {
-        ring[(next_packet_ + j) & mask] = staging_buffer_[j];
-      }
     } else {
       // Packets are contiguous in the ring buffer
       handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
