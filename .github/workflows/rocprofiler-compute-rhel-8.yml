@@ -69,9 +69,9 @@ jobs:
           max_attempts: 3
           command: |
             if [ ${{ matrix.os-release }} == "8.10" ]; then
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.70100-1.el8.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/8.10/amdgpu-install-7.1.1.70101-1.el8.noarch.rpm
             else
-              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.70100-1.el9.noarch.rpm
+              yum install -y https://repo.radeon.com/amdgpu-install/latest/rhel/9.4/amdgpu-install-7.1.1.70101-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
       - name: Checkout

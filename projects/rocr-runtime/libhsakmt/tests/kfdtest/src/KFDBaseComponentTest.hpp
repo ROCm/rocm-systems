@@ -31,7 +31,10 @@
 #include <amdgpu.h>
 #include <amdgpu_drm.h>
 #include <sys/param.h>
+#include <thread>
+#include <functional>
 #include <algorithm>
+#include <future>
 #include "hsakmt/hsakmt.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"
@@ -106,11 +109,11 @@ class KFDBaseComponentTest : public testing::Test {
         return m_numSdmaXgmiEngines_GPU[gpuIndex];
     }
 
-    HSAKMT_STATUS KFDTestMultiGPU(Test_Function test_function, 
-                                            const std::vector<int>& gpu_indices,
+    HSAKMT_STATUS KFDTestMultiGPU(std::function<void(int)> test_func, 
+                                            const std::vector<int>& gpuNodes, 
                                             unsigned int gpu_num);
 
-    HSAKMT_STATUS KFDTest_Launch(Test_Function test_function);
+    HSAKMT_STATUS KFDTestLaunch(std::function<void(int)> test_func);
 
  protected:
     HsaVersionInfo  m_VersionInfo;

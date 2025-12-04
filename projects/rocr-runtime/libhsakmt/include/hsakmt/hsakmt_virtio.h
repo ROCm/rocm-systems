@@ -29,6 +29,10 @@
 #if defined(__linux__)
 #include "hsakmt/linux/kfd_ioctl.h"
 #endif
+
+// Forward declaration for HsaKFDContext to avoid dependency issues
+typedef struct _HsaKFDContext HsaKFDContext;
+
 #include "hsakmt/hsakmt.h"
 #include <libdrm/amdgpu.h>
 

@@ -19,8 +19,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
-* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
-
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
@@ -51,6 +49,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Adds support for dispatch timeline analysis.
   * Shows duration as median in addition to mean in kernel view.
 
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
@@ -62,6 +64,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Empty cells replaced with `N/A` for unavailable metrics in analysis.
 
 
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
+
 ### Removed
 
 * Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
@@ -71,6 +77,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
+
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
 
 ### Known issues
 

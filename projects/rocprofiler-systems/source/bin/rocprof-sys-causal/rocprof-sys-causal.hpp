@@ -32,6 +32,11 @@
 #include <string_view>
 #include <vector>
 
+template <typename Tp>
+void
+update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+           bool _append = false, std::string_view _join_delim = ":");
+
 int
 get_verbose();
 
@@ -48,15 +53,6 @@ prepare_command_for_run(char*, std::vector<char*>&);
 
 void
 prepare_environment_for_run(std::vector<char*>&);
-
-template <typename Tp>
-void
-update_env(std::vector<char*>&, std::string_view, Tp&&, bool _append = false,
-           std::string_view _join_delim = ":");
-
-template <typename Tp>
-void
-add_default_env(std::vector<char*>&, std::string_view, Tp&&);
 
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>&,

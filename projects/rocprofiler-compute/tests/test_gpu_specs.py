@@ -26,16 +26,14 @@
 import re
 import subprocess
 import tempfile
-from importlib.machinery import SourceFileLoader
 from unittest.mock import patch
 
 import pytest
 
-from src.utils.specs import generate_machine_specs
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
+try:
+    from src.utils.specs import generate_machine_specs
+except Exception:
+    from utils.specs import generate_machine_specs
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -162,12 +160,20 @@ def test_num_xcds_cli_output():
     num_xcds = get_num_xcds()
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
-    proc = subprocess.run(
-        ["src/rocprof-compute", "-s"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["src/rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception:
+        proc = subprocess.run(
+            ["rocprof-compute", "-s"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     assert proc.returncode == 0, (
         f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
     )
