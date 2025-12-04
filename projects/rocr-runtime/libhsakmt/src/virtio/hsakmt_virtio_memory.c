@@ -295,8 +295,9 @@ int vhsakmt_create_mappable_blob_bo(vhsakmt_device_handle dev, size_t size, uint
   return r;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
-                                           HsaMemFlags MemFlags, void** MemoryAddress) {
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                                HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                                void** MemoryAddress) {
   vhsakmt_device_handle dev = vhsakmt_dev();
   struct vhsakmt_ccmd_memory_rsp* rsp;
   vhsakmt_bo_handle bo;
@@ -310,6 +311,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
               .PreferredNode = PreferredNode,
               .SizeInBytes = SizeInBytes,
               .MemFlags = MemFlags,
+              .Alignment = Alignment,
           },
   };
 
@@ -349,6 +351,11 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
              *MemoryAddress, bo->host_addr, SizeInBytes, bo->real.res_id, bo->real.handle);
 
   return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                           HsaMemFlags MemFlags, void** MemoryAddress) {
+  return vhsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, 0, MemFlags, MemoryAddress);
 }
 
 int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
