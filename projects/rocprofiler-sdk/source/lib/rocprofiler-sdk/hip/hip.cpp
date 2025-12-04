@@ -550,10 +550,12 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
         // 1. get the sub-table containing the function pointer in original table
         // 2. get reference to function pointer in sub-table in original table
-        // 3. update function pointer with wrapper
+        // 3. update function pointer with wrapper (with memory barriers for thread safety)
         auto& _table = _info.get_table(_orig);
         auto& _func  = _info.get_table_func(_table);
-        _func        = _info.get_functor(_func);
+        std::atomic_thread_fence(std::memory_order_release);
+        _func = _info.get_functor(_func);
+        std::atomic_thread_fence(std::memory_order_release);
     }
 }
 
@@ -573,6 +575,46 @@ update_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
     update_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0)
         update_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx>
+void
+restore_table_entry(Tp* _table, std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename hip_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hip_api_info<TableIdx, OpIdx>{};
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _table->size) return;
+
+        ROCP_TRACE << "restoring table entry for " << _info.name;
+
+        // 1. get the sub-table containing the function pointer in runtime's table
+        // 2. get reference to function pointer in sub-table in runtime's table
+        auto& _runtime_table = _info.get_table(_table);
+        auto& _runtime_func  = _info.get_table_func(_runtime_table);
+
+        // 3. get the sub-table containing the saved original function pointer
+        // 4. get reference to saved original function pointer
+        auto& _saved_table = _info.get_table(get_table());
+        auto& _saved_func  = _info.get_table_func(_saved_table);
+
+        // 5. restore the original function pointer (with memory barriers for thread safety)
+        std::atomic_thread_fence(std::memory_order_release);
+        _runtime_func = _saved_func;
+        std::atomic_thread_fence(std::memory_order_release);
+    }
+}
+
+template <size_t TableIdx, typename Tp, size_t... OpIdx>
+void
+restore_table_impl(Tp* _table, std::index_sequence<OpIdx...>)
+{
+    // Use fold expression to call restore_table_entry for each operation
+    (restore_table_entry<TableIdx>(_table, std::integral_constant<size_t, OpIdx>{}), ...);
 }
 }  // namespace
 
@@ -665,6 +707,16 @@ update_table(TableT* _orig)
         update_table<TableIdx>(_orig, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
+template <typename TableT>
+void
+restore_table(TableT* _table)
+{
+    constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
+    if(_table)
+        restore_table_impl<TableIdx>(_table,
+                                     std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
+}
+
 using hip_api_data_t   = rocprofiler_hip_api_args_t;
 using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
 using hip_op_args_bf_t = rocprofiler_buffer_tracing_operation_args_cb_t;
@@ -672,6 +724,7 @@ using hip_op_args_bf_t = rocprofiler_buffer_tracing_operation_args_cb_t;
 #define INSTANTIATE_HIP_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
     template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
     template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
+    template void                     restore_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                \
     template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
     template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \

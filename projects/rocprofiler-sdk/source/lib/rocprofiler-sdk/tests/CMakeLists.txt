@@ -52,7 +52,7 @@ rocprofiler_add_unit_test(
 # -------------------------------------------------------------------------------------- #
 
 set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
-                                   registration.cpp roctx.cpp status.cpp)
+                                   late_start.cpp registration.cpp roctx.cpp status.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
@@ -69,7 +69,7 @@ set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 
 set(rocprofiler-sdk-lib-tests-env
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}")
 
 rocprofiler_add_unit_test(
     TARGET rocprofiler-sdk-lib-tests-shared
@@ -79,5 +79,4 @@ rocprofiler_add_unit_test(
     LABELS "unittests"
     ENVIRONMENT
         "${rocprofiler-sdk-lib-tests-env}"
-        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

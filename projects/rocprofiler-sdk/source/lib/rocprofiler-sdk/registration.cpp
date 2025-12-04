@@ -44,6 +44,7 @@
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
+#include "lib/rocprofiler-sdk/late_start.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
@@ -87,7 +88,8 @@
 #include <unordered_set>
 #include <vector>
 
-extern "C" {
+extern "C"
+{
 #pragma weak rocprofiler_configure
 
 extern rocprofiler_tool_configure_result_t*
@@ -236,7 +238,7 @@ struct client_library
     client_library(const client_library&)     = delete;
     client_library(client_library&&) noexcept = default;
 
-    client_library& operator=(const client_library&) = delete;
+    client_library& operator=(const client_library&)     = delete;
     client_library& operator=(client_library&&) noexcept = delete;
 
     std::string                                 name                    = {};
@@ -929,7 +931,8 @@ detach()
 }  // namespace registration
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_is_initialized(int* status)
 {
@@ -965,6 +968,27 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
     forced_config = configure_func;
     rocprofiler::registration::initialize();
+
+    // Automatic late-start detection
+    auto hsa_rt = rocprofiler::late_start::detect_hsa_runtime();
+    auto hip_rt = rocprofiler::late_start::detect_hip_runtime();
+
+    if(hsa_rt.initialized || hip_rt.initialized)
+    {
+        ROCP_INFO << "Detected initialized runtime(s), performing automatic late-start";
+
+        if(hsa_rt.initialized)
+        {
+            ROCP_INFO << "Wrapping HSA runtime for late-start";
+            rocprofiler::late_start::wrap_hsa_tables(hsa_rt);
+        }
+
+        if(hip_rt.initialized)
+        {
+            ROCP_INFO << "Wrapping HIP runtime for late-start";
+            rocprofiler::late_start::wrap_hip_tables(hip_rt);
+        }
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
