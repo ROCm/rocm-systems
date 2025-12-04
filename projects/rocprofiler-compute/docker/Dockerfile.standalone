@@ -13,11 +13,16 @@ RUN yum install -y python39 python39-devel && \
     curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
     python3 get-pip.py
 
+# Should be absolute path to where the standalone binary will extract its contents
+ENV ROCPROF_COMPUTE_BINARY_EXTRACT_DIR=/tmp
+
 CMD ["/bin/bash", "-c", "\
     python3 -m pip install -r requirements.txt \
     && python3 -m pip install nuitka patchelf \
     && git rev-parse HEAD > VERSION.sha \
     && python3 -m nuitka --mode=onefile --no-deployment-flag=self-execution \
+        --product-name=${ROCPROF_COMPUTE_BINARY_EXTRACT_DIR} \
+        --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID} \
         --enable-plugin=no-qt \
         --include-data-files=VERSION*=./ \
         --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp \
