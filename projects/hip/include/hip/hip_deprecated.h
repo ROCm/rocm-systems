@@ -21,7 +21,7 @@
 
 #pragma once
 
-// This file will add older hip functions used in the versioning system
+// This file will add older hip functions used in the versioning system 
 // Find the deprecated functions and structs in hip_device.cpp
 
 // This struct is also kept in hip_device.cpp
