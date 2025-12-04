@@ -243,7 +243,7 @@ __global__ void coalesced_group_tiled_partition_shfl_up(uint64_t* active_masks, 
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
-  const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
@@ -354,7 +354,7 @@ __global__ void coalesced_group_tiled_partition_shfl_down(uint64_t* active_masks
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() {
-  const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);

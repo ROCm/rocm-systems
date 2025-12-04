@@ -152,7 +152,7 @@ __global__ void block_tile_shfl_up(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflUpTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
-    const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
@@ -219,7 +219,7 @@ __global__ void block_tile_shfl_down(T* const out, const unsigned int delta) {
 
 template <typename T, size_t tile_size> void BlockTileShflDownTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {
-    const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();
@@ -298,7 +298,7 @@ __global__ void block_tile_shfl_xor(T* const out, const unsigned mask) {
 
 template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
   DYNAMIC_SECTION("Tile size: " << tile_size) {    
-    const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+    const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
     auto blocks = GenerateBlockDimensionsForShuffle();
     auto threads = GenerateThreadDimensionsForShuffle();

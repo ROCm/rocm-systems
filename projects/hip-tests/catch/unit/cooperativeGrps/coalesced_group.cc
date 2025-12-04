@@ -391,7 +391,7 @@ template <typename T> __global__ void coalesced_group_shfl_up(T* const out,
 }
 
 template <typename T> void CoalescedGroupShflUpTestImpl() {
-  const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
   const int warp_size = getWarpSize();
 
@@ -475,7 +475,7 @@ template <typename T> __global__ void coalesced_group_shfl_down(T* const out,
 }
 
 template <typename T> void CoalescedGroupShflDownTest() {
-  const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
   const int warp_size = getWarpSize();
 
