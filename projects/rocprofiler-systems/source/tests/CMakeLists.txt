@@ -20,6 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+# Skip unit tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+if(ROCPROFSYS_INSTALL_TESTS)
+    return()
+endif()
+
 add_executable(rocprof-sys-unit-tests dummy.cpp)
 
 target_link_libraries(

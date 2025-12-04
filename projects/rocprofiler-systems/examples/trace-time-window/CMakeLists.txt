@@ -27,7 +27,7 @@ set_target_properties(
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS trace-time-window
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples
+        DESTINATION share/rocprofiler-systems/samples/trace-time-window
+        COMPONENT rocprofiler-systems-samples
     )
 endif()

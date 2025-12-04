@@ -849,8 +849,8 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
                 OPTIONAL
             )
         endif()
-
-        if(ROCPROFSYS_BUILD_TESTING OR ROCPROFSYS_BUILD_PYTHON)
+        # Skip console script tests when ROCPROFSYS_INSTALL_TESTS is enabled (for now)
+        if((ROCPROFSYS_BUILD_TESTING OR ROCPROFSYS_BUILD_PYTHON) AND NOT ROCPROFSYS_INSTALL_TESTS)
             add_test(
                 NAME ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
                 COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} --help
