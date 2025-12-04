@@ -398,8 +398,26 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.interceptor_index = interceptors.size() - 1;
     Cursor.pkt_index = next_packet_;
     auto& handler = interceptors[Cursor.interceptor_index];
-    handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
-                                                handler.second, PacketWriter);
+    
+    // Check if packets wrap around the ring buffer boundary.
+    // The interceptor callback expects packets to be contiguous in memory.
+    uint64_t start_index = next_packet_ & mask;
+    uint64_t end_index = start_index + packet_count;
+
+    if (end_index > amd_queue_.hsa_queue.size) {
+      // Packets wrap around - copy to a staging contiguous buffer
+      std::vector<AqlPacket> contiguous_packets(packet_count);
+      for (uint64_t j = 0; j < packet_count; ++j) {
+        contiguous_packets[j] = ring[(next_packet_ + j) & mask];
+      }
+      handler.first(contiguous_packets.data(), packet_count, next_packet_,
+                    handler.second, PacketWriter);
+    } else {
+      // Packets are contiguous in the ring buffer
+      handler.first(&ring[start_index], packet_count, next_packet_,
+                                                 handler.second, PacketWriter);
+    }
+
     if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
       _mm_sfence();
