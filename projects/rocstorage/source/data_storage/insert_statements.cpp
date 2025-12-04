@@ -39,6 +39,7 @@ insert_statements::insert_statements(std::shared_ptr<database> database,
   initialize_code_object_stmt();
   initialize_args_stmt();
   initialize_memory_alloc_stmt();
+  initialize_string_stmt();
 }
 
 void insert_statements::initialize_event_stmt() {
@@ -202,5 +203,16 @@ void insert_statements::initialize_memory_alloc_stmt() {
           uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t,
           const char *>(query);
 }
+
+void insert_statements::initialize_string_stmt() {
+  data_storage::queries::table_insert_query query_builder;
+  auto query = query_builder.set_table_name("rocpd_string_" + m_uuid)
+                   .set_columns("guid", "string")
+                   .set_values('?', '?')
+                   .get_query_string();
+  m_insert_string_statement =
+      m_database->create_statement_executor<const char *, const char *>(query);
+}
+
 } // namespace data_storage
 } // namespace rocstorage

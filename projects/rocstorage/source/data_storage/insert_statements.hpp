@@ -78,6 +78,8 @@ struct insert_statements {
   using insert_args_statement =
       std::function<void(const char *, size_t, size_t, const char *,
                          const char *, const char *, const char *)>;
+  using insert_string_statement =
+      std::function<void(const char *, const char *)>;
 
 private:
   void initialize_pmc_event_stmt();
@@ -90,6 +92,7 @@ private:
   void initialize_code_object_stmt();
   void initialize_args_stmt();
   void initialize_memory_alloc_stmt();
+  void initialize_string_stmt();
 
 private:
   std::shared_ptr<database> m_database;
@@ -108,6 +111,7 @@ public:
   insert_memory_alloc_statement m_insert_memory_alloc_statement;
   insert_memory_alloc_no_agent_statement
       m_insert_memory_alloc_no_agent_statement;
+  insert_string_statement m_insert_string_statement;
 };
 
 } // namespace data_storage
