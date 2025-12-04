@@ -1,29 +1,32 @@
 .. meta::
-  :description: This chapter describes performance optimization concepts and metrics for AMD GPUs
-  :keywords: AMD, ROCm, HIP, performance, optimization, roofline, occupancy, bandwidth, arithmetic intensity
+  :description: This chapter explains performance concepts and theoretical models for understanding AMD GPU performance
+  :keywords: AMD, ROCm, HIP, performance, theory, roofline, occupancy, bandwidth, arithmetic intensity
 
 .. _performance_optimization:
 
 *******************************************************************************
-Performance optimization
+Understanding GPU performance
 *******************************************************************************
 
-This chapter describes key performance concepts and optimization strategies for 
-AMD GPUs. Understanding these concepts is essential for achieving optimal 
-performance in GPU applications.
+This chapter explains the theoretical foundations of GPU performance on AMD 
+hardware. Understanding these concepts helps you analyze performance 
+characteristics, identify bottlenecks, and make informed optimization decisions.
+
+For practical optimization techniques and step-by-step guidance, see 
+:doc:`../how-to/performance_guidelines`.
 
 Performance bottlenecks
 =======================
 
 A performance bottleneck is the limiting factor that prevents a GPU kernel from 
-achieving higher performance. Identifying and addressing bottlenecks is crucial 
-for optimization. The two primary categories of bottlenecks are:
+achieving higher performance. The two primary categories are:
 
 * **Compute-bound**: The kernel is limited by arithmetic throughput
 * **Memory-bound**: The kernel is limited by memory bandwidth
 
-Understanding which bottleneck affects your kernel helps determine the appropriate 
-optimization strategy.
+Understanding which category applies helps identify the appropriate optimization 
+approach. Compute-bound kernels benefit from arithmetic optimizations, while 
+memory-bound kernels benefit from memory access improvements.
 
 .. _roofline_model:
 
@@ -31,8 +34,7 @@ Roofline model
 ==============
 
 The roofline model is a visual performance analysis framework that relates 
-achievable performance to hardware limits based on arithmetic intensity. It helps 
-identify whether a kernel is compute-bound or memory-bound.
+achievable performance to hardware limits based on arithmetic intensity.
 
 The model plots performance (FLOPS) against arithmetic intensity (FLOPS/byte) 
 with two limiting factors:
@@ -44,6 +46,19 @@ The intersection point determines the transition between memory-bound and
 compute-bound regions. Kernels below and to the left of the intersection are 
 memory-bound, while those to the right are compute-bound.
 
+.. figure:: ../../data/understand/performance_optimization/roofline.svg
+   :alt: Roofline model diagram showing memory bandwidth ceiling and compute
+         ceiling
+   :align: center
+   :width: 100%
+
+   Roofline model showing the relationship between arithmetic intensity and
+   achievable performance. The memory bandwidth ceiling represents the GPU's
+   memory bandwidth limit, while the compute ceiling shows the maximum
+   achievable TFLOPs. Kernels falling into the area to the left of the red
+   line are memory-bound, while they are compute-bound if they fall into the
+   right area.
+
 Key characteristics:
 
 * The roofline creates an upper bound on achievable performance
@@ -52,8 +67,8 @@ Key characteristics:
 
 .. _compute_bound:
 
-Compute-bound kernels
-=====================
+Compute-bound performance
+=========================
 
 A kernel is compute-bound when its performance is limited by the GPU's arithmetic 
 throughput rather than memory bandwidth. These kernels have high arithmetic 
@@ -63,20 +78,20 @@ Characteristics of compute-bound kernels:
 
 * High ratio of arithmetic operations to memory accesses
 * Performance scales with GPU compute capacity
-* Limited benefit from memory optimization
+* Limited benefit from memory bandwidth optimization
 * Can often achieve a high percentage of peak theoretical FLOPS
 
-Optimization strategies:
+The theoretical maximum is determined by:
 
-* Increase occupancy to hide arithmetic latency
-* Use specialized units (matrix cores, SFUs) when applicable
-* Optimize instruction mix and scheduling
-* Consider mixed-precision computation for higher throughput
+* Number of compute units and SIMD lanes
+* Clock frequency
+* Instruction throughput per cycle
+* Specialized unit capabilities (matrix cores, SFUs)
 
 .. _memory_bound:
 
-Memory-bound kernels
-====================
+Memory-bound performance
+========================
 
 A kernel is memory-bound when its performance is limited by memory bandwidth 
 rather than compute capacity. These kernels have low arithmetic intensity and 
@@ -89,12 +104,12 @@ Characteristics of memory-bound kernels:
 * Sensitive to memory access patterns
 * Typically achieve lower percentage of peak FLOPS
 
-Optimization strategies:
+The theoretical maximum is determined by:
 
-* Improve memory coalescing to reduce transactions
-* Use shared memory (LDS) for data reuse
-* Optimize data layout for access patterns
-* Reduce memory traffic through compression or precision reduction
+* HBM bandwidth capacity
+* Memory controller efficiency
+* Cache hierarchy effectiveness
+* Memory access pattern efficiency
 
 .. _arithmetic_intensity:
 
@@ -102,12 +117,13 @@ Arithmetic intensity
 ====================
 
 Arithmetic intensity is the ratio of floating-point operations (FLOPs) to memory 
-traffic (bytes) for a given kernel or algorithm. It determines whether a kernel 
-is compute-bound or memory-bound.
+traffic (bytes) for a given kernel or algorithm.
 
 .. math::
 
    \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}
+
+This metric determines whether a kernel is compute-bound or memory-bound.
 
 Key points:
 
@@ -124,18 +140,22 @@ For modern AMD GPUs:
 
 .. _latency_hiding:
 
-Latency hiding
-==============
+Latency hiding mechanisms
+==========================
 
 GPUs hide memory and instruction latency through massive hardware multithreading 
-rather than complex CPU techniques like out-of-order execution. This is achieved 
-by rapidly switching between wavefronts when one stalls.
+rather than complex CPU techniques like out-of-order execution.
 
-Mechanisms for latency hiding:
+How latency hiding works:
 
 * **Wavefront switching**: Context switches occur every cycle with zero overhead
 * **Multiple wavefronts per CU**: Many concurrent wavefronts supported
 * **Instruction-level parallelism**: Multiple independent instructions in flight
+
+The hardware can completely hide memory latency if there are enough active 
+wavefronts with independent work. The number of instructions needed from other 
+wavefronts to hide latency depends on the specific memory latency and instruction 
+throughput characteristics of the GPU.
 
 Requirements for effective latency hiding:
 
@@ -144,48 +164,44 @@ Requirements for effective latency hiding:
 * Balanced resource usage
 * Minimal divergence
 
-The hardware can completely hide memory latency if there are enough active 
-wavefronts with independent work. The number of instructions needed from other 
-wavefronts to hide latency depends on the specific memory latency and instruction 
-throughput characteristics of the GPU.
-
 .. _wavefront_execution:
 
 Wavefront execution states
 ==========================
 
-Understanding wavefront states helps optimize GPU utilization. A wavefront can 
-be in one of several states:
+A wavefront can be in one of several states during execution:
 
 * **Active**: Currently executing on a SIMD unit
 * **Ready**: Eligible for execution, waiting for scheduling
 * **Stalled**: Waiting for a dependency (memory, synchronization)
 * **Sleeping**: Blocked on a barrier or synchronization primitive
 
-Key metrics:
+Understanding these states helps explain GPU utilization metrics:
 
 * **Active cycles**: Percentage of cycles with at least one instruction executing
 * **Stall cycles**: Percentage of cycles waiting for resources
 * **Idle cycles**: No wavefronts available to execute
 
-Optimization goals:
-
-* Maximize active cycles
-* Minimize stall cycles through latency hiding
-* Reduce idle cycles by increasing occupancy
+Maximizing active cycles while minimizing stall and idle cycles improves 
+performance.
 
 .. _occupancy:
 
-Occupancy
-=========
+Occupancy theory
+================
 
 Occupancy measures the ratio of active wavefronts to the maximum possible 
-wavefronts on a compute unit. Higher occupancy generally improves latency hiding 
-but is limited by resource constraints.
+wavefronts on a compute unit.
 
 .. math::
 
    \text{Occupancy} = \frac{\text{Active Wavefronts}}{\text{Max Wavefronts per CU}}
+
+Why occupancy matters:
+
+* Higher occupancy improves latency hiding
+* More concurrent wavefronts mask memory and instruction latency
+* Enables better utilization of execution units
 
 Limiting factors:
 
@@ -196,116 +212,98 @@ Limiting factors:
 
 Trade-offs:
 
-* Higher occupancy improves latency hiding
-* Lower occupancy allows more resources per thread
+* Higher occupancy improves latency hiding but reduces resources per thread
+* Lower occupancy allows more resources per thread but may expose latency
 * Optimal occupancy depends on kernel characteristics
 * Memory-bound kernels benefit more from high occupancy
 
-Tools like ``rocprofv3`` can measure achieved occupancy and identify limiting 
-factors.
+.. _memory_hierarchy_theory:
 
-.. _memory_optimization:
+Memory hierarchy impact on performance
+=======================================
 
-Memory access optimization
-==========================
+The GPU memory hierarchy has different bandwidths and latencies:
 
-Efficient memory access patterns are crucial for GPU performance. Key 
-optimization techniques include:
+Memory types by speed:
 
-Memory coalescing
------------------
+1. **Registers**: Fastest, lowest latency (per-thread storage)
+2. **LDS (shared memory)**: Very fast, on-chip (per-block storage)
+3. **L1 cache**: Fast, on-chip (per-CU cache)
+4. **L2 cache**: Moderate, on-chip (shared across CUs)
+5. **HBM (global memory)**: Slower, off-chip but high bandwidth
+
+Memory coalescing theory
+-------------------------
 
 Memory coalescing combines memory accesses from multiple threads into fewer 
 transactions. When consecutive threads access consecutive memory addresses, the 
 hardware can merge requests into efficient cache line accesses.
 
-**Coalesced access pattern**:
+Why coalescing matters:
 
-* Consecutive threads access consecutive memory addresses
-* Results in minimal cache line requests (optimal)
-* Can achieve a high percentage of peak bandwidth
+* Reduces number of memory transactions
+* Improves memory bandwidth utilization
+* Decreases memory access latency
 
-**Non-coalesced pattern**:
+**Coalesced pattern**: Consecutive threads accessing consecutive addresses 
+achieve high bandwidth utilization.
 
-* Threads access random or strided addresses
-* Results in many separate memory transactions
-* May achieve only a small fraction of peak bandwidth
+**Non-coalesced pattern**: Random or strided addresses result in many separate 
+transactions and low bandwidth utilization.
 
-Best practices:
+.. _bank_conflicts_theory:
 
-* Ensure consecutive threads access consecutive addresses
-* Use structure-of-arrays rather than array-of-structures
-* Align data to cache line boundaries
-* Consider padding to avoid conflicts
-
-.. _bank_conflicts:
-
-Bank conflicts
---------------
+Bank conflict theory
+--------------------
 
 Shared memory (LDS) is organized into banks that can be accessed independently. 
 Bank conflicts occur when multiple threads access different addresses in the 
-same bank, causing serialization.
+same bank.
 
-LDS organization:
+Why bank conflicts matter:
 
-* Multiple memory banks of fixed width
-* Banks can be accessed independently each cycle
 * Conflicts serialize accesses, reducing throughput
+* LDS bandwidth drops proportionally to conflict degree
+* Can turn parallel operations into sequential ones
 
 Common patterns:
 
-* **No conflict**: Each thread accesses a different bank
+* **No conflict**: Each thread accesses a different bank (full bandwidth)
 * **Broadcast**: Multiple threads read the same address (no conflict)
-* **Two-way conflict**: Two threads access the same bank (significant slowdown)
-* **N-way conflict**: N threads access the same bank (proportional slowdown)
+* **N-way conflict**: N threads access the same bank (1/N bandwidth)
 
-Avoiding conflicts:
+.. _register_pressure_theory:
 
-* Pad arrays to avoid power-of-two strides
-* Use odd strides when possible
-* Reorganize data layout
-* Use different indexing schemes
-
-.. _register_pressure:
-
-Register pressure
-=================
+Register pressure theory
+=========================
 
 Register pressure occurs when a kernel requires more registers than optimal for 
-the target occupancy. This can limit the number of concurrent wavefronts and 
-reduce performance.
+the target occupancy.
 
-Effects of high register pressure:
+Why register pressure matters:
 
-* Reduced occupancy due to register limitations
-* Potential register spilling to memory
-* Decreased ability to hide latency
-* Lower overall throughput
+* Reduces maximum occupancy
+* May cause register spilling to memory
+* Decreases ability to hide latency
+* Lowers overall throughput
 
-Management strategies:
+The relationship between registers and occupancy:
 
-* Minimize live variables
-* Recompute values instead of storing
-* Use shared memory for temporary storage
-* Split complex kernels
-* Adjust launch bounds to guide compiler
+* More registers per thread → fewer concurrent wavefronts
+* Fewer registers per thread → higher occupancy but may need memory spills
+* Optimal balance depends on kernel memory access patterns
 
-The compiler reports register usage, and tools like ``rocm-smi`` can help 
-analyze register-limited occupancy.
+.. _performance_metrics_theory:
 
-.. _performance_metrics:
+Performance metrics explained
+==============================
 
-Key performance metrics
-=======================
-
-Understanding performance metrics helps identify optimization opportunities:
+Understanding performance metrics helps analyze GPU behavior:
 
 Peak rate
 ---------
 
-The theoretical maximum performance of a GPU, typically measured in FLOPS or 
-bandwidth:
+The theoretical maximum performance of a GPU:
 
 * **Peak FLOPS**: Maximum floating-point operations per second
 * **Peak bandwidth**: Maximum memory throughput
@@ -313,71 +311,65 @@ bandwidth:
 
 Actual performance is always below peak due to various inefficiencies.
 
-Pipe utilization
-----------------
+Utilization metrics
+-------------------
 
-The percentage of execution cycles where the pipeline is actively processing 
-instructions. Low utilization indicates stalls or insufficient work.
+**Pipe utilization**: The percentage of execution cycles where the pipeline is 
+actively processing instructions. Low utilization indicates stalls or insufficient 
+work.
 
-Issue efficiency
-----------------
+**Issue efficiency**: The ratio of issued instructions to the maximum possible. 
+Low efficiency can indicate instruction cache misses, scheduling inefficiencies, 
+or resource conflicts.
 
-The ratio of issued instructions to the maximum possible. Low efficiency can 
-indicate:
+**CU utilization**: The percentage of compute units actively executing work. Low 
+utilization suggests insufficient parallelism, load imbalance, or synchronization 
+overhead.
 
-* Instruction cache misses
-* Scheduling inefficiencies
-* Resource conflicts
+**Branch efficiency**: The ratio of non-divergent to total branches. Low 
+efficiency indicates significant divergence overhead.
 
-CU utilization
---------------
+Theoretical performance limits
+==============================
 
-The percentage of compute units actively executing work. Low utilization suggests:
+Understanding theoretical limits helps set realistic performance expectations.
 
-* Insufficient parallelism
-* Load imbalance
+**Peak performance bounds**
+
+Every GPU has theoretical maximum performance determined by:
+
+* Clock frequency and number of compute units
+* Instruction throughput per clock cycle
+* Memory bandwidth capacity
+* Specialized unit capabilities (matrix cores, SFUs)
+
+**Achievable performance**
+
+Real applications typically achieve a fraction of theoretical peak due to:
+
+* Imperfect resource utilization
+* Memory access inefficiencies
+* Control flow divergence
 * Synchronization overhead
+* Launch and scheduling costs
 
-Branch efficiency
------------------
-
-The ratio of non-divergent to total branches. Low efficiency indicates significant 
-divergence overhead.
-
-.. _optimization_workflow:
-
-Optimization workflow
-=====================
-
-A systematic approach to GPU optimization:
-
-1. **Profile and measure**: Use tools like ``rocprofv3`` to identify bottlenecks
-2. **Analyze metrics**: Determine if kernel is compute or memory bound
-3. **Apply optimizations**: Target the identified bottleneck
-4. **Verify improvements**: Re-profile to confirm gains
-5. **Iterate**: Repeat until performance goals are met
-
-Common optimization priorities:
-
-1. Ensure correct algorithm implementation
-2. Optimize memory access patterns
-3. Improve occupancy if latency-limited
-4. Reduce divergence
-5. Use specialized hardware features
-6. Fine-tune resource usage
+The gap between theoretical and achieved performance reveals optimization 
+opportunities. The roofline model provides a framework for understanding these 
+limits and identifying which factor (compute or memory) constrains performance.
 
 Summary
 =======
 
-Effective GPU optimization requires understanding both hardware capabilities and 
-kernel characteristics. Key concepts include:
+Understanding GPU performance requires knowledge of several interconnected concepts:
 
-* The roofline model for classifying bottlenecks
-* Arithmetic intensity as a performance predictor
-* Occupancy and latency hiding strategies
-* Memory optimization techniques
-* Performance metrics for analysis
+* **Performance bottlenecks**: Whether compute or memory limits performance
+* **Roofline model**: Visual framework for analyzing performance limits
+* **Arithmetic intensity**: The compute-to-memory ratio of algorithms
+* **Latency hiding**: How concurrent execution masks delays
+* **Occupancy**: How wavefront concurrency affects resource utilization
+* **Memory hierarchy**: How different memory types affect bandwidth
+* **Performance metrics**: Quantitative measures for analysis
 
-Success comes from systematically identifying and addressing the limiting factors 
-in your specific kernels. For additional optimization guidance, see 
-:doc:`../how-to/performance_guidelines` and the ROCm profiling tools documentation.
+These theoretical foundations inform practical optimization decisions. For 
+step-by-step optimization techniques and practical guidance, see 
+:doc:`../how-to/performance_guidelines`.
