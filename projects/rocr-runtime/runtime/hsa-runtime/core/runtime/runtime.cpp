@@ -63,6 +63,10 @@
 #include <rocprofiler-register/rocprofiler-register.h>
 #endif
 
+#ifdef HSAKMT_VIRTIO_ENABLED
+#include "hsakmt/hsakmt_virtio.h"
+#endif
+
 #include "core/common/shared.h"
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
@@ -1056,20 +1060,20 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    bool isUnknown = (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN);
-
-#ifdef HSAKMT_VIRTIO_ENABLED
-    if (isUnknown) {
-        err = vhsaKmtQueryPointerInfo(ptr, &thunkInfo);
-        isUnknown = (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN);
-    }
-#endif
-
-    if (isUnknown) {
-        retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+    auto err = QueryPointerInfo(ptr, &thunkInfo);
+    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
+         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
+         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
+         * were previously filled with VMemoryPtrInfo.
+         */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
+      }
+      retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+      memcpy(info, &retInfo, retInfo.size);
+      return HSA_STATUS_SUCCESS;
     }
 
     if (returnListData) {
@@ -2144,6 +2148,14 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     }
     it++;
   }
+}
+
+HSAKMT_STATUS Runtime::QueryPointerInfo(const void* ptr, HsaPointerInfo* pointer_info) {
+#ifdef HSAKMT_VIRTIO_ENABLED
+  return vhsaKmtQueryPointerInfo(ptr, pointer_info);
+#else
+  return HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, pointer_info));
+#endif
 }
 
 Runtime::Runtime()
