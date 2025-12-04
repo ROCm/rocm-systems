@@ -24,6 +24,10 @@ THE SOFTWARE.
 
 #include <catch2/catch_all.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "hip/hip_runtime.h"
+#include <cstring>
+#include <iomanip>
+#include <hip_test_common.hh>
 
 // Define a new MatcherBase class with a public 'describe' member function because
 // Catch::MatcherBase::describe is protected and thus can't be used via a pointer to
@@ -61,10 +65,99 @@ template <typename T, typename Matcher> class ValidatorBase : public MatcherBase
   bool nan = false;
 };
 
+__global__ void getNextAfter(Float16 from, Float16 direction, uint64_t steps, Float16* out);
+
+struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
+  Float16WithinUlpsMatcher(Float16 target, uint64_t ulps) : m_target(target), m_ulps(ulps) {}
+
+  bool match(Float16 const& matchee) const override {
+    // Comparison with NaN should always be false.
+    // This way we can rule it out before getting into the ugly details
+
+    // std::cout << " Matchee: " << matchee << " M_Target: " << __half2float(m_target) << std::endl;
+    if (__hisnan(matchee) || __hisnan(m_target)) {
+      return false;
+    }
+
+    auto lc = convert(matchee);
+    auto rc = convert(m_target);
+
+    if ((lc < 0) != (rc < 0)) {
+      // Potentially we can have +0 and -0
+      return matchee == m_target;
+    }
+
+    auto ulpDiff = std::abs(lc - rc);
+    return static_cast<uint64_t>(ulpDiff) <= m_ulps;
+  }
+
+  std::string describe() const override {
+    std::stringstream ret;
+
+    ret << "is within " << m_ulps << " ULPs of ";
+
+
+    write(ret, m_target);
+    ret << 'f';
+
+
+    ret << " ([";
+
+    // We have to cast INFINITY to float because of MinGW, see #1782
+    write(ret, step(m_target, -FLOAT16_MAX, m_ulps));
+    ret << ", ";
+    write(ret, step(m_target, FLOAT16_MAX, m_ulps));
+
+    ret << "])";
+
+    return ret.str();
+  }
+
+ private:
+  Float16 step(Float16 start, Float16 direction, uint64_t steps) const {
+    Float16* outManagedMem;
+    HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&outManagedMem), sizeof(Float16)));
+    *outManagedMem = start;
+
+
+    getNextAfter<<<1, 1>>>(start, direction, steps, outManagedMem);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    Float16 result = *outManagedMem;
+    // std::cout << " Start: " << __half2float(start) << " Direction: " << __half2float(direction)
+    //           << " Step: " << steps << " Result: " << __half2float(result) << std::endl;
+    HIP_CHECK(hipFree(outManagedMem));
+    return result;
+  }
+
+  void write(std::ostream& out, Float16 num) const {
+    const uint32_t float16MaxDigits = 5;
+    out << std::scientific << std::setprecision(float16MaxDigits) << num;
+  }
+
+  static int16_t convert(Float16 d) {
+    static_assert(sizeof(Float16) == sizeof(unsigned short),
+                  "Important ULP matcher assumption violated");
+    uint16_t i;
+    std::memcpy(&i, &d, sizeof(Float16));
+    return i;
+  }
+
+  Float16 m_target;
+  uint64_t m_ulps;
+};
+
+
 template <typename T> auto ULPValidatorBuilderFactory(int64_t ulps) {
   return [=](T target, auto&&...) {
     return std::make_unique<ValidatorBase<T, Catch::Matchers::WithinUlpsMatcher>>(
         target, Catch::Matchers::WithinULP(target, ulps));
+  };
+};
+
+template <> inline auto ULPValidatorBuilderFactory<Float16>(int64_t ulps) {
+  return [=](Float16 target, auto&&...) {
+    return std::make_unique<ValidatorBase<Float16, Float16WithinUlpsMatcher>>(target, Float16WithinUlpsMatcher(target, ulps));
   };
 };
 
