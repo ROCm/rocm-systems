@@ -1,6 +1,6 @@
 #include <hip_test_common.hh>
 
-TEST_CASE("Unit_hipHostMalloc_4bytes") {
+TEST_CASE("Unit_hipHostMalloc_4bytes", "[memory]") {
   int* d_a;
   auto res = hipHostMalloc(&d_a, sizeof(int), 0);
   REQUIRE(res == hipSuccess);
@@ -8,7 +8,7 @@ TEST_CASE("Unit_hipHostMalloc_4bytes") {
   REQUIRE(res == hipSuccess);
 }
 
-TEST_CASE("Unit_hipMalloc_4bytes") {
+TEST_CASE("Unit_hipMalloc_4bytes", "[memory]") {
   int* d_a;
   auto res = hipMalloc(&d_a, sizeof(int));
   REQUIRE(res == hipSuccess);

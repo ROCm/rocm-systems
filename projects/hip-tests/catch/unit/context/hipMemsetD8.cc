@@ -20,7 +20,7 @@ THE SOFTWARE.
 #define N 1024
 constexpr char memsetval = 'b';
 
-TEST_CASE("Unit_hipMemsetD8_Functional") {
+TEST_CASE("Unit_hipMemsetD8_Functional", "[memory][memset]") {
   size_t Nbytes = N * sizeof(char);
   char* A_h = new char[Nbytes];
   ;
