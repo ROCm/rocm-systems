@@ -24,7 +24,6 @@
 
 #include "common/defines.h"
 #include "common/environment.hpp"
-#include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/timemory.hpp"
@@ -76,71 +75,9 @@ to_string(bool _v)
 
 namespace
 {
+using rocprofsys::common::update_mode;
+
 auto original_envs = std::unordered_set<std::string>{};
-enum update_mode : int
-{
-    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
-    UPD_PREPEND = 1 << 0,  // 0x01
-    UPD_APPEND  = 1 << 1,  // 0x02
-    UPD_WEAK    = 1 << 2,  // 0x04
-};
-
-template <typename Tp>
-void
-update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
-           update_mode&& _mode, std::string_view _join_delim = ":")
-{
-    auto _prepend  = (_mode & UPD_PREPEND) != 0;
-    auto _append   = (_mode & UPD_APPEND) != 0;
-    auto _weak_upd = (_mode & UPD_WEAK) != 0;
-
-    // if both flags are set, prefer append
-    if(_prepend && _append)
-    {
-        _prepend = false;
-    }
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_weak_upd)
-            {
-                // if the value has changed, do not update but allow overridding the value
-                // inherited from the initial env
-                if(original_envs.find(std::string{ itr }) == original_envs.end()) return;
-            }
-
-            if(_prepend || _append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_prepend)
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                    else
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
 
 int
 get_verbose(parser_data_t& _data)
@@ -172,16 +109,18 @@ get_initial_environment(parser_data_t& _data)
     auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
-        update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
-        _data.updated.emplace("ROCPROFSYS_SCRIPT_PATH");
+        rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
+                                       _libexecpath, update_mode::REPLACE, ":",
+                                       _data.updated, original_envs);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose);
        !llvm_dir.empty())
     {
-        update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir, UPD_APPEND);
-        _data.updated.emplace("LD_LIBRARY_PATH");
+        rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
+                                       update_mode::APPEND, ":", _data.updated,
+                                       original_envs);
         auto        current_ld = getenv("LD_LIBRARY_PATH");
         std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
         setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);

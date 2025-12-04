@@ -26,7 +26,11 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "core/trace_cache/storage_parser.hpp"
+
+#include "library/runtime.hpp"
+
 #include <memory>
+#include <unistd.h>
 
 namespace rocprofsys
 {

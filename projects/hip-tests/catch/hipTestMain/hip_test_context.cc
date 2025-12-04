@@ -58,12 +58,27 @@ std::string TestContext::substringFound(std::vector<std::string> list, std::stri
 
 std::string TestContext::getCurrentArch() {
 #if HT_LINUX
-  const char* cmd =
-      "/opt/rocm/bin/rocm_agent_enumerator | awk '$0 != \"gfx000\"' | xargs | sed -e 's/ /;/g' | "
-      "tr -d '\n'";
+  constexpr std::string_view rocm_agent_enum = "rocm_agent_enumerator";
+  std::filesystem::path default_rocm_bin_path = "/opt/rocm";
+  std::string command{};
+  if (const char *env_rocm_path = std::getenv("ROCM_PATH")) {
+    command += env_rocm_path;
+  } else {
+    command += default_rocm_bin_path;
+  }
+  command += "/bin/";
+  command += rocm_agent_enum;
+  if (!std::filesystem::exists(command)) {
+    return "";
+  }
+
+  command += " | awk '$0 != "
+             "\"gfx000\"' | xargs | sed -e 's/ /;/g' | "
+             "tr -d '\n'";
+
   std::array<char, 1024> buffer;
   std::string result;
-  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
   if (!pipe) {
     printf("popen() failed!");
     return "";

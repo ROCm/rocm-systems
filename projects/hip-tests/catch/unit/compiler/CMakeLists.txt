@@ -18,7 +18,15 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+  set(OFFLOAD_ARCH_GENERIC_STR 
+    --offload-arch=gfx9-generic
+    --offload-arch=gfx9-4-generic:sramecc+:xnack-
+    --offload-arch=gfx9-4-generic:sramecc-:xnack-
+    --offload-arch=gfx9-4-generic:xnack+
+    --offload-arch=gfx10-1-generic
+    --offload-arch=gfx10-3-generic
+    --offload-arch=gfx11-generic
+    --offload-arch=gfx12-generic)
 
   set(DISABLE_GENERIC_TARGET_ONLY)
 
@@ -30,40 +38,34 @@ if(HIP_PLATFORM MATCHES "amd")
     set(GENERIC_TARGET_ONLY_COMPRESSED_EXE hipSquareGenericTargetOnlyCompressed)
 
     set(LIBFS)
-    set(HIP_GENERIC_RPATH)
-    if(WIN32)
-      set(GENERIC_TARGET_ONLY_EXE ${GENERIC_TARGET_ONLY_EXE}.exe)
-      set(GENERIC_TARGET_ONLY_COMPRESSED_EXE ${GENERIC_TARGET_ONLY_COMPRESSED_EXE}.exe)
-    else()
-        set(LIBFS -lstdc++fs)
-        set(HIP_GENERIC_RPATH
-          -Wl,-rpath,'$$ORIGIN/../lib:${HIP_PATH}/lib')
+    if(NOT WIN32)
+      set(LIBFS -lstdc++fs)
     endif()
 
-    add_custom_target(hipSquareGenericTargetOnly ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} -DNO_GENERIC_TARGET_ONLY_TEST --std=c++17 -mcode-object-version=6 -w "${OFFLOAD_ARCH_GENERIC_STR}"
-                    ${CMAKE_CURRENT_SOURCE_DIR}/hipSquareGenericTarget.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
-                    ${HIP_GENERIC_RPATH}
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE}
-                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson ${LIBFS})
-    add_custom_target(hipSquareGenericTargetOnlyCompressed ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} -DNO_GENERIC_TARGET_ONLY_TEST -DGENERIC_COMPRESSED --std=c++17 -mcode-object-version=6 --offload-compress -w "${OFFLOAD_ARCH_GENERIC_STR}"
-                    ${CMAKE_CURRENT_SOURCE_DIR}/hipSquareGenericTarget.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
-                    ${HIP_GENERIC_RPATH}
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
-                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson ${LIBFS})
+    set_source_files_properties(hipSquareGenericTarget.cc PROPERTIES LANGUAGE HIP)
+    add_executable(${GENERIC_TARGET_ONLY_EXE}
+      hipSquareGenericTarget.cc
+      $<TARGET_OBJECTS:Main_Object>)
+    target_compile_options(${GENERIC_TARGET_ONLY_EXE} PUBLIC -w ${OFFLOAD_ARCH_GENERIC_STR})
+    target_link_libraries(${GENERIC_TARGET_ONLY_EXE} hip::host hip::device)
+    target_compile_definitions(${GENERIC_TARGET_ONLY_EXE} PRIVATE NO_GENERIC_TARGET_ONLY_TEST)
+    if(NOT USE_PREBUILT_CATCH)
+      target_link_libraries(${GENERIC_TARGET_ONLY_EXE} Catch2::Catch2WithMain)
+    endif()
+
+    add_executable(${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
+      hipSquareGenericTarget.cc
+      $<TARGET_OBJECTS:Main_Object>)
+    target_compile_definitions(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PRIVATE GENERIC_COMPRESSED NO_GENERIC_TARGET_ONLY_TEST)
+    target_compile_options(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} PUBLIC --offload-compress -w ${OFFLOAD_ARCH_GENERIC_STR})
+    target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} hip::host hip::device)
+    if(NOT USE_PREBUILT_CATCH)
+      target_link_libraries(${GENERIC_TARGET_ONLY_COMPRESSED_EXE} Catch2::Catch2WithMain)
+    endif()
+    if (WIN32)
+      set(GENERIC_TARGET_ONLY_EXE ${GENERIC_TARGET_ONLY_EXE}.exe)
+      set(GENERIC_TARGET_ONLY_COMPRESSED_EXE ${GENERIC_TARGET_ONLY_COMPRESSED_EXE}.exe)
+    endif()
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE})
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE})
   else()
@@ -77,12 +79,14 @@ if(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME hipSquareGenericTarget
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-  set_target_properties(hipSquareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY} -w ${OFFLOAD_ARCH_GENERIC_STR}")
+  set_target_properties(hipSquareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
+  target_compile_options(hipSquareGenericTarget PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
   hip_add_exe_to_target(NAME hipSquareGenericTargetCompressed
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-  set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress -w ${OFFLOAD_ARCH_GENERIC_STR}")
+  set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress")
+  target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
   add_dependencies(hipSquareGenericTarget hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)
@@ -93,15 +97,15 @@ if(HIP_PLATFORM MATCHES "amd")
   # SWDEV-548807 skip building hipSpirvTest
   if(false)
     add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                    COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
+                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
+                    -I${Catch2_SOURCE_DIR}/src
+                    -I${Catch2_BINARY_DIR}/generated-includes
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
-                    -I${HIP_PATH}/include/ --hip-path=${HIP_PATH} --offload-arch=amdgcnspirv
+                    --offload-arch=amdgcnspirv
                     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
     add_dependencies(CompilerTest hipSpirvTest)
   endif()
-
 endif()

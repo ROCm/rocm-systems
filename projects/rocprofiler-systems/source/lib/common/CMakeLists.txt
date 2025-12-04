@@ -48,3 +48,7 @@ target_compile_definitions(
     rocprofiler-systems-common-library
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
