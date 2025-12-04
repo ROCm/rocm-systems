@@ -72,7 +72,7 @@ config["METRIC_LOGGING"] = False
 num_kernels = 3
 num_devices = 1
 
-attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_no_delay = 1000
 attach_detach_interval_msec_with_delay = 60000
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
@@ -2100,22 +2100,16 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
             attach_detach_para=attach_detach,
         )
 
-        # Normal cleanup if profiler ended cleanly
-        if process_workload.poll() is None:
-            process_workload.kill()
-            process_workload.wait()
-
-        # Validate results
-        file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-        validate(inspect.stack()[0][3], workload_dir, file_dict)
-
     finally:
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
             process_workload.wait()
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    # Validate results
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.skip(
@@ -2156,35 +2150,26 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
             attach_detach_para=attach_detach,
         )
 
-        # Normal cleanup
-        if process_workload.poll() is None:
-            print(
-                f"rocprof-compute detached; killing workload pid={process_workload.pid}"
-            )
-            process_workload.kill()
-            process_workload.wait()
-
-        # Validate output
-        file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-        validate(
-            inspect.stack()[0][3],
-            workload_dir,
-            file_dict,
-        )
-
-        # Check profiling_config.yaml block entries
-        config_file = f"{workload_dir}/profiling_config.yaml"
-        assert test_utils.check_file_pattern("- 3.1.1", config_file)
-        assert test_utils.check_file_pattern("- 4.1.1", config_file)
-        assert test_utils.check_file_pattern("- 5.1.1", config_file)
-
     finally:
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
             process_workload.wait()
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    # Validate output
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    # Check profiling_config.yaml block entries
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    assert test_utils.check_file_pattern("- 3.1.1", config_file)
+    assert test_utils.check_file_pattern("- 4.1.1", config_file)
+    assert test_utils.check_file_pattern("- 5.1.1", config_file)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.live_attach_detach
@@ -2221,43 +2206,35 @@ def test_live_attach_detach_singlepath_launch_stats(
             attach_detach_para=attach_detach,
         )
 
-        # Normal cleanup
-        if process_workload.poll() is None:
-            print(
-                f"rocprof-compute detached; killing workload pid={process_workload.pid}"
-            )
-            process_workload.kill()
-            process_workload.wait()
-
-        # Validate CSVs & output correctness
-        file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-        validate(
-            inspect.stack()[0][3],
-            workload_dir,
-            file_dict,
-        )
-
-        # Check that launch-stat sets were applied
-        config_file = f"{workload_dir}/profiling_config.yaml"
-        for tag in [
-            "7.1.0",
-            "7.1.1",
-            "7.1.2",
-            "7.1.5",
-            "7.1.6",
-            "7.1.7",
-            "7.1.8",
-            "7.1.9",
-        ]:
-            assert test_utils.check_file_pattern(f"- {tag}", config_file)
-
     finally:
         if process_workload and process_workload.poll() is None:
             print(f"[finally] killing workload pid={process_workload.pid}")
             process_workload.kill()
             process_workload.wait()
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    # Validate CSVs & output correctness
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    # Check that launch-stat sets were applied
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    for tag in [
+        "7.1.0",
+        "7.1.1",
+        "7.1.2",
+        "7.1.5",
+        "7.1.6",
+        "7.1.7",
+        "7.1.8",
+        "7.1.9",
+    ]:
+        assert test_utils.check_file_pattern(f"- {tag}", config_file)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.sets_func
