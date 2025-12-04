@@ -2299,13 +2299,13 @@ class TestAmdSmiCPUPythonPerformance(unittest.TestCase):
 		
 
 # =============================================================================
-# PERFORMANCE TEST REPORTING SYSTEM (Converted from perf_cpu_test.sh)
+# PERFORMANCE TEST REPORTING SYSTEM (Converted from perf_test.sh)
 # =============================================================================
 
 def generate_reports_from_output():
     """
     Generate enhanced and table reports from test output.
-    This function replicates the Python report generation from perf_cpu_test.sh.
+    This function replicates the Python report generation from perf_test.sh.
     """
     import os
     import re
@@ -2315,7 +2315,7 @@ def generate_reports_from_output():
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Read the captured test output
-    log_file = os.path.join(script_dir, '_perf_cpu_test.log')
+    log_file = os.path.join(script_dir, '_perf_test.log')
     if not os.path.exists(log_file):
         print(f"⚠️  Warning: Performance log not found: {log_file}")
         return False
@@ -2347,17 +2347,17 @@ def generate_reports_from_output():
             if avg_match and err_match:
                 perf_line_match = re.match(r'Performance\s+(\S+?)(?:_processor_\d+|_gpu_\d+|_socket_\d+|_system)?:', line)
 
-                perf_cpu_test = {
+                perf_test = {
                     'avg_ms': float(avg_match.group(1)),
                     'errors': int(err_match.group(1)),
                 }
 
                 if perf_line_match:
-                    perf_cpu_test['name'] = perf_line_match.group(1)
+                    perf_test['name'] = perf_line_match.group(1)
                 else:
-                    perf_cpu_test['name'] = current_test['name']
+                    perf_test['name'] = current_test['name']
 
-                workflow_tests.append(perf_cpu_test)
+                workflow_tests.append(perf_test)
 
         elif 'All calls failed' in line and current_test:
             if workflow_tests and 'avg_ms' not in workflow_tests[-1]:
@@ -2372,18 +2372,18 @@ def generate_reports_from_output():
                 workflow_tests[-1]['error_name'] = error_match.group(2)
 
         elif line.startswith('Performance test completed for') and current_test:
-            for perf_cpu_test in workflow_tests:
-                if 'avg_ms' in perf_cpu_test:
-                    api_name = perf_cpu_test['name']
+            for perf_test in workflow_tests:
+                if 'avg_ms' in perf_test:
+                    api_name = perf_test['name']
 
-                    if perf_cpu_test['errors'] > 0 and 'error_name' not in perf_cpu_test:
+                    if perf_test['errors'] > 0 and 'error_name' not in perf_test:
                         if 'fan' in api_name.lower() or 'overdrive' in api_name.lower():
-                            perf_cpu_test['error_name'] = 'AMDSMI_STATUS_NOT_SUPPORTED'
+                            perf_test['error_name'] = 'AMDSMI_STATUS_NOT_SUPPORTED'
                         else:
-                            perf_cpu_test['error_name'] = 'AMDSMI_STATUS_NOT_SUPPORTED'
+                            perf_test['error_name'] = 'AMDSMI_STATUS_NOT_SUPPORTED'
 
-                    perf_cpu_test['category'] = 'FUNCTIONAL' if perf_cpu_test['errors'] == 0 else 'ERROR_MEASUREMENT'
-                    tests.append(perf_cpu_test)
+                    perf_test['category'] = 'FUNCTIONAL' if perf_test['errors'] == 0 else 'ERROR_MEASUREMENT'
+                    tests.append(perf_test)
 
             workflow_tests = []
             current_test = None
@@ -2393,13 +2393,13 @@ def generate_reports_from_output():
     error_tests = sorted([t for t in tests if t['category'] == 'ERROR_MEASUREMENT'], key=lambda x: x['avg_ms'])
 
     # Generate Enhanced Report
-    enhanced_file = os.path.join(script_dir, '_perf_cpu_test_enhanced.log')
+    enhanced_file = os.path.join(script_dir, '_perf_test_enhanced.log')
     with open(enhanced_file, 'w') as f:
         f.write('╔' + '═' * 78 + '╗\n')
         f.write('║' + ' AMD SMI PYTHON PERFORMANCE TEST RESULTS'.center(78) + '║\n')
         f.write('║' + f' Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}' + ' ' * (78 - len(f' Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')) + '║\n')
         f.write('╚' + '═' * 78 + '╝\n\n')
-        
+
         total = len(tests)
         f.write('📊 SUMMARY STATISTICS\n')
         f.write('─' * 50 + '\n')
@@ -2424,19 +2424,19 @@ def generate_reports_from_output():
     print(f'✅ Enhanced report: {enhanced_file}')
 
     # Generate Table Report
-    table_file = os.path.join(script_dir, '_perf_cpu_test_table.log')
+    table_file = os.path.join(script_dir, '_perf_test_table.log')
     with open(table_file, 'w') as f:
-        f.write('╔' + '═' * 53+ '╗\n')
+        f.write('╔' + '═' * 168 + '╗\n')
         f.write('║' + 'AMD SMI PYTHON PERFORMANCE TEST RESULTS'.center(168) + '║\n')
         f.write('║' + 'TABLE FORMAT'.center(168) + '║\n')
-        f.write('╠' + '═' * 53 + '╣\n')
+        f.write('╠' + '═' * 168 + '╣\n')
         gen_text = f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
-        f.write('║ ' + gen_text + ' ' * (51 - len(gen_text)) + ' ║\n')
-        f.write('╚' + '═' * 53 + '╝\n\n')
+        f.write('║ ' + gen_text + ' ' * (166 - len(gen_text)) + ' ║\n')
+        f.write('╚' + '═' * 168 + '╝\n\n')
 
         total = len(tests)
         f.write('📊 SUMMARY STATISTICS\n')
-        f.write('═' * 55 + '\n')
+        f.write('═' * 53 + '\n')
         f.write(f'Total Tests Executed   : {total}\n')
         f.write(f'✅ Functional Tests    : {len(functional_tests)} ({len(functional_tests)/total*100:.1f}%)\n')
         f.write(f'⚠️  Error Measurements  : {len(error_tests)} ({len(error_tests)/total*100:.1f}%)\n\n')
@@ -2453,7 +2453,7 @@ def generate_reports_from_output():
 
         if functional_tests:
             f.write('✅ FUNCTIONAL TESTS (APIs Returning Valid Data)\n')
-            f.write('═' * 55 + '\n')
+            f.write('═' * 53 + '\n')
             f.write('┌──────┬───────────────────────────────────────────────────────────────────┬─────────────┬─────────────────────────────────────────────┐\n')
             f.write('│ Rank │ API Name                                                          │ Time (ms)   │ Status                                      │\n')
             f.write('├──────┼───────────────────────────────────────────────────────────────────┼─────────────┼─────────────────────────────────────────────┤\n')
@@ -2466,7 +2466,7 @@ def generate_reports_from_output():
 
         if error_tests:
             f.write('⚠️ ERROR MEASUREMENT TESTS (APIs Correctly Returning Expected Errors)\n')
-            f.write('═' * 55 + '\n')
+            f.write('═' * 53 + '\n')
             f.write('┌──────┬───────────────────────────────────────────────────────────────────┬─────────────┬──────────────────────────────────────────┐\n')
             f.write('│ #    │ API Name                                                          │ Time (ms)   │ Error Code                               │\n')
             f.write('├──────┼───────────────────────────────────────────────────────────────────┼─────────────┼──────────────────────────────────────────┤\n')
@@ -2483,7 +2483,7 @@ def generate_reports_from_output():
         # Performance categories
         if tests:
             f.write('🏃 PERFORMANCE CATEGORIES\n')
-            f.write('═' * 170 + '\n')
+            f.write('═' * 53 + '\n')
             ultra_fast = [t for t in tests if t['avg_ms'] < 0.01]
             fast = [t for t in tests if 0.01 <= t['avg_ms'] < 0.1]
             medium = [t for t in tests if 0.1 <= t['avg_ms'] < 1.0]
@@ -2494,13 +2494,13 @@ def generate_reports_from_output():
             f.write(f'🚶 Medium (0.1-1.0ms)       : {len(medium):2d} tests\n')
             f.write(f'🐌 Slow (>= 1.0ms)          : {len(slow):2d} tests\n\n')
 
-        f.write('═' * 170 + '\n')
+        f.write('═' * 53 + '\n')
         f.write(f'Report generated by AMD SMI Performance Test (Python Version)\n')
-        f.write(f'For detailed logs, see: _perf_cpu_test.log and _perf_cpu_test_err.log\n\n')
+        f.write(f'For detailed logs, see: _perf_test.log and _perf_test_err.log\n\n')
         f.write('📝 NOTE: "Error Measurement Tests" are successful performance measurements\n')
         f.write('   of APIs that correctly return expected error codes (e.g., AMDSMI_STATUS_NOT_SUPPORTED)\n')
         f.write('   These are NOT test failures - they are successful timing measurements.\n')
-        f.write('═' * 170 + '\n')
+        f.write('═' * 53 + '\n')
 
     print(f'✅ Table report: {table_file}')
     print(f'✅ Raw output: {log_file}')
@@ -2534,10 +2534,10 @@ if __name__ == '__main__':
     # Step 1: Clean previous results
     print('\n[STEP 1] Cleaning previous results...')
     log_files = [
-        '_perf_cpu_test.log',
-        '_perf_cpu_test_err.log',
-        '_perf_cpu_test_enhanced.log',
-        '_perf_cpu_test_table.log'
+        '_perf_test.log',
+        '_perf_test_err.log',
+        '_perf_test_enhanced.log',
+        '_perf_test_table.log'
     ]
     removed = 0
     for log_file in log_files:
@@ -2555,8 +2555,8 @@ if __name__ == '__main__':
     print('\n[STEP 2] Running performance tests...')
     print('⏳ Executing tests...')
 
-    log_file = os.path.join(script_dir, '_perf_cpu_test.log')
-    err_file = os.path.join(script_dir, '_perf_cpu_test_err.log')
+    log_file = os.path.join(script_dir, '_perf_test.log')
+    err_file = os.path.join(script_dir, '_perf_test_err.log')
 
     # Run tests with unittest and capture output
     with open(log_file, 'w') as f_out, open(err_file, 'w') as f_err:
@@ -2600,10 +2600,10 @@ if __name__ == '__main__':
             if os.path.exists(full_path):
                 size = os.path.getsize(full_path) / 1024
                 desc = {
-                    '_perf_cpu_test_enhanced.log': 'Enhanced Summary Report',
-                    '_perf_cpu_test_table.log': 'Tabular Results Report',
-                    '_perf_cpu_test_err.log': 'Error Log & Test Status',
-                    '_perf_cpu_test.log': 'Complete Test Output'
+                    '_perf_test_enhanced.log': 'Enhanced Summary Report',
+                    '_perf_test_table.log': 'Tabular Results Report',
+                    '_perf_test_err.log': 'Error Log & Test Status',
+                    '_perf_test.log': 'Complete Test Output'
                 }.get(log_file, 'Output File')
 
                 print(f'  {desc} ({size:.1f} KB)')
@@ -2612,7 +2612,7 @@ if __name__ == '__main__':
         # Show preview of enhanced report
         print('📈 Quick Stats Preview:')
         print('═' * 80)
-        enhanced_path = os.path.join(script_dir, '_perf_cpu_test_enhanced.log')
+        enhanced_path = os.path.join(script_dir, '_perf_test_enhanced.log')
         if os.path.exists(enhanced_path):
             with open(enhanced_path, 'r') as f:
                 lines = f.readlines()
