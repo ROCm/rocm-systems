@@ -325,6 +325,8 @@ Device::~Device() {
     default_mem_pool_->release();
   }
 
+  clearAllTrackedObjects();
+
   if (graph_mem_pool_ != nullptr) {
     graph_mem_pool_->release();
   }
