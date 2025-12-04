@@ -72,7 +72,7 @@ config["METRIC_LOGGING"] = False
 num_kernels = 3
 num_devices = 1
 
-attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_no_delay = 1000
 attach_detach_interval_msec_with_delay = 60000
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
