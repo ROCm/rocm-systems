@@ -47,8 +47,8 @@
 // Callback function to get available in the system agents
 hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
   HsaRsrcFactory* hsa_rsrc = reinterpret_cast<HsaRsrcFactory*>(data);
-  // AddAgentInfo may return NULL for unsupported agent types (e.g., NPU)
-  // We should continue iterating regardless
+  // AddAgentInfo may return NULL for unsupported agent types (e.g., NPU).
+  // We should continue iterating regardless.
   hsa_rsrc->AddAgentInfo(agent);
   return HSA_STATUS_SUCCESS;
 }
