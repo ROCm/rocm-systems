@@ -1032,13 +1032,42 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
 
 
 @pytest.mark.roofline_2
-def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
+@pytest.mark.parametrize(
+    "options,expected_files",
+    [
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
+            ["empirRoof_gpu-0_FP32.pdf"],
+        ),
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
+            ["empirRoof_gpu-0_FP16.pdf"],
+        ),
+        (
+            ["--device", "0", "--roof-only", "--kernel-names", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
+            ["EXPECTED_FILE_PLACEHOLDER"],
+        ),
+    ],
+    ids=["FP32_datatype", "FP16_datatype", "kernel_filter"],
+)
+def test_roof_plot_modes(binary_handler_profile_rocprof_compute, options, expected_files):
     if soc in ("MI100"):
-        assert True
+        pytest.skip("Skipping roofline test for MI100")
         return
 
+    # Handle dynamic kernel name substitution for the kernel_filter test case
+    options = [
+        config["kernel_name_1"] if opt == "KERNEL_NAME_PLACEHOLDER" else opt
+        for opt in options
+    ]
     # Test `--kernel` filtering outputs are present and labelled correctly
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
+    expected_files = [
+        filter_empirRoof if f == "EXPECTED_FILE_PLACEHOLDER" else f
+        for f in expected_files
+    ]
+
+    workload_dir = test_utils.get_output_dir()
 
     plot_configurations = [
         {
@@ -1064,17 +1093,17 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     for config_test in plot_configurations:
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(
-            config, workload_dir, config_test["options"], check_success=False, roof=True
-        )
-        assert returncode == 0
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+    assert returncode == 0
 
-        for expected_file in config_test["expected_files"]:
-            expected_path = os.path.join(workload_dir, expected_file)
-            if os.path.exists(expected_path):
-                assert os.path.getsize(expected_path) > 0
+    for expected_file in expected_files:
+        expected_path = os.path.join(workload_dir, expected_file)
+        if os.path.exists(expected_path):
+            assert os.path.getsize(expected_path) > 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.roofline_2
