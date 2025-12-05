@@ -300,14 +300,18 @@ class AMDSMIParser(argparse.ArgumentParser):
         class AMDSMIPowerCapArgs(argparse.Action):
             def __call__(self, parser: AMDSMIParser, namespace: argparse.Namespace,
                          values: list, option_string: Optional[str] = None) -> None:
-                if len(values) != 2:
+                if len(values) == 1:
+                    # Only wattage provided - set all available power cap types
+                    power_cap_value = values[0]
+                    power_cap_type = None  # None means all available sensors
+                elif len(values) == 2:
+                    # Both power type and wattage provided
+                    power_cap_value = values[0]
+                    power_cap_type = values[1]
+                    if power_cap_type not in ['ppt0', 'ppt1']:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], power_cap_type, output_format)
+                else:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], values, output_format)
-
-                power_cap_type = values[0]
-                power_cap_value = values[1]
-
-                if power_cap_type not in ['ppt0', 'ppt1']:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], power_cap_type, output_format)
 
                 if not power_cap_value.isdigit():
                     raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], power_cap_value, output_format)
@@ -1320,7 +1324,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 ptl_format_help_choices_str = ", ".join(self.helpers.get_ptl_values()[0][0:-1])
                 set_ptl_format_help = f"Set the PTL format on a GPU processor. For example, --ptl-format I8,F32\n\tSet to one of the following PTL formats: {ptl_format_help_choices_str}"
             ppt0_power_cap_min, ppt0_power_cap_max, ppt1_power_cap_min, ppt1_power_cap_max = self.helpers.get_power_caps()
-            set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o ppt0 1300`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
+            set_power_cap_help = f"Set either PPT0 or PPT1 power capacity limit:\n\tEx: `amd-smi set -o 1300 ppt0`\n\tPPT0 min cap: {ppt0_power_cap_min}, PPT0 max cap: {ppt0_power_cap_max}\n\tPPT1 min cap: {ppt1_power_cap_min}, PPT1 max cap: {ppt1_power_cap_max}"
             set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
@@ -1359,7 +1363,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                                                        required=False, help=set_compute_partition_help, metavar=('TYPE/INDEX'))
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
             # Power cap is enabled on guest, maintain order
-            set_value_exclusive_group.add_argument('-o', '--power-cap', action=self._power_cap_options(), nargs=2, required=False, help=set_power_cap_help, metavar=('PWR_TYPE', 'WATTS'))
+            set_value_exclusive_group.add_argument('-o', '--power-cap', action=self._power_cap_options(), nargs='+', required=False, help=set_power_cap_help, metavar=('WATTS', '[PWR_TYPE]'))
             if self.helpers.is_baremetal():
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')

@@ -47,7 +47,6 @@
         "Unit_hipGraphicsUnregisterResource_Negative_Parameters",
         "SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it",
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
-        "Unit_Assert_Positive_Basic_KernelFail",
         "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint8_t",
         "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint16_t",
         "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint32_t",
