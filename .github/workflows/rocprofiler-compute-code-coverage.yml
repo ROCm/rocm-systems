@@ -112,7 +112,7 @@ jobs:
 
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          python3 ./tools/run-ci.py \
+          python3 ./tools/run-code-coverage.py \
             --build-name "${BUILD_NAME}" \
             --site "${SITE_NAME}" \
             --mode "Nightly" \
