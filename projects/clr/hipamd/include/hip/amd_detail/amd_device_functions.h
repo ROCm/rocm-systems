@@ -52,10 +52,12 @@ __device__ static inline unsigned int __popcll(unsigned long long int input) {
   return __builtin_popcountll(input);
 }
 
-__device__ static inline int __clz(int input) { return __ockl_clz_u32((uint)input); }
+__device__ static inline int __clz(int input) {
+  return input == 0u ? 32 : __builtin_clz((uint)input);
+}
 
 __device__ static inline int __clzll(long long int input) {
-  return __ockl_clz_u64((__hip_uint64_t)input);
+  return input == 0u ? 64 : __builtin_clzl((__hip_uint64_t)input);
 }
 
 __device__ static inline int __ffs(unsigned int input) {
