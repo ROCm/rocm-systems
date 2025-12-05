@@ -53,11 +53,11 @@ constexpr auto perfetto_shmem_size_hint_kb = 64;
 
 struct output_config
 {
-    output_config()                         = default;
-    ~output_config()                        = default;
-    output_config(const output_config&)     = default;
-    output_config(output_config&&) noexcept = default;
-    output_config& operator=(const output_config&) = default;
+    output_config()                                    = default;
+    ~output_config()                                   = default;
+    output_config(const output_config&)                = default;
+    output_config(output_config&&) noexcept            = default;
+    output_config& operator=(const output_config&)     = default;
     output_config& operator=(output_config&&) noexcept = default;
 
     bool                     stats                       = false;
@@ -68,6 +68,7 @@ struct output_config
     bool                     pftrace_output              = false;
     bool                     otf2_output                 = false;
     bool                     rocpd_output                = false;
+    bool                     perf_user_events_output     = false;
     bool                     summary_output              = false;
     bool                     kernel_rename               = false;
     bool                     group_by_queue              = false;
@@ -131,6 +132,7 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(otf2_output);
     CFG_SERIALIZE_MEMBER(summary_output);
     CFG_SERIALIZE_MEMBER(rocpd_output);
+    CFG_SERIALIZE_MEMBER(perf_user_events_output);
     CFG_SERIALIZE_MEMBER(kernel_rename);
     CFG_SERIALIZE_MEMBER(group_by_queue);
 

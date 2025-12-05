@@ -12,14 +12,16 @@
 #include <linux/perf_event.h>
 #include <linux/atomic.h>
 #include <linux/limits.h>
+#include <linux/rcupdate.h>
+#include <linux/spinlock.h>
 
 #include "aql_perf.h"
 #include "amdgpu_pmu.h"
 #include "pmu_dimension.h"
 
-/* Global AQL session - initialized during module load */
-static struct aql_perf_session *global_aql_session = NULL;
-static struct mutex aql_pmu_mutex;
+/* Global AQL session - RCU-protected for safe access from atomic context */
+static struct aql_perf_session __rcu *global_aql_session = NULL;
+static struct mutex aql_pmu_mutex; /* For writes and non-atomic operations */
 static bool aql_feature_available = false;
 
 /* Global workqueue - shared by all measurements */
@@ -59,30 +61,32 @@ int aql_pmu_init(void)
 	aql_info("Created global workqueue for all measurements");
 
 	/* Create global AQL session */
-	global_aql_session = aql_perf_session_create();
-	if (IS_ERR(global_aql_session)) {
-		ret = PTR_ERR(global_aql_session);
+	struct aql_perf_session *session = aql_perf_session_create();
+	if (IS_ERR(session)) {
+		ret = PTR_ERR(session);
 		aql_err("Failed to create global AQL session: %d", ret);
-		global_aql_session = NULL;
 		destroy_workqueue(aql_global_workqueue);
 		aql_global_workqueue = NULL;
 		return ret;
 	}
 
 	/* Initialize the session */
-	ret = aql_perf_session_initialize(global_aql_session);
+	ret = aql_perf_session_initialize(session);
 	if (ret) {
 		aql_err("Failed to initialize global AQL session: %d", ret);
-		aql_perf_session_put(global_aql_session);
-		global_aql_session = NULL;
+		aql_perf_session_put(session);
 		destroy_workqueue(aql_global_workqueue);
 		aql_global_workqueue = NULL;
 		return ret;
 	}
 
+	/* Publish session via RCU */
+	mutex_lock(&aql_pmu_mutex);
+	rcu_assign_pointer(global_aql_session, session);
 	aql_feature_available = true;
-	aql_info("AQL PMU integration initialized successfully with %u GPUs",
-		 global_aql_session->num_gpus);
+	mutex_unlock(&aql_pmu_mutex);
+
+	aql_info("AQL PMU integration initialized successfully with %u GPUs", session->num_gpus);
 
 	return 0;
 }
@@ -118,18 +122,22 @@ void aql_pmu_flush_all_measurements(void)
  */
 void aql_pmu_cleanup(void)
 {
+	struct aql_perf_session *session;
+
 	aql_info("Cleaning up AQL PMU integration");
 
+	/* Clear session pointer under mutex */
 	mutex_lock(&aql_pmu_mutex);
-
-	if (global_aql_session) {
-		aql_perf_session_put(global_aql_session);
-		global_aql_session = NULL;
-	}
-
+	session = rcu_dereference_protected(global_aql_session, lockdep_is_held(&aql_pmu_mutex));
+	rcu_assign_pointer(global_aql_session, NULL);
 	aql_feature_available = false;
-
 	mutex_unlock(&aql_pmu_mutex);
+
+	/* Wait for all RCU readers to finish before releasing session */
+	if (session) {
+		synchronize_rcu();
+		aql_perf_session_put(session);
+	}
 
 	/* Destroy global workqueue - safe because session is already released
      * and timer is already cancelled (done in pmu_main.c before calling this) */
@@ -149,12 +157,13 @@ void aql_pmu_cleanup(void)
  */
 bool aql_pmu_is_available(void)
 {
+	struct aql_perf_session *session;
 	bool available;
 
-	mutex_lock(&aql_pmu_mutex);
-	available = aql_feature_available && global_aql_session &&
-		    (global_aql_session->state == SESSION_ACTIVE);
-	mutex_unlock(&aql_pmu_mutex);
+	rcu_read_lock();
+	session = rcu_dereference(global_aql_session);
+	available = aql_feature_available && session && (session->state == SESSION_ACTIVE);
+	rcu_read_unlock();
 
 	return available;
 }
@@ -189,6 +198,7 @@ static bool aql_pmu_should_use_hardware(struct perf_event *event)
  * @event: Perf event to map
  *
  * Internal version that assumes aql_pmu_mutex is already held by caller.
+ * Uses rcu_dereference_protected since mutex provides necessary protection.
  *
  * Returns: GPU device ID (e.g., 7410), or U32_MAX on error
  */
@@ -202,7 +212,7 @@ static uint32_t aql_pmu_get_gpu_id_for_event_locked(struct perf_event *event)
 		return U32_MAX;
 	}
 
-	session = global_aql_session;
+	session = rcu_dereference_protected(global_aql_session, lockdep_is_held(&aql_pmu_mutex));
 	cpu = event->cpu;
 
 	aql_debug("get_gpu_id_for_event: cpu=%d, num_gpus=%u", cpu,
@@ -296,22 +306,25 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
 
 	aql_debug("Before mutex_lock(&aql_pmu_mutex)");
 	mutex_lock(&aql_pmu_mutex);
-	aql_debug("After mutex_lock(&aql_pmu_mutex), global_aql_session=%p", global_aql_session);
 
-	if (!global_aql_session) {
+	struct aql_perf_session *session =
+		rcu_dereference_protected(global_aql_session, lockdep_is_held(&aql_pmu_mutex));
+	aql_debug("After mutex_lock(&aql_pmu_mutex), session=%p", session);
+
+	if (!session) {
 		aql_debug("Global AQL session is NULL, falling back to simulation");
 		mutex_unlock(&aql_pmu_mutex);
 		return -EOPNOTSUPP;
 	}
 
-	aql_debug("About to check session state, session=%p", global_aql_session);
-	if (global_aql_session->state != SESSION_ACTIVE) {
+	aql_debug("About to check session state, session=%p", session);
+	if (session->state != SESSION_ACTIVE) {
 		aql_debug("AQL session state is %d (not active), falling back to simulation",
-			  global_aql_session->state);
+			  session->state);
 		mutex_unlock(&aql_pmu_mutex);
 		return -EOPNOTSUPP;
 	}
-	aql_debug("Session is active, state=%d", global_aql_session->state);
+	aql_debug("Session is active, state=%d", session->state);
 
 	/* Select GPU for this event */
 	aql_debug("Before aql_pmu_select_gpu");
@@ -325,7 +338,7 @@ int aql_pmu_event_init(struct perf_event *event, const struct pmu_dimension_coor
 
 	/* Create AQL measurement */
 	aql_debug("Before aql_perf_measurement_create for GPU %u", gpu_id);
-	measurement = aql_perf_measurement_create(global_aql_session, gpu_id, event);
+	measurement = aql_perf_measurement_create(session, gpu_id, event);
 	aql_debug("After aql_perf_measurement_create, measurement=%p", measurement);
 	if (IS_ERR(measurement)) {
 		aql_err("Failed to create AQL measurement: %ld", PTR_ERR(measurement));
@@ -439,6 +452,29 @@ int aql_pmu_event_stop(struct perf_event *event)
 }
 
 /**
+ * __aql_pmu_event_read_internal - Internal read function without logging
+ * @event: Perf event to read
+ *
+ * This is the quiet version used by high-frequency sampling paths (e.g., timer).
+ * No logging to avoid flooding kernel log at 50Hz sampling rate.
+ *
+ * Returns: Counter value
+ */
+static uint64_t __aql_pmu_event_read_internal(struct perf_event *event)
+{
+	struct aql_measurement *measurement;
+
+	if (!event->hw.config_base) {
+		return 0;
+	}
+
+	measurement = (struct aql_measurement *)event->hw.config_base;
+
+	/* Use atomic version to return cached value and schedule refresh */
+	return aql_perf_measurement_read_atomic(measurement);
+}
+
+/**
  * aql_pmu_event_read - Read AQL event counter value
  * @event: Perf event to read
  *
@@ -455,9 +491,10 @@ uint64_t aql_pmu_event_read(struct perf_event *event)
 
 	measurement = (struct aql_measurement *)event->hw.config_base;
 
-	/* Use atomic version to return cached value and schedule refresh */
-	counter_value = aql_perf_measurement_read_atomic(measurement);
+	/* Call internal read function */
+	counter_value = __aql_pmu_event_read_internal(event);
 
+	/* Log results */
 	aql_debug("GPU %u: read=%llu", measurement->gpu_id, counter_value);
 	aql_info("[PMU] ========== aql_pmu_event_read RETURNING: %llu (0x%llx) ==========",
 		 counter_value, counter_value);
@@ -501,11 +538,13 @@ uint64_t aql_pmu_event_read_sync(struct perf_event *event)
  */
 int aql_pmu_get_gpu_count(void)
 {
+	struct aql_perf_session *session;
 	int count;
 
-	mutex_lock(&aql_pmu_mutex);
-	count = global_aql_session ? global_aql_session->num_gpus : 0;
-	mutex_unlock(&aql_pmu_mutex);
+	rcu_read_lock();
+	session = rcu_dereference(global_aql_session);
+	count = session ? session->num_gpus : 0;
+	rcu_read_unlock();
 
 	return count;
 }
@@ -516,9 +555,15 @@ int aql_pmu_get_gpu_count(void)
  * Retrieves the global AQL session and increments its reference count.
  * Caller must call aql_pmu_put_session() when done.
  *
- * Note: Currently returns the single global session. The reference counting
- * is designed for future flexibility if multiple sessions or session lifecycle
- * management becomes necessary.
+ * IMPORTANT: This function is safe to call from atomic context (e.g., timer
+ * callbacks, hard IRQ handlers) because it uses RCU read-side critical
+ * sections instead of mutexes.
+ *
+ * RCU Protocol:
+ * - Readers (this function) use rcu_read_lock/unlock for atomic-safe access
+ * - Writers (init/cleanup) use rcu_assign_pointer and synchronize_rcu
+ * - Reference count is acquired with refcount_inc_not_zero to avoid races
+ *   with session destruction
  *
  * Returns: Global AQL session with incremented refcount, or NULL
  */
@@ -526,11 +571,11 @@ struct aql_perf_session *aql_pmu_get_session(void)
 {
 	struct aql_perf_session *session;
 
-	mutex_lock(&aql_pmu_mutex);
-	session = global_aql_session;
-	if (session)
-		aql_perf_session_get(session);
-	mutex_unlock(&aql_pmu_mutex);
+	rcu_read_lock();
+	session = rcu_dereference(global_aql_session);
+	if (session && !aql_perf_session_get(session))
+		session = NULL; /* Session is being destroyed, don't use it */
+	rcu_read_unlock();
 
 	return session;
 }
@@ -557,24 +602,26 @@ void aql_pmu_put_session(struct aql_perf_session *session)
  */
 void aql_pmu_get_stats(struct aql_perf_stats *stats)
 {
+	struct aql_perf_session *session;
+
 	if (!stats)
 		return;
 
 	aql_perf_get_stats(stats);
 
 	/* Add session-specific stats if available */
-	mutex_lock(&aql_pmu_mutex);
-	if (global_aql_session) {
-		atomic64_add(atomic64_read(&global_aql_session->stats.packets_submitted),
+	rcu_read_lock();
+	session = rcu_dereference(global_aql_session);
+	if (session) {
+		atomic64_add(atomic64_read(&session->stats.packets_submitted),
 			     &stats->packets_submitted);
-		atomic64_add(atomic64_read(&global_aql_session->stats.packets_completed),
+		atomic64_add(atomic64_read(&session->stats.packets_completed),
 			     &stats->packets_completed);
-		atomic64_add(atomic64_read(&global_aql_session->stats.errors_total),
-			     &stats->errors_total);
-		atomic64_add(atomic64_read(&global_aql_session->stats.sessions_created),
+		atomic64_add(atomic64_read(&session->stats.errors_total), &stats->errors_total);
+		atomic64_add(atomic64_read(&session->stats.sessions_created),
 			     &stats->sessions_created);
 	}
-	mutex_unlock(&aql_pmu_mutex);
+	rcu_read_unlock();
 }
 
 EXPORT_SYMBOL_GPL(aql_get_global_workqueue);

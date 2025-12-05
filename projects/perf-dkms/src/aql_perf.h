@@ -227,6 +227,9 @@ struct aql_measurement {
 	bool cache_valid; /* Whether cached value is valid */
 	bool pending_destroy; /* Measurement should be freed after async work */
 
+	/* Tracepoint sampling support - delta tracking */
+	atomic64_t prev_counter_value; /* Previous value for delta calculation */
+
 	/* Reference counting to prevent use-after-free with work items */
 	struct kref refcount; /* Reference count for safe async operations */
 };
@@ -283,7 +286,7 @@ struct workqueue_struct *aql_get_global_workqueue(void);
 struct aql_perf_session *aql_perf_session_create(void);
 int aql_perf_session_initialize(struct aql_perf_session *session);
 void aql_perf_session_destroy(struct aql_perf_session *session);
-void aql_perf_session_get(struct aql_perf_session *session);
+bool aql_perf_session_get(struct aql_perf_session *session);
 void aql_perf_session_put(struct aql_perf_session *session);
 
 /* GPU Discovery and Setup */

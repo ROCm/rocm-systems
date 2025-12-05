@@ -659,6 +659,9 @@ struct aql_measurement *aql_perf_measurement_create(struct aql_perf_session *ses
 	measurement->cached_counter_value = 0;
 	measurement->cache_valid = false;
 
+	/* Initialize tracepoint sampling support */
+	atomic64_set(&measurement->prev_counter_value, 0);
+
 	/* Initialize reference count - starts at 1 for the creator */
 	kref_init(&measurement->refcount);
 

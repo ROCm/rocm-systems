@@ -49,6 +49,7 @@
 #include "lib/output/generateCSV.hpp"
 #include "lib/output/generateJSON.hpp"
 #include "lib/output/generateOTF2.hpp"
+#include "lib/output/generatePerfUserEvents.hpp"
 #include "lib/output/generatePerfetto.hpp"
 #include "lib/output/generateRocpd.hpp"
 #include "lib/output/generateStats.hpp"
@@ -108,7 +109,8 @@
 #include <sys/wait.h>
 
 #if defined(CODECOV) && CODECOV > 0
-extern "C" {
+extern "C"
+{
 extern void
 __gcov_dump(void);
 }
@@ -118,7 +120,8 @@ namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 namespace fs     = ::rocprofiler::common::filesystem;
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
@@ -1919,6 +1922,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
 
+    // Initialize perf user_events early so external tools can subscribe before events are written
+    if(tool::get_config().perf_user_events_output)
+    {
+        tool::init_perf_user_events();
+    }
+
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
     auto code_obj_ctx = null_context_id;
@@ -2755,6 +2764,13 @@ generate_output(cleanup_mode _cleanup_mode)
                           counters_output.get_generator());
     }
 
+    if(tool::get_config().perf_user_events_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::write_perf_user_events(
+            tool::get_config(), *tool_metadata, kernel_dispatch_output.get_generator());
+    }
+
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
        outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
@@ -2863,6 +2879,9 @@ tool_fini(void* /*tool_data*/)
     flush();
 
     generate_output(cleanup_mode::destroy);
+
+    // Cleanup perf user_events resources
+    tool::cleanup_perf_user_events();
 
     if(destructors)
     {
@@ -2975,7 +2994,8 @@ wait_pid(pid_t _pid, int _opts = 0)
     return _status;
 }
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 

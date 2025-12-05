@@ -245,13 +245,14 @@ static void aql_perf_session_release(struct aql_perf_session *session)
 	{
 		struct aql_measurement *measurement, *tmp;
 		struct list_head local_list;
+		unsigned long flags;
 
 		INIT_LIST_HEAD(&local_list);
 
 		/* Move all measurements to local list to avoid holding spinlock during cleanup */
-		spin_lock(&session->measurement_lock);
+		spin_lock_irqsave(&session->measurement_lock, flags);
 		list_splice_init(&session->active_measurements, &local_list);
-		spin_unlock(&session->measurement_lock);
+		spin_unlock_irqrestore(&session->measurement_lock, flags);
 
 		/* Stop and cleanup each measurement */
 		list_for_each_entry_safe(measurement, tmp, &local_list, list)
@@ -285,13 +286,15 @@ static void aql_perf_session_release(struct aql_perf_session *session)
 	/* Clean up any remaining shared counter refs */
 	{
 		struct shared_counter_ref *ref, *tmp;
-		spin_lock(&session->shared_lock);
+		unsigned long flags;
+
+		spin_lock_irqsave(&session->shared_lock, flags);
 		list_for_each_entry_safe(ref, tmp, &session->shared_counters, list)
 		{
 			list_del(&ref->list);
 			kfree(ref);
 		}
-		spin_unlock(&session->shared_lock);
+		spin_unlock_irqrestore(&session->shared_lock, flags);
 	}
 
 	/* Free counter buffers and architectures for all GPUs */
@@ -378,15 +381,19 @@ struct aql_perf_session *aql_perf_session_create(void)
  * aql_perf_session_get - Increment session reference count
  * @session: Session to reference
  *
- * Note: Currently only one global session exists, so this refcounting
- * infrastructure is not strictly necessary. However, it provides safety
- * for potential future designs with multiple sessions or session sharing
- * between different subsystems.
+ * Uses refcount_inc_not_zero() to safely increment the reference count
+ * only if it's not already zero (session being destroyed). This is critical
+ * for RCU-protected access where readers may encounter a session in the
+ * process of being destroyed.
+ *
+ * Returns: true if reference acquired, false if session is being destroyed
  */
-void aql_perf_session_get(struct aql_perf_session *session)
+bool aql_perf_session_get(struct aql_perf_session *session)
 {
-	if (session)
-		refcount_inc(&session->ref_count);
+	if (!session)
+		return false;
+
+	return refcount_inc_not_zero(&session->ref_count);
 }
 
 /**
