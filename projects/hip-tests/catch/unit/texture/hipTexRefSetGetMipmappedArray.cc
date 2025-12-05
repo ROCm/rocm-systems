@@ -43,6 +43,7 @@ TEST_CASE("Unit_hipTexRefSetGetMipmappedArray") {
   SECTION("Set and get mipmapped array") {
     hipMipmappedArray_t mipmapped_array;
     HIP_RESOURCE_DESC res_desc{};
+    hipModule_t module = nullptr;
     hipExtent extent;
     hipChannelFormatDesc channel_desc;
     unsigned int width = 256, height = 256, mipmap_level = 2;
@@ -58,8 +59,11 @@ TEST_CASE("Unit_hipTexRefSetGetMipmappedArray") {
       return;
     }
     HIP_CHECK(res);
-
-    HIP_CHECK(hipTexRefSetMipmappedArray(texRef, mipmapped_array, Flags));
+    HIP_CHECK(hipFree(nullptr));
+    HIP_CHECK(hipModuleLoad(&module, "tex_ref_get_module.code"));
+    HIP_CHECK(hipModuleGetTexRef(&texRef, module, "tex"));
+    HIP_CHECK(hipTexRefSetFlags(texRef, HIP_TRSF_NORMALIZED_COORDINATES));
+    HIP_CHECK(hipTexRefSetMipmappedArray(texRef, mipmapped_array, HIP_TRSA_OVERRIDE_FORMAT));
     HIP_CHECK(hipTexRefGetMipMappedArray(&outArr, texRef));
     REQUIRE(outArr == mipmapped_array);
     HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
