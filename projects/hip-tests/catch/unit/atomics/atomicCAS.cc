@@ -62,7 +62,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Unit_atomicCAS_Positive, int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -107,7 +107,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicCAS_Positive_Multi_Kernel, int, unsigned int,
                    unsigned long long, unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -142,7 +142,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicCAS_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicCAS_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicCAS_int, kAtomicCAS_uint, kAtomicCAS_ulong,

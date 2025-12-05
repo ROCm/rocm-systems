@@ -40,7 +40,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
+TEST_CASE(Unit_hipGetProcAddress_IPC_Memory) {
   int N = 40;
   int Nbytes = N * sizeof(int);
 
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Memory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_IPC_Event") {
+TEST_CASE(Unit_hipGetProcAddress_IPC_Event) {
   int fd[2];
   REQUIRE(pipe(fd) == 0);
 

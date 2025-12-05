@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 #include "gl_interop_common.hh"
 
-TEST_CASE("Unit_hipGraphicsMapResources_Positive_Basic") {
+TEST_CASE(Unit_hipGraphicsMapResources_Positive_Basic) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipGraphicsMapResources_Positive_Basic") {
   HIP_CHECK(hipGraphicsUnregisterResource(resources.at(1)));
 }
 
-TEST_CASE("Unit_hipGraphicsMapResources_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphicsMapResources_Negative_Parameters) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();

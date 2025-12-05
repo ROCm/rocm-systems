@@ -55,10 +55,10 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs,
                    int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs,
                    int, unsigned int, unsigned long, unsigned long long, float,
                    double) {
 #endif  // HT_NVIDIA
@@ -110,10 +110,10 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu]",
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_GPU,
                    int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_GPU,
                    int, unsigned int, unsigned long, unsigned long long, float,
                    double) {
 #endif // HT_NVIDIA
@@ -166,11 +166,11 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "[multigpu]",
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
-                   "[multigpu]", int, unsigned int, unsigned long long, float) {
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_Peer_GPUs,
+                   int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
-                   "[multigpu]", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Host_And_Peer_GPUs,
+                   int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
 #endif  // HT_NVIDIA
   int warp_size = 0;
@@ -206,7 +206,7 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicExch_system_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicExch_system_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source =

@@ -51,10 +51,10 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive_Same_Address_Compile_Time, int, unsigned int,
                    unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive_Same_Address_Compile_Time, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
 #endif  // HT_NVIDIA
   for (auto current = 0; current < cmd_options.iterations; ++current) {
@@ -91,9 +91,9 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long long, float) {
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive, int, unsigned int, unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive, int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
 #endif  // HT_NVIDIA
   int warp_size = 0;
@@ -143,10 +143,10 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned l
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive_Multi_Kernel, int, unsigned int,
                    unsigned long long, float) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicExch_Positive_Multi_Kernel, int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
 #endif  // HT_NVIDIA
   int warp_size = 0;
@@ -183,7 +183,7 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned in
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicExch_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicExch_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicExchInt, kAtomicExchUnsignedInt, kAtomicExchULL,

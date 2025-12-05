@@ -44,7 +44,7 @@ static __global__ void binary_part_tiled_odd_even_val(int* data, int* odd_res, i
   }
 }
 
-TEST_CASE("Unit_cg_binary_part") {
+TEST_CASE(Unit_cg_binary_part) {
   const size_t warp_size = getWarpSize();
 
   int *data, *odd_res, *even_res;

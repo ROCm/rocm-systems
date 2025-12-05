@@ -1,0 +1,2081 @@
+---
+definitions:
+  default_cmd_options: &default_cmd_options
+    iterations: 5
+    warmups: 5
+    cg_extended_run: 5
+    cg_iterations: 2
+    no_display: false
+    progress: false
+    accuracy_iterations: 4294967296 # std::numeric_limits<uint32_t>::max() + 1ull
+    reduce_iterations: 1
+    reduce_input_size: 50
+    accuracy_max_memory: 80
+    max_memory: 2147483648
+    reduction_factor: 0.1
+  level_0: &level_0
+    level: 0
+  level_1: &level_1
+    level: 1
+  level_2: &level_2 
+    level: 2
+  level_3: &level_3
+    level: 3
+  level_5: &level_5
+    level: 5
+  disabled_all: &disabled_all
+    disabled:
+      - amd_linux
+      - amd_windows
+      - amd_wsl
+      - nvidia_linux
+      - nvidia_windows
+  disabled_amd: &disabled_amd
+    disabled:
+      - amd_linux
+      - amd_windows
+      - amd_wsl
+  disabled_nvidia: &disabled_nvidia
+    disabled:
+      - nvidia_linux
+      - nvidia_windows
+  disabled_linux: &disabled_linux
+    disabled:
+      - amd_linux
+      - nvidia_linux
+  disabled_windows: &disabled_windows
+    disabled:
+      - amd_windows
+      - nvidia_windows
+
+cmd_options:
+  level_2: *default_cmd_options
+  level_5:
+    <<: *default_cmd_options
+    reduction_factor: 100
+
+tests:
+  assertion:
+    Unit_StaticAssert_Positive_Basic_RTC: *level_2
+    Unit_StaticAssert_Negative_Basic_RTC: *level_2
+    Unit_Assert_Positive_Basic_KernelPass: *level_2
+    Unit_Assert_Positive_Basic_KernelFail:
+      <<: *level_2
+      # fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
+      <<: *disabled_all
+  atomics:
+    Unit_atomicAnd_Positive_SameAddress: *level_2
+    Unit_atomicAnd_Positive_Adjacent_Addresses: *level_2
+    Unit_atomicAnd_Positive_Scattered_Addresses: *level_2
+    Unit_atomicAnd_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_atomicAnd_Negative_Parameters_RTC: *level_2
+    Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicAnd_system_Positive_Peer_GPUs_Adjacent_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicAnd_system_Positive_Peer_GPUs_Scattered_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicOr_Positive_SameAddress: *level_2
+    Unit_atomicOr_Positive_Adjacent_Addresses: *level_2
+    Unit_atomicOr_Positive_Scattered_Addresses: *level_2
+    Unit_atomicOr_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_atomicOr_Negative_Parameters_RTC: *level_2
+    Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicXor_Positive_SameAddress: *level_2
+    Unit_atomicXor_Positive_Adjacent_Addresses: *level_2
+    Unit_atomicXor_Positive_Scattered_Addresses: *level_2
+    Unit_atomicXor_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_atomicXor_Negative_Parameters_RTC: *level_2
+    Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicXor_system_Positive_Peer_GPUs_Adjacent_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicXor_system_Positive_Peer_GPUs_Scattered_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMin_Positive_SameAddress: *level_2
+    Unit_atomicMin_Positive_Adjacent_Addresses: *level_2
+    Unit_atomicMin_Positive_Scattered_Addresses: *level_2
+    Unit_atomicMin_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_atomicMin_Negative_Parameters_RTC: *level_2
+    Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMax_Positive_SameAddress: *level_2
+    Unit_atomicMax_Positive_Adjacent_Addresses: *level_2
+    Unit_atomicMax_Positive_Scattered_Addresses: *level_2
+    Unit_atomicMax_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_atomicMax_Negative_Parameters_RTC: *level_2
+    Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMax_system_Positive_Peer_GPUs_Adjacent_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicMax_system_Positive_Peer_GPUs_Scattered_Addresses:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_safeAtomicMin_Positive_SameAddress: *level_2
+    Unit_safeAtomicMin_Positive_Adjacent_Addresses: *level_2
+    Unit_safeAtomicMin_Positive_Scattered_Addresses: *level_2
+    Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_safeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_safeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_unsafeAtomicMin_Positive_SameAddress: *level_2
+    Unit_unsafeAtomicMin_Positive_Adjacent_Addresses: *level_2
+    Unit_unsafeAtomicMin_Positive_Scattered_Addresses: *level_2
+    Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_unsafeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_unsafeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_safeAtomicMax_Positive_SameAddress: *level_2
+    Unit_safeAtomicMax_Positive_Adjacent_Addresses: *level_2
+    Unit_safeAtomicMax_Positive_Scattered_Addresses: *level_2
+    Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_safeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_safeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit_unsafeAtomicMax_Positive_SameAddress: *level_2
+    Unit_unsafeAtomicMax_Positive_Adjacent_Addresses: *level_2
+    Unit_unsafeAtomicMax_Positive_Scattered_Addresses: *level_2
+    Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address: *level_2
+    Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
+    Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Wavefront_SameAddress: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Wavefront_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Wavefront_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Workgroup_SameAddress: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Workgroup_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Workgroup_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses: *level_2
+    Unit_AtomicBuiltins_Negative_Parameters_RTC: *level_2
+    Unit___hip_atomic_load_store_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_exchange_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_compare_exchange_strong_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_compare_exchange_weak_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_add_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Acquire_Release: *level_2
+    Unit___hip_atomic_load_store_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_exchange_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_compare_exchange_strong_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_compare_exchange_weak_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_add_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency: *level_2
+    Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency: *level_2
+    Unit_atomicAdd_Positive: *level_2
+    Unit_atomicAdd_Positive_Multi_Kernel: *level_2
+    Unit_atomicAdd_Negative_Parameters_RTC: *level_2
+    Unit_atomicAdd_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicAdd_system_Positive_Host_And_GPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicAdd_system_Positive_Host_And_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_unsafeAtomicAdd_Positive: *level_2
+    Unit_unsafeAtomicAdd_Positive_Multi_Kernel: *level_2
+    Unit_unsafe_atomic_add_half_and_bfloat: *level_2
+    Unit_unsafe_atomic_add_half_and_bfloat: *level_2
+    Unit_safeAtomicAdd_Positive: *level_2
+    Unit_safeAtomicAdd_Positive_Multi_Kernel: *level_2
+    Unit_atomicSub_Positive: *level_2
+    Unit_atomicSub_Positive_Multi_Kernel: *level_2
+    Unit_atomicSub_Negative_Parameters_RTC: *level_2
+    Unit_atomicSub_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicSub_system_Positive_Host_And_GPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicSub_system_Positive_Host_And_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicCAS_Positive: *level_2
+    Unit_atomicCAS_Positive_Multi_Kernel: *level_2
+    Unit_atomicCAS_Negative_Parameters_RTC: *level_2
+    Unit_atomicCAS_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicCAS_system_Positive_Host_And_GPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit___hip_atomic_fetch_add_Positive_Wavefront: *level_2
+    Unit___hip_atomic_fetch_add_Positive_Workgroup: *level_2
+    Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront: *level_2
+    Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup: *level_2
+    Unit_atomicExch_Positive_Same_Address_Compile_Time:
+      <<: *level_2
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl, nvidia_linux]
+    Unit_atomicExch_Positive: *level_2
+    Unit_atomicExch_Positive_Multi_Kernel:
+      <<: *level_2
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl]
+    Unit_atomicExch_Negative_Parameters_RTC: *level_2
+    Unit_atomicExch_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl]
+    Unit_atomicExch_system_Positive_Host_And_GPU:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl, nvidia_linux]
+    Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl]
+    Unit_atomicExch_system_Negative_Parameters_RTC: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Wavefront_SameAddress: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Wavefront_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Workgroup_SameAddress: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Workgroup_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_and_Positive_Workgroup_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Wavefront_SameAddress: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Wavefront_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Wavefront_Scattered_Addresses: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Workgroup_SameAddress: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Workgroup_Adjacent_Addresses: *level_2
+    Unit___hip_atomic_fetch_xor_Positive_Workgroup_Scattered_Addresses: *level_2
+    Unit___hip_atomic_exchange_Positive_Wavefront: *level_2
+    Unit___hip_atomic_exchange_Positive_Workgroup: *level_2
+    Unit_atomicInc_Positive: *level_2
+    Unit_atomicInc_Positive_Multi_Kernel: *level_2
+    Unit_atomicInc_Negative_Parameters_RTC: *level_2
+    Unit_atomicDec_Positive: *level_2
+    Unit_atomicDec_Positive_Multi_Kernel: *level_2
+    Unit_atomicDec_Negative_Parameters_RTC: *level_2
+  c_compilation:
+    Unit_hipGetDeviceProp_ctest: *level_2
+  callback:
+    Unit_hipApiName_Positive_Basic: *level_2
+    Unit_hipApiName_Negative_ReservedIds: *level_2
+    Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_2
+    Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
+    Unit_hipKernelNameRef_Positive_Basic:
+      <<: *level_2
+      # (amd_windows) Note: intermittent Seg fault failure
+      # (amd_wsl) Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipKernelNameRef_Negative_Parameters:
+      <<: *level_2
+      # (amd_windows) Note: intermittent Seg fault failure
+      # (amd_wsl) Note: intermittent Seg fault failure
+      # (amd_wsl) Note: Linux disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipKernelNameRefByPtr_Positive_Basic: *level_2
+    Unit_hipKernelNameRefByPtr_Negative_StreamNullptr: *level_2
+    Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_2
+  channelDescriptor:
+    Unit_ChannelDescriptor_Positive_Basic_1D:
+      <<: *level_2
+      # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
+      disabled: [nvidia_windows]
+    Unit_ChannelDescriptor_Positive_Basic_2D:
+      <<: *level_2
+      # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
+      disabled: [nvidia_windows]
+    Unit_ChannelDescriptor_Positive_Basic_3D:
+      <<: *level_2
+      # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
+      disabled: [nvidia_windows]
+    Unit_ChannelDescriptor_Positive_Basic_4D:
+      <<: *level_2
+      # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
+      disabled: [nvidia_windows]
+    Unit_ChannelDescriptor_Positive_FormatNone: *level_2
+    Unit_ChannelDescriptor_Positive_16BitFloatingPoint:
+      <<: *level_2
+      # (amd_wsl) Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+  clock:
+    Unit_hipClock64_Positive_Basic:
+      <<: *level_2
+      # SWDEV-555665
+      disabled: [amd_windows]
+    Unit_hipClock_Positive_Basic:
+      <<: *level_2
+      # SWDEV-555665
+      disabled: [amd_windows]
+    Unit_hipWallClock64_Positive_Basic: *level_2
+  compiler:
+    Unit_hipClassKernel_Overload_Override: *level_2
+    Unit_hipClassKernel_Friend: *level_2
+    Unit_hipClassKernel_Empty: *level_2
+    Unit_hipClassKernel_BSize: *level_2
+    Unit_hipClassKernel_Size: *level_2
+    Unit_hipClassKernel_Virtual: *level_2
+    Unit_hipClassKernel_Value: *level_2
+  complex:
+    Unit_Device_Complex_Unary_Device_Sanity_Positive: *level_2
+    Unit_Device_Complex_Unary_Host_Sanity_Positive: *level_2
+    Unit_Device_Complex_Binary_Device_Sanity_Positive: *level_2
+    Unit_Device_Complex_Binary_Host_Sanity_Positive: *level_2
+    Unit_Device_Complex_hipCfma_Device_Sanity_Positive: *level_2
+    Unit_Device_Complex_hipCfma_Host_Sanity_Positive: *level_2
+    Unit_Device_make_Complex_Device_Positive: *level_2
+    Unit_Device_make_Complex_Host_Positive: *level_2
+    Unit_Device_make_hipComplex_Device_Positive: *level_2
+    Unit_Device_make_hipComplex_Host_Positive: *level_2
+    Unit_Device_Complex_Cast_Device_Sanity_Positive: *level_2
+    Unit_Device_Complex_Cast_Host_Sanity_Positive: *level_2
+    Unit_Device_Complex_Constructor_Host: *level_2
+  context:
+    Unit_hipDeviceGetPCIBusId_Functional: *level_2
+    Unit_hipDrvMemcpy_Functional: *level_2
+    Unit_hipMemsetD8_Functional: *level_2
+    Unit_hipDevicePrimaryCtxSetFlags_Negative: *level_2
+    Unit_hipDeviceAPIs_not_supported: *level_2
+    Unit_hipCtxGetSetCacheConfig_not_supported: *level_2
+    Unit_hipCtxGetSetSharedMemConfig_not_supported: *level_2
+    Unit_hipCtxPeerAccess_not_supported: *level_2
+    Unit_hipCtxAPIs_not_supported: *level_2
+    hipDevicePrimaryCtxGetState_Negative: *level_2
+  cooperativeGrps:
+    Unit_Thread_Block_Getters_Positive_Basic:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic: *level_2
+    Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
+    Unit_Thread_Block_Sync_Positive_Basic: *level_2
+    Unit_Thread_Block_Tile_Getters_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Shfl_Positive_Basic:
+      <<: *level_2
+      # SWDEV-441604: Below tests take long time to run in stress test on 12/01/24
+      disabled: [amd_windows]
+    Unit_Thread_Block_Tile_Sync_Positive_Basic:
+      <<: *level_2
+      # Below tests hang in Jenkins PSDB
+      disabled: [amd_windows]
+    Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic:
+      <<: *level_2
+      # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
+      disabled: [amd_windows]
+    Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic:
+      <<: *level_2
+      # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
+      disabled: [amd_windows]
+    Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic:
+      <<: *level_2
+      # SWDEV-486448 - Following tests disabled due to taking too much time to execute, ~700s per test
+      disabled: [amd_windows]
+    Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic: *level_2
+    Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic:
+      <<: *level_2
+      # (amd_linux) Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
+      disabled: [amd_linux, amd_windows]
+    Unit_hipCGThreadBlockType: *level_2
+    Unit_hipCGMultiGridGroupType_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipCGMultiGridGroupType_Barrier:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipCGGridGroupType_Basic: *level_2
+    Unit_hipCGGridGroupType_DataSharing: *level_2
+    Unit_hipCGGridGroupType_Barrier: *level_2
+    Unit_hipCGThreadBlockTileType: *level_2
+    Unit_hipCGThreadBlockTileType_Shfl: *level_2
+    Unit_coalesced_groups:
+      <<: *level_2
+      # Below tests hang in Jenkins PSDB
+      disabled: [amd_windows]
+    Unit_hipLaunchCooperativeKernel_Basic: *level_2
+    Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_Multi_Grid_Group_Getters_Positive_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_Multi_Grid_Group_Getters_Positive_Base_Type:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_Multi_Grid_Group_Positive_Sync:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-443630 : Below test failed in stress test on 19/01/24
+      disabled: [gfx90a, gfx942, gfx950]
+    Unit_coalesced_groups_shfl_down:
+      <<: *level_2
+      # Below tests hang in Jenkins PSDB
+      disabled: [amd_windows]
+    Unit_coalesced_groups_shfl_up:
+      <<: *level_2
+      # Below tests hang in Jenkins PSDB
+      disabled: [amd_windows]
+    Unit_Coalesced_Group_Getters_Positive_Basic: *level_2
+    Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic: *level_2
+    Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
+    Unit_Coalesced_Group_Shfl_Up_Positive_Basic:
+      <<: *level_2
+      # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_Coalesced_Group_Shfl_Down_Positive_Basic:
+      <<: *level_2
+      # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_Coalesced_Group_Shfl_Positive_Basic:
+      <<: *level_2
+      # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_Coalesced_Group_Sync_Positive_Basic:
+      <<: *level_2
+      # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
+      disabled: [amd_windows]
+    Unit_Grid_Group_Getters_Positive_Basic: *level_2
+    Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
+    Unit_Grid_Group_Sync_Positive_Basic: *level_2
+    Unit_tiled_groups_metagrp_basic: *level_2
+    Unit_coalesced_groups_metagrp_basic: *level_2
+    Unit_cg_binary_part: *level_2
+    Unit_coopgroups_ballot: *level_2
+    Unit_binary_part_ballot: *level_2
+    Unit_coopgroups_any: *level_2
+    Unit_coopgroups_coal_all: *level_2
+    Unit_coopgroups_match_any_coal: *level_2
+    Unit_coopgroups_match_all_coal: *level_2
+  device:
+    Unit_hipChooseDevice_ValidateDevId: *level_2
+    Unit_hipChooseDevice_NegTst: *level_2
+    Unit_hipDeviceComputeCapability_Negative: *level_2
+    Unit_hipDeviceComputeCapability_ValidateVersion: *level_2
+    Unit_hipDeviceGetByPCIBusId_Functional: *level_2
+    Unit_hipDeviceGetByPCIBusId_NegativeNullChk: *level_2
+    Unit_hipDeviceGetByPCIBusId_NegativeInputString: *level_2
+    Unit_hipDeviceGetByPCIBusId_WrongBusID: *level_2
+    Unit_hipDeviceGetLimit_NegTst: *level_2
+    Unit_hipDeviceGetLimit_CheckValidityOfOutputVal: *level_2
+    Unit_hipDeviceGetName_NegTst: *level_2
+    Unit_hipDeviceGetName_CheckPropName: *level_2
+    Unit_hipDeviceGetName_PartialFill: *level_2
+    Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr: *level_2
+    Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipDeviceGetPCIBusId_NegTst: *level_2
+    Unit_hipDeviceSetCacheConfig_Positive_Basic: *level_2
+    Unit_hipDeviceGetCacheConfig_Positive_Default: *level_2
+    Unit_hipDeviceSynchronize_Positive_Empty_Streams: *level_2
+    Unit_hipDeviceSynchronize_Positive_Nullstream:
+      <<: *level_2
+      # Disabling tests which no longer behave the same on nvidia platform
+      disabled: [nvidia_windows]
+    Unit_hipDeviceSynchronize_Functional:
+      <<: *level_2
+      # Disabling tests which no longer behave the same on nvidia platform
+      disabled: [nvidia_windows]
+    Unit_hipDeviceTotalMem_NegTst: *level_2
+    Unit_hipDeviceTotalMem_ValidateTotalMem: *level_2
+    Unit_hipDeviceTotalMem_NonSelectedDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetDeviceAttribute_CheckAttrValues: *level_2
+    Unit_hipDeviceGetAttribute_NegTst: *level_2
+    Print_Out_Attributes: *level_2
+    Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported: *level_2
+    Unit_hipGetDeviceCount_NegTst: *level_2
+    Unit_hipGetDeviceCount_HideDevices: *level_2
+    Print_Out_Device_Count: *level_2
+    Unit_hipGetDeviceProperties_ArchPropertiesTst:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetDeviceProperties_NegTst: *level_2
+    Print_Out_Properties: *level_2
+    Print_Out_Properties_6: *level_2
+    Unit_hipRuntimeGetVersion_Positive: *level_2
+    Unit_hipRuntimeGetVersion_Negative: *level_2
+    Unit_hipGetSetDeviceFlags_NullptrFlag: *level_2
+    Unit_hipGetSetDeviceFlags_ValidFlag: *level_2
+    Unit_hipGetSetDeviceFlags_SetThenGet: *level_2
+    Unit_hipGetSetDeviceFlags_Threaded: *level_2
+    Unit_hipGetDeviceFlags_Positive_Context:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGetSetDeviceFlags_InvalidFlag: *level_2
+    Unit_hipSetDevice_BasicSetGet:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetSetDevice_MultiThreaded:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipSetGetDevice_Positive_Threaded_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipSetGetDevice_Negative: *level_2
+    Unit_hipDeviceGet_Negative: *level_2
+    Unit_hipDeviceGetUuid_Positive:
+      <<: *level_2
+      # (amd_windows) Note: UUID returned empty on some windows nodes
+      # (amd_wsl) Note: UUID returned empty on some windows nodes
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipDeviceGetUuid_Negative: *level_2
+    Unit_hipDeviceGetUuid_From_RocmInfo:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES: *level_2
+    Unit_UUID_setEnv_Thread: *level_2
+    Unit_hipDeviceAPUCheck: *level_2
+    Unit_hipDeviceGetDefaultMemPool_Positive_Basic: *level_2
+    Unit_hipDeviceGetDefaultMemPool_Negative_Parameters: *level_2
+    Unit_hipDeviceCanAccessPeer_positive: *level_2
+    Unit_hipDeviceCanAccessPeer_negative: *level_2
+    Unit_hipDeviceEnableDisablePeerAccess_positive:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceEnablePeerAccess_negative:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceDisablePeerAccess_negative:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic: *level_2
+    Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters: *level_2
+    Unit_hipDeviceSetLimit_SetGet:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceSetLimit_Positive_StackSize: *level_2
+    Unit_hipDeviceSetLimit_Negative_Parameters:
+      <<: *level_2
+      # Below 2 tests are disabled due to defect EXSWHTEC-342
+      disabled: [nvidia_windows]
+    Unit_hipDeviceGetLimit_Negative_Parameters:
+      <<: *level_2
+      # Below 2 tests are disabled due to defect EXSWHTEC-342
+      disabled: [nvidia_windows]
+    Unit_hipDeviceGetSetLimit_Scratch_Negative: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_MultiDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceGetSetLimit_Scratch_InThread: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_InChildProcess: *level_2
+    Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads: *level_2
+    Unit_hipDeviceSetSharedMemConfig_Positive_Basic: *level_2
+    Unit_hipDeviceSetSharedMemConfig_Negative_Parameters: *level_2
+    Unit_hipDeviceGetSharedMemConfig_Positive_Default: *level_2
+    Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Linux disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Linux disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipDeviceGetSharedMemConfig_Negative_Parameters: *level_2
+    Unit_hipDeviceReset_Positive_Basic:
+      <<: *level_2
+      # (amd_wsl) Note: Windows disabled
+      # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+      disabled: [amd_wsl, nvidia_windows]
+    Unit_hipDeviceReset_Positive_Threaded:
+      <<: *level_2
+      # (amd_wsl) Note: Windows disabled
+      # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+      disabled: [amd_wsl, nvidia_windows]
+    Unit_hipDeviceSetMemPool_Positive_Basic: *level_2
+    Unit_hipDeviceSetMemPool_Negative_Parameters: *level_2
+    Unit_hipDeviceGetMemPool_Positive_Default: *level_2
+    Unit_hipDeviceGetMemPool_Positive_Basic: *level_2
+    Unit_hipDeviceGetMemPool_Positive_Threaded: *level_2
+    Unit_hipDeviceGetMemPool_Negative_Parameters: *level_2
+    Unit_hipInit_Positive: *level_2
+    Unit_hipInit_Negative:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipDriverGetVersion_Positive: *level_2
+    Unit_hipDriverGetVersion_Negative: *level_2
+    Unit_hipSetValidDevices_Negative: *level_2
+    Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize: *level_2
+    Unit_hipSetValidDevices_Positive_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipSetValidDevices_WithAllDevicesInSystem: *level_2
+    Unit_hipSetValidDevices_Positive_Cases: *level_2
+    Unit_hipSetValidDevices_MultiProcess: *level_2
+    Unit_hipSetValidDevices_MultiThread: *level_2
+    Unit_hipSetValidDevices_with_hipMemcpyPeer: *level_2
+    Unit_hipGetProcAddress_ValidateDeviceApis: *level_2
+    Unit_hipGetProcAddress_PeerDeviceAccessAPIs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetProcAddress_SetGetMemPoolAPIs:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetDriverEntryPoint_Positive: *level_2
+    Unit_hipGetDriverEntryPoint_Negative: *level_2
+    Unit_hipGetDriverEntryPoint_spt_Positive: *level_2
+    Unit_hipGetDriverEntryPoint_spt_Negative: *level_2
+    Unit_hipGetProcAddress_IPC_Memory: *level_2
+    Unit_hipGetProcAddress_IPC_Event: *level_2
+    Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
+      <<: *level_2
+      # Note: Windows disabled
+      disabled: [amd_wsl]
+    Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device:
+      <<: *level_2
+      # (amd_linux) SWDEV-511679 : Below tests fail in stress test
+      # (amd_wsl) Note: hsa_amd_ipc_ is dummy
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
+      <<: *level_2
+      # Note: Test disabled due to defect - EXSWHTEC-207
+      disabled: [amd_wsl]
+    Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory:
+      <<: *level_2
+      # Note: hsa_amd_ipc_ is dummy
+      disabled: [amd_wsl]
+    Unit_hipIpcGetMemHandle_Negative_Handle_For_Freed_Memory: *level_2
+    Unit_hipIpcGetMemHandle_Negative_Out_Of_Bound_Pointer: *level_2
+    Unit_hipIpcCloseMemHandle_Positive_Reference_Counting:
+      <<: *level_2
+      # (amd_linux) SWDEV-511679 : Below tests fail in stress test
+      # (amd_wsl) Note: hsa_amd_ipc_ is dummy
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
+      <<: *level_2
+      # Note: Windows disabled
+      disabled: [amd_wsl]
+  device_memory:
+    Unit_Device_memcpy_Positive: *level_2
+    Unit_Device_memcpy_Negative_Parameters_RTC: *level_2
+    Unit_Device_memset_Positive: *level_2
+    Unit_Device_memset_Negative_Parameters_RTC: *level_2
+  deviceLib:
+    Unit_deviceFunctions_CompileTest: *level_2
+    Unit_AnyAll_CompileTest: *level_2
+    Unit_ballot: *level_2
+    Unit_clz: *level_2
+    Unit_ffs: *level_2
+    Unit_funnelshift: *level_2
+    Unit_brev: *level_2
+    Unit_popc: *level_2
+    Unit_ldg: *level_2
+    Unit_threadfence_system:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_syncthreads_and: *level_2
+    Unit_syncthreads_count: *level_2
+    Unit_syncthreads_or: *level_2
+    Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_PerThread_PrimitiveDataType:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_PerThread_StructDataType:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_PerThread_StructDataType:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_InOneThread_AccessInAllThreads:
+      <<: *level_2
+      # (amd_windows) Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # (amd_windows) all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      # (amd_wsl) SWDEV-427101:Below test fails randomly in PSDB
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_AcrossKernels:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_AcrossKernels:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_ComplexDataType:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows]
+    Unit_deviceAllocation_New_ComplexDataType:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_UnionType:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_UnionType:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_SingleCodeObj:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_SingleCodeObj:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_PerThread_Graph:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_PerThread_Graph:
+      <<: *level_2
+      # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
+      # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_DeviceFunc:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_DeviceFunc:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_VirtualFunction:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_MulKernels_MulThreads:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_MulKernels_MulThreads:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_Malloc_SingKernels_MulThreads: *level_2
+    Unit_deviceAllocation_New_SingKernels_MulThreads: *level_2
+    Unit_deviceAllocation_Malloc_MulCodeObj:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_deviceAllocation_New_MulCodeObj:
+      <<: *level_2
+      # Note: devicelib hangs and failures
+      disabled: [amd_windows, amd_wsl]
+    Unit_AtomicFunctions_Inc: *level_2
+    Unit_AtomicFunctions_Dec: *level_2
+    Unit_DoublePrecisionIntrinsics: *level_2
+    Unit_DoublePrecisionMathDevice: *level_2
+    Unit_DoublePrecisionMathHost: *level_2
+    Unit_FloatMathPrecise: *level_2
+    Unit_IntegerIntrinsics: *level_2
+    Unit_SinglePrecisionIntrinsics: *level_2
+    Unit_SinglePrecisionMathDevice: *level_2
+    Unit_SinglePrecisionMathHost: *level_2
+    Unit_SimpleAtomicsTest: *level_2
+    Unit_hipTestAtomicAdd: *level_2
+    Unit_StdComplex: *level_2
+    Unit_hipTestClock: *level_2
+    Unit_kernel_trigger: *level_2
+    Unit_ToAndFroMemCpyToDevice: *level_2
+    Unit_TestIncludeMathPreciseFloat: *level_2
+    Unit_hipTestDotFunctions: *level_2
+    Unit_hipMemcpyToSymbolAsync_ToNFrom: *level_2
+    Unit_hipGetSymbolAddressAndSize_Validation: *level_2
+    Unit_hipGetSymbolAddress_Negative: *level_2
+    Unit_hipGetSymbolSize_Negative: *level_2
+    Unit_hipTest_DeviceNewOperator: *level_2
+    Unit_hipThreadFence: *level_2
+    Unit_hipDeviceTrigFunc_Float: *level_2
+    Unit_hipTestDeviceLimit_Basic: *level_2
+    Unit_hipTrigDeviceFunc_Double: *level_2
+    Unit_TestDevice_DoublePrecisionMathFunc: *level_2
+    Unit_hadd_int_varaint: *level_2
+    Unit_rhadd_int_varaint: *level_2
+    Unit_uhadd_int_varaint: *level_2
+    Unit_urhadd_int_varaint: *level_2
+    Unit_unsafeAtomicAdd: *level_2
+    Unit_mbcnt: *level_2
+    Unit_bitExtract: *level_2
+    Unit_bitInsert: *level_2
+    Unit_floatTM:
+      <<: *level_2
+      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
+      disabled: [amd_linux]
+    Unit_abs_int64_Verification: *level_2
+    Unit_pown_Verification: *level_2
+    Unit_hmax_hmin_Tsts: *level_2
+    Unit_hmax_hmin_Tsts_Negative: *level_2
+    Unit_hmax_hmin_Tsts_With_Array: *level_2
+    Unit_hipBfloat16: *level_2
+    Unit_hipVectorTypes_test_on_host: *level_2
+    Unit_hipVectorTypes_test_on_device:
+      <<: *level_2
+      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipTestHalf: *level_2
+    Unit_TestMathFuncComplex:
+      <<: *level_2
+      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
+      disabled: [amd_linux]
+    Unit_hipTestFMA: *level_2
+    Unit_hipTestNativeHalf: *level_2
+    Unit_Test_makechar_functionality: *level_2
+    Unit_bf16_basic: *level_2
+    Unit_bf16_conversion_to_integral_type: *level_2
+    Unit_bf162_basic: *level_2
+    Unit_bf16_operators_host: *level_2
+    Unit_bf162_operators_host: *level_2
+    Unit_bf16_bf162_convert_tests: *level_2
+    Unit_bf16_shfl: *level_2
+    Unit_bf162_shfl: *level_2
+    Unit_bf16_value_ops: *level_2
+    Unit_bf16_floor_ceil: *level_2
+    Unit_bf162_floor_ceil: *level_2
+    Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger: *level_2
+    Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat: *level_2
+    Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger: *level_2
+    Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat: *level_2
+    Unit_fp16_arith: *level_2
+    Unit_fp162_arith: *level_2
+    Unit_fp16_host_operations: *level_2
+    Unit_half_isnan_host: *level_2
+    Unit_half_abs_host: *level_2
+    Unit_half_min_max_host: *level_2
+    Unit_fp8_ocp_bool_host: *level_2
+    Unit_all_fp8_ocp_vector_cvt: *level_2
+    Unit_fp8_ocp_correctness: *level_2
+    Unit_fp8_ocp_vector_basic_conversions: *level_2
+    Unit_fp8_fnuz_bool_host: *level_2
+    Unit_all_fp8_fnuz_vector_cvt: *level_2
+    Unit_fp8_fnuz_correctness: *level_2
+    Unit_fp8_fnuz_vector_basic_conversions: *level_2
+    Unit__hip_cvt_bfloat16raw_to_e8m0: *level_2
+    Unit__hip_cvt_float_to_e8m0: *level_2
+    Unit__hip_cvt_double_to_e8m0: *level_2
+    Unit__hip_cvt_e8m0_to_bf16raw: *level_2
+    Unit_all_fp6_ocp_vector_cvt_interger_data: *level_2
+    Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data: *level_2
+    Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device: *level_2
+    Unit_all_fp6_ocp_vector_cvt_interger_data_device: *level_2
+    Unit_all_fp4_from_double: *level_2
+    Unit_all_fp4_from_double_device: *level_2
+    Unit_all_fp4_from_interger_data: *level_2
+    Unit_all_fp4_from__unsigned_integer_data: *level_2
+    Unit_all_fp4_from_integer_data_device: *level_2
+    Unit_all_fp4_from__unsigned_integer_data_device: *level_2
+    Unit_ocp_fp4_from_double_full_range_host: *level_2
+    Unit_ocp_fp4_from_double_full_range_device: *level_2
+    Unit_AtomicAdd_CoherentwithUnsafeflag: *level_2
+    Unit_AtomicAdd_Coherentwithoutflag: *level_2
+    Unit_AtomicAdd_Coherentwithnounsafeflag: *level_2
+    Unit_AtomicAdd_NonCoherentwithoutflag: *level_2
+    Unit_AtomicAdd_NonCoherentwithnounsafeflag: *level_2
+    Unit_AtomicAdd_NonCoherentwithUnsafeflag: *level_2
+    Unit_BuiltinAtomics_fmaxCoherentGlobalMem: *level_2
+    Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem: *level_2
+    Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem: *level_2
+    Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem: *level_2
+    Unit_BuiltinAtomics_fminCoherentGlobalMem: *level_2
+    Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem: *level_2
+    Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem: *level_2
+    Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem: *level_2
+    Unit_BuiltInAtomicAdd_CoherentGlobalMem: *level_2
+    Unit_BuiltInAtomicAdd_NonCoherentGlobalMem: *level_2
+    Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc: *level_2
+    Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc: *level_2
+    Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
+    Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag: *level_2
+    Unit_unsafeAtomicAdd_CoherentRTCwithoutflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentRTC: *level_2
+    Unit_unsafeAtomicAdd_CoherentwithUnsafeflag: *level_2
+    Unit_unsafeAtomicAdd_Coherentwithoutflag: *level_2
+    Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentwithoutflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag: *level_2
+    Unit_unsafeAtomicAdd_NonCoherentwithunsafeatomicsflag: *level_2
+    Unit_fp8_fnuz_compare_host_device: *level_2
+    Unit_fp8x2_fnuz_compare_host_device: *level_2
+    Unit_fp8x2_fnuz_split_compare: *level_2
+    Unit_fp8x4_fnuz_split_compare: *level_2
+    Unit_fp8_fnuz_bool_device: *level_2
+    Unit_all_fp8_fnuz_cvt: *level_2
+    Unit_fp8_fnuz_correctness_device: *level_2
+  dynamicLoading:
+    Unit_dynamic_loading_device_kernels_from_library: *level_2
+    Unit_hipApiDynamicLoad_hipGetProcAddress: *level_2
+    Unit_hipApiDynamicLoad: *level_2
+  errorHandling:
+    Unit_hipGetErrorName_Positive_Basic: *level_2
+    Unit_hipGetErrorName_Negative_Parameters: *level_2
+    Unit_hipGetErrorString_Positive_Basic: *level_2
+    Unit_hipGetErrorString_Negative_Parameters: *level_2
+    Unit_hipDrvGetErrorName_Positive_Basic: *level_2
+    Unit_hipDrvGetErrorName_Negative_Parameters: *level_2
+    Unit_hipDrvGetErrorString_Positive_Basic: *level_2
+    Unit_hipDrvGetErrorString_Negative_Parameters: *level_2
+    Unit_hipGetLastError_Positive_Basic: *level_2
+    Unit_hipGetLastError_Positive_Threaded: *level_2
+    Unit_hipGetLastError_with_hipMemcpyPeerAsync:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
+    Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
+    Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
+    Unit_hipGetLastError_with_hipMemcpy3DAsync: *level_2
+    Unit_hipGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
+    Unit_hipGetLastError_with_hipStreamAttachMemAsync: *level_2
+    Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
+    Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
+    Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
+    Unit_hipGetLastError_with_hipMemcpy2DAsync: *level_2
+    Unit_hipGetLastError_with_hipMemsetAsync: *level_2
+    Unit_hipGetLastError_with_MemCpyAsync: *level_2
+    Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
+    Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
+    Unit_hipGetLastError_with_hipStreamBegin_EndCapture: *level_2
+    Unit_hipGetLastError_error_check_with_hipGraphCreate: *level_2
+    Unit_hipGetLastError_success_before_hipGetLastError_check_again: *level_2
+    Unit_hipGetLastError_with_Kernel_divide_by_zero: *level_2
+    Unit_hipGetLastError_With_Chk_Updated_Status: *level_2
+    Unit_hipGetLastError_Chk_Along_hipPeekAtLastError: *level_2
+    Unit_hipGetLastError_Error_Combinations: *level_2
+    Unit_hipGetLastError_With_Thread: *level_2
+    Unit_hipGetLastError_MultiProcess: *level_2
+    Unit_hipGetLastError_Kernel_Invalid_Config: *level_2
+    Unit_hipPeekAtLastError_Positive_Basic: *level_2
+    Unit_hipPeekAtLastError_Positive_Threaded: *level_2
+    Unit_hipPeekAtLastError_Positive: *level_2
+    Unit_hipPeekAtLastError_Chk_Updated_Status: *level_2
+    Unit_hipPeekAtLastError_Chk_Along_hipGetLastError: *level_2
+    Unit_hipPeekAtLastError_Error_Combinations: *level_2
+    Unit_hipPeekAtLastError_With_Thread: *level_2
+    Unit_hipPeekAtLastError_MultiProcess: *level_2
+    Unit_hipPeekAtLastError_Kernel_Invalid_Config: *level_2
+    Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations: *level_2
+    Unit_hipGetLastError_KernelFailure_TwoDevices:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGetLastError_KernelFailure_TwoStreams: *level_2
+    Unit_hipExtGetLastError_Positive_Basic: *level_2
+    Unit_hipExtGetLastError_Positive_Threaded: *level_2
+    Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
+    Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemcpy3DAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync: *level_2
+    Unit_hipExtGetLastError_with_hipStreamAttachMemAsync: *level_2
+    Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
+    Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemcpy2DAsync: *level_2
+    Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
+    Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
+    Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
+    Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
+    Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture: *level_2
+    Unit_hipExtGetLastError_error_check_with_hipGraphCreate: *level_2
+    Unit_hipExtGetLastError_success_before_error_check_again: *level_2
+    Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_2
+  event:
+    Unit_hipEventCreate_NullCheck: *level_2
+    Unit_hipEventCreateWithFlags_NullCheck: *level_2
+    Unit_hipEventCreate_IncompatibleFlags: *level_2
+    Unit_hipEventSynchronize_NullCheck: *level_2
+    Unit_hipEventQuery_NullCheck: *level_2
+    Unit_hipEventDestroy_NullCheck: *level_2
+    Unit_hipEvent:
+      <<: *level_2
+      # SWDEV-411303 fails in WSL. Profiling not support in WSL
+      disabled: [amd_wsl]
+    Unit_hipEventElapsedTime_NullCheck: *level_2
+    Unit_hipEventElapsedTime_DisableTiming: *level_2
+    Unit_hipEventElapsedTime_DifferentDevices:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipEventElapsedTime_NotReady_Negative:
+      <<: *level_2
+      # SWDEV-411303 fails in WSL. Profiling not support in WSL
+      disabled: [amd_wsl]
+    Unit_hipEventElapsedTime: *level_2
+    Unit_hipEventElapsedTime_Verify_Capture: *level_2
+    Unit_hipEventRecord:
+      <<: *level_2
+      disabled: [amd_windows]
+    Unit_hipEventRecord_Negative:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipEventIpc:
+      <<: *level_2
+      # (amd_wsl) Below tests fail in stress test on 24/07/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventDestroy_Unfinished:
+      <<: *level_2
+      # SWDEV-411303 fails in WSL. Profiling not support in WSL
+      disabled: [amd_wsl]
+    Unit_hipEventDestroy_WithWaitingStream:
+      <<: *level_2
+      # SWDEV-402054 fails in external github build
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventDestroy_Negative: *level_2
+    Unit_hipEventDestroy_Verify_Capture: *level_2
+    Unit_hipEventCreate_Positive: *level_2
+    Unit_hipEventCreate_Verify_Capture: *level_2
+    Unit_hipEventCreateWithFlags_Positive: *level_2
+    Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem:
+      <<: *level_2
+      # (amd_linux) SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.
+      # (amd_windows) Note: intermittent Seg fault failure
+      disabled: [gfx1200, gfx1201, amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipEventCreateWithFlags_Verify_Capture: *level_2
+    Unit_hipEventSynchronize_Default_Positive: *level_2
+    Unit_hipEventSynchronize_NoEventRecord_Positive: *level_2
+    Unit_hipEventMGpuMThreads_1: *level_2
+    Unit_hipEventMGpuMThreads_2:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipEventMGpuMThreads_3:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipEventQuery_DifferentDevice:
+      <<: *level_2
+      tags: [multigpu]
+  executionControl:
+    Unit_hipFuncGetAttributes_Positive_Basic:
+      <<: *level_2
+      # NOTE: The following test is disabled due to defect - EXSWHTEC-242
+      disabled: [amd_linux, amd_windows]
+    Unit_hipFuncGetAttributes_Negative_Parameters: *level_2
+    Unit_hipLaunchKernel_Positive_Basic: *level_2
+    Unit_hipLaunchKernel_Positive_Parameters: *level_2
+    Unit_hipLaunchKernel_Negative_Parameters:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipLaunchCooperativeKernel_Positive_Basic: *level_2
+    Unit_hipLaunchCooperativeKernel_Positive_Parameters: *level_2
+    Unit_hipLaunchCooperativeKernel_Negative_Parameters: *level_2
+    Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice: *level_2
+    Unit_hipExtLaunchKernel_Positive_Basic: *level_2
+    Unit_hipExtLaunchKernel_Positive_Parameters: *level_2
+    Unit_hipExtLaunchKernel_Negative_Parameters: *level_2
+    Unit_hipExtLaunchKernel_capturehipExtLaunchKernel: *level_2
+    Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
+      <<: *level_2
+      tags: [multigpu]
+      # NOTE: The following test is disabled due to defect - EXSWHTEC-244
+      disabled: [amd_linux, amd_windows]
+    Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice: *level_2
+    Unit_hipLaunchByPtr_Positive_Basic: *level_2
+    Unit_hipLaunchByPtr_Negative_Parameters: *level_2
+    Unit___hipPushCallConfiguration_Positive_Basic: *level_2
+    Unit_hipGetProcAddress_KernelLaunchApis: *level_2
+    Unit_hipGetProcAddress_CallbackActivityAPIs: *level_2
+    Unit_hipGetProcAddress_ExecutionControlAPIs: *level_2
+  g++:
+    Unit_hipMalloc_gpptest: *level_2
+  gcc:
+    Unit_LaunchKernelgccTests: *level_2
+    Unit_hipMallocgccTests: *level_2
+  gl_interop:
+    Unit_hipGLGetDevices_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGLGetDevices_Positive_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGLGetDevices_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterBuffer_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterImage_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterImage_Positive_Register_Twice:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsGLRegisterImage_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsMapResources_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsMapResources_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipGraphicsUnmapResources_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+    Unit_hipGraphicsUnregisterResource_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_linux, amd_wsl]
+  graph:
+    Unit_hipGraphAddEmptyNode_Functional: *level_2
+    Unit_hipGraphAddEmptyNode_NegTest: *level_2
+    Unit_hipGraphAddEmptyNode_BarrierFunc: *level_2
+    Unit_hipGraphAddDependencies_Positive_Functional: *level_2
+    Unit_hipGraphAddDependencies_Positive_Parameters: *level_2
+    Unit_hipGraphAddDependencies_Negative_Parameters: *level_2
+    Unit_hipGraphAddDependencies_Functional: *level_2
+    Unit_hipGraphAddDependencies_NegTest: *level_2
+    Unit_hipGraphAddEventRecordNode_Functional_Simple: *level_2
+    Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphAddEventRecordNode_Functional_WithFlags: *level_2
+    Unit_hipGraphAddEventRecordNode_MultipleRun:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled: *level_2
+    Unit_hipGraphAddEventRecordNode_Positive_Parameters: *level_2
+    Unit_hipGraphAddEventRecordNode_Negative: *level_2
+    Unit_hipGraphAddEventWaitNode_Functional_Simple: *level_2
+    Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency: *level_2
+    Unit_hipGraphAddEventWaitNode_MultipleRun: *level_2
+    Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency: *level_2
+    Unit_hipGraphAddEventWaitNode_differentFlags: *level_2
+    Unit_hipGraphAddEventWaitNode_Positive_Parameters: *level_2
+    Unit_hipGraphAddEventWaitNode_Negative: *level_2
+    Unit_hipGraph_BasicFunctional: *level_2
+    Unit_hipGraph_SimpleGraphWithKernel: *level_2
+    Unit_hipGraphAddMemcpyNode_Positive_Basic: *level_2
+    Unit_hipGraphAddMemcpyNode_Negative_Parameters:
+      <<: *level_2
+      # NOTE: The following test is disabled due to defect - EXSWHTEC-245
+      disabled: [amd_windows]
+    Unit_hipGraphAddMemcpyNode_Negative: *level_2
+    Unit_hipGraphAddMemcpyNode_BasicFunctional: *level_2
+    Unit_hipGraphAddMemcpyNode_PeerAccessFunctional:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNode_HostToHost: *level_2
+    Unit_hipGraphClone_Negative: *level_2
+    Unit_hipGraphClone_Functional:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphClone_MultiThreaded: *level_2
+    Unit_hipGraphInstantiateWithFlags_Negative: *level_2
+    Unit_hipGraphInstantiateWithFlags_DependencyGraph: *level_2
+    Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
+      <<: *level_2
+      tags: [multigpu]
+      # Enable the below test when multi-device graph launches are fully supported
+      disabled: [amd_linux]
+    Unit_hipGraphInstantiateWithFlags_StreamCapture: *level_2
+    Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024
+      disabled: [amd_linux]
+    Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
+      <<: *level_2
+      # SWDEV-402082 - PAL Backend fails to reserve address on GPU except first one
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop:
+      <<: *level_2
+      # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
+      disabled: [amd_windows]
+    Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel:
+      <<: *level_2
+      # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
+      disabled: [amd_windows]
+    Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel:
+      <<: *level_2
+      # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
+      disabled: [amd_windows]
+    Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch:
+      <<: *level_2
+      # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
+      disabled: [amd_windows]
+    Unit_hipGraphInstantiateWithParams_Negative:
+      <<: *level_2
+      # Unit_hipGraphInstantiateWithParams_Negative
+      disabled: [nvidia_windows]
+    Unit_hipGraphInstantiateWithParams_DependencyGraph: *level_2
+    Unit_hipGraphInstantiateWithParams_StreamCapture: *level_2
+    Unit_hipGraphAddHostNode_Negative: *level_2
+    Unit_hipGraphAddHostNode_ClonedGraphWithHostNode:
+      <<: *level_2
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphAddHostNode_VectorSquare: *level_2
+    Unit_hipGraphAddHostNode_BasicFunc: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_Negative: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemory: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemory: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_Positive_Basic: *level_2
+    Unit_hipGraphAddMemcpyNodeFromSymbol_Negative_Parameters: *level_2
+    Unit_hipGraphChildGraphNodeGetGraph_Functional: *level_2
+    Unit_hipGraphChildGraphNodeGetGraph_Negative: *level_2
+    Unit_hipGraphNodeFindInClone_Negative: *level_2
+    Unit_hipGraphNodeFindInClone_Functional: *level_2
+    Unit_hipGraphNodeFindInClone_MultipleClone: *level_2
+    Unit_hipGraphExecHostNodeSetParams_Negative: *level_2
+    Unit_hipGraphExecHostNodeSetParams_ClonedGraphWithHostNode: *level_2
+    Unit_hipGraphExecHostNodeSetParams_BasicFunc: *level_2
+    Unit_hipGraphAddMemcpyNodeToSymbol_Negative: *level_2
+    Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemory: *level_2
+    Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory: *level_2
+    Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice: *level_2
+    Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic:
+      <<: *level_2
+      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
+      disabled: [amd_linux]
+    Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters: *level_2
+    Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
+    Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
+      <<: *level_2
+      # Note: Test disabled due to defect - EXSWHTEC-207
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative: *level_2
+    Unit_hipGraphMemcpyNodeSetParamsToSymbol_Functional:
+      <<: *level_2
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters: *level_2
+    Unit_hipGraphDestroyNode_Negative: *level_2
+    Unit_hipGraphDestroyNode_BasicFunctionality: *level_2
+    Unit_hipGraphDestroyNode_DestroyDependencyNode: *level_2
+    Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphGetNodes_Positive_Functional: *level_2
+    Unit_hipGraphGetNodes_Positive_CapturedStream: *level_2
+    Unit_hipGraphGetNodes_Negative_Parameters: *level_2
+    Unit_hipGraphGetNodes_Functional: *level_2
+    Unit_hipGraphGetNodes_CapturedStream: *level_2
+    Unit_hipGraphGetNodes_ParamValidation: *level_2
+    Unit_hipGraphGetRootNodes_Positive_Functional: *level_2
+    Unit_hipGraphGetRootNodes_Positive_CapturedStream: *level_2
+    Unit_hipGraphGetRootNodes_Negative_Parameters: *level_2
+    Unit_hipGraphGetRootNodes_Functional: *level_2
+    Unit_hipGraphGetRootNodes_CapturedStream: *level_2
+    Unit_hipGraphGetRootNodes_ParamValidation: *level_2
+    Unit_hipGraphGetRootNodes_Complx_NumRootNodes: *level_2
+    Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph: *level_2
+    Unit_hipGraphGetRootNodes_Complx_NRootNodesAsChildGraph: *level_2
+    Unit_hipGraphHostNodeSetParams_Negative: *level_2
+    Unit_hipGraphHostNodeSetParams_ClonedGraphWithHostNode: *level_2
+    Unit_hipGraphHostNodeSetParams_BasicFunc: *level_2
+    Unit_hipGraphAddMemcpyNode1D_Positive_Basic: *level_2
+    Unit_hipGraphAddMemcpyNode1D_Negative_Parameters: *level_2
+    Unit_hipGraphAddChildGraphNode_Negative: *level_2
+    Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph:
+      <<: *level_2
+      # Disabling tests which no longer behave the same on nvidia platform
+      disabled: [nvidia_windows]
+    Unit_hipGraphAddChildGraphNode_ExecuteChildGraph: *level_2
+    Unit_hipGraphAddChildGraphNode_CloneChildGraph: *level_2
+    Unit_hipGraphAddChildGraphNode_MultipleChildNodes: *level_2
+    Unit_hipGraphAddChildGraphNode_SingleChildNode: *level_2
+    Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs: *level_2
+    Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone:
+      <<: *level_2
+      # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
+      disabled: [amd_wsl]
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode: *level_2
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode_Clone: *level_2
+    Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphNodeGetType_Negative: *level_2
+    Unit_hipGraphNodeGetType_Functional: *level_2
+    Unit_hipGraphNodeGetType_NodeType: *level_2
+    Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread: *level_2
+    Unit_hipGraphNodeGetType_NodeTypeOfChildGraph: *level_2
+    Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies: *level_2
+    Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams1D_Functional: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams1D_Negative:
+      <<: *level_2
+      # SWDEV-439004: Below tests failing randomly in CQE staging
+      disabled: [amd_wsl]
+    Unit_hipGraphExecMemcpyNodeSetParams1D_Positive_Basic: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Parameters: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams1D_Negative_Changing_Memcpy_Direction: *level_2
+    Unit_hipGraphGetEdges_Positive_Functional: *level_2
+    Unit_hipGraphGetEdges_Positive_CapturedStream: *level_2
+    Unit_hipGraphGetEdges_Negative_Parameters: *level_2
+    Unit_hipGraphGetEdges_Functionality: *level_2
+    Unit_hipGraphGetEdges_Negative: *level_2
+    Unit_hipGraphRemoveDependencies_Positive_Functional: *level_2
+    Unit_hipGraphRemoveDependenciesPositive_CapturedStream: *level_2
+    Unit_hipGraphRemoveDependencies_Positive_ChangeComputeFunc: *level_2
+    Unit_hipGraphRemoveDependencies_Positive_Parameters: *level_2
+    Unit_hipGraphRemoveDependencies_Negative_Parameters: *level_2
+    Unit_hipGraphRemoveDependencies_Func_Manual: *level_2
+    Unit_hipGraphRemoveDependencies_Func_StrmCapture: *level_2
+    Unit_hipGraphRemoveDependencies_ChangeComputeFunc: *level_2
+    Unit_hipGraphRemoveDependencies_Negative: *level_2
+    Unit_hipGraphInstantiate_Negative: *level_2
+    Unit_hipGraphInstantiate_Basic: *level_2
+    Unit_hipGraphInstantiate_functionalScenarios: *level_2
+    Unit_hipGraphExecUpdate_Negative_Basic: *level_2
+    Unit_hipGraphExecUpdate_Negative_TypeChange: *level_2
+    Unit_hipGraphExecUpdate_Negative_CountDiffer: *level_2
+    Unit_hipGraphExecUpdate_Functional: *level_2
+    Unit_hipGraphExecUpdate_Negative_Functional_ParametersChanged: *level_2
+    Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1: *level_2
+    Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2: *level_2
+    Unit_hipGraphExecUpdate_Negative_Dependent_NodesDiffer: *level_2
+    Unit_hipGraphExecUpdate_Negative_NodeType_Changed: *level_2
+    Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
+      disabled: [amd_windows]
+    Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed: *level_2
+    Unit_hipGraphExecEventRecordNodeSetEvent_Functional: *level_2
+    Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged: *level_2
+    Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphExecEventRecordNodeSetEvent_Negative: *level_2
+    Unit_hipGraphEventWaitNodeSetEvent_SetProp: *level_2
+    Unit_hipGraphEventWaitNodeSetEvent_SetGet: *level_2
+    Unit_hipGraphEventWaitNodeSetEvent_Negative: *level_2
+    Unit_hipGraphMemsetNodeGetParams_Negative_Parameters: *level_2
+    Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
+      <<: *level_2
+      # Note: Following four tests disabled due to defect - EXSWHTEC-203
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphMemsetNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Functional: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-396617 ExecMemcpyNodeSetParamsFromSymbol fails in direction
+      disabled: [amd_wsl]
+    Unit_hipGraphEventRecordNodeGetEvent_Functional: *level_2
+    Unit_hipGraphEventRecordNodeGetEvent_Negative: *level_2
+    Unit_hipGraphEventRecordNodeSetEvent_SetEventProperty: *level_2
+    Unit_hipGraphEventRecordNodeSetEvent_SetGet: *level_2
+    Unit_hipGraphEventRecordNodeSetEvent_Negative: *level_2
+    Unit_hipGraphEventWaitNodeGetEvent_Functional: *level_2
+    Unit_hipGraphEventWaitNodeGetEvent_Negative: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams_Negative: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParams_Functional: *level_2
+    Unit_hipStreamBeginCapture_Positive_Functional:
+      <<: *level_2
+      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
+      disabled: [amd_linux]
+    Unit_hipStreamBeginCapture_Negative_Parameters: *level_2
+    Unit_hipStreamBeginCapture_Positive_Basic: *level_2
+    Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags: *level_2
+    Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority: *level_2
+    Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags: *level_2
+    Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio: *level_2
+    Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc: *level_2
+    Unit_hipStreamBeginCapture_Positive_Multithreaded: *level_2
+    Unit_hipStreamBeginCapture_Positive_Multiplestrms: *level_2
+    Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms: *level_2
+    Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture: *level_2
+    Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm: *level_2
+    Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture: *level_2
+    Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapture: *level_2
+    Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture: *level_2
+    Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg: *level_2
+    Unit_hipStreamBeginCapture_Positive_MultiGPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipStreamBeginCapture_Positive_nestedStreamCapture: *level_2
+    Unit_hipStreamBeginCapture_Positive_streamReuse: *level_2
+    Unit_hipStreamBeginCapture_Positive_captureComplexGraph: *level_2
+    Unit_hipStreamBeginCapture_Positive_captureEmptyStreams: *level_2
+    Unit_hipStreamBeginCapture_StreamSync_OngoingCapture: *level_2
+    Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread: *level_2
+    Unit_hipGraphAddMemcpyNode1D_Functional:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemcpyNode1D_Negative: *level_2
+    Unit_hipGraphAddMemcpyNode1D_HostToHost: *level_2
+    Unit_hipStreamBeginCapture_BasicFunctional: *level_2
+    Unit_hipStreamBeginCapture_hipStreamPerThread: *level_2
+    Unit_hipStreamBeginCapture_Negative: *level_2
+    Unit_hipStreamBeginCapture_Basic: *level_2
+    Unit_hipStreamBeginCapture_InterStrmEventSync_defaultflag: *level_2
+    Unit_hipStreamBeginCapture_InterStrmEventSync_blockingflag: *level_2
+    Unit_hipStreamBeginCapture_InterStrmEventSync_diffflags: *level_2
+    Unit_hipStreamBeginCapture_InterStrmEventSync_diffprio: *level_2
+    Unit_hipStreamBeginCapture_ColligatedStrmCapture_defaultflag: *level_2
+    Unit_hipStreamBeginCapture_ColligatedStrmCapture_blockingflag: *level_2
+    Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffflags: *level_2
+    Unit_hipStreamBeginCapture_ColligatedStrmCapture_diffprio: *level_2
+    Unit_hipStreamBeginCapture_multiplestrms: *level_2
+    Unit_hipStreamBeginCapture_ColligatedStrmCapture_func: *level_2
+    Unit_hipStreamBeginCapture_Multithreaded_Global: *level_2
+    Unit_hipStreamBeginCapture_Multithreaded_ThreadLocal: *level_2
+    Unit_hipStreamBeginCapture_Multithreaded_Relaxed: *level_2
+    Unit_hipStreamBeginCapture_CapturingFromWithinStrms: *level_2
+    Unit_hipStreamBeginCapture_DetectingInvalidCapture: *level_2
+    Unit_hipStreamBeginCapture_CapturingMultGraphsFrom1Strm: *level_2
+    Unit_hipStreamBeginCapture_EndingCapturewhenCaptureInProgress: *level_2
+    Unit_hipStreamBeginCapture_MultiGPU:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipStreamBeginCapture_nestedStreamCapture: *level_2
+    Unit_hipStreamBeginCapture_streamReuse: *level_2
+    Unit_hipStreamBeginCapture_captureComplexGraph:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipStreamBeginCapture_captureEmptyStreams: *level_2
+    Unit_hipStreamIsCapturing_Negative_Parameters: *level_2
+    Unit_hipStreamIsCapturing_Positive_Basic: *level_2
+    Unit_hipStreamIsCapturing_Positive_Functional: *level_2
+    Unit_hipStreamIsCapturing_Positive_Thread: *level_2
+    Unit_hipStreamIsCapturing_Negative: *level_2
+    Unit_hipStreamIsCapturing_Functional_Basic: *level_2
+    Unit_hipStreamIsCapturing_Functional: *level_2
+    Unit_hipStreamIsCapturing_hipStreamPerThread: *level_2
+    Unit_hipStreamIsCapturing_ParentAndForkedStream: *level_2
+    Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread: *level_2
+    Unit_hipStreamIsCapturing_ChkNullStrmStatus: *level_2
+    Unit_hipGraphMemFreeNodeGetParams_ValidArgs: *level_2
+    Unit_hipGraphMemFreeNodeGetParams_InvalidArgs: *level_2
+    Unit_hipGraphUserObj_Int_float_Objects: *level_2
+    Unit_hipGraphUserObj_HostRegister: *level_2
+    Unit_hipGraphUserObj_Struct_Class_Ojects: *level_2
+    Unit_hipGraphUserObj_ClonedGraph:
+      <<: *level_2
+      # Test Unit_hipGraphUserObj_ClonedGraph disabled due to SWDEV-483112
+      disabled: [amd_windows]
+    Unit_hipGraphUserObj_ManualGraph: *level_2
+    Unit_hipGraphExecBatchMemOpNodeSetParams_NegativeTsts: *level_2
+    Unit_hipGraphAddBatchMemOpNode_NegativeTsts: *level_2
+    Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts: *level_2
+    Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts: *level_2
+    Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative: *level_2
+    Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive: *level_2
+    Unit_hipDrvGraphAddMemFreeNode_Negative_Params: *level_2
+    Unit_hipDrvGraphAddMemFreeNode_Positive: *level_2
+    Unit_hipStreamCapture_ExtModuleLaunchKernel: *level_2
+    Unit_hipStreamBeginCaptureToGraph_BasicFunctional: *level_2
+    Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph: *level_2
+    Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph:
+      <<: *level_2
+      # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
+      disabled: [amd_windows]
+    Unit_hipStreamBeginCaptureToGraph_ComplexGraph: *level_2
+    Unit_hipStreamBeginCaptureToGraph_CaptureTwice: *level_2
+    Unit_hipStreamBeginCaptureToGraph_ModifyCloneGraph: *level_2
+    Unit_hipStreamBeginCaptureToGraph_CaptureChildpGraph: *level_2
+    Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph: *level_2
+    Unit_hipStreamBeginCaptureToGraph_Negative: *level_2
+    Unit_hipStreamBeginCaptureToGraph_StateTesting: *level_2
+    Unit_hipStreamBeginCaptureToGraph_GetCaptureInfo: *level_2
+    Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress: *level_2
+    Unit_hipStreamBeginCaptureToGraph_MultipleFlags: *level_2
+    Unit_hipStreamBeginCaptureToGraph_CapturePartialInThreads: *level_2
+    Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads:
+      <<: *level_2
+      # SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24
+      disabled: [amd_windows]
+    Unit_hipGetProcAddress_GraphAPIs_StreamCapture: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_HostNode: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_ExecUpdate: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree: *level_2
+    Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams: *level_2
+    Unit_hipGraphExecNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipGraphExecNodeSetParams_Positive: *level_2
+    Unit_hipGraphNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipGraphNodeSetParams_Positive: *level_2
+    Unit_hipGraphExecGetFlags_Negative: *level_2
+    Unit_hipGraphExecGetFlags_Positive: *level_2
+    Unit_hipStreamGetCaptureInfo_Positive_Functional: *level_2
+    Unit_hipStreamGetCaptureInfo_Positive_UniqueID: *level_2
+    Unit_hipStreamGetCaptureInfo_Negative_Parameters: *level_2
+    Unit_hipStreamGetCaptureInfo_BasicFunctional: *level_2
+    Unit_hipStreamGetCaptureInfo_hipStreamPerThread: *level_2
+    Unit_hipStreamGetCaptureInfo_UniqueID: *level_2
+    Unit_hipStreamGetCaptureInfo_ArgValidation: *level_2
+    Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus: *level_2
+    Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread: *level_2
+    Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture: *level_2
+    Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo: *level_2
+    Unit_hipStreamEndCapture_Negative_Parameters: *level_2
+    Unit_hipStreamEndCapture_Positive_GraphDestroy: *level_2
+    Unit_hipStreamEndCapture_Negative_Thread: *level_2
+    Unit_hipStreamEndCapture_Positive_Thread: *level_2
+    Unit_hipStreamEndCapture_Negative: *level_2
+    Unit_hipStreamEndCapture_Thread_Negative: *level_2
+    Unit_hipStreamEndCapture_mode_hipStreamCaptureModeRelaxed: *level_2
+    Unit_hipStreamEndCapture_chkError_on_wrongStream: *level_2
+    Unit_hipStreamEndCapture_streamMerge_in_thread: *level_2
+    Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative: *level_2
+    Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Functional: *level_2
+    Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters: *level_2
+    Unit_hipGraphExecEventWaitNodeSetEvent_SetAndVerifyMemory: *level_2
+    Unit_hipGraphExecEventWaitNodeSetEvent_VerifyEventNotChanged: *level_2
+    Unit_hipGraphExecEventWaitNodeSetEvent_Negative: *level_2
+    Unit_hipGraphAddMemsetNode_Positive_Basic: *level_2
+    Unit_hipGraphAddMemsetNode_Negative_Parameters: *level_2
+    Unit_hipGraphAddMemsetNode_hipMallocPitch_2D: *level_2
+    Unit_hipGraphAddMemsetNode_hipMallocPitch_1D: *level_2
+    Unit_hipGraphAddMemsetNode_hipMalloc3D_2D: *level_2
+    Unit_hipGraphAddMemsetNode_hipMalloc3D_1D: *level_2
+    Unit_hipGraphAddMemsetNode_hipMalloc_1D: *level_2
+    Unit_hipGraphAddMemsetNode_hipMallocManaged: *level_2
+    Unit_hipGraphAddKernelNode_Negative: *level_2
+    Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph: *level_2
+    Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate: *level_2
+    Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph: *level_2
+    Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture: *level_2
+    Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters: *level_2
+    Unit_hipGraphMemcpyNodeGetParams_Negative: *level_2
+    Unit_hipGraphMemcpyNodeGetParams_Functional: *level_2
+    Unit_hipGraphMemcpyNodeSetParams_Positive_Basic: *level_2
+    Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipGraphMemcpyNodeSetParams_Negative: *level_2
+    Unit_hipGraphMemcpyNodeSetParams_Functional:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphKernelNodeGetParams_Negative: *level_2
+    Unit_hipGraphKernelNodeGetParams_Functional: *level_2
+    Unit_hipGraphKernelNodeSetParams_Negative: *level_2
+    Unit_hipGraphKernelNodeSetParams_Functional: *level_2
+    Unit_hipGraphKernelNodeGetSetParams_Functional: *level_2
+    Unit_hipGraphExecKernelNodeSetParams_Negative: *level_2
+    Unit_hipGraphExecKernelNodeSetParams_Functional: *level_2
+    Unit_hipGraphLaunch_Positive: *level_2
+    Unit_hipGraphLaunch_Negative_Parameters: *level_2
+    Unit_hipGraphLaunch_Negative: *level_2
+    Unit_hipGraphLaunch_Functional_hipStreamPerThread: *level_2
+    Unit_hipGraphLaunch_Functional_multidevice_test:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphLaunch_Functional_MultipleLaunch: *level_2
+    Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic: *level_2
+    Unit_hipGraphMemcpyNodeSetParams1D_Negative_Parameters: *level_2
+    Unit_hipGraphMemcpyNodeSetParams1D_Negative: *level_2
+    Unit_hipGraphMemcpyNodeSetParams1D_Functional: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative: *level_2
+    Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Functional:
+      <<: *level_2
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphNodeGetDependentNodes_Positive_Functional: *level_2
+    Unit_hipGraphNodeGetDependentNodes_Negative_Parameters: *level_2
+    Unit_hipGraphNodeGetDependentNodes_Functional:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphNodeGetDependentNodes_ParamValidation: *level_2
+    Unit_hipGraphNodeGetDependencies_Positive_Functional: *level_2
+    Unit_hipGraphNodeGetDependencies_Negative_Parameters: *level_2
+    Unit_hipGraphNodeGetDependencies_Functional:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphNodeGetDependencies_ParamValidation: *level_2
+    Unit_hipGraphHostNodeGetParams_Negative: *level_2
+    Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode: *level_2
+    Unit_hipGraphHostNodeGetParams_BasicFunc: *level_2
+    Unit_hipGraphHostNodeGetParams_SetParams: *level_2
+    Unit_hipGraphExecChildGraphNodeSetParams_Negative: *level_2
+    Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc: *level_2
+    Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology:
+      <<: *level_2
+      # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
+      # (amd_wsl) Note: Windows disabled
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipStreamGetCaptureInfo_v2_Positive_Functional: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_Positive_UniqueID: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_Negative_Parameters: *level_2
+    Unit_hipGraphCreate_Negative_Parameters: *level_2
+    Unit_hipGraphCreate_Positive_Basic: *level_2
+    Unit_hipGraphDestroy_Positive_Basic: *level_2
+    Unit_hipGraphDestroy_Negative_Parameters: *level_2
+    Unit_hipStreamSetCaptureDependencies_Positive_Functional:
+      <<: *level_2
+      # Note: Following four tests disabled due to defect - EXSWHTEC-203
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipStreamAddCaptureDependencies_Positive_Functional: *level_2
+    Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters: *level_2
+    Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters: *level_2
+    Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional: *level_2
+    Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters: *level_2
+    Unit_hipLaunchHostFunc_Negative_Parameters: *level_2
+    Unit_hipLaunchHostFunc_Positive_Functional: *level_2
+    Unit_hipLaunchHostFunc_Positive_Thread: *level_2
+    Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_BasicFunctional: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_hipStreamPerThread: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_UniqueID: *level_2
+    Unit_hipStreamGetCaptureInfo_v2_ParamValidation: *level_2
+    Unit_hipUserObjectCreate_Functional_1: *level_2
+    Unit_hipUserObjectCreate_Functional_2: *level_2
+    Unit_hipUserObjectCreate_Functional_3: *level_2
+    Unit_hipUserObjectCreate_Functional_4: *level_2
+    Unit_hipUserObjectCreate_Negative: *level_2
+    Unit_hipUserObj_Negative_Test: *level_2
+    Unit_hipUserObjectRelease_Negative: *level_2
+    Unit_hipUserObjectRetain_Negative: *level_2
+    Unit_hipGraphReleaseUserObject_Negative: *level_2
+    Unit_hipGraphRetainUserObject_Functional_1: *level_2
+    Unit_hipGraphRetainUserObject_Functional_2: *level_2
+    Unit_hipGraphRetainUserObject_Negative: *level_2
+    Unit_hipGraphRetainUserObject_Negative_Basic: *level_2
+    Unit_hipGraphRetainUserObject_Negative_Null_Object: *level_2
+    Unit_hipGraphDebugDotPrint_Functional: *level_2
+    Unit_hipGraphDebugDotPrint_Argument_Check: *level_2
+    Unit_hipGraphClone_Test_hipGraphKernelNodeSetParams: *level_2
+    Unit_hipGraphClone_Test_hipGraphExecKernelNodeSetParams: *level_2
+    Unit_hipGraphClone_Test_hipGraphAddMemcpy_and_memset: *level_2
+    Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams: *level_2
+    Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams:
+      <<: *level_2
+      # Below tests fail in stress test on 23/06/23
+      disabled: [amd_wsl]
+    Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec:
+      <<: *level_2
+      # Below tests fail in stress test on 23/06/23
+      disabled: [amd_wsl]
+    Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec: *level_2
+    Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec: *level_2
+    Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec: *level_2
+    Unit_hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams: *level_2
+    Unit_hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec: *level_2
+    Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec: *level_2
+    Unit_hipGraphClone_address_change_in_loop:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphClone_address_change_in_thread:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphClone_multi_GPU_test:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphClone_hipUserObject_hipGraphUserObject: *level_2
+    Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative: *level_2
+    Unit_hipGraphChild_hipUserObject_hipGraphUserObject: *level_2
+    Unit_hipGraphNodeSetEnabled_Functional_Basic: *level_2
+    Unit_hipGraphNodeSetEnabled_Functional_KernelNode: *level_2
+    Unit_hipGraphNodeSetEnabled_Functional_MemSet: *level_2
+    Unit_hipGraphNodeSetEnabled_Functional_MemCpy: *level_2
+    Unit_hipGraphNodeSetEnabled_Negative_Functional: *level_2
+    Unit_hipGraphNodeGetEnabled_Functional_Basic: *level_2
+    Unit_hipGraphNodeGetEnabled_Negative_Functional: *level_2
+    Unit_hipGraphExecDestroy_Negative_Parameters: *level_2
+    Unit_hipGraphExecDestroy_Positive_Basic: *level_2
+    Unit_hipGraphUpload_Functional: *level_2
+    Unit_hipGraphUpload_Functional_multidevice_test:
+      <<: *level_2
+      tags: [multigpu]
+      # (amd_linux) SWDEV-553920 disabled until multi device graph issues are resolved
+      # (amd_windows) SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
+      disabled: [amd_linux, amd_windows]
+    Unit_hipGraphUpload_Functional_With_Priority_Stream: *level_2
+    Unit_hipGraphUpload_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipGraphKernelNodeCopyAttributes_Functional: *level_2
+    Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative: *level_2
+    Unit_hipStreamBeginCapture_with_hipGraphAddHostNode: *level_2
+    Unit_hipStreamEndCapture_later_and_add_a_node_inbetween: *level_2
+    Unit_hipStreamEndCapture_first_and_add_a_node_later: *level_2
+    Unit_hipStreamEndCapture_first_and_add_other_graph_node_later: *level_2
+    Unit_hipStreamEndCapture_later_and_addEmptyNode: *level_2
+    Unit_hipGraph_BasicCyclic1: *level_2
+    Unit_hipGraph_BasicCyclic2: *level_2
+    Unit_hipGraph_BasicCyclic3: *level_2
+    Unit_hipGraph_BasicCyclic4: *level_2
+    Unit_hipGraph_BasicCyclic5: *level_2
+    Unit_hipGraph_PerfCheck_MemcpyKernelMixCall: *level_2
+    Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams_inLoop:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams: *level_2
+    Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams_inLoop:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParams1D_inLoop:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsFrmSymbol:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecMemcpyNodeSetParamsToSymbol:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecMemsetNodeSetParams:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecChildGraphNodeSetParams:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecEventRecordNodeSetEvent:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecEventWaitNodeSetEvent:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecHostNodeSetParams:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecUpdate:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters: *level_2
+    Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow: *level_2
+    Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative: *level_2
+    Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters: *level_2
+    Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional: *level_2
+    Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it
+      disabled: [amd_windows]
+    Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2: *level_2
+    Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
+      <<: *level_2
+      # SWDEV-430116:Below tests failed in stress test on 27/10/23
+      disabled: [amd_wsl]
+    Unit_hipGraphAddMemAllocNode_Negative_Params: *level_2
+    Unit_hipGraphAddMemAllocNode_Negative_NotSupported: *level_2
+    Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream: *level_2
+    Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph: *level_2
+    Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph: *level_2
+    Unit_hipGraphAddMemAllocNode_Functional_1: *level_2
+    Unit_hipGraphAddMemAllocNode_Functional_2:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemAllocNode_Functional_3:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemAllocNode_Functional_4:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipGraphAddMemAllocNode_Argument_Check: *level_2
+    Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again: *level_2
+    Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
+      <<: *level_2
+      # (amd_linux) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
+      # (amd_windows) SWDEV-457316 Below test is skipped due ref count logic (Discussed with German)
+      disabled: [amd_linux, amd_windows]
+    Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph: *level_2
+    Unit_hipGraphAddMemFreeNode_Negative_Params: *level_2
+    Unit_hipGraphAddMemFreeNode_Negative_NotSupported:
+      <<: *level_2
+      # SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB
+      disabled: [amd_windows]
+    Unit_hipGraphAddMemFreeNode_Functional: *level_2
+    Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters: *level_2
+    Unit_hipDrvGraphMemcpyNodeGetParams_Positive: *level_2
+    Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic: *level_2
+    Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array: *level_2
+    Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters: *level_2
+    Unit_hipDeviceSetGraphMemAttribute_Positive_Default: *level_2
+    Unit_hipDeviceSetGraphMemAttribute_Negative_Parameters: *level_2
+    Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory: *level_2
+    Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters: *level_2
+    Unit_hipDeviceGetGraphMemAttribute_Functional: *level_2
+    Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDeviceGetGraphMemAttribute_Negative: *level_2
+    Unit_hipDeviceSetGraphMemAttribute_Negative: *level_2
+    Unit_hipDeviceGraphMemTrim_Positive_Default: *level_2
+    Unit_hipDeviceGraphMemTrim_Negative_Parameters: *level_2
+    Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive: *level_2
+    Unit_hipDrvGraphExecMemsetNodeSetParams_Negative: *level_2
+    Unit_hipGraphAddNodeTypeMemset_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeKernel_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeHost_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeChildGraph_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeEventWait_Positive_Basic: *level_2
+    Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic: *level_2
+    Unit_hipGraphAddNode_Negative_Parameters: *level_2
+    Unit_hipDrvGraphAddMemsetNode_Positive_Basic: *level_2
+    Unit_hipDrvGraphAddMemsetNode_Negative_Parameters: *level_2
+    Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemsetNode_hipMallocManaged:
+      <<: *level_2
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
+    Unit_hipDrvGraphAddMemcpyNode_Negative: *level_2
+    Unit_hipDrvGraphAddMemcpyNode_test: *level_2
+    Unit_hipDrvGraphAddMemcpyNode_MulitDevice:
+      <<: *level_2
+      tags: [multigpu]
+    Unit_hipDrvGraphAddMemcpyNode_Positive_Basic: *level_2
+    Unit_hipDrvGraphAddMemcpyNode_Positive_Array: *level_2
+    Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters: *level_2

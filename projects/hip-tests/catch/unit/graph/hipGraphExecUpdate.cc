@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_Basic") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_Basic) {
   hipError_t ret;
   hipGraph_t graph{};
   hipGraphExec_t graphExec{};
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Basic") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_TypeChange") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_TypeChange) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(char);
   constexpr size_t val = 0;
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_TypeChange") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_CountDiffer") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_CountDiffer) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -231,7 +231,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_CountDiffer") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Functional") {
+TEST_CASE(Unit_hipGraphExecUpdate_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -336,7 +336,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Functional") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_ParametersChanged") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_ParametersChanged) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -390,7 +390,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_ParametersChanged") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -444,7 +444,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -519,7 +519,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_Dependent_NodesDiffer") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_Dependent_NodesDiffer) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -578,7 +578,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Dependent_NodesDiffer") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_NodeType_Changed") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_NodeType_Changed) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -639,8 +639,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_NodeType_Changed") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed",
-          "[multigpu]") {
+TEST_CASE(Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -740,7 +739,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_MultiDevice_Context_Changed",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed") {
+TEST_CASE(Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency

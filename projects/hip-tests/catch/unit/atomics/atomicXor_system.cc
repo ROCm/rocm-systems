@@ -45,8 +45,8 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE(Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address,
+                   int, unsigned int, unsigned long,
                    unsigned long long) {
   for (auto current = 0; current < 1; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
@@ -70,7 +70,7 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address",
  *  - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE(
-    "Unit_atomicXor_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]",
+    Unit_atomicXor_system_Positive_Peer_GPUs_Adjacent_Addresses,
     int, unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -97,8 +97,8 @@ TEMPLATE_TEST_CASE(
  *  - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE(
-    "Unit_atomicXor_system_Positive_Peer_GPUs_Scattered_Addresses",
-    "[multigpu]", int, unsigned int, unsigned long, unsigned long long) {
+    Unit_atomicXor_system_Positive_Peer_GPUs_Scattered_Addresses,
+    int, unsigned int, unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
