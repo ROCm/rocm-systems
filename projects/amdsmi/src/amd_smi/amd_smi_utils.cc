@@ -616,12 +616,9 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
     std::strncpy(version, empty.c_str(), len-1);
     openFileAndModifyBuffer("/sys/module/amdgpu/version",
                                       version, static_cast<size_t>(len));
-    if (version[0] == '\0') {
-        openFileAndModifyBuffer("/proc/version", version, static_cast<size_t>(len));
-        if (version[0] == '\0') {
-            return AMDSMI_STATUS_IO;
-        }
-    }
+    if (version[0] == '\0')
+        return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+
     return status;
 }
 
@@ -791,6 +788,25 @@ std::string smi_amdgpu_split_string(std::string str, char delim) {
     return token;  // return 1st match
   }
   return "";
+}
+
+// Split string at delimiter and return strings in vector
+std::vector<std::string> split_string(const std::string& line, char delim) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+
+  while (start < line.size()) {
+    auto pos = line.find(delim, start);
+    if (pos == std::string::npos) {
+        pos = line.size();
+    }
+    std::string token = trim(line.substr(start, pos - start));
+    if (!token.empty()) {
+        out.push_back(token);
+    }
+    start = pos + 1;
+  }
+  return out;
 }
 
 // wrapper to return string expression of a rsmi_status_t return

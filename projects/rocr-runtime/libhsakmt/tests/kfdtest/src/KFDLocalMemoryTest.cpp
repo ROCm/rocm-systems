@@ -44,15 +44,13 @@ void KFDLocalMemoryTest::TearDown() {
     ROUTINE_END
 }
 
-static void AccessLocalMem(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDLocalMemoryTest::AccessLocalMem(int gpuNode) {
 
     /* Skip test if not on dGPU path, which the test depends on */
     if (!hsakmt_is_dgpu()) {
         LOG() << "Not dGPU path, skipping the test" << std::endl;
         return;
     }
-
-    int gpuNode = pTestParamters->gpuNode;
 
     //local memory
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false, true);
@@ -75,23 +73,22 @@ static void AccessLocalMem(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDLocalMemoryTest, AccessLocalMem) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AccessLocalMem));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AccessLocalMem(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void BasicTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDLocalMemoryTest::BasicTest(int gpuNode) {
 
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
     unsigned int BufferSize = PAGE_SIZE;
     HsaMemMapFlags mapFlags = {0};
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDLocalMemoryTest* pKFDLocalMemoryTest = (KFDLocalMemoryTest*)pTestParamters->pTestObject;
-
     Assembler* m_pAsm;
-    m_pAsm = pKFDLocalMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
@@ -138,23 +135,22 @@ TEST_F(KFDLocalMemoryTest, BasicTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void VerifyContentsAfterUnmapAndMap(KFDTEST_PARAMETERS* pTestParamters)
+void KFDLocalMemoryTest::VerifyContentsAfterUnmapAndMap(int gpuNode)
 {
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
     unsigned int BufferSize = PAGE_SIZE;
     HsaMemMapFlags mapFlags = {0};
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDLocalMemoryTest* pKFDLocalMemoryTest = (KFDLocalMemoryTest*)pTestParamters->pTestObject;
-
     Assembler* m_pAsm;
-    m_pAsm = pKFDLocalMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
@@ -197,7 +193,9 @@ TEST_F(KFDLocalMemoryTest, VerifyContentsAfterUnmapAndMap) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(VerifyContentsAfterUnmapAndMap));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->VerifyContentsAfterUnmapAndMap(gpuNode);
+    }));
 
     TEST_END
 }
@@ -271,14 +269,11 @@ TEST_F(KFDLocalMemoryTest, VerifyContentsAfterUnmapAndMap) {
  *    20 |    1M |   4G |   10G |   40G |  10
  */
 
-static void Fragmentation(KFDTEST_PARAMETERS* pTestParamters){
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDLocalMemoryTest* pKFDLocalMemoryTest = (KFDLocalMemoryTest*)pTestParamters->pTestObject;
+void KFDLocalMemoryTest::Fragmentation(int gpuNode){
 
     HSAuint64 fbSize;
 
-    fbSize = pKFDLocalMemoryTest->GetVramSize(gpuNode);
+    fbSize = GetVramSize(gpuNode);
 
     if (!fbSize) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
@@ -311,7 +306,7 @@ static void Fragmentation(KFDTEST_PARAMETERS* pTestParamters){
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
 
     /* instantiate Assembler for gpuNode */
-    HsaNodeInfo* m_NodeInfo = pKFDLocalMemoryTest->Get_NodeInfo();
+    HsaNodeInfo* m_NodeInfo = Get_NodeInfo();
     const HsaNodeProperties *nodeProperties = m_NodeInfo->GetNodeProperties(gpuNode);
     Assembler* m_pAsm = new Assembler(GetGfxVersion(nodeProperties));
 
@@ -439,18 +434,17 @@ TEST_F(KFDLocalMemoryTest, DISABLED_Fragmentation) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(Fragmentation));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->Fragmentation(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CheckZeroInitializationVram(KFDTEST_PARAMETERS* pTestParamters){
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDLocalMemoryTest* pKFDLocalMemoryTest = (KFDLocalMemoryTest*)pTestParamters->pTestObject;
+void KFDLocalMemoryTest::CheckZeroInitializationVram(int gpuNode){
 
     /* Testing VRAM */
-    HSAuint64 vramSizeMB = pKFDLocalMemoryTest->GetVramSize(gpuNode) >> 20;
+    HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
 
    if (!vramSizeMB) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
@@ -501,7 +495,9 @@ TEST_F(KFDLocalMemoryTest, CheckZeroInitializationVram) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CheckZeroInitializationVram));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CheckZeroInitializationVram(gpuNode);
+    }));
 
     TEST_END
 }

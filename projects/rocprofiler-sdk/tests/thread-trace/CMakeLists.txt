@@ -94,16 +94,28 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
+# Feature introduced in ROCm 7.1, however some pre-release CI builds for 7.1 dont have
+# this feature in aqlprofile. Disable the next tests for ROCm < 7.2.
+set(IS_DISABLED True)
+find_package(hip CONFIG REQUIRED)
+if(hip_FOUND)
+    if(${hip_VERSION_MAJOR} EQUAL 7 AND ${hip_VERSION_MINOR} GREATER 1)
+        set(IS_DISABLED False)
+    elseif(${hip_VERSION_MAJOR} GREATER 7)
+        set(IS_DISABLED False)
+    endif()
+endif()
+
 # Test large buffer sizes. 5120 == 5GB
 rocprofiler_add_integration_execute_test(
     thread-trace-api-large-buffer-test
     COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
     DEPENDS thread-trace-api-agent-test
-    TIMEOUT 10
+    TIMEOUT 30
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT "ATT_BUFFER_SIZE_MB=5120"
-    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
+    DISABLED ${IS_DISABLED})
 
 # Test occupancy mode
 rocprofiler_add_integration_execute_test(

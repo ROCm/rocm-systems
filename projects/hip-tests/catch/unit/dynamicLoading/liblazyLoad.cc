@@ -32,8 +32,8 @@ THE SOFTWARE.
   }
 
 __global__ static void addition(float* C, float* A, float* B, size_t N) {
-  size_t offset = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-  size_t stride = hipBlockDim_x * hipGridDim_x;
+  size_t offset = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
 
   for (size_t i = offset; i < N; i += stride) {
     C[i] = A[i] + B[i];
@@ -121,7 +121,9 @@ __global__ static void test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_
     tmpBuf[blockIdx.x] = sum;
   }
 
-  gg.sync();
+  // TODO: remove syncthreads with grid sync when compiler issue is fixed
+  // gg.sync();
+  __syncthreads();
 
   if (offset == 0) {
     for (uint i = 1; i < gridDim.x; ++i) {
@@ -139,7 +141,7 @@ static int cooperativeKernelTest() {
   int64_t* Ah;
 
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, 0);
+  CHECK_RET_VAL(hipGetDeviceProperties(&deviceProp, 0));
 
   if (!deviceProp.cooperativeLaunch) {
     return testResult;
@@ -170,8 +172,8 @@ static int cooperativeKernelTest() {
     dimBlock.x = workgroups[i];
     /* Calculate the device occupancy to know how many blocks can be
        run concurrently */
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t));
+    CHECK_RET_VAL(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t)));
     dimGrid.x = deviceProp.multiProcessorCount * std::min(numBlocks, 32);
     CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB), dimGrid.x * sizeof(int64_t)));
 

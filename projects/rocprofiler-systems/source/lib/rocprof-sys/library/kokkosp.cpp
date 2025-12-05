@@ -192,6 +192,7 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
 
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::in_time_sample{
+            static_cast<size_t>(rocprofsys::category_enum_id<category::kokkos>::value),
             rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
             event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
             call_stack, line_info });
