@@ -131,8 +131,13 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalNBITestType:
         max_msg_size = args.max_msg_size / args.num_wgs;
         break;
+      case TeamAllToAllTestType:
+      case AllToAllsTestType:
+      case TeamAlltoallmemOnStreamTestType:
+        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs;
+        break;
       default:
-        //TODO collectives?
+        //TODO other collectives
         break;
     }
     if (max_msg_size == 0) {
@@ -746,9 +751,10 @@ void Tester::print(uint64_t size) {
   /**
    * Calculate total amount of data transfered
    */
-  uint64_t total_size = size * num_timed_msgs;
-  double timer_avg = timerAvgInMicroseconds();
+  size_t total_size = size * num_timed_msgs;
+  size_t volume = (bw_factor * total_size) / num_loops;
 
+  double timer_avg = timerAvgInMicroseconds();
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
   double time_s = time_us / 1e6;
 
@@ -757,9 +763,7 @@ void Tester::print(uint64_t size) {
   double msg_rate = num_timed_msgs / time_s;
 
   double bandwidth_gbs =
-      static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
-
-  size_t volume = size * num_timed_msgs / num_loops;
+      static_cast<double>(bw_factor * total_size) / time_s / pow(2, 30);
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
