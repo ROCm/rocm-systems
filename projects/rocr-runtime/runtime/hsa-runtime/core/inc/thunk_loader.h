@@ -365,6 +365,12 @@ class ThunkLoader {
                                       uint64_t flags, \
                                       uint32_t op);
 
+    typedef int (DRM_DEF(amdgpu_bo_query_info))(amdgpu_bo_handle bo, \
+                                      struct amdgpu_bo_info* info);
+
+    typedef int (DRM_DEF(amdgpu_bo_set_metadata))(amdgpu_bo_handle bo, \
+                                      struct amdgpu_bo_metadata* info);
+
     typedef int (DRM_DEF(drmCommandWriteRead))(int fd, \
                                       unsigned long drmCommandIndex, \
                                       void *data, \
@@ -483,6 +489,8 @@ class ThunkLoader {
     DRM_DEF(amdgpu_bo_export)* DRM_PFN(amdgpu_bo_export);
     DRM_DEF(amdgpu_bo_import)* DRM_PFN(amdgpu_bo_import);
     DRM_DEF(amdgpu_bo_va_op)* DRM_PFN(amdgpu_bo_va_op);
+    DRM_DEF(amdgpu_bo_query_info)* DRM_PFN(amdgpu_bo_query_info);
+    DRM_DEF(amdgpu_bo_set_metadata)* DRM_PFN(amdgpu_bo_set_metadata);
     DRM_DEF(drmCommandWriteRead)* DRM_PFN(drmCommandWriteRead);
 
   private:

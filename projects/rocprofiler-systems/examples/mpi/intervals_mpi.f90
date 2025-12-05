@@ -8,13 +8,13 @@ program main
 !
 !    INTERVALS uses MPI routines to multiprocess a computational task.
 !
-!    We have a function F(X), an interval [XMIN,XMAX], 
+!    We have a function F(X), an interval [XMIN,XMAX],
 !    and a value N.
 !
 !    We define N equally spaced points in the interval,
 !
-!      X(I) = ( ( N - I     ) * XMIN 
-!             + (     I - 1 ) * XMAX ) 
+!      X(I) = ( ( N - I     ) * XMIN
+!             + (     I - 1 ) * XMAX )
 !             / ( N     - 1 )
 !
 !    We thus have N-1 subintervals.
@@ -34,7 +34,7 @@ program main
 !
 !    COMMUNICATION:
 !
-!    Processor 0 communicates to processor I the endpoints of 
+!    Processor 0 communicates to processor I the endpoints of
 !    the interval it is assigned, and the number of sample points
 !    to use in that interval.
 !
@@ -69,7 +69,7 @@ program main
 !    MIT Press, 1998.
 !
   use mpi
- 
+
   real ( kind = 8 ) f
   real ( kind = 8 ) h
   integer ( kind = 4 ) i
@@ -154,7 +154,7 @@ program main
       xb(2) = ( real ( process_num - process - 1, kind = 8 ) * x_min   &
               + real (               process,     kind = 8 ) * x_max ) &
               / real ( process_num           - 1, kind = 8 )
- 
+
       target = process
       tag = 1
 
@@ -169,7 +169,7 @@ program main
 
     call MPI_Recv ( xb, 2, MPI_DOUBLE_PRECISION, 0, tag, &
       MPI_COMM_WORLD, status, ierr )
-    
+
   end if
 !
 !  Wait here until everyone has gotten their assignment.
@@ -192,7 +192,7 @@ program main
 
   call MPI_Bcast ( m, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr )
 !
-!  Now, every process EXCEPT 0 computes its estimate of the 
+!  Now, every process EXCEPT 0 computes its estimate of the
 !  integral over its subinterval, and sends the result back
 !  to process 0.
 !

@@ -4612,6 +4612,9 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     // Get the driver version
     status = smi_amdgpu_get_driver_version(gpu_device,
                 &length, info->driver_version);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
     std::string render_name = gpu_device->get_gpu_path();
