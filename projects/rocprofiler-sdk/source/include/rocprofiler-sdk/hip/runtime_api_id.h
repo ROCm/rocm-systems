@@ -573,5 +573,8 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 19
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGetProcAddress_spt,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

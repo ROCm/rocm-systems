@@ -462,7 +462,7 @@ void getMinMaxCurrentAndSetCurrent() {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_MultiDevice") {
+TEST_CASE("Unit_hipDeviceGetSetLimit_Scratch_MultiDevice", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {

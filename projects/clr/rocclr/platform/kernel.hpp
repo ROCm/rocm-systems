@@ -123,7 +123,6 @@ class KernelParameters : protected HeapObject {
   KernelSignature& signature_;
 
   address values_;                      //!< pointer to the base of the values stack.
-  uint32_t execInfoOffset_;             //!< The offset of execInfo
   std::vector<void*> execSvmPtr_;       //!< The non argument svm pointers for kernel
   FGSStatus svmSystemPointersSupport_;  //!< The flag for the status of the kernel
                                         //   support of fine-grain system sharing.
@@ -148,7 +147,6 @@ class KernelParameters : protected HeapObject {
   //! Construct a new instance of parameters for the given signature.
   KernelParameters(KernelSignature& signature)
       : signature_(signature),
-        execInfoOffset_(0),
         svmSystemPointersSupport_(FGS_DEFAULT),
         memoryObjects_(nullptr),
         samplerObjects_(nullptr),
@@ -168,14 +166,12 @@ class KernelParameters : protected HeapObject {
     samplerObjects_ = reinterpret_cast<amd::Sampler**>(values_ + samplerObjOffset_);
     queueObjOffset_ = samplerObjOffset_ + signature_.numSamplers() * sizeof(amd::Sampler*);
     queueObjects_ = reinterpret_cast<amd::DeviceQueue**>(values_ + queueObjOffset_);
-    execInfoOffset_ = totalSize_;
     address limit = reinterpret_cast<address>(&queueObjects_[signature_.numQueues()]);
     ::memset(values_, '\0', limit - values_);
   }
 
   explicit KernelParameters(const KernelParameters& rhs)
       : signature_(rhs.signature_),
-        execInfoOffset_(rhs.execInfoOffset_),
         execSvmPtr_(rhs.execSvmPtr_),
         svmSystemPointersSupport_(rhs.svmSystemPointersSupport_),
         memoryObjects_(nullptr),
@@ -254,8 +250,8 @@ class KernelParameters : protected HeapObject {
   //! get the number of svmPtr in the execInfo container
   size_t getNumberOfSvmPtr() const { return execSvmPtr_.size(); }
 
-  //! get the offset of svmPtr in the parameters
-  uint32_t getExecInfoOffset() const { return execInfoOffset_; }
+  //! Get the total size of parameters / offset where execInfo (SVM pointers) are stored
+  uint32_t getTotalSize() const { return totalSize_; }
 
   //! get the offset of memory objects in the parameters
   uint32_t memoryObjOffset() const { return memoryObjOffset_; }

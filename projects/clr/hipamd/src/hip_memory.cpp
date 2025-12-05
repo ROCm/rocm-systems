@@ -34,8 +34,6 @@ namespace hip {
 amd::Monitor hipArraySetLock{};
 std::unordered_set<hipArray*> hipArraySet;
 
-template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
-
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   auto memObj = amd::MemObjMap::FindMemObj(ptr, &offset);
@@ -1057,7 +1055,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
 
   if (!amd::Image::validateDimensions(devices, imageType, imageWidth, imageHeight, imageDepth,
                                       imageArraySize)) {
-    DevLogError("Image does not have valid dimensions");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Image does not have valid dimensions");
     status = hipErrorInvalidValue;
     return nullptr;
   }
@@ -3431,12 +3429,14 @@ hipError_t hipIpcCloseMemHandle(void* dev_ptr) {
 
   amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Memory object for the ptr: 0x%x cannot be null \n", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Memory object for the ptr: 0x%x cannot be null \n", dev_ptr);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!amd_mem_obj->ipcShared()) {
-    DevLogPrintfError("Memory object for the ptr: 0x%x is not ipcShared \n", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Memory object for the ptr: 0x%x is not ipcShared \n", dev_ptr);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3499,7 +3499,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
     // getDeviceMemory can fail, hence validate the sanity of the mem obtained
     if (nullptr == devMem) {
-      DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
       HIP_RETURN(hipErrorMemoryAllocation);
     }
 
@@ -3605,7 +3606,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
 
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
         if (nullptr == devMem) {
-          DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
           return hipErrorMemoryAllocation;
         }
         *reinterpret_cast<hipDeviceptr_t*>(data) =
@@ -3712,7 +3714,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
 
           // getDeviceMemory can fail, hence validate the sanity of the mem obtained
           if (nullptr == devMem) {
-            DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+            ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
             return hipErrorMemoryAllocation;
           }
           *reinterpret_cast<hipDeviceptr_t*>(data) =

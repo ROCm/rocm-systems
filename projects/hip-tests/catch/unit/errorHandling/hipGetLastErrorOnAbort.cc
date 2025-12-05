@@ -102,7 +102,7 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices") {
+TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoDevices", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {

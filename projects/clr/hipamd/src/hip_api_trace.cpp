@@ -883,6 +883,8 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
                                                     int numBlocks, int blockSize);
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
 }  // namespace hip
 
 namespace hip {
@@ -1429,6 +1431,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetLibrary_fn = hip::hipKernelGetLibrary;
   ptrDispatchTable->hipKernelGetName_fn = hip::hipKernelGetName;
   ptrDispatchTable->hipOccupancyAvailableDynamicSMemPerBlock_fn = hip::hipOccupancyAvailableDynamicSMemPerBlock;
+  ptrDispatchTable->hipKernelGetParamInfo_fn = hip::hipKernelGetParamInfo;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2109,15 +2112,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetName_fn, 504);
 HIP_ENFORCE_ABI(HipDispatchTable, hipOccupancyAvailableDynamicSMemPerBlock_fn, 505);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
 HIP_ENFORCE_ABI(HipDispatchTable, hipGetProcAddress_spt_fn, 506);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 20
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetParamInfo_fn, 507);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 507)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 508)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 19,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 20,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

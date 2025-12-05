@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-
+#include <vector>
 #include <cstring>
 #include "../kernel/printf_common.h"
 
@@ -45,7 +45,7 @@ __global__ void run_printf() { printf("Hello World\n"); }
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_kernel_ChkPrintf") {
+TEST_CASE("Unit_kernel_ChkPrintf", "[multigpu]") {
   int device_count = 0;
   CaptureStream capture(stdout);
   HIP_CHECK(hipGetDeviceCount(&device_count));
@@ -56,13 +56,11 @@ TEST_CASE("Unit_kernel_ChkPrintf") {
     if (!HipTest::isPcieAtomicSupported()) continue;
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
     HIP_CHECK(hipDeviceSynchronize());
-    char* data = new char[st.size()];
-    ;
+    std::vector<char> data(st.size() + 1);  // +1 for null terminator
     std::ifstream CapturedData = capture.getCapturedData();
-    CapturedData.getline(data, st.size() + 1);
-    int result = strcmp(data, check);
+    CapturedData.getline(data.data(), st.size() + 1);
+    int result = strcmp(data.data(), check);
     REQUIRE(result == 0);
-    delete[] data;
   }
 }
 

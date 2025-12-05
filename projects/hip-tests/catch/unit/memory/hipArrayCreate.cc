@@ -85,7 +85,7 @@ This testcase verifies the hipArrayCreate API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipArrayCreate API with small and big chunks data
 */
-TEST_CASE("Unit_hipArrayCreate_MultiThread") {
+TEST_CASE("Unit_hipArrayCreate_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
@@ -335,7 +335,7 @@ TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
   hipArray_t array;
 
   INFO("Format: " << formatToString(desc.Format) << " NumChannels: " << desc.NumChannels
-                  << " Height: " << desc.Height)
+                  << " Height: " << desc.Height);
   HIP_CHECK_ERROR(hipArrayCreate(&array, &desc), hipErrorInvalidValue);
 }
 
@@ -360,6 +360,6 @@ TEST_CASE("Unit_hipArrayCreate_BadChannelFormat") {
 
   hipArray_t array;
 
-  INFO("Format: " << formatToString(desc.Format) << " Height: " << desc.Height)
+  INFO("Format: " << formatToString(desc.Format) << " Height: " << desc.Height);
   HIP_CHECK_ERROR(hipArrayCreate(&array, &desc), hipErrorInvalidValue);
 }

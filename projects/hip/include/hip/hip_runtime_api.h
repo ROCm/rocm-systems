@@ -4652,6 +4652,8 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
 /**
  *  @brief Memory copy on the stream.
  *  It allows single or multiple devices to do memory copy on single or multiple streams.
+ *  The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
+ *  Since it is a sync API, it is not allowed during graph capture.
  *
  *  @param[out]  dst Data being copy to
  *  @param[in]  src Data being copy from
@@ -6465,6 +6467,19 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
  * @return #hipSuccess, #hipErrorInvalidValue
 */
 hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+
+/**
+ * @brief Returns the offset and size of a kernel parameter
+ *
+ * @param [in] kernel       Kernel handle to retrieve parameter info
+ * @param [in] paramIndex   Index of the parameter
+ * @param [out] paramOffset returns the offset of the parameter
+ * @param [out] paramSize   Optionally returns the size of the parameter
+ *
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
 
 /**
  * @brief Find out attributes for a given function.

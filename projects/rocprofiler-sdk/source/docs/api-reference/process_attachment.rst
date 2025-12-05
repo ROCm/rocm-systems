@@ -16,7 +16,7 @@ This document provides the technical details needed to implement a process attac
 Python Functions
 ===================================
 
-The python file ``rocprofv3-attach.py`` defines a main function that can be used for attachment:
+The python file ``rocprof-attach`` defines a main function that can be used for attachment:
 
 .. code-block:: python
 
@@ -30,7 +30,7 @@ The python file ``rocprofv3-attach.py`` defines a main function that can be used
 
 **Function Details**
 
-The main function performs the entire attachment process, including attaching and detaching, and provides the ability to use custom tools. It also has simple control flow intended for direct calling from python. For more complex control, it is recommended to instead use the explicit attach and detach functions provided by the ``librocprofv3-attach.so`` binary.
+The main function performs the entire attachment process, including attaching and detaching, and provides the ability to use custom tools. It also has simple control flow intended for direct calling from python. For more complex control, it is recommended to instead use the explicit attach and detach functions provided by the ``librocprofiler-sdk-rocattach.so`` binary.
 
 **Parameters**
 
@@ -38,7 +38,7 @@ The main function performs the entire attachment process, including attaching an
    - Defaults to environment variable ROCPROF_ATTACH_PID
 - **attach_library**: Optional - Colon delimited list of tool libraries to use
    - Defaults to environment variable ROCPROF_ATTACH_TOOL_LIBRARY
-   - If unspecified, defaults to the absolute path of librocprofv3-attach.so
+   - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
 - **duration**: Optional - Length of time in milliseconds to profile for
    - Defaults to environment variable ROCPROF_ATTACH_DURATION
    - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
@@ -46,7 +46,7 @@ The main function performs the entire attachment process, including attaching an
 C Functions
 ===================================
 
-The C library ``librocprofv3-attach.so`` defines an attach and detach function that can be used for attachment:
+The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach function that can be used for attachment:
 
 .. code-block:: cpp
 
@@ -151,9 +151,9 @@ Basic Attachment Tool Implementation
    public:
        bool initialize() {
            // Load the rocprofiler-attach library/binary
-           attach_lib_handle = dlopen("librocprofv3-attach.so", RTLD_NOW);
+           attach_lib_handle = dlopen("librocprofiler-sdk-rocattach.so", RTLD_NOW);
            if (!attach_lib_handle) {
-               std::cerr << "Failed to load librocprofv3-attach: " << dlerror() << std::endl;
+               std::cerr << "Failed to load librocprofiler-sdk-rocattach: " << dlerror() << std::endl;
                return false;
            }
 

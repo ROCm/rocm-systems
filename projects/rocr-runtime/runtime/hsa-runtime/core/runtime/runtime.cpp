@@ -378,13 +378,15 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //clear the set metadata here if possible if theres an existing ldrm_bo
     if (it->second.ldrm_bo) {
 #if defined(__linux__)
-      struct amdgpu_bo_info info = {0};
-      auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
+      if (!thunkLoader()->IsDXG()) {
+        struct amdgpu_bo_info info = {0};
+        auto err = DRM_CALL(amdgpu_bo_query_info(it->second.ldrm_bo, &info));
 
-      //clear metadata
-      amdgpu_bo_metadata zero_metadata = {0};
-      memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
-      amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+        //clear metadata
+        amdgpu_bo_metadata zero_metadata = {0};
+        memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+        DRM_CALL(amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata));
+      }
 #else
       assert(!"Unimplemented!");
 #endif
@@ -845,41 +847,18 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             hsa_signal_value_t value,
                                             hsa_amd_signal_handler handler,
                                             void* arg) {
-  struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
-  int priority = runtime_singleton_->flag().async_events_thread_priority();
+  bool exception = false;
 
-  if (signal.handle != 0) {
+  if (signal.handle) {
     // Indicate that this signal is in use.
     hsa_signal_handle(signal)->Retain();
 
     core::Signal* coreSignal = core::Signal::Convert(signal);
-    if (coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL) {
-      priority = os::OS_THREAD_PRIORITY_DEFAULT;
-      asyncInfo = &asyncExceptions_;
-    }
+    exception = !!(coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL);
   }
 
-
-  // Lazy initializer
-  if (asyncInfo->control.async_events_thread_ == NULL) {
-    // Create monitoring thread control signal
-    auto err = HSA::hsa_signal_create(0, 0, NULL, &asyncInfo->control.wake);
-    if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Asyncronous events control signal creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-    asyncInfo->events.PushBack(asyncInfo->control.wake, HSA_SIGNAL_CONDITION_NE,
-                          0, NULL, NULL);
-
-    // Start event monitoring thread
-    asyncInfo->control.exit = false;
-    asyncInfo->control.async_events_thread_ =
-        os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
-    if (asyncInfo->control.async_events_thread_ == NULL) {
-      assert(false && "Asyncronous events thread creation error.");
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-  }
+  // Lazy initializer asyncExceptions_ and asyncSignals_ will be constructed on first dereference
+  struct AsyncEventsInfo* asyncInfo = exception ? (*asyncExceptions_).get() : (*asyncSignals_).get();
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
@@ -1427,29 +1406,31 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
 #if defined(__linux__)
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
-    amdgpu_bo_import_result res;
+    if (!thunkLoader()->IsDXG()) {
+      AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
+      amdgpu_bo_import_result res;
 
-    srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-    handle->handle[7] = rand();
+      srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+      handle->handle[7] = rand();
 
-    //libdrm import for buffer object handle
-    if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
-      fprintf(stderr, "Error in amdgpu_bo_import\n");
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+      //libdrm import for buffer object handle
+      if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
+        fprintf(stderr, "Error in amdgpu_bo_import\n");
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
 
-    //query buffer object for pre existing metadata
-    struct amdgpu_bo_info info = {0};
-    if (!amdgpu_bo_query_info(res.buf_handle, &info) && !!info.metadata.size_metadata) {
-      handle->handle[7] = info.metadata.umd_metadata[0];
-    } else {
-      amdgpu_bo_metadata buf_info = {0};
-      buf_info.size_metadata = sizeof(uint32_t);
-      buf_info.umd_metadata[0] = handle->handle[7];
+      //query buffer object for pre existing metadata
+      struct amdgpu_bo_info info = {0};
+      if (!DRM_CALL(amdgpu_bo_query_info(res.buf_handle, &info)) && !!info.metadata.size_metadata) {
+        handle->handle[7] = info.metadata.umd_metadata[0];
+      } else {
+        amdgpu_bo_metadata buf_info = {0};
+        buf_info.size_metadata = sizeof(uint32_t);
+        buf_info.umd_metadata[0] = handle->handle[7];
 
-      amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
-      allocation_map_[ptr].ldrm_bo = res.buf_handle;
+        DRM_CALL(amdgpu_bo_set_metadata(res.buf_handle, &buf_info));
+        allocation_map_[ptr].ldrm_bo = res.buf_handle;
+      }
     }
 #else
     assert(!"Unimplemented!");
@@ -1616,15 +1597,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (ipc_dmabuf_supported_ && !isSysMem) {
 #if defined(__linux__)
-        // use the bo from the allocation map
-        // Only check metadata for GPU memory
-        struct amdgpu_bo_info info = {0};
-        int ret = amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info);
+        if (!thunkLoader()->IsDXG()) {
+          // use the bo from the allocation map
+          // Only check metadata for GPU memory
+          struct amdgpu_bo_info info = {0};
+          int ret = DRM_CALL(amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info));
 
-        // Validate metadata for IPC handle
-        if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
-            fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
-            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          // Validate metadata for IPC handle
+          if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
+              fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
+              return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          }
         }
 #else
         assert(!"Unimplemented!");
@@ -2259,10 +2242,11 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
       PrintMemoryMapNear(reinterpret_cast<void*>(fault.VirtualAddress));
 #endif
     }
-    // Fallback if KFD does not support GPU core dump. In this case, there core dump is
+    // Fallback if KFD does not support GPU core dump. In this case, the core dump is
     // generated by hsa-runtime.
     if (faulty_agent &&
-        faulty_agent->supported_isas()[0]->GetMajorVersion() != 11 &&
+        !(faulty_agent->supported_isas()[0]->GetMajorVersion() == 11
+	  && faulty_agent->supported_isas()[0]->GetMinorVersion() < 5) &&
                       !runtime_singleton_->KfdVersion().supports_core_dump) {
 
       if (pcs::PcsRuntime::instance()->SessionsActive())
@@ -2329,6 +2313,32 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
   }
 }
 
+Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
+  : control(this), events(), new_events(), monitor_exceptions(exceptions_) {
+
+  events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
+}
+
+Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
+  control.Shutdown();
+}
+
+Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
+  : exit(false) {
+
+  int priority = asyncInfo->monitor_exceptions ? os::OS_THREAD_PRIORITY_DEFAULT :
+                  runtime_singleton_->flag().async_events_thread_priority();
+
+  auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
+  if (err != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+
+  asyncInfo->control.thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
+  if (!asyncInfo->control.thread_)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to initialize async handler thread");
+
+}
+
 Runtime::Runtime()
     : loader_(nullptr),
       region_gpu_(nullptr),
@@ -2346,8 +2356,6 @@ Runtime::Runtime()
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
   xnack_enabled_ = false;
-  asyncSignals_.monitor_exceptions = false;
-  asyncExceptions_.monitor_exceptions = true;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
   ::_amdgpu_r_debug = {11,
@@ -2356,7 +2364,6 @@ Runtime::Runtime()
                                 &_loader_debug_state),
                      r_debug::RT_CONSISTENT,
                      0};
-
   log_file = stderr;
 }
 
@@ -2387,6 +2394,9 @@ hsa_status_t Runtime::Load() {
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+
+  asyncSignals_.reset(new AsyncEventsInfo(false));
+  asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
@@ -2445,8 +2455,8 @@ void Runtime::Unload() {
       agent->ReleaseResources();
   }
 
-  asyncSignals_.control.Shutdown();
-  asyncExceptions_.control.Shutdown();
+  asyncSignals_.reset();
+  asyncExceptions_.reset();
 
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_->DestroySignal();
@@ -2831,14 +2841,12 @@ void Runtime::CloseTools() {
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {
-  if (async_events_thread_ != NULL) {
-    exit = true;
-    hsa_signal_handle(wake)->StoreRelaxed(1);
-    os::WaitForThread(async_events_thread_);
-    os::CloseThread(async_events_thread_);
-    async_events_thread_ = NULL;
-    HSA::hsa_signal_destroy(wake);
-  }
+  exit = true;
+  hsa_signal_handle(wake)->StoreRelaxed(1);
+  os::WaitForThread(thread_);
+  os::CloseThread(thread_);
+  thread_ = NULL;
+  core::Signal::Convert(wake)->DestroySignal();
 }
 
 void Runtime::AsyncEvents::PushBack(hsa_signal_t signal,
@@ -3788,11 +3796,13 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
   #if defined(__linux__)
-    void* mapped_ptr =
+    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      void* mapped_ptr =
         mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
              reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-    if (mapped_ptr != va)
-      return HSA_STATUS_ERROR;
+      if (mapped_ptr != va)
+        return HSA_STATUS_ERROR;
+    }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
         shareable_handle, va, mappedHandle->offset, size, perms);

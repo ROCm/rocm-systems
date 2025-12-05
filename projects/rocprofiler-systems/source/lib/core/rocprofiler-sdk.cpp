@@ -328,6 +328,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hip_api");
     _add_domain("hsa_api");
     _add_domain("marker_api");
+    _add_domain("roctx");
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);

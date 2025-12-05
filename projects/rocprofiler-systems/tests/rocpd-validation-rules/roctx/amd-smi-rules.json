@@ -23,6 +23,7 @@
             ]
         },
         {
+            "_comment": "The actual number of samples will vary depending on the GPU. This validates presence of samples, not the actual number of samples.",
             "min_rows": 100,
             "name_prefix": "rocpd_pmc_event_",
             "required_columns": [

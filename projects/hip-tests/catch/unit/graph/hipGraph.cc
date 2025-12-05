@@ -95,6 +95,8 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d, double* outpu
                        outputVec_d, result_d);
     HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1));
     HIP_CHECK(hipStreamSynchronize(stream1));
+    HIP_CHECK(hipStreamSynchronize(stream2));
+    HIP_CHECK(hipStreamSynchronize(stream3));
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto result = std::chrono::duration<double, std::milli>(stop - start);
