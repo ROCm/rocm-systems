@@ -27,10 +27,6 @@
 namespace amd::roc {
 namespace GlInterop {
 
-bool Supported() {
-  return true;
-}
-
 typedef PROC(WINAPI* PFNWGLGETPROCADDRESS)(LPCSTR name);
 typedef HGLRC(WINAPI* PFNWGLGETCURRENTCONTEXT)(void);
 typedef HGLRC(WINAPI* PFNWGLCREATECONTEXT)(HDC hdc);
@@ -49,6 +45,12 @@ static PFNWGLRESOURCEDETACHAMD wglResourceReleaseAMD = nullptr;
 static PFNWGLRESOURCEDETACHAMD wglResourceDetachAMD = nullptr;
 static PFNWGLGETCONTEXTGPUINFOAMD wglGetContextGPUInfoAMD = nullptr;
 
+// ================================================================================================
+bool Supported() {
+  return true;
+}
+
+// ================================================================================================
 bool initGLInteropPrivateExt(void* GLdeviceContext) {
   static std::once_flag gGlFuncInit;
   static bool gGlFuncLoaded = false;
@@ -118,6 +120,7 @@ bool initGLInteropPrivateExt(void* GLdeviceContext) {
   return gGlFuncLoaded;
 }
 
+// ================================================================================================
 bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
   bool canInteroperate = false;
 
@@ -136,6 +139,7 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
   return canInteroperate;
 }
 
+// ================================================================================================
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
   static_cast<void>(flags); // unused
 
@@ -148,6 +152,7 @@ bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLde
   return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
 }
 
+// ================================================================================================
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext) {
   static_cast<void>(device); // unused
 

@@ -53,10 +53,12 @@ static constexpr const char* errorStrings[] = {"MESA_GLINTEROP_SUCCESS",
                                                "MESA_GLINTEROP_INVALID_MIP_LEVEL",
                                                "MESA_GLINTEROP_UNSUPPORTED"};
 
+// ================================================================================================
 bool Supported() {
   return true;
 }
 
+// ================================================================================================
 // Fallback for older OS' and Mesa versions
 static void LegacyInitGLX() {
   if (!GlxInfo) {
@@ -70,6 +72,7 @@ static void LegacyInitGLX() {
   }
 }
 
+// ================================================================================================
 static void LegacyInitEGL() {
   if (!EglInfo) {
     EglInfo = reinterpret_cast<PFNMESAGLINTEROPEGLQUERYDEVICEINFOPROC*>(
@@ -82,8 +85,8 @@ static void LegacyInitEGL() {
   }
 }
 
+// ================================================================================================
 // Returns true if the required subsystem is supported on the GL device.
-// Must be called at least once, may be called multiple times.
 bool Init(MESA_INTEROP_KIND Kind) {
   static std::once_flag gGlFuncInit;
   std::call_once(gGlFuncInit, [&]() {
@@ -129,6 +132,7 @@ bool Init(MESA_INTEROP_KIND Kind) {
   return ((loadedGLAPITypes & Kind) == Kind);
 }
 
+// ================================================================================================
 bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const DisplayHandle display,
              const ContextHandle context) {
   assert((loadedGLAPITypes & Kind) == Kind && "Requested interop API is not currently loaded.");
@@ -152,6 +156,7 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
   return false;
 }
 
+// ================================================================================================
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context) {
   assert((loadedGLAPITypes & Kind) == Kind && "Requested interop API is not currently loaded.");
@@ -175,6 +180,7 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
   return false;
 }
 
+// ================================================================================================
 bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
@@ -212,6 +218,7 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
          dev_info.pcieDeviceId_ == info.device_id;
 }
 
+// ================================================================================================
 bool glDissociate(Device*, void*, void*) {
   return true;
 }
