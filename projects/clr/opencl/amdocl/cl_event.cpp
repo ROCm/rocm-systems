@@ -379,13 +379,16 @@ RUNTIME_ENTRY(cl_int, clSetEventCallback,
 
   amd::Event* ev = as_amd(event);
   ev->retain();
-
+  
+  bool need_notify = (ev->status() > CL_COMPLETE);
+  
   bool ok = ev->setCallback(command_exec_callback_type, pfn_notify, user_data);
-  if (!ok) {
+  if (!ok) { 
     ev->release();
     return CL_OUT_OF_HOST_MEMORY;
   }
-  if (ev->status() > CL_COMPLETE) {
+  
+  if (need_notify) {
     ev->notifyCmdQueue();
   }
   ev->release();
