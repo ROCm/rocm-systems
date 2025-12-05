@@ -27,6 +27,8 @@
 #include "output_config.hpp"
 #include "stream_info.hpp"
 
+#include <rocprofiler-sdk/buffer_tracing.h>
+
 namespace rocprofiler
 {
 namespace tool
@@ -46,6 +48,20 @@ write_perf_user_events(
     const output_config&                                               cfg,
     const metadata&                                                    tool_metadata,
     const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& kernel_dispatch_gen);
+
+// Write HSA API events to perf user_events.
+// Must call init_perf_user_events() first.
+void
+write_hsa_api_events(const output_config&                                          cfg,
+                     const metadata&                                               tool_metadata,
+                     const generator<rocprofiler_buffer_tracing_hsa_api_record_t>& hsa_api_gen);
+
+// Write HIP API events to perf user_events.
+// Must call init_perf_user_events() first.
+void
+write_hip_api_events(const output_config&                                       cfg,
+                     const metadata&                                            tool_metadata,
+                     const generator<tool_buffer_tracing_hip_api_ext_record_t>& hip_api_gen);
 
 // Cleanup perf user_events resources.
 // Call this at tool shutdown.

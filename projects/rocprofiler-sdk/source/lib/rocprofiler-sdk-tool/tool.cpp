@@ -2769,6 +2769,8 @@ generate_output(cleanup_mode _cleanup_mode)
     {
         tool::write_perf_user_events(
             tool::get_config(), *tool_metadata, kernel_dispatch_output.get_generator());
+        tool::write_hsa_api_events(tool::get_config(), *tool_metadata, hsa_output.get_generator());
+        tool::write_hip_api_events(tool::get_config(), *tool_metadata, hip_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&
