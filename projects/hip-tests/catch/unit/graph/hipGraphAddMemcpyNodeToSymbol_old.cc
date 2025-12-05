@@ -62,7 +62,7 @@ __global__ void MemcpyToSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphAddMemcpyNodeToSymbol API */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_Negative", "[graph][node]") {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int* A_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -218,7 +218,7 @@ This testcase verifies allocating global symbol memory,
 add the MemcpyNodeToSymbol node to the graph and
 erifying the result
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemory", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemory", "[graph][node]") {
   hipGraphAddMemcpyNodeToSymbol_GlobalMemory(false, false);
 }
 
@@ -227,7 +227,7 @@ This testcase verifies allocating global const symbol memory,
 add the MemcpyNodeToSymbol node to the graph and
 verifying the result
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemory", "[graph][node]") {
   hipGraphAddMemcpyNodeToSymbol_GlobalMemory(false, true);
 }
 
@@ -237,7 +237,7 @@ This testcase verifies allocating global symbol memory and device variables
 in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice", "[graph][node]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -257,7 +257,7 @@ This testcase verifies allocating global const symbol memory and device variable
 in GPU-0 and add the MemcpyNodeToSymbol node to the graph and
 verifying the result in GPU-1
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice", "[graph][node][multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -278,7 +278,7 @@ This testcaser verifies allocating global memory,
 Add MemcpyToSymbolNode,KernelNode and memcpynode and validating
 the behaviour
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel", "[graph][node][multigpu]") {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

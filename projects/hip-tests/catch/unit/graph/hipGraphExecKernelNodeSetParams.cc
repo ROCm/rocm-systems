@@ -39,7 +39,7 @@ Functional -
 /**
  * Negative Test for API hipGraphExecKernelNodeSetParams
  */
-TEST_CASE("Unit_hipGraphExecKernelNodeSetParams_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphExecKernelNodeSetParams_Negative", "[graph][exec]") {
   constexpr size_t N = 1024;
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -128,7 +128,7 @@ TEST_CASE("Unit_hipGraphExecKernelNodeSetParams_Negative", "[graph]") {
 /**
  * Functional Test for API Exec Kernel Params
  */
-TEST_CASE("Unit_hipGraphExecKernelNodeSetParams_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphExecKernelNodeSetParams_Functional", "[graph][exec]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency

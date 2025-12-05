@@ -131,11 +131,11 @@ static void hipGraphMemAllocNodeGetParams_Functional(unsigned deviceId = 0) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional", "[graph][query]") {
   hipGraphMemAllocNodeGetParams_Functional();
 }
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice", "[graph][query][multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -163,7 +163,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice", "[
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2", "[graph]") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2", "[graph][query]") {
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -276,7 +276,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2", "[graph]") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3", "[graph]") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3", "[graph][query]") {
   constexpr auto element_count{512 * 1024 * 1024};
   constexpr size_t num_bytes = element_count * sizeof(int);
 
@@ -369,7 +369,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3", "[graph]") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative", "[graph][query]") {
   hipError_t ret;
   constexpr size_t N = 1024 * 1024;
   constexpr size_t Nbytes = N * sizeof(int);

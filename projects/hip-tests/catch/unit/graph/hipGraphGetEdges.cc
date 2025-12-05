@@ -104,7 +104,7 @@ static void validate_hipGraphGetEdges_fromto(size_t testNumEdges, GraphGetNodesT
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Positive_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphGetEdges_Positive_Functional", "[graph][query]") {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d, *B_d, *C_d;
@@ -173,7 +173,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_Functional", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream", "[graph]") {
+TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream", "[graph][query]") {
   hipGraph_t graph{nullptr};
   constexpr size_t N = 1024;
   constexpr int numMemcpy[2]{2, 3}, numKernel[2]{2, 3}, numMemset[2]{2, 0};
@@ -251,7 +251,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphGetEdges_Negative_Parameters", "[graph][query]") {
   hipGraph_t graph{}, graph_uninit{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t nodes_from[kNumOfEdges]{}, nodes_to[kNumOfEdges]{};

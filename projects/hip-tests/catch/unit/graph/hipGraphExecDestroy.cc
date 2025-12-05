@@ -40,7 +40,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters", "[graph][lifecycle]") {
   SECTION("Pass hipGraphExecDestroy with nullptr") {
     HIP_CHECK_ERROR(hipGraphExecDestroy(nullptr), hipErrorInvalidValue);
   }
@@ -63,7 +63,7 @@ TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic", "[graph][lifecycle]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipStream_t streamForGraph;

@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters", "[graph][capture]") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -76,7 +76,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Basic", "[graph][capture]") {
   hipStreamCaptureStatus cStatus;
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -144,7 +144,7 @@ void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Functional", "[graph]") {
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Functional", "[graph][capture]") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -174,7 +174,7 @@ static void thread_func(hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Thread", "[graph]") {
+TEST_CASE("Unit_hipStreamIsCapturing_Positive_Thread", "[graph][capture]") {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 

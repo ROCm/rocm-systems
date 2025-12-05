@@ -111,7 +111,7 @@ static bool CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, 
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_BasicFunctional", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_BasicFunctional", "[graph][capture]") {
   int *A_d, *B_d, *C_d;
   std::vector<int> A_h(N), B_h(N), C_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -178,7 +178,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_BasicFunctional", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph", "[graph][capture]") {
   int *A1_d, *B1_d, *C1_d;
   std::vector<int> A1_h(N), B1_h(N), C1_h(N);
   int *A2_d, *B2_d, *C2_d;
@@ -275,7 +275,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph", "[graph]") {
  *    - HIP_VERSION >= 6.2
  */
 #ifdef __linux__
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph", "[graph][capture]") {
   hipGraphExec_t graphExec{nullptr};
   int *A1_d, *B1_d, *C1_d, *C2_d;
   std::vector<int> A1_h(N), B1_h(N), C1_h(N), C2_h(N);
@@ -373,7 +373,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ComplexGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ComplexGraph", "[graph][capture]") {
   int *A_d, *B_d, *C_d, *D_d;
   std::vector<int> A_h(N), B_h(N), C_h(N), D_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -474,7 +474,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ComplexGraph", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureTwice", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureTwice", "[graph][capture]") {
   bool useSameAPI = GENERATE(true, false);
   int *A_d, *B_d, *C_d, *D_d;
   std::vector<int> A_h(N), B_h(N), C_h(N), D_h(N);
@@ -572,7 +572,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureTwice", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyCloneGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyCloneGraph", "[graph][capture]") {
   int *A_d, *B_d, *C_d, *D_d;
   std::vector<int> A_h(N), B_h(N), C_h(N), D_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -667,7 +667,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyCloneGraph", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureChildpGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureChildpGraph", "[graph][capture]") {
   int *A_d, *B_d, *C_d, *D_d;
   std::vector<int> A_h(N), B_h(N), C_h(N), D_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -761,7 +761,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureChildpGraph", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph", "[graph][capture]") {
   int *A_d, *B_d, *C_d, *D_d;
   std::vector<int> A_h(N), B_h(N), C_h(N), D_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -855,7 +855,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_Negative", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_Negative", "[graph][capture]") {
   // Create streams and graph
   hipStream_t stream;
   hipGraph_t graph{nullptr};
@@ -898,7 +898,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_Negative", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_StateTesting", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_StateTesting", "[graph][capture]") {
   // Create streams and graph
   hipStream_t stream1, stream2;
   hipEvent_t e;
@@ -940,7 +940,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_StateTesting", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_GetCaptureInfo", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_GetCaptureInfo", "[graph][capture]") {
   // Create streams and graph
   hipStream_t stream1, stream2;
   hipEvent_t e;
@@ -987,7 +987,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_GetCaptureInfo", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress", "[graph][capture]") {
   hipStream_t stream1, stream2;
   hipGraph_t graph{nullptr};
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -1050,7 +1050,7 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_EndingWhileCaptureInProgress", "[gr
  */
 enum class strmFlag { defFlag, sameFlag, diffFlag, diffPrio };
 
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_MultipleFlags", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_MultipleFlags", "[graph][capture]") {
   strmFlag flag =
       GENERATE(strmFlag::defFlag, strmFlag::sameFlag, strmFlag::diffFlag, strmFlag::diffPrio);
   int *A_d, *B_d, *C_d;
@@ -1136,7 +1136,7 @@ static void threadCaptureStart(hipStream_t* streamCapt, hipStream_t* streamFork,
   HIP_CHECK(hipEventDestroy(e));
 }
 
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CapturePartialInThreads", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CapturePartialInThreads", "[graph][capture]") {
   int *A_d, *B_d, *C_d;
   std::vector<int> A_h(N), B_h(N), C_h(N);
   size_t Nbytes = N * sizeof(int);
@@ -1206,7 +1206,7 @@ void threadCaptureExec(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_
   retValG.fetch_and(val);
 }
 
-TEST_CASE("Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads", "[graph]") {
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads", "[graph][capture]") {
   int *A1_d, *B1_d, *C1_d;
   std::vector<int> A1_h(N), B1_h(N), C1_h(N);
   int *A2_d, *B2_d, *C2_d;

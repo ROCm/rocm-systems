@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 #define THREADS_PER_BLOCK 512
 
-TEST_CASE("Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters", "[graph][query]") {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

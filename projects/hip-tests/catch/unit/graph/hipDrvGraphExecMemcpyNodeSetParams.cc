@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative", "[graph]") {
+TEST_CASE("Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative", "[graph][exec]") {
   size_t size = 10;
   size_t numW = size * sizeof(int);
   // Host Vectors
@@ -120,7 +120,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemcpyNodeSetParams_Negative", "[graph]") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive", "[graph]") {
+TEST_CASE("Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive", "[graph][exec]") {
   size_t size = 10;
   size_t numW = size * sizeof(int);
   // Host Vectors

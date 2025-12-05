@@ -63,7 +63,7 @@ static void callbackfunc(void* A_h) {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic", "[graph][node]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -190,7 +190,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic", "[graph]") {
  11) Make ClonedGraph and disabled the kernel node in ClonedGraph and verify
  12) Enable the Kernel node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_KernelNode", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_KernelNode", "[graph][node]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -309,7 +309,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_KernelNode", "[graph]") {
  15) Make ClonedGraph and disabled the MemSet node in ClonedGraph and verify
  16) Enable the MemSet node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemSet", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemSet", "[graph][node]") {
   constexpr size_t Nbytes = N * sizeof(char);
   constexpr size_t val = 9;
   hipGraph_t graph, clonedGraph;
@@ -426,7 +426,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemSet", "[graph]") {
  19) Make ClonedGraph and disabled the MemCpy node in ClonedGraph and verify
  20) Enable the MemCpy node in ClonedGraph and verify the result */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemCpy", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemCpy", "[graph][node]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -555,7 +555,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_MemCpy", "[graph]") {
  12) Create graphExec and then delete the graphExec and verify a node
  */
 
-TEST_CASE("Unit_hipGraphNodeSetEnabled_Negative_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeSetEnabled_Negative_Functional", "[graph][node]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

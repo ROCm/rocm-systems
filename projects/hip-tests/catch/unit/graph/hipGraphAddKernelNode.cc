@@ -57,7 +57,7 @@ THE SOFTWARE.
 constexpr size_t size = 1 << 12;
 enum fnType { normal, object };
 
-TEST_CASE("Unit_hipGraphAddKernelNode_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphAddKernelNode_Negative", "[graph][node]") {
   constexpr int N = 1024;
   size_t NElem{N};
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -233,7 +233,7 @@ static void kernelFnChange(int* A_d, int* A_h, int* B_d, int* B_h, int* C_d, int
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph", "[graph]") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph", "[graph][node]") {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -304,7 +304,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_graphNclonedGraph", "[g
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate", "[graph]") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate", "[graph][node]") {
   size_t maxBlocks = 512;
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
@@ -332,7 +332,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_kernelFnUpdate", "[grap
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph", "[graph]") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph", "[graph][node]") {
   int *A_d, *B_d, *C_d;  // Device pointers
   int *A_h, *B_h, *C_h;  // Host Pointers
   HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, size, false);
@@ -409,7 +409,7 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph", "[graph]")
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture", "[graph]") {
+TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_streamCapture", "[graph][node]") {
   size_t maxBlocks = 512;
   size_t Nbytes = sizeof(int) * maxBlocks;
 

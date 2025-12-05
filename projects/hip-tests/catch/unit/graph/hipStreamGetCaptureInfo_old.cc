@@ -177,7 +177,7 @@ void validateStreamCaptureInfo(hipStream_t mstream) {
  * Basic Functional Test for stream capture and getting capture info.
  * Regular/custom stream is used for stream capture.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_BasicFunctional", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_BasicFunctional", "[graph][capture]") {
   hipStream_t streamForCapture;
 
   HIP_CHECK(hipStreamCreate(&streamForCapture));
@@ -189,7 +189,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_BasicFunctional", "[graph]") {
  * Test performs stream capture on hipStreamPerThread and validates
  * capture info.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamPerThread", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamPerThread", "[graph][capture]") {
   validateStreamCaptureInfo(hipStreamPerThread);
 }
 
@@ -197,7 +197,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamPerThread", "[graph]") {
  * Test starts stream capture on multiple streams and verifies uniqueness of
  * identifiers returned.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_UniqueID", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_UniqueID", "[graph][capture]") {
   constexpr int numStreams = 100;
   hipStream_t streams[numStreams]{};
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -233,7 +233,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_UniqueID", "[graph]") {
 /**
  * Argument validation/Negative tests for api
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation", "[graph][capture]") {
   hipError_t ret;
   hipStream_t stream;
   hipStreamCaptureStatus captureStatus;
@@ -262,7 +262,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation", "[graph]") {
  * capture info (status and id) of both s1 and s2 are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus", "[graph][capture]") {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -394,7 +394,7 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
  * thread is same as capture id in main function. Exit the thread and end the capture
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread", "[graph][capture]") {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -424,7 +424,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread", "[graph]") {
  * capture info. Verify that all the capture info are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture", "[graph][capture]") {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   float *A_d, *B_d, *C_d, *D_d;
@@ -518,7 +518,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture", "[grap
  * graph and verify the output from the operations.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo", "[graph][capture]") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

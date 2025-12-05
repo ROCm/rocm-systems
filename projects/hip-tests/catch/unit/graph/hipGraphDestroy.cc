@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphDestroy_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroy_Positive_Basic", "[graph][lifecycle]") {
   hipGraph_t graph = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipGraphDestroy_Positive_Basic", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphDestroy_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroy_Negative_Parameters", "[graph][lifecycle]") {
   HIP_CHECK_ERROR(hipGraphDestroy(static_cast<hipGraph_t>(nullptr)), hipErrorInvalidValue);
 }
 

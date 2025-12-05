@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters", "[graph][exec]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
@@ -97,7 +97,7 @@ TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecNodeSetParams_Positive", "[graph]") {
+TEST_CASE("Unit_hipGraphExecNodeSetParams_Positive", "[graph][exec]") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;

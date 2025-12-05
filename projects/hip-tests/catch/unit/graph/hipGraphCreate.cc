@@ -40,7 +40,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphCreate_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphCreate_Negative_Parameters", "[graph][lifecycle]") {
   hipGraph_t graph = nullptr;
 
   SECTION("pGraph is nullptr") {
@@ -62,7 +62,7 @@ TEST_CASE("Unit_hipGraphCreate_Negative_Parameters", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphCreate_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphCreate_Positive_Basic", "[graph][lifecycle]") {
   hipGraph_t graph = nullptr;
 
   HIP_CHECK(hipGraphCreate(&graph, 0));

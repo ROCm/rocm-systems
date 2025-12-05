@@ -104,7 +104,7 @@ TEMPLATE_TEST_CASE("Unit_hipGraphAddMemsetNode_Positive_Basic", "", uint8_t, uin
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_Negative_Parameters", "[graph][node]") {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -129,7 +129,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_Negative_Parameters", "[graph]") {
  * using hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_2D", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_2D", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
@@ -196,7 +196,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_2D", "[graph]") {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_1D", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_1D", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, pitch_A;
@@ -257,7 +257,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocPitch_1D", "[graph]") {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_2D", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_2D", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
@@ -334,7 +334,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_2D", "[graph]") {
  * memory using hipGraphAddMemsetNode. Copy the values in device
  * memory to host using hipGraphAddMemcpyNode. Verify the results.
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_1D", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_1D", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
@@ -404,7 +404,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc3D_1D", "[graph]") {
  * hipGraphAddMemsetNode. Copy the values in device memory to host using
  * hipGraphAddMemcpyNode. Verify the results.
  */
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc_1D", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc_1D", "[graph][node]") {
   char* A_d;
   size_t NumW = SIZE;
   size_t Nbytes1D = SIZE * sizeof(char);
@@ -463,7 +463,7 @@ TEST_CASE("Unit_hipGraphAddMemsetNode_hipMalloc_1D", "[graph]") {
   HIP_CHECK(hipFree(A_d));
 }
 
-TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocManaged", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemsetNode_hipMallocManaged", "[graph][node]") {
   int managed = 0;
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);

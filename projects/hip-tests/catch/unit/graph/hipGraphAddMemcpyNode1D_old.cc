@@ -115,7 +115,7 @@ static void validateMemcpyNode1DArray(bool peerAccess,
  * For Peer device test: Memory allocations happen on device(0) and memcpy operations
  * are performed from device(1).
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[graph][node][multigpu]") {
   SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(false); }
   SECTION("Memcpy with 1D array using DeviceToDeviceNoCU") {
     validateMemcpyNode1DArray(false, hipMemcpyDeviceToDeviceNoCU);
@@ -139,7 +139,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[multigpu][graph]") {
 /**
  * Negative Test for API hipGraphAddMemcpyNode1D
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Negative", "[graph][node]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *A_h;
@@ -205,7 +205,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Negative", "[graph]") {
  * hipGraphAddMemcpyNode1D with data transfer kind hipMemcpyHostToHost.
  * Validate the output.
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_HostToHost", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode1D_HostToHost", "[graph][node]") {
   constexpr size_t size = 1024;
   size_t numBytes{size * sizeof(int)};
 

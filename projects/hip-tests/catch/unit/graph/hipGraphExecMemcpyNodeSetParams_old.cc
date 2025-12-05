@@ -38,7 +38,7 @@ verify api returns error code.
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative", "[graph][exec]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{10}, height{10}, depth{10};
@@ -151,7 +151,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative", "[graph]") {
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional", "[graph][exec]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int XSIZE = 1024;

@@ -52,7 +52,7 @@ static __global__ void dummyKernel() { return; }
 /**
  * Functional Test for API fetching root node list
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_Functional", "[graph][query]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -155,7 +155,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Functional", "[graph]") {
  * Create a graph with stream capture done on multiple dependent streams. Verify root nodes
  * of created graph are matching the operations pushed which doesn't have dependencies.
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_CapturedStream", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_CapturedStream", "[graph][query]") {
   hipStream_t stream1{nullptr}, stream2{nullptr}, mstream{nullptr};
   hipStream_t streamForGraph{nullptr};
   hipEvent_t memsetEvent1, memsetEvent2, forkStreamEvent;
@@ -260,7 +260,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_CapturedStream", "[graph]") {
  * as input and output parameters and validates the behavior.
  * Test will include both negative and positive scenarios.
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_ParamValidation", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_ParamValidation", "[graph][query]") {
   hipStream_t stream1{nullptr}, stream2{nullptr}, mstream{nullptr};
   hipEvent_t memsetEvent1, memsetEvent2, forkStreamEvent;
   hipGraph_t graph{nullptr};
@@ -357,7 +357,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_ParamValidation", "[graph]") {
  * Functional Test to validate number of root nodes when dependencies
  * in the graph are dynamically varied.
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes", "[graph][query]") {
   hipGraph_t graph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -390,7 +390,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes", "[graph]") {
  * Functional Test to validate number of root nodes when dependencies
  * in the graph are dynamically varied in a cloned graph.
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph", "[graph][query]") {
   hipGraph_t graph, clonedgraph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -428,7 +428,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NumRootNodes_ClonedGrph", "[graph]")
  * Functional Test to validate number of root nodes when a graph with N
  * independent nodes is added as a child node to another graph.
  */
-TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NRootNodesAsChildGraph", "[graph]") {
+TEST_CASE("Unit_hipGraphGetRootNodes_Complx_NRootNodesAsChildGraph", "[graph][query]") {
   hipGraph_t graph, graph1;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];

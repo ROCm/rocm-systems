@@ -57,7 +57,7 @@ static bool validateKernelNodeAttrValue(hipKernelNodeAttrValue in, hipKernelNode
   return true;
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Functional", "[graph][node]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -206,7 +206,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Functional", "[graph]") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative", "[graph][node]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency

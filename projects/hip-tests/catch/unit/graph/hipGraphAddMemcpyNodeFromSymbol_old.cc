@@ -69,7 +69,7 @@ __global__ void MemcpyFromSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphAddMemcpyNodeFromSymbol API */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_Negative", "[graph][node]") {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -235,7 +235,7 @@ This testcase verifies allocating global symbol memory,
 add the MemcpyNodeFromSymbol node to the graph and
 erifying the result
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemory", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemory", "[graph][node]") {
   hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(false, false);
 }
 
@@ -245,7 +245,7 @@ add the MemcpyNodeFromSymbol node to the graph and
 verifying the result
 */
 
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemory", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemory", "[graph][node]") {
   hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(false, true);
 }
 
@@ -255,7 +255,7 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice", "[graph][node][multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
@@ -276,7 +276,7 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice", "[graph][node][multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
@@ -296,7 +296,7 @@ This testcaser verifies allocating global memory,
 Add MemcpyFromSymbolNode,KernelNode and memcpynode and validating
 the behaviour
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel", "[graph][node]") {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

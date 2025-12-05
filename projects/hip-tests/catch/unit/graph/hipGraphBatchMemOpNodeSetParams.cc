@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts", "[graph]") {
+TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts", "[graph][node]") {
   HIP_CHECK(hipInit(0));
   hipGraph_t graph;
   hipCtx_t ctx;
@@ -129,7 +129,7 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts", "[graph]") {
+TEST_CASE("Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts", "[graph][node]") {
   hipBatchMemOpNodeParams retrievedNodeParams;
   HIP_CHECK_ERROR(hipGraphBatchMemOpNodeGetParams(nullptr, &retrievedNodeParams),
                   hipErrorInvalidValue);

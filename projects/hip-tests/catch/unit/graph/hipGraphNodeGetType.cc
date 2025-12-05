@@ -62,7 +62,7 @@ static void callbackfunc(void* A_h) {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeGetType_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_Negative", "[graph][query]") {
   SECTION("Pass nullptr to graph node") {
     hipGraphNodeType nodeType;
     REQUIRE(hipGraphNodeGetType(nullptr, &nodeType) == hipErrorInvalidValue);
@@ -84,7 +84,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_Negative", "[graph]") {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeGetType_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_Functional", "[graph][query]") {
   constexpr size_t N = 1024;
   hipGraphNodeType nodeType;
   hipGraph_t graph;
@@ -131,7 +131,7 @@ constexpr size_t Nbytes = N * sizeof(int);
 constexpr auto blocksPerCU = 6;  // to hide latency
 constexpr auto threadsPerBlock = 256;
 
-TEST_CASE("Unit_hipGraphNodeGetType_NodeType", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_NodeType", "[graph][query]") {
   hipGraph_t graph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -303,7 +303,7 @@ static void thread_func(hipGraph_t graph, std::map<hipGraphNodeType, int>* numNo
  * 2.Create a graph with different types of nodes. Pass the graph to a thread. In the
  * thread, verify node types of all the nodes in the graph
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread", "[graph][query]") {
   hipGraph_t graph, childGraph, clonedGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -422,7 +422,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread", "[g
  * few nodes and X as child graph. Now verify each of nodes of Y including
  * the nodes inside child graph using hipGraphNodeGetType()
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph", "[graph][query]") {
   hipGraph_t graph, childGraph, getGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -569,7 +569,7 @@ static void thread_func1(hipGraph_t graph, enum graphType type) {
  * graph using hipGraphNodeGetType.
  * 2.Pass the graph to thread and verify each type of node in the graph
  * */
-TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies", "[graph][query]") {
   hipGraph_t graph, childGraph, clonedGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
@@ -665,7 +665,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies", "[gr
  * Now verify each of nodes of Y including the nodes inside child graph using
  * hipGraphNodeGetType()
  */
-TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetType_NodeTypeOfChildGraph_WithDependency", "[graph][query]") {
   hipGraph_t graph, childGraph, getGraph;
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;

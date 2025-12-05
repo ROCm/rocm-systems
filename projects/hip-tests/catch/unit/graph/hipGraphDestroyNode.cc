@@ -56,7 +56,7 @@ static __global__ void dummyKernel() { return; }
 
 /* This test covers the negative scenarios of
    hipGraphDestroyNode API */
-TEST_CASE("Unit_hipGraphDestroyNode_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_Negative", "[graph][lifecycle]") {
   SECTION("Passing nullptr to graph Node") {
     REQUIRE(hipGraphDestroyNode(nullptr) == hipErrorInvalidValue);
   }
@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Negative", "[graph]") {
    hipGraphDestroyNode API where we create and destroy
    the node
 */
-TEST_CASE("Unit_hipGraphDestroyNode_BasicFunctionality", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_BasicFunctionality", "[graph][lifecycle]") {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph{};
@@ -92,7 +92,7 @@ This testcase verifies the following scenario where
 graph is created with dependencies and one of the dependency is
 destroyed before execute the graph
 */
-TEST_CASE("Unit_hipGraphDestroyNode_DestroyDependencyNode", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_DestroyDependencyNode", "[graph][lifecycle]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -157,7 +157,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_DestroyDependencyNode", "[graph]") {
  * Functional Test to test hipGraphDestroyNode using hipGraphGetNodes
  * and hipGraphGetEdges APIs.
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep", "[graph][lifecycle]") {
   hipGraph_t graph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -197,7 +197,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep", "[graph]") {
  * Functional Test to test hipGraphDestroyNode using hipGraphGetNodes
  * and hipGraphGetEdges APIs on a cloned graph
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph", "[graph][lifecycle]") {
   hipGraph_t graph, clonedgraph;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES];
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];
@@ -243,7 +243,7 @@ TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph", "[grap
  * Functional Test to test hipGraphDestroyNode on child node using
  * hipGraphGetNodes and hipGraphGetEdges APIs on a cloned graph.
  */
-TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode", "[graph]") {
+TEST_CASE("Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode", "[graph][lifecycle]") {
   hipGraph_t graph0, graph1;
   hipGraphNode_t kernelnode[NUM_OF_DUMMY_NODES], childGraphNode;
   hipKernelNodeParams kernelNodeParams[NUM_OF_DUMMY_NODES];

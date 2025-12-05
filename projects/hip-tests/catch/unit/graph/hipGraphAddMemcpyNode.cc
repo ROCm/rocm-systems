@@ -51,7 +51,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -122,7 +122,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters", "[graph][node]") {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;

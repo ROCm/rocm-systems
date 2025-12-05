@@ -43,7 +43,7 @@ static void callbackfunc(void* A_h) {
   }
 }
 
-TEST_CASE("Unit_hipGraphNodeGetEnabled_Functional_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetEnabled_Functional_Basic", "[graph][query]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -161,7 +161,7 @@ TEST_CASE("Unit_hipGraphNodeGetEnabled_Functional_Basic", "[graph]") {
  12) Create graphExec and then delete the graphExec and verify a node
  */
 
-TEST_CASE("Unit_hipGraphNodeGetEnabled_Negative_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphNodeGetEnabled_Negative_Functional", "[graph][query]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

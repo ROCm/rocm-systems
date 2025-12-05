@@ -39,7 +39,7 @@ static bool CompareAccessPolicyWindow(const hipKernelNodeAttrValue& lhs,
          lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow", "[graph][node]") {
   constexpr int N = 1024;
 
   const auto hit_prop = GENERATE(from_range(begin(kAccessProperties), end(kAccessProperties)));
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow", "[g
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative", "[graph][node]") {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative", "[graph]")
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters", "[graph][node]") {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

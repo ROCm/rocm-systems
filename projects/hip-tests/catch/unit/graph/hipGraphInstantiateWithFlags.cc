@@ -65,7 +65,7 @@ static __global__ void doubleKernel(int* arr, int size) {
 
 /* This test covers the negative scenarios of
    hipGraphInstantiateWithFlags API */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative", "[graph][lifecycle]") {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -260,7 +260,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph and instantiate, launching and verifying
 the result
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraph", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraph", "[graph][lifecycle]") {
   GraphInstantiateWithFlags_DependencyGraph();
 }
 
@@ -269,7 +269,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg", "[graph][lifecycle][multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -290,7 +290,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph and instantiate, launching and verifying
 the result
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCapture", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCapture", "[graph][lifecycle]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -311,7 +311,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg", "[graph][lifecycle][multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -336,7 +336,7 @@ Note - This test case is just to check if hipGraphInstantiateFlagAutoFreeOnLaunc
        is not resulting in compilation error or api failure. Real functional test
        will be added once the feature is fully implemented.
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check", "[graph][lifecycle]") {
   constexpr size_t size = 512 * 1024 * 1024;
   constexpr size_t Nbytes = size * sizeof(int);
 
@@ -410,7 +410,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check", "[grap
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop", "[graph][lifecycle]") {
   constexpr size_t NBytes = 1024 * 1024 * 1024;
 
   void* devMem = nullptr;
@@ -472,7 +472,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop", "[graph]")
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel", "[graph][lifecycle]") {
   int value = 100;
 
   int* hostMemDst = new int[SIZE];
@@ -565,7 +565,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel", "[grap
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel", "[graph][lifecycle]") {
   int* hostMemSrc = new int[SIZE];
   REQUIRE(hostMemSrc != nullptr);
 
@@ -672,7 +672,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel", "[gr
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch", "[graph]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch", "[graph][lifecycle]") {
   int* hostMem1 = new int[SIZE];
   REQUIRE(hostMem1 != nullptr);
   int* hostMem2 = new int[SIZE];

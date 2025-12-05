@@ -229,7 +229,7 @@ static void hipGraphClone_Test_hipGraphKernelNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphKernelNodeSetParams", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphKernelNodeSetParams", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphKernelNodeSetParams();
 }
 
@@ -276,7 +276,7 @@ static void hipGraphClone_Test_hipGraphExecKernelNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecKernelNodeSetParams", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecKernelNodeSetParams", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphExecKernelNodeSetParams();
 }
 
@@ -339,7 +339,7 @@ static void hipGraphClone_Test_hipGraphAddMemcpy_and_memset() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphAddMemcpy_and_memset", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphAddMemcpy_and_memset", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphAddMemcpy_and_memset();
 }
 
@@ -449,7 +449,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams() {
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, hData, hDataTemp, hOutputData, false);
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams", "[graph][lifecycle]") {
   CHECK_IMAGE_SUPPORT
 
   hipGraphClone_Test_hipGraphMemcpyNodeSetParams();
@@ -564,7 +564,7 @@ static void hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams() {
   HIP_CHECK(hipFreeArray(devArray3));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams", "[graph][lifecycle]") {
   CHECK_IMAGE_SUPPORT
 
   hipGraphClone_Test_hipGraphExecMemcpyNodeSetParams();
@@ -645,7 +645,7 @@ static void hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphMemcpyNodeSetParams1D_and_exec();
 }
 
@@ -739,7 +739,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec", "[graph][lifecycle]") {
   hipGraphClone_hipGraphMemcpyNodeSetParamsFromSymbol_exec();
 }
 
@@ -832,7 +832,7 @@ static void hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec", "[graph][lifecycle]") {
   hipGraphClone_hipGraphMemcpyNodeSetParamsToSymbol_exec();
 }
 
@@ -944,7 +944,7 @@ static void hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec() {
   HIP_CHECK(hipGraphDestroy(clonedGraph_2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphMemsetNodeSetParams_exec();
 }
 
@@ -1013,7 +1013,7 @@ static void hipGraphClone_Test_hipGraphRemoveDependencies() {
   HIP_CHECK(hipGraphDestroy(clonedGraph));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphRemoveDependencies", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphRemoveDependencies", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphRemoveDependencies();
 }
 #endif
@@ -1112,7 +1112,7 @@ static void hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams() {
   HIP_CHECK(hipGraphDestroy(childgraph2));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphExecChildGraphNodeSetParams();
 }
 
@@ -1306,7 +1306,7 @@ static void hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec() {
   HIP_CHECK(hipEventDestroy(event_end));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphEventRecordNodeSetEvent_and_Exec();
 }
 
@@ -1480,7 +1480,7 @@ static void hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec() {
   HIP_CHECK(hipEventDestroy(event_1));
 }
 
-TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec", "[graph][lifecycle]") {
   hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec();
 }
 
@@ -1490,7 +1490,7 @@ TEST_CASE("Unit_hipGraphClone_Test_hipGraphEventWaitNodeSetEvent_and_Exec", "[gr
  Execute both original graph and cloned graph in loop: with multiple device.
  Loop: Update input data -> Launch Graph -> Validate output data -> Goto Loop */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_loop", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphClone_address_change_in_loop", "[graph][lifecycle][multigpu]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1644,7 +1644,7 @@ static void hipGraphClone_address_change_in_thread(hipGraph_t* graph, hipGraphNo
  memory addresses in each Node and create executable graphs.
  Launch the graphs in their respective GPUs. Validate the outputs. */
 
-TEST_CASE("Unit_hipGraphClone_address_change_in_thread", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphClone_address_change_in_thread", "[graph][lifecycle][multigpu]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -1735,7 +1735,7 @@ static void hipGraphClone_Test_All_API(int dev) {
  Create a graph with Memcpy and Kernel nodes. and its cloned graph.
  Run all the above writen test cases for multiple GPU scenarios */
 
-TEST_CASE("Unit_hipGraphClone_multi_GPU_test", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphClone_multi_GPU_test", "[graph][lifecycle][multigpu]") {
   // FIXME: This test tests 3D as well, decouple it
   CHECK_IMAGE_SUPPORT
 
@@ -1768,7 +1768,7 @@ static void destroyFloatObj(void* ptr) {
  Launch the graphs. Validate the outputs. Release the reference by calling
  hipGraphReleaseUserObject with count. */
 
-TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject", "[graph][lifecycle]") {
   ComplexGrph cg;  // This will create skeleton of Graph and ClonedGraph
 
   int* object_i = new int();
@@ -1805,7 +1805,7 @@ TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject", "[graph]") {
  (Negative - Check this should give error and reference was created for
  Oroginal graph and releasing it for other graph)*/
 
-TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative", "[graph][lifecycle]") {
   ComplexGrph cg;  // This will create skeleton of Graph and ClonedGraph
 
   int* object_i = new int();
@@ -1847,7 +1847,7 @@ TEST_CASE("Unit_hipGraphClone_hipUserObject_hipGraphUserObject_Negative", "[grap
  (Negative - Check this should give error and reference was created for
  Oroginal graph and releasing it for other graph) */
 
-TEST_CASE("Unit_hipGraphChild_hipUserObject_hipGraphUserObject", "[graph]") {
+TEST_CASE("Unit_hipGraphChild_hipUserObject_hipGraphUserObject", "[graph][lifecycle]") {
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

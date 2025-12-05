@@ -148,7 +148,7 @@ void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_Functional", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_Functional", "[graph][capture]") {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -171,7 +171,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_Functional", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_UniqueID", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_UniqueID", "[graph][capture]") {
   constexpr int numStreams = 100;
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   std::vector<int> idlist;
@@ -218,7 +218,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Positive_UniqueID", "[graph]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_Negative_Parameters", "[graph][capture]") {
   hipGraph_t capInfoGraph{};
 #if HT_NVIDIA
   hipStreamCaptureStatus captureStatus;

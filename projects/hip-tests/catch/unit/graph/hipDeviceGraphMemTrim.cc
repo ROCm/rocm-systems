@@ -41,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGraphMemTrim_Positive_Default", "[graph]") {
+TEST_CASE("Unit_hipDeviceGraphMemTrim_Positive_Default", "[graph][exec]") {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   // Check for each device
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipDeviceGraphMemTrim_Positive_Default", "[graph]") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGraphMemTrim_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipDeviceGraphMemTrim_Negative_Parameters", "[graph][exec]") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 

@@ -38,7 +38,7 @@ Functional -
 
 /* Test verifies hipGraphMemcpyNodeGetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Negative", "[graph][query]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};
@@ -134,7 +134,7 @@ static bool memcpyNodeCompare(hipMemcpy3DParms* mNode1, hipMemcpy3DParms* mNode2
   return true;
 }
 
-TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Functional", "[graph][query]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};

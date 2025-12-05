@@ -95,7 +95,7 @@ void GraphMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_sym
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic", "[graph]") {
+TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic", "[graph][node]") {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphMemcpyFromSymbolSetParamsShell, 1,
                                                          char);
@@ -136,7 +136,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic", "[graph]"
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters", "[graph][node]") {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

@@ -64,7 +64,7 @@ static void init_input(int* a, size_t size) {
 }
 
 
-TEST_CASE("Unit_hipGraphMultiDevice", "[graph]") {
+TEST_CASE("Unit_hipGraphMultiDevice", "[graph][exec]") {
   int nGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {

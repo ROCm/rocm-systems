@@ -55,7 +55,7 @@ both graphs.
 /**
  * Scenario 1
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Functional_Simple", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_Functional_Simple", "[graph][node]") {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -216,28 +216,28 @@ static void validate_hipGraphAddEventWaitNode_internodedep(int test, int nstep,
 /**
  * Scenario 2
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency", "[graph][node]") {
   validate_hipGraphAddEventWaitNode_internodedep(0, 1);
 }
 
 /**
  * Scenario 3
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultipleRun", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_MultipleRun", "[graph][node]") {
   validate_hipGraphAddEventWaitNode_internodedep(0, 100);
 }
 
 /**
  * Scenario 4
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency", "[graph][node]") {
   validate_hipGraphAddEventWaitNode_internodedep(1, 1);
 }
 
 /**
  * Scenario 5
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_differentFlags", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_differentFlags", "[graph][node]") {
   SECTION("flag = hipEventBlockingSync") {
     validate_hipGraphAddEventWaitNode_internodedep(0, 1, hipEventBlockingSync);
   }
@@ -249,7 +249,7 @@ TEST_CASE("Unit_hipGraphAddEventWaitNode_differentFlags", "[graph]") {
 /**
  * Scenario 6: Positive parameter tests
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Positive_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_Positive_Parameters", "[graph][node]") {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event;
@@ -288,7 +288,7 @@ TEST_CASE("Unit_hipGraphAddEventWaitNode_Positive_Parameters", "[graph]") {
 /**
  * Scenario 7
  */
-TEST_CASE("Unit_hipGraphAddEventWaitNode_Negative", "[graph]") {
+TEST_CASE("Unit_hipGraphAddEventWaitNode_Negative", "[graph][node]") {
   using namespace std::placeholders;
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));

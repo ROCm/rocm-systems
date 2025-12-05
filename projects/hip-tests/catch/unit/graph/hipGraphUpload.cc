@@ -134,7 +134,7 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional", "[graph]") {
+TEST_CASE("Unit_hipGraphUpload_Functional", "[graph][exec]") {
   SECTION("Pass a stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -152,7 +152,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional", "[graph]") {
   }
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu][graph]") {
+TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[graph][exec][multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -214,7 +214,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu][graph]"
    Upload the graph into high priority stream and execute the graph and verify.
  */
 
-TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream", "[graph]") {
+TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream", "[graph][exec]") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -261,7 +261,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream", "[graph]") {
 4) Graphexec is destroyed before upload
 */
 
-TEST_CASE("Unit_hipGraphUpload_Negative_Parameters", "[graph]") {
+TEST_CASE("Unit_hipGraphUpload_Negative_Parameters", "[graph][exec]") {
   hipGraphExec_t graphExec{};
   hipError_t ret;
 
