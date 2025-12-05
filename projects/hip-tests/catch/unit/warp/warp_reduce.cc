@@ -196,7 +196,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   runTestReduceForTypes<Op>(remainingTypes);
 }
 
-TEST_CASE("Unit_hipReduceRandom", "[warp]") {
+TEST_CASE("Unit_hipReduceRandom", "[device_lib][warp][reduce]") {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

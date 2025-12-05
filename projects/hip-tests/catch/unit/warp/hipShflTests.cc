@@ -165,7 +165,7 @@ template <typename T> static void runTest() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipShflTests", "[warp]") {
+TEST_CASE("Unit_hipShflTests", "[device_lib][warp][shuffle]") {
   SECTION("run test for int") { runTest<int>(); }
   SECTION("run test for float") { runTest<float>(); }
   SECTION("run test for double") { runTest<double>(); }
@@ -211,7 +211,7 @@ __global__ void testShflWithUndefArgs(unsigned long total_out_strings, unsigned 
     out[lane]++;
   }
 }
-TEST_CASE("Unit_hipShflUndefArgs", "[warp]") {
+TEST_CASE("Unit_hipShflUndefArgs", "[device_lib][warp][shuffle]") {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

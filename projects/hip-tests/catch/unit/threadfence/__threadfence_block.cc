@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_block_Positive_Basic_Shared", "[sync]") {
+TEST_CASE("Unit___threadfence_block_Positive_Basic_Shared", "[sync][fence]") {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -76,7 +76,7 @@ TEST_CASE("Unit___threadfence_block_Positive_Basic_Shared", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_block_Positive_Basic_Global", "[sync]") {
+TEST_CASE("Unit___threadfence_block_Positive_Basic_Global", "[sync][fence]") {
   LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
 
@@ -108,7 +108,7 @@ TEST_CASE("Unit___threadfence_block_Positive_Basic_Global", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_block_Positive_Basic_Pinned", "[sync]") {
+TEST_CASE("Unit___threadfence_block_Positive_Basic_Pinned", "[sync][fence]") {
   LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
 
@@ -136,7 +136,7 @@ TEST_CASE("Unit___threadfence_block_Positive_Basic_Pinned", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_block_Positive_Basic_Managed", "[sync]") {
+TEST_CASE("Unit___threadfence_block_Positive_Basic_Managed", "[sync][fence]") {
   LinearAllocGuard<int> in_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
   LinearAllocGuard<int> out_host(LinearAllocs::hipMallocManaged, 2 * sizeof(int));
 
@@ -164,7 +164,7 @@ TEST_CASE("Unit___threadfence_block_Positive_Basic_Managed", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___threadfence_block_Positive_Basic_Peer", "[multigpu][sync]") {
+TEST_CASE("Unit___threadfence_block_Positive_Basic_Peer", "[multigpu][sync][fence]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("At least 2 devices are required");

@@ -288,7 +288,7 @@ static void runTestShflXor_4() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipShflSync_Xor", "[warp]") {
+TEST_CASE("Unit_hipShflSync_Xor", "[device_lib][warp][shuffle]") {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   SECTION("run test for short") {

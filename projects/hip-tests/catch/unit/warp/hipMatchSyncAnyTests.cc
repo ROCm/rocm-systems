@@ -205,7 +205,7 @@ static void runTestMatchAny_3() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipMatchSync_Any", "[warp]") {
+TEST_CASE("Unit_hipMatchSync_Any", "[device_lib][warp][vote]") {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   SECTION("run test for int") {

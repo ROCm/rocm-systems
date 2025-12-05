@@ -152,7 +152,7 @@ template <typename T> static void runTestShflXor() {
  * ticket SWDEV-379177
  */
 
-TEST_CASE("Unit_runTestShfl_up", "[warp]") {
+TEST_CASE("Unit_runTestShfl_up", "[device_lib][warp][shuffle]") {
   SECTION("runTestShflUp for int") { runTestShflUp<int>(); }
   SECTION("runTestShflUp for float") { runTestShflUp<float>(); }
   SECTION("runTestShflUp for double") { runTestShflUp<double>(); }
@@ -189,7 +189,7 @@ TEST_CASE("Unit_runTestShfl_up", "[warp]") {
  * ticket SWDEV-379177
  */
 
-TEST_CASE("Unit_runTestShfl_Down", "[warp]") {
+TEST_CASE("Unit_runTestShfl_Down", "[device_lib][warp][shuffle]") {
   SECTION("runTestShflDown for int") { runTestShflDown<int>(); }
   SECTION("runTestShflDown for float") { runTestShflDown<float>(); }
   SECTION("runTestShflDown for double") { runTestShflDown<double>(); }
@@ -226,7 +226,7 @@ TEST_CASE("Unit_runTestShfl_Down", "[warp]") {
  * ticket SWDEV-379177
  */
 
-TEST_CASE("Unit_runTestShfl_Xor", "[warp]") {
+TEST_CASE("Unit_runTestShfl_Xor", "[device_lib][warp][shuffle]") {
   SECTION("runTestShflXor for int") { runTestShflXor<int>(); }
   SECTION("runTestShflXor for float") { runTestShflXor<float>(); }
   SECTION("runTestShflXor for double") { runTestShflXor<double>(); }

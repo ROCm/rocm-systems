@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Basic", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Basic", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -71,7 +71,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Basic", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Zero", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Zero", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -99,7 +99,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Zero", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Predicate_One", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Predicate_One", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -128,7 +128,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Predicate_One", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Predicate_OddEven", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Predicate_OddEven", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -156,7 +156,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Predicate_OddEven", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Negative", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Negative", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -184,7 +184,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Negative", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Id", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Id", "[device_lib][sync][block]") {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -212,7 +212,7 @@ TEST_CASE("Unit___syncthreads_count_Positive_Predicate_Id", "[sync]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_count_Negative_Parameters_RTC", "[sync]") {
+TEST_CASE("Unit___syncthreads_count_Negative_Parameters_RTC", "[device_lib][sync][block]") {
   hiprtcProgram program{};
 
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kSyncthreadsCountSource,
