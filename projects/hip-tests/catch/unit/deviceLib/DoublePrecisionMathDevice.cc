@@ -125,6 +125,6 @@ __device__ void double_precision_math_functions() {
 
 __global__ void compileDoublePrecisionMathOnDevice(int) { double_precision_math_functions(); }
 
-TEST_CASE("Unit_DoublePrecisionMathDevice", "[device_lib]") {
+TEST_CASE("Unit_DoublePrecisionMathDevice", "[device_lib][math]") {
   hipLaunchKernelGGL(compileDoublePrecisionMathOnDevice, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

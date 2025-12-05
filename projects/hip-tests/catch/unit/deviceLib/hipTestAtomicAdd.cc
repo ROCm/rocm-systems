@@ -166,7 +166,7 @@ template <typename T> bool atomictestnoret_simple(const T& initial_val) {
   return true;
 }
 
-TEST_CASE("Unit_hipTestAtomicAdd", "[device_lib]") {
+TEST_CASE("Unit_hipTestAtomicAdd", "[device_lib][atomic]") {
   bool TestPassed = true;
 
   SECTION("atomic tests with many waves") {

@@ -33,7 +33,7 @@
 
 extern "C" int hipGetDeviceProp();
 
-TEST_CASE("Unit_hipGetDeviceProp_ctest", "[compiler]") {
+TEST_CASE("Unit_hipGetDeviceProp_ctest", "[rtc][integration]") {
   int result = hipGetDeviceProp();
   REQUIRE(result == 1);
 }

@@ -88,7 +88,7 @@ __global__ void clz_HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c
   }
 }
 
-TEST_CASE("Unit_clz", "[device_lib]") {
+TEST_CASE("Unit_clz", "[device_lib][bitops]") {
   using namespace std;
 
   unsigned int* hostA;

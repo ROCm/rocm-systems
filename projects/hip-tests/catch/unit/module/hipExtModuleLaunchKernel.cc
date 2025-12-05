@@ -94,7 +94,7 @@ static bool searchRegExpr(const std::regex& expr, const char* filename) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr", "[module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr", "[module][launch]") {
   // Open copyKernel.s and read the file
   const std::regex regexp("uniform_work_group_size\\s*:\\s*[0-1]");
   REQUIRE(true == searchRegExpr(regexp, "copyKernel.s"));
@@ -115,7 +115,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr", "[module]") {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup", "[module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup", "[module][launch]") {
   // first check if uniform_work_group_size = 1.
   const std::regex regexp("uniform_work_group_size\\s*:\\s*1");
   if (false == searchRegExpr(regexp, "copyKernel.s")) {
@@ -185,7 +185,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup", "[module]") {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup", "[module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup", "[module][launch]") {
   size_t arraylength = totalWorkGroups * localWorkSize;
   size_t sizeBytes{arraylength * sizeof(int)};
   // Get module and function from module
@@ -251,7 +251,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup", "[module]") {
   HIP_CHECK(hipModuleUnload(Module));
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters", "[module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters", "[module][launch]") {
   ModuleLaunchKernelPositiveParameters<hipExtModuleLaunchKernel>();
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Pass only start event") {
@@ -277,7 +277,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters", "[module]") {
   }
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters", "[multigpu][module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters", "[multigpu][module][launch]") {
   ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
 /**
@@ -744,7 +744,7 @@ bool ModuleLaunchKernel::Module_WorkGroup_Test() {
   return testStatus;
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_Functional", "[module]") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_Functional", "[module][launch]") {
   bool testStatus = true;
   ModuleLaunchKernel kernelLaunch;
   testStatus &= kernelLaunch.ExtModule_Negative_tests();

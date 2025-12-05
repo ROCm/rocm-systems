@@ -220,7 +220,7 @@ template <typename T, typename U> int dataTypesRun4() {
   return errors;
 }
 
-TEST_CASE("Unit_ldg", "[device_lib]") {
+TEST_CASE("Unit_ldg", "[device_lib][bitops]") {
   using namespace std;
 
   int errors;

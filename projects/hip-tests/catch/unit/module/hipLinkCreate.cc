@@ -101,7 +101,7 @@ static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkSt
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hip_linker_spirv_input", "[module]") {
+TEST_CASE("Unit_hip_linker_spirv_input", "[module][resource]") {
     size_t N = ARRAY_SIZE;
     size_t sizeBytes = N * sizeof(int);
     int *A_h = new int[sizeBytes];
@@ -165,7 +165,7 @@ TEST_CASE("Unit_hip_linker_spirv_input", "[module]") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkCreate_Negative", "[module]") {
+TEST_CASE("Unit_hipLinkCreate_Negative", "[module][resource]") {
 
     hipLinkState_t linkstate;
     hipJitOption options[4];
@@ -199,7 +199,7 @@ TEST_CASE("Unit_hipLinkCreate_Negative", "[module]") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkCreate_AddLinker_CUDA_only_options", "[module]") {
+TEST_CASE("Unit_hipLinkCreate_AddLinker_CUDA_only_options", "[module][resource]") {
   hipLinkState_t linkstate;
   // Random options so that it is not null
   const char* isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm", "-inlinehint-threshold=1"};
@@ -254,7 +254,7 @@ TEST_CASE("Unit_hipLinkCreate_AddLinker_CUDA_only_options", "[module]") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkAddFile_Negative", "[module]") {
+TEST_CASE("Unit_hipLinkAddFile_Negative", "[module][resource]") {
     hipLinkState_t linkstate;
     HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &linkstate));
 

@@ -32,14 +32,14 @@ static hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Positive_Basic", "[module]") {
+TEST_CASE("Unit_hipModuleGetTexRef_Positive_Basic", "[module][resource]") {
   CHECK_IMAGE_SUPPORT
   hipTexRef tex_ref = nullptr;
   HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"));
   REQUIRE(tex_ref != nullptr);
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters", "[module]") {
+TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters", "[module][resource]") {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = GetModule();
   hipTexRef tex_ref = nullptr;
@@ -57,7 +57,7 @@ TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters", "[module]") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr", "[module]") {
+TEST_CASE("Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr", "[module][resource]") {
   CHECK_IMAGE_SUPPORT
   hipTexRef tex_ref = nullptr;
 
@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr", "[module]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String", "[module]") {
+TEST_CASE("Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String", "[module][resource]") {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = GetModule();
   hipTexRef tex_ref = nullptr;

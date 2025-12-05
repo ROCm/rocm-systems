@@ -49,7 +49,7 @@ __global__ void floatMath(float* In, float* Out) {
   Out[tid] = __tanf(Out[tid]);
 }
 
-TEST_CASE("Unit_deviceFunctions_CompileTest", "[device_lib]") {
+TEST_CASE("Unit_deviceFunctions_CompileTest", "[device_lib][math]") {
   float *Ind, *Outd;
   auto res = hipMalloc((void**)&Ind, SIZE);
   REQUIRE(res == hipSuccess);

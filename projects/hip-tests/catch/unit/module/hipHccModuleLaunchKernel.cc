@@ -57,7 +57,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipHccModuleLaunchKernel_basic", "[module]") {
+TEST_CASE("Unit_hipHccModuleLaunchKernel_basic", "[module][launch]") {
   size_t width = GENERATE(3, 4, 100);
   size_t widthInBytes = width * sizeof(int);
   int *A_d, *B_d;
@@ -99,7 +99,7 @@ TEST_CASE("Unit_hipHccModuleLaunchKernel_basic", "[module]") {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipHccModuleLaunchKernel_NegTst", "[module]") {
+TEST_CASE("Unit_hipHccModuleLaunchKernel_NegTst", "[module][launch]") {
   size_t width = GENERATE(3, 4, 100);
   size_t widthInBytes = width * sizeof(int);
   int *A_d, *B_d;

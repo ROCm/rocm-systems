@@ -30,7 +30,7 @@ __global__ void warpvote(int* device_any, int* device_all, int pshift) {
 }
 
 
-TEST_CASE("Unit_AnyAll_CompileTest", "[device_lib]") {
+TEST_CASE("Unit_AnyAll_CompileTest", "[device_lib][warp]") {
   int warpSize, pshift;
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));

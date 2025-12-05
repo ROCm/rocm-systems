@@ -157,7 +157,7 @@ template <typename T> void runTestShflSync(int option) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE("Unit_hiprtc_half_shuffle_sync", "[compiler]") {
+TEST_CASE("Unit_hiprtc_half_shuffle_sync", "[rtc][integration]") {
   runTestShflSync<__half>(1);
   runTestShflSync<__half>(2);
   runTestShflSync<__half>(3);

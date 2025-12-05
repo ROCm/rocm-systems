@@ -395,7 +395,7 @@ static bool test_allcomplexMathFunc_host() {
   return TestPassed;
 }
 
-TEST_CASE("Unit_TestMathFuncComplex", "[device_lib]") {
+TEST_CASE("Unit_TestMathFuncComplex", "[device_lib][types]") {
   bool TestPassed = false;
   TestPassed = test_makehipComplex_dev<hipFloatComplex, float>() &&
                test_makehipComplex_dev<float2, float>() &&

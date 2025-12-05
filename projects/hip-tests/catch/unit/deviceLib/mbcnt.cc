@@ -36,7 +36,7 @@ __global__ void HIP_kernel(unsigned int* mbcnt_lo, unsigned int* mbcnt_hi, unsig
 }
 
 
-TEST_CASE("Unit_mbcnt", "[device_lib]") {
+TEST_CASE("Unit_mbcnt", "[device_lib][bitops]") {
   using namespace std;
   unsigned int* device_mbcnt_lo;
   unsigned int* device_mbcnt_hi;

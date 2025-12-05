@@ -78,7 +78,7 @@ static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
   HIP_CHECK(hipFree(dptr));
 }
 
-TEST_CASE("Unit_AtomicFunctions_Inc", "[device_lib]") {
+TEST_CASE("Unit_AtomicFunctions_Inc", "[device_lib][atomic]") {
   int* Hptr{nullptr};
   int val;
   // Allocate Host memory
@@ -98,7 +98,7 @@ TEST_CASE("Unit_AtomicFunctions_Inc", "[device_lib]") {
   free(Hptr);
 }
 
-TEST_CASE("Unit_AtomicFunctions_Dec", "[device_lib]") {
+TEST_CASE("Unit_AtomicFunctions_Dec", "[device_lib][atomic]") {
   int* Hptr{nullptr};
   int val;
   // Allocate Host memory

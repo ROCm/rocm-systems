@@ -45,7 +45,7 @@ __global__ void fn(float* px, float* py) {
   *py = *py + *px;
 }
 
-TEST_CASE("Unit_hipFuncSetAttribute_Basic", "[module]") {
+TEST_CASE("Unit_hipFuncSetAttribute_Basic", "[module][function]") {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&fn),
                                 hipFuncAttributeMaxDynamicSharedMemorySize, 0));
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&fn),

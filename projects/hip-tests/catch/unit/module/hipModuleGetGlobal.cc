@@ -82,7 +82,7 @@ static inline hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Positive_Basic", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Positive_Basic", "[module][resource]") {
   hipModule_t module = GetModule();
 
   SECTION("int") { HIP_MODULE_GET_GLOBAL_TEST(int, module); }
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Positive_Basic", "[module]") {
   SECTION("double") { HIP_MODULE_GET_GLOBAL_TEST(double, module); }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Positive_Parameters", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Positive_Parameters", "[module][resource]") {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Positive_Parameters", "[module]") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Parameters", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Negative_Parameters", "[module][resource]") {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -123,7 +123,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Parameters", "[module]") {
   }
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr", "[module][resource]") {
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
 
@@ -133,7 +133,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr", "[module]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String", "[module][resource]") {
   hipModule_t module = GetModule();
   hipDeviceptr_t global = 0;
   size_t global_size = 0;
@@ -141,14 +141,14 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String", "[module]") {
   HIP_CHECK_ERROR(hipModuleGetGlobal(&global, &global_size, module, ""), hipErrorInvalidValue);
 }
 
-TEST_CASE("Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr", "[module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr", "[module][resource]") {
   hipModule_t module = GetModule();
   HIP_CHECK_ERROR(hipModuleGetGlobal(nullptr, nullptr, module, "int_var"), hipErrorInvalidValue);
 }
 
 // Test description: Loading device ptr from different device than the one on which the module
 // is loaded
-TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice", "[multigpu][module]") {
+TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice", "[multigpu][module][resource]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
