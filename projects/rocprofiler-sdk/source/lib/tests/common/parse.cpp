@@ -73,7 +73,7 @@ TEST(parse, cpu_info_model_name)
 {
     // Simulate the logic in agent.cpp
     auto parse_line = [](std::string_view line) -> std::string {
-        auto match = sdk::parse::tokenize(line, std::vector<std::string_view>{": "});
+        auto        match = sdk::parse::tokenize(line, std::vector<std::string_view>{": "});
         std::string model_name;
 
         if(match.size() >= 2)
@@ -97,8 +97,7 @@ TEST(parse, cpu_info_model_name)
             {
                 model_name = value;
                 // Remove leading and trailing whitespaces
-                model_name =
-                    sdk::parse::strip(std::string{model_name}, " \t\n\v\f\r");
+                model_name = sdk::parse::strip(std::string{model_name}, " \t\n\v\f\r");
             }
         }
         return model_name;
@@ -106,15 +105,15 @@ TEST(parse, cpu_info_model_name)
 
     // Case 1: Normal model name
     {
-        auto line = "model name : AMD EPYC 7742 64-Core Processor";
-        auto name = parse_line(line);
+        const auto* line = "model name : AMD EPYC 7742 64-Core Processor";
+        auto        name = parse_line(line);
         EXPECT_EQ(name, "AMD EPYC 7742 64-Core Processor");
     }
 
     // Case 2: Model name with colons (The bug fix case)
     {
-        auto line = "model name : AMD EPYC : 100-000000248";
-        auto name = parse_line(line);
+        const auto* line = "model name : AMD EPYC : 100-000000248";
+        auto        name = parse_line(line);
         EXPECT_EQ(name, "AMD EPYC : 100-000000248");
     }
 }
