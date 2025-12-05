@@ -482,11 +482,75 @@ build_sample_for_devices("cu_mask")
 
 set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
+# Check for numa library and headers (same approach as libhsakmt)
+find_package(PkgConfig)
+find_package(NUMA)
+if(NUMA_FOUND)
+  set(NUMA_LIBS ${NUMA_LIBRARIES})
+  message(STATUS "Found NUMA package: ${NUMA_LIBRARIES}")
+  if(NUMA_INCLUDE_DIRS)
+    include_directories(${NUMA_INCLUDE_DIRS})
+    message(STATUS "NUMA include dirs: ${NUMA_INCLUDE_DIRS}")
+  endif()
+  set(HAVE_NUMA TRUE)
+else()
+  # Fallback to manual detection
+  find_library(NUMA_LIBRARY NAMES numa)
+  if(NUMA_LIBRARY)
+    set(NUMA_LIBS ${NUMA_LIBRARY})
+    message(STATUS "Found numa library (fallback): ${NUMA_LIBRARY}")
+    set(HAVE_NUMA TRUE)
+  else()
+    message(WARNING "NUMA library not found. Building without numa support.")
+    message(WARNING "  Install libnuma-dev (Debian/Ubuntu) or numactl-devel (RHEL/CentOS)")
+    set(NUMA_LIBS "")
+    set(HAVE_NUMA FALSE)
+    # Exclude numa-dependent files from build
+    list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy.*\\.cc$")
+  endif()
+endif()
+
 # Build rules
 add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeSources} ${stressSources}
                                            ${common_srcs} ${testCommonSources})
 
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so.5)
+# Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
+
+# Find hwloc library
+# Try pkg-config first (for super-project builds)
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(HWLOC QUIET hwloc)
+  if(HWLOC_FOUND)
+    set(HWLOC_LIBRARY ${HWLOC_LINK_LIBRARIES})
+    message(STATUS "Found hwloc via pkg-config: ${HWLOC_LIBRARY}")
+  endif()
+endif()
+
+# If not found via pkg-config, try bundled version
+if(NOT HWLOC_FOUND)
+  find_library(HWLOC_LIBRARY NAMES hwloc
+    PATHS
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib
+    NO_DEFAULT_PATH
+  )
+  set(HWLOC_BUNDLED_FOUND FALSE)
+  if(HWLOC_LIBRARY)
+    set(HWLOC_BUNDLED_FOUND TRUE)
+    message(STATUS "Found bundled hwloc library: ${HWLOC_LIBRARY}")
+  else()
+    # Fall back to system hwloc
+    find_library(HWLOC_LIBRARY NAMES hwloc)
+    if(HWLOC_LIBRARY)
+      message(WARNING "Using system hwloc library: ${HWLOC_LIBRARY}")
+      message(WARNING "  Consider using bundled version to avoid compatibility issues")
+    else()
+      message(FATAL_ERROR "hwloc library not found. Please install libhwloc-dev or hwloc-devel package.")
+    endif()
+  endif()
+endif()
+
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt ${NUMA_LIBS} ${HWLOC_LIBRARY})
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
