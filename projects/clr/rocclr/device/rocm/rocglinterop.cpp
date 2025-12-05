@@ -198,16 +198,10 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
     context.glxContext = reinterpret_cast<GLXContext>(gfxContext);
   }
 
-  if (!Init(kind)) {
-    return false;
-  }
+  mesa_glinterop_device_info info = {.version = MESA_GLINTEROP_DEVICE_INFO_VERSION};
 
-  mesa_glinterop_device_info info;
-  info.version = MESA_GLINTEROP_DEVICE_INFO_VERSION;
-
-  if (!GetInfo(info, kind, display, context)) {
+  if (!Init(kind) || !GetInfo(info, kind, display, context))
     return false;
-  }
 
   const auto& pcie = device->info().deviceTopology_.pcie;
   const auto& dev_info = device->info();
