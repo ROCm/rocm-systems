@@ -125,7 +125,9 @@ convert_ptrace_error(int error)
     }
 
 // How long to wait for a process to start or stop after a ptrace operation
-constexpr size_t PTRACE_BREAKPOINT_TIMEOUT_MS = 10000;
+// This could wait for a long time due to detach triggering (and blocking for) output generation.
+// TODO: When output generation is non-blocking or shorter, reduce this
+constexpr size_t PTRACE_BREAKPOINT_TIMEOUT_MS = 1800000;
 // How long to wait for the signal handler thread to start or stop
 constexpr size_t PTRACE_HANDLER_START_STOP_TIMEOUT_MS = 10000;
 
