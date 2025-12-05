@@ -169,13 +169,72 @@ REQUIRE(exepctedOutput == proc.getOutput()); // Test on expected output of the p
 ```
 The process must be a standalone exe inside the same folder as other tests.
 
-## Enabling New Tests
-Initially, the new tests can be enabled via using ```-DHIP_CATCH_TEST=1```. After porting existing tests, this will be turned on by default.
-
 ## Building a single test
+
+The  test suite has moved to Catch2v3 (v3.8.1) to be exact. Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
+Starting with, it is no longer a single header, it is now a library, which needs to be linked to the test exe.
+
+If you are on your personal machine, I highly recommend you to install Catch2v3 (v3.8.1) locally on your system. This helps skip the download/build part in hip-tests and results in faster builds overall.
+
+### Steps to install Catch2v3 locally
+
+- `git clone https://github.com/catchorg/Catch2.git -b v3.8.1 --depth 1`
+- `cd Catch2`
+- `mkdir build && cd build`
+- `cmake .. -DCMAKE_BUILD_TYPE=Release`
+- `make -j8`
+
+Install step, you might need to have superuser permission to be able to install globally.
+
+- `make install`
+
+With Catch2 installed globally we can build individual Catch2 test like this:
+
 ```bash
-hipcc <path_to_test.cpp> -I<HIP_SRC_DIR>/tests/catch/include <HIP_SRC_DIR>/tests/catch/hipTestMain/standalone_main.cc -I<HIP_SRC_DIR>/tests/catch/external/Catch2 -g -o <out_file_name>
+export ROCM_SYSTEMS_DIR=<path_to_rocm_systems>
+amdclang++                                                                           \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/external/picojson                    \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
+  -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/main.cc              \
+  -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/hip_test_context.cc  \
+  -x hip <path_to_test>                                                              \
+  -L /usr/local/lib                                                                  \
+  --offload-arch=native                                                              \
+  -lCatch2
 ```
+
+### Steps to use FetchContent to get Catch2
+
+Build Catch2 with hip-tests
+
+```bash
+export HIP_PATH=<path_where_hip_is_installed>
+cd rocm-systems
+mkdir tests
+cd tests
+cmake ../projects/hip-tests/catch -DHIP_PLATFORM=amd -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HIP_PATH
+make -j$(nproc) Catch2
+export DEPS_PATH=$PWD/_deps
+```
+
+We now use the Catch2 we just build to link to the tests
+
+```bash
+export ROCM_SYSTEMS_DIR=<path_to_rocm_systems>
+amdclang++                                                                           \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/external/picojson                    \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
+  -I $DEPS_PATH/catch2-src/src                                                       \
+  -I $DEPS_PATH/catch2-build/generated-includes                                      \
+  -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/main.cc              \
+  -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/hip_test_context.cc  \
+  -x hip <path_to_test>                                                              \
+  --offload-arch=native                                                              \
+  -L $DEPS_PATH/catch2-build/src                                                     \
+  -lCatch2
+```
+
+You might need to set `LD_LIBRARY_PATH` to be Catch2 location.
 
 ## Debugging support
 Catch2 allows multiple ways in which you can debug the test case.
@@ -197,7 +256,6 @@ Tests fall in 5 categories and its file name prefix are as follows:
  - Performance tests(Prefix: Perf_\*Intent\*_\*Optional Scenario\*, example: Perf_DispatchLatenc  y): Performance tests are used to get results of HIP APIs.
 
 # General Guidelines:
- - Do not use the catch2 tags. Tags wont be used for filtering
  - Add as many INFO() as you can in tests which prints state of the t est, this will help the debugger when the test fails (INFO macro only prints when the test fails)
  - Check return of each HIP API and fail whenever there is a misma    tch with hipSuccess or hiprtcSuccess.
  - Each Category of test will hav e its own exe and catch_discover_test macro will be called on it to discover its tests
