@@ -914,19 +914,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get soc pstate policy info for gpu %s | %s", gpu_id, e.get_error_info())
 
-                # Format for CSV output
+                # Format for CSV output - flatten completely to avoid extra columns
                 if self.logger.is_csv_format() and isinstance(policy_info, dict):
-                    if 'policies' in policy_info and isinstance(policy_info['policies'], list):
-                        # Format as "0:soc_pstate_default, 1:soc_pstate_0, ..."
-                        policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
-                                         for p in policy_info['policies'] 
-                                         if 'policy_id' in p and 'policy_description' in p]
-                        policy_info = {
-                            'num_supported': policy_info.get('num_supported', 'N/A'),
-                            'current_id': policy_info.get('current_id', 'N/A'),
-                            'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
-                        }
-                static_dict['soc_pstate'] = policy_info
+                    policies_str = ', '.join(
+                        f"{p['policy_id']}:{p['policy_description']}"
+                        for p in policy_info.get('policies', [])
+                    ) or 'N/A'
+                    
+                    static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
+                    static_dict['current_id'] = policy_info.get('current_id', 'N/A')
+                    static_dict['policies'] = policies_str
+                else:
+                    static_dict['soc_pstate'] = policy_info
         if 'xgmi_plpd' in current_platform_args:
             if args.xgmi_plpd:
                 try:
@@ -935,19 +934,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get xgmi_plpd info for gpu %s | %s", gpu_id, e.get_error_info())
 
-                # Format for CSV output
+                # Format for CSV output - flatten completely to avoid extra columns
                 if self.logger.is_csv_format() and isinstance(policy_info, dict):
-                    if 'policies' in policy_info and isinstance(policy_info['policies'], list):
-                        # Format as "0:plpd_disallow, 1:plpd_default, ..."
-                        policy_strings = [f"{p['policy_id']}:{p['policy_description']}" 
-                                         for p in policy_info['policies'] 
-                                         if 'policy_id' in p and 'policy_description' in p]
-                        policy_info = {
-                            'num_supported': policy_info.get('num_supported', 'N/A'),
-                            'current_id': policy_info.get('current_id', 'N/A'),
-                            'policies': ', '.join(policy_strings) if policy_strings else 'N/A'
-                        }
-                static_dict['xgmi_plpd'] = policy_info
+                    policies_str = ', '.join(
+                        f"{p['policy_id']}:{p['policy_description']}"
+                        for p in policy_info.get('policies', [])
+                    ) or 'N/A'
+                    
+                    static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
+                    static_dict['current_id'] = policy_info.get('current_id', 'N/A')
+                    static_dict['policies'] = policies_str
+                else:
+                    static_dict['xgmi_plpd'] = policy_info
         if 'process_isolation' in current_platform_args:
             if args.process_isolation:
                 try:
