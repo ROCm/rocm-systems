@@ -457,7 +457,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
-  bool ForceHandler() const { return force_handler_; }
+  bool ForceIrq() const { return force_irq_; }
 
  private:
   //! Dispatches a barrier with blocking HSA signals
@@ -570,7 +570,7 @@ class VirtualGPU : public device::VirtualDevice {
       uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
       uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
       uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
-      uint32_t force_handler_ : 1;          //!< Forces interrupt on the queue completion
+      uint32_t force_irq_ : 1;              //!< Forces interrupt on the signal completion
     };
     uint32_t state_;
   };

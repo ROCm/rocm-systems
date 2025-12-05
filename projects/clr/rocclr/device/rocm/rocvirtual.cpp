@@ -477,26 +477,27 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     }
   }
 
-  bool enqueHandler = IS_WINDOWS && gpu_.ForceHandler();
+  bool enqueHandler = false;
   if (AMD_DIRECT_DISPATCH) {
     if (ts != nullptr) {
       enqueHandler =
           (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
           !ts->command().CpuWaitRequested();
     }
+    bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
     // Check if the signal doesn't match the requested one.
     // Note: runtime needs the interrupts for the callbacks in DD mode
-    if ((signal_list_[current_id_]->flags_.interrupt_ != enqueHandler) && gpu_.dev().ActiveWait()) {
+    if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
       // Use different stacks if an interrupt is required or not.
       // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
       // with the interrupt signal and saves the signal without interrupt, or vise versa
-      auto& pool_get = (enqueHandler) ? signal_pool_irq_ : signal_pool_;
-      auto& pool_save = (enqueHandler) ? signal_pool_ : signal_pool_irq_;
+      auto& pool_get = (use_irq) ? signal_pool_irq_ : signal_pool_;
+      auto& pool_save = (use_irq) ? signal_pool_ : signal_pool_irq_;
 
       // Check if a free signal in the pop stack isn't available
       if (pool_get.empty()) {
         std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
-        if ((signal != nullptr) && CreateSignal(signal.get(), enqueHandler)) {
+        if ((signal != nullptr) && CreateSignal(signal.get(), use_irq)) {
           pool_get.push(signal.release());
         }
       }
@@ -1703,7 +1704,7 @@ VirtualGPU::~VirtualGPU() {
       gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
     }
     // Windows requires an interrupt in more cases than Linux for OS fence updates
-    force_handler_ = IS_WINDOWS;
+    force_irq_ = IS_WINDOWS;
     // Force extra barrier to make sure OS gets an interrupt,
     // but avoid if the PM4 emulation, since PM4 path can deadlock during device destruction
     hasPendingDispatch_ |= IS_WINDOWS && !dev().IsPm4Emulation();
@@ -3952,6 +3953,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
     if (vcmd.CpuWaitRequested()) {
+      force_irq_ = IS_WINDOWS;
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
       if (gpu_queue_ == nullptr) {
@@ -3972,6 +3974,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
           }
         } else {
           // Submit a barrier with a cache flushes.
+          force_irq_ = IS_WINDOWS;
           if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
             dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
           } else {
@@ -3982,6 +3985,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       }
       profilingEnd();
     }
+    force_irq_ = false;
   }
 }
 
