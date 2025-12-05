@@ -1001,3 +1001,34 @@ free_out:
   free(req);
   return r;
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
+      .export_dmabuf_args =
+          {
+              .MemoryAddress = (uint64_t)MemoryAddress,
+              .MemorySizeInBytes = MemorySizeInBytes,
+          },
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  *DMABufFd = rsp->export_dmabuf_rsp.dmabuf_fd;
+  *Offset = rsp->export_dmabuf_rsp.offset;
+
+  printf("%s: gva: %p, size: %lx, dmabuf_fd: %d, offset: %lx\n", __FUNCTION__, MemoryAddress,
+         MemorySizeInBytes, *DMABufFd, *Offset);
+
+  return rsp->ret;
+}

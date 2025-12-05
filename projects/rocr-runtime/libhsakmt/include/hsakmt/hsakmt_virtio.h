@@ -110,6 +110,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset);
 
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
                              amdgpu_device_handle* device_handle);

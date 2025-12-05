@@ -40,6 +40,7 @@ vhsaKmtCreateQueue;
 vhsaKmtDestroyQueue;
 vhsaKmtRegisterGraphicsHandleToNodes;
 vhsaKmtGetRuntimeCapabilities;
+vhsaKmtExportDMABufHandle;
 vamdgpu_device_initialize;
 vamdgpu_device_deinitialize;
 vamdgpu_query_gpu_info;

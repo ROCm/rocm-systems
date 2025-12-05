@@ -449,12 +449,34 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
 }
 
 hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) {
-  return HSA_STATUS_ERROR;
+  int dmabuf_fd_res = -1;
+  size_t offset_res = 0;
+  HSAKMT_STATUS status =
+      vhsaKmtExportDMABufHandle(mem, size, &dmabuf_fd_res, &offset_res);
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  *dmabuf_fd = dmabuf_fd_res;
+  *offset = offset_res;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
                                            core::ShareableHandle& handle) {
-  return HSA_STATUS_ERROR;
+  auto &gpu_agent = static_cast<GpuAgent &>(agent);
+  amdgpu_bo_import_result res;
+  auto ret = vamdgpu_bo_import(
+      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
+  if (ret)
+    return HSA_STATUS_ERROR;
+
+  handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
