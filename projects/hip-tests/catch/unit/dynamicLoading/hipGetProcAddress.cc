@@ -25,7 +25,7 @@ THE SOFTWARE.
  * @addtogroup hipGetProcAddress hipGetProcAddress_spt
  * @{
  * @ingroup DynamicLoading
- * `hipError_t hipGetProcAddress (const char * 	symbol, void ** pfn, int
+ * `hipError_t hipGetProcAddress (const char * symbol, void ** pfn, int
                                   hipVersion, uint64_t flags,
                                   hipDriverProcAddressQueryResult *
  symbolStatus)` -
@@ -77,10 +77,10 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
   REQUIRE(status == HIP_GET_PROC_ADDRESS_SUCCESS);
 
   hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
-  int countFuncPtr;
+  int countFuncPtr = 0;
   HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
 
-  int count;
+  int count = 0;
   HIP_CHECK(hipGetDeviceCount(&count));
 
   REQUIRE(count > 0);
@@ -161,10 +161,10 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
   REQUIRE(status == HIP_GET_PROC_ADDRESS_SUCCESS);
 
   hipError_t (*hipGetDeviceCount_ptr)(int *) = (hipError_t(*)(int *))funcPtr;
-  int countFuncPtr;
+  int countFuncPtr = 0;
   HIP_CHECK(hipGetDeviceCount_ptr(&countFuncPtr));
 
-  int count;
+  int count = 0;
   HIP_CHECK(hipGetDeviceCount(&count));
 
   REQUIRE(count > 0);
@@ -230,8 +230,25 @@ TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
   void *funcPtr_legacy = nullptr;
   void *funcPtr_spt = nullptr;
 
-  void *handle = dlopen("libamdhip64.so", RTLD_LAZY);
-  REQUIRE(handle != NULL);
+  void *handle = nullptr;
+  handle = dlopen("libamdhip64.so", RTLD_LAZY);
+
+  if (handle == nullptr) {
+    // Try to find in the user defined rocm path
+    char *rocmPath = nullptr;
+    rocmPath = std::getenv("ROCM_PATH");
+
+    if (rocmPath) {
+      std::string libPathFile(rocmPath);
+      libPathFile += "/lib/libamdhip64.so";
+      handle = dlopen(libPathFile.c_str(), RTLD_LAZY);
+    }
+    // Try to find in the /opt/rocm/lib path
+    else {
+      handle = dlopen("/opt/rocm/lib/libamdhip64.so", RTLD_LAZY);
+    }
+  }
+  REQUIRE(handle != nullptr);
 
   void *sym_hipMemcpy = dlsym(handle, "hipMemcpy");
   void *sym_hipMemcpy_spt = dlsym(handle, "hipMemcpy_spt");

@@ -25,7 +25,7 @@ THE SOFTWARE.
  * @addtogroup hipGetProcAddress hipGetProcAddress_spt
  * @{
  * @ingroup DynamicLoading
- * `hipError_t hipGetProcAddress (const char * 	symbol, void ** pfn, int
+ * `hipError_t hipGetProcAddress (const char * symbol, void ** pfn, int
                                   hipVersion, uint64_t flags,
                                   hipDriverProcAddressQueryResult *
  symbolStatus)` -
@@ -53,8 +53,25 @@ TEST_CASE("Unit_hipGetProcAddress_With_spt_CompilerOption") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  void *handle = dlopen("libamdhip64.so", RTLD_LAZY);
-  REQUIRE(handle != NULL);
+  void *handle = nullptr;
+  handle = dlopen("libamdhip64.so", RTLD_LAZY);
+
+  if (handle == nullptr) {
+    // Try to find in the user defined rocm path
+    char *rocmPath = nullptr;
+    rocmPath = std::getenv("ROCM_PATH");
+
+    if (rocmPath) {
+      std::string libPathFile(rocmPath);
+      libPathFile += "/lib/libamdhip64.so";
+      handle = dlopen(libPathFile.c_str(), RTLD_LAZY);
+    }
+    // Try to find in the /opt/rocm/lib path
+    else {
+      handle = dlopen("/opt/rocm/lib/libamdhip64.so", RTLD_LAZY);
+    }
+  }
+  REQUIRE(handle != nullptr);
 
   void *sym_hipMemcpy = dlsym(handle, "hipMemcpy");
   void *sym_hipMemcpy_spt = dlsym(handle, "hipMemcpy_spt");
