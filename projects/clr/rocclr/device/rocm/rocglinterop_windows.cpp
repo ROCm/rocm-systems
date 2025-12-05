@@ -46,11 +46,6 @@ static PFNWGLRESOURCEDETACHAMD wglResourceDetachAMD = nullptr;
 static PFNWGLGETCONTEXTGPUINFOAMD wglGetContextGPUInfoAMD = nullptr;
 
 // ================================================================================================
-bool Supported() {
-  return true;
-}
-
-// ================================================================================================
 bool initGLInteropPrivateExt(void* GLdeviceContext) {
   static std::once_flag gGlFuncInit;
   static bool gGlFuncLoaded = false;

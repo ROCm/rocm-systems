@@ -127,10 +127,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   enableExtension(ClAmdMediaOps);
   enableExtension(ClAmdMediaOps2);
   enableExtension(ClKhrImage2dFromBuffer);
-
-  if (GlInterop::Supported()) {
-    enableExtension(ClKhrGlSharing);
-  }
+  enableExtension(ClKhrGlSharing);
 
   // Enable platform extension
   enableExtension(ClAmdDeviceAttributeQuery);

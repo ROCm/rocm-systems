@@ -54,11 +54,6 @@ static constexpr const char* errorStrings[] = {"MESA_GLINTEROP_SUCCESS",
                                                "MESA_GLINTEROP_UNSUPPORTED"};
 
 // ================================================================================================
-bool Supported() {
-  return true;
-}
-
-// ================================================================================================
 // Fallback for older OS' and Mesa versions
 static void LegacyInitGLX() {
   if (!GlxInfo) {
