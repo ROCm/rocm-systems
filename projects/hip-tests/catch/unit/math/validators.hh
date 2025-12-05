@@ -98,11 +98,8 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
 
     ret << "is within " << m_ulps << " ULPs of ";
 
-
     write(ret, m_target);
     ret << 'f';
-
-
     ret << " ([";
 
     write(ret, step(m_target, -FLOAT16_MAX, m_ulps));
