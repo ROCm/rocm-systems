@@ -26,7 +26,7 @@ extern "C" __device__ __attribute__((const)) half __ocml_nextafter_f16(half, hal
 __global__ void getNextAfter(Float16 from, Float16 direction, uint64_t steps, Float16* out) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     Float16 result = from;
-    for (uint64_t i = 0; i < steps + 1 /*FIXME */; ++i) {
+    for (uint64_t i = 0; i < steps; ++i) {
       result = __ocml_nextafter_f16(result, direction);
     }
 

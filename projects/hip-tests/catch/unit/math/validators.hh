@@ -24,10 +24,14 @@ THE SOFTWARE.
 
 #include <catch2/catch_all.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "hip/hip_runtime.h"
+
+#include <hip/hip_runtime.h>
+#include <hip_test_common.hh>
+
 #include <cstring>
 #include <iomanip>
-#include <hip_test_common.hh>
+
+#include "Float16.hh"
 
 // Define a new MatcherBase class with a public 'describe' member function because
 // Catch::MatcherBase::describe is protected and thus can't be used via a pointer to
@@ -101,7 +105,6 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
 
     ret << " ([";
 
-    // We have to cast INFINITY to float because of MinGW, see #1782
     write(ret, step(m_target, -FLOAT16_MAX, m_ulps));
     ret << ", ";
     write(ret, step(m_target, FLOAT16_MAX, m_ulps));
@@ -151,7 +154,8 @@ template <typename T> auto ULPValidatorBuilderFactory(int64_t ulps) {
 
 template <> inline auto ULPValidatorBuilderFactory<Float16>(int64_t ulps) {
   return [=](Float16 target, auto&&...) {
-    return std::make_unique<ValidatorBase<Float16, Float16WithinUlpsMatcher>>(target, Float16WithinUlpsMatcher(target, ulps));
+    return std::make_unique<ValidatorBase<Float16, Float16WithinUlpsMatcher>>(
+        target, Float16WithinUlpsMatcher(target, ulps));
   };
 };
 
