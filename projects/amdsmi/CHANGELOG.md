@@ -19,7 +19,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
   - Added C++ types to support NPM API:
     - `amdsmi_npm_status_t`: whether NPM is enabled or disabled
-    - `amdsmi_npm_status_t`: a struct containing the status and the Node-level power limit in Watts
+    - `amdsmi_npm_info_t`: a struct containing the status and the Node-level power limit in Watts
   - Added Python API wrappers for new node device functions
   - Added `amd-smi node` CLI command for Node Power Management operations
   - Currently supported for OAM_ID 0 only.
@@ -88,7 +88,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C++ API added:
     - `amdsmi_get_gpu_ptl_state()`: retrieves whether PTL (Peak Tops Limiter) is currently enabled or disabled for the specified processor
     - `amdsmi_set_gpu_ptl_state()`: enables or disables PTL (Peak Tops Limiter) operation
-    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL fromats for the specified processor
+    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL formats for the specified processor
     - `amdsmi_set_gpu_ptl_formats()`: Set PTL with specified preferred data formats
   - New C++ type added:
     - `amdsmi_ptl_data_format_t`: Valid PTL data formats: I8, F16, BF16, F32, F64
