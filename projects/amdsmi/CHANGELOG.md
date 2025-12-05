@@ -200,6 +200,31 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.11.0
 
+### Added
+
+- **Enhanced GPU metrics support with version detection and XCP partition metrics**.
+  - Added support for GPU metrics v1.8 and v3.x with backward compatibility
+  - Added `amdsmi_get_gpu_partition_metrics_info()` function for XCP partition utilization
+  - Unit tests enhanced to validate version-specific GPU metrics functionality
+  - Examples updated to demonstrate new GPU metrics v3 and partition metrics APIs
+
+- **Expanded language binding support for GPU metrics**.
+  - **Golang**: Added `GetGpuMetricsInfo()` and `GetGpuPartitionMetricsInfo()` functions to Go bindings
+  - **Rust**: Added partition metrics support with manual extern declarations
+  - **Python**: Added comprehensive example scripts for GPU metrics version detection and XCP partition monitoring
+
+- **Enhanced CLI support for GPU metrics and partition monitoring**.
+  - Added `--gpu-metrics-ver` option to display GPU metrics version information
+  - Added `--gpu-metrics-table` option to show raw GPU metrics table data
+  - Added `--gpu-partition-metrics` option to metric command for partition utilization
+  - Added `--metrics` option to partition command for XCP partition performance monitoring
+
+- **Comprehensive documentation and examples**.
+  - Added Python documentation with GPU metrics version detection examples
+  - Added XCP partition metrics usage examples with throttling detection
+  - Created `gpu_metrics_version_example.py` demonstrating version-aware metrics access
+  - Created `partition_metrics_example.py` for XCP partition monitoring and analysis
+
 ### Updated
 
 - **Updated support for set and get option for the following APIs**.

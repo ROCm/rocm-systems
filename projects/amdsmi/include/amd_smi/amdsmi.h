@@ -243,7 +243,7 @@ typedef enum {
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
-#define AMDSMI_LIB_VERSION_MAJOR 26
+#define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
 #define AMDSMI_LIB_VERSION_MINOR 3
