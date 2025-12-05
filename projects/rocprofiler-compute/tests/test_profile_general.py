@@ -1044,7 +1044,7 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
             ["empirRoof_gpu-0_FP16.pdf"],
         ),
         (
-            ["--device", "0", "--roof-only", "--kernel-names", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
+            ["--device", "0", "--roof-only", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
             ["EXPECTED_FILE_PLACEHOLDER"],
         ),
     ],
@@ -1068,30 +1068,6 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute, options, expect
     ]
 
     workload_dir = test_utils.get_output_dir()
-
-    plot_configurations = [
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            "expected_files": ["empirRoof_gpu-0_FP32.pdf"],
-        },
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
-        },
-        {
-            "options": [
-                "--device",
-                "0",
-                "--roof-only",
-                "--kernel",
-                config["kernel_name_1"],
-            ],
-            "expected_files": [filter_empirRoof],
-        },
-    ]
-
-    for config_test in plot_configurations:
-        workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=False, roof=True
