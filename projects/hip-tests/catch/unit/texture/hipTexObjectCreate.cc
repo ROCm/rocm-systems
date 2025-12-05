@@ -21,7 +21,7 @@ THE SOFTWARE.
 
 #define N 256
 
-TEST_CASE("Unit_TexObjectCreate_NullptrParams", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_NullptrParams", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -48,7 +48,7 @@ TEST_CASE("Unit_TexObjectCreate_NullptrParams", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeLinear", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -86,7 +86,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -159,7 +159,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -200,7 +200,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeArray", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeArray", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -227,7 +227,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -245,7 +245,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeArray_NullptrArray", "[texture]") {
 }
 
 #if 0
-TEST_CASE("Unit_TexObjectCreate_TypeMipmapped", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeMipmapped", "[texture][texobj]") {
 #if __linux__
   HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
   return;
@@ -276,7 +276,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmapped", "[texture]") {
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit", "[texture][texobj]") {
 #if __linux__
   HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
   return;
@@ -314,7 +314,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit", "[texture]") {
 }
 #endif
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypePitch2D", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -357,7 +357,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 
@@ -423,7 +423,7 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D_IncompleteInit", "[texture]") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases", "[texture]") {
+TEST_CASE("Unit_TexObjectCreate_TypePitch2D_EdgeCases", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   CTX_CREATE();
 

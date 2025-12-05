@@ -134,7 +134,7 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check", "[texture]") {
+TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   // Height Width Vector
@@ -174,7 +174,7 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check", "[texture]") {
  *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
 #if defined(_WIN32)

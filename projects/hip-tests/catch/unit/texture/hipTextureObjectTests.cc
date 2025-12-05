@@ -112,7 +112,7 @@ class TextureObjectTestWrapper {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTextureObjectResourceDesc_positive", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectResourceDesc_positive", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(false);
@@ -142,7 +142,7 @@ TEST_CASE("Unit_hipGetTextureObjectResourceDesc_positive", "[texture]") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTextureObjectResourceDesc_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectResourceDesc_Negative_Parameters", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(false);
@@ -192,7 +192,7 @@ TEST_CASE("Unit_hipGetTextureObjectResourceDesc_Negative_Parameters", "[texture]
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_positive", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_positive", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(true);
@@ -225,7 +225,7 @@ TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_positive", "[texture]") {
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(true);
@@ -278,7 +278,7 @@ TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters", "[text
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipGetTextureObjectTextureDesc_positive", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectTextureDesc_positive", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(false);
@@ -313,7 +313,7 @@ TEST_CASE("Unit_hipGetTextureObjectTextureDesc_positive", "[texture]") {
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipGetTextureObjectTextureDesc_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipGetTextureObjectTextureDesc_Negative_Parameters", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(false);
@@ -361,7 +361,7 @@ TEST_CASE("Unit_hipGetTextureObjectTextureDesc_Negative_Parameters", "[texture]"
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDestroyTextureObject_positive", "[texture]") {
+TEST_CASE("Unit_hipDestroyTextureObject_positive", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   TextureObjectTestWrapper tex_obj_wrapper(false, true);

@@ -39,7 +39,7 @@ static __global__ void texture2dCopyKernel(float* dst) {
 #endif
 }
 
-TEST_CASE("Unit_hipBindTexture2D_Positive", "[texture]") {
+TEST_CASE("Unit_hipBindTexture2D_Positive", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   float* device_ptr;
   size_t device_pitch, texture_offset;
@@ -50,7 +50,7 @@ TEST_CASE("Unit_hipBindTexture2D_Positive", "[texture]") {
   HIP_CHECK(hipFree((void*)device_ptr));
 }
 
-TEST_CASE("Unit_hipBindTexture2D_Pitch", "[texture]") {
+TEST_CASE("Unit_hipBindTexture2D_Pitch", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   (void) hipGetLastError();  // Prevent negative tests affecting this
 
@@ -89,7 +89,7 @@ TEST_CASE("Unit_hipBindTexture2D_Pitch", "[texture]") {
   HIP_CHECK(hipUnbindTexture(tex));
 }
 
-TEST_CASE("Unit_hipBindTexture2D_Negative", "[texture]") {
+TEST_CASE("Unit_hipBindTexture2D_Negative", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   float* device_ptr;
   size_t device_pitch, texture_offset;

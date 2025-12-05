@@ -128,7 +128,7 @@ template <typename T> bool runTest() {
   return testResult;
 }
 
-TEST_CASE("Unit_hipTextureFetch_vector", "[texture]") {
+TEST_CASE("Unit_hipTextureFetch_vector", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
 
   // test for char

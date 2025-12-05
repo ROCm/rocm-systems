@@ -33,7 +33,7 @@ __global__ void tex2DKernel(float* outputData, int width) {
 #endif
 }
 
-TEST_CASE("Unit_hipTextureRef2D_Check", "[texture]") {
+TEST_CASE("Unit_hipTextureRef2D_Check", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int SIZE = 256;

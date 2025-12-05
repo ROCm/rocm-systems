@@ -32,7 +32,7 @@ static __global__ void tex1dKernel(float* val, hipTextureObject_t obj) {
 }
 
 
-TEST_CASE("Unit_hipCreateTextureObject_tex1DfetchVerification", "[texture]") {
+TEST_CASE("Unit_hipCreateTextureObject_tex1DfetchVerification", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
   (void) hipGetLastError();  // Prevent negative tests affecting this
 

@@ -40,7 +40,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipMipmappedArrayCreate_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipMipmappedArrayCreate_Negative_Parameters", "[texture][mipmap]") {
   CHECK_IMAGE_SUPPORT;
 
 #ifdef __linux__

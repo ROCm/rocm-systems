@@ -43,7 +43,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetChannelDesc_CreateAndGet", "[texture]") {
+TEST_CASE("Unit_hipGetChannelDesc_CreateAndGet", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   hipChannelFormatDesc chan_test, chan_desc;
@@ -76,7 +76,7 @@ TEST_CASE("Unit_hipGetChannelDesc_CreateAndGet", "[texture]") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetChannelDesc_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipGetChannelDesc_Negative_Parameters", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT;
 
   hipChannelFormatDesc chan_test, chan_desc;

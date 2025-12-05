@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
-TEST_CASE("Unit_hipTexRefSetAddress2D_Negative_Parameters", "[texture]") {
+TEST_CASE("Unit_hipTexRefSetAddress2D_Negative_Parameters", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipTexRefSetAddress2D_Negative_Parameters", "[texture]") {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-TEST_CASE("Unit_hipTexRefSetAddress2D_Positive", "[texture]") {
+TEST_CASE("Unit_hipTexRefSetAddress2D_Positive", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width = 256;

@@ -21,7 +21,7 @@ THE SOFTWARE.
 texture<float, 2, hipReadModeElementType> tex;
 
 // Test for hipTexRefSetMipmappedArray and hipTexRefGetMipmappedArray, including error handling
-TEST_CASE("Unit_hipTexRefSetGetMipmappedArray", "[texture]") {
+TEST_CASE("Unit_hipTexRefSetGetMipmappedArray", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT;
 
   // Retrieve the texture reference for our symbol

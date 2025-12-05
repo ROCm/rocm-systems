@@ -280,7 +280,7 @@ template <typename T> static void runTestRW(const int width, const int height) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapread_Positive_Basic", "", char, uchar, short, ushort, int, uint,
+TEMPLATE_TEST_CASE("Unit_surfCubemapread_Positive_Basic", "[texture][surface][surfop]", char, uchar, short, ushort, int, uint,
                    float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {
@@ -302,7 +302,7 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapread_Positive_Basic", "", char, uchar, short
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapwrite_Positive_Basic", "", char, uchar, short, ushort, int,
+TEMPLATE_TEST_CASE("Unit_surfCubemapwrite_Positive_Basic", "[texture][surface][surfop]", char, uchar, short, ushort, int,
                    uint, float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {
@@ -324,7 +324,7 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapwrite_Positive_Basic", "", char, uchar, shor
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemap_Positive_ReadWrite", "", char, uchar, short, ushort, int, uint,
+TEMPLATE_TEST_CASE("Unit_surfCubemap_Positive_ReadWrite", "[texture][surface][surfop]", char, uchar, short, ushort, int, uint,
                    float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {

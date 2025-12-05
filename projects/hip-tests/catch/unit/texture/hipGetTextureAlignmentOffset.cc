@@ -38,7 +38,7 @@ texture<float, 1, hipReadModeElementType> tex;
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipGetTextureAlignmentOffset_Positive", "[texture]") {
+TEST_CASE("Unit_hipGetTextureAlignmentOffset_Positive", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   size_t offset = 0;
@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipGetTextureAlignmentOffset_Positive", "[texture]") {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipGetTextureAlignmentOffset_Negative", "[texture]") {
+TEST_CASE("Unit_hipGetTextureAlignmentOffset_Negative", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   size_t offset = 0;
   size_t* tex_buf;

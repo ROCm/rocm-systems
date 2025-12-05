@@ -35,7 +35,7 @@ static __global__ void kernel(float* out) {
 #endif
 }
 
-TEST_CASE("Unit_hipBindTexture_Positive", "[texture]") {
+TEST_CASE("Unit_hipBindTexture_Positive", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   size_t offset = 0;
   float* tex_buf;
@@ -58,7 +58,7 @@ TEST_CASE("Unit_hipBindTexture_Positive", "[texture]") {
   HIP_CHECK(hipFree(tex_buf));
 }
 
-TEST_CASE("Unit_hipBindTexture_1DfetchVerification", "[texture]") {
+TEST_CASE("Unit_hipBindTexture_1DfetchVerification", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
 
   float* tex_buf;
@@ -103,7 +103,7 @@ TEST_CASE("Unit_hipBindTexture_1DfetchVerification", "[texture]") {
   HIP_CHECK(hipFree(dev_buf));
 }
 
-TEST_CASE("Unit_hipBindTexture_Negative", "[texture]") {
+TEST_CASE("Unit_hipBindTexture_Negative", "[texture][texref]") {
   CHECK_IMAGE_SUPPORT
   size_t offset = 0;
   float* tex_buf;

@@ -38,7 +38,7 @@ THE SOFTWARE.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_ArrayResource", "[texture]") {
+TEST_CASE("Unit_hipCreateTextureObject_ArrayResource", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
 
   hipError_t ret;
@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipCreateTextureObject_ArrayResource", "[texture]") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_MmArrayResource", "[texture]") {
+TEST_CASE("Unit_hipCreateTextureObject_MmArrayResource", "[texture][texobj]") {
   CHECK_IMAGE_SUPPORT
 
   hipError_t ret;
