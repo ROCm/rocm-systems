@@ -337,7 +337,7 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
   hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
     allocation_map_[*address] = AllocationRegion(region, size, size_requested, alloc_flags);
   }
 
@@ -355,7 +355,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateNoFlags;
 
   {
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
     std::map<const void*, AllocationRegion>::iterator it = allocation_map_.find(ptr);
 
@@ -457,7 +457,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
 
 hsa_status_t Runtime::RegisterReleaseNotifier(void* ptr, hsa_amd_deallocation_callback_t callback,
                                               void* user_data) {
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto mem = allocation_map_.upper_bound(ptr);
   if (mem != allocation_map_.begin()) {
     mem--;
@@ -481,7 +481,7 @@ hsa_status_t Runtime::RegisterReleaseNotifier(void* ptr, hsa_amd_deallocation_ca
 hsa_status_t Runtime::DeregisterReleaseNotifier(void* ptr,
                                                 hsa_amd_deallocation_callback_t callback) {
   hsa_status_t ret = HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto mem = allocation_map_.upper_bound(ptr);
   if (mem != allocation_map_.begin()) {
     mem--;
@@ -697,7 +697,7 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
   size_t alloc_size = 0;
 
   {
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
     std::map<const void*, AllocationRegion>::const_iterator it = allocation_map_.find(ptr);
 
@@ -928,7 +928,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
   *size = info.SizeInBytes;
   *ptr = info.MemoryAddress;
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   allocation_map_[info.MemoryAddress] = AllocationRegion(
       nullptr, info.SizeInBytes, info.SizeInBytes, core::MemoryRegion::AllocateNoFlags);
 
@@ -1054,7 +1054,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
@@ -1195,7 +1195,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
 hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
   {  // Use allocation map if possible to handle fragments.
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
     const auto& it = allocation_map_.find(ptr);
     if (it != allocation_map_.end()) {
       it->second.user_ptr = userptr;
@@ -1546,7 +1546,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       // Store the buffer object handle in allocation map for later use
       if (err == HSAKMT_STATUS_SUCCESS) {
-        std::unique_lock<std::shared_mutex> lock(memory_lock_);
+        std::lock_guard<std::shared_mutex> lock(memory_lock_);
         allocation_map_[*importAddress] =
             AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
         allocation_map_[*importAddress].ldrm_bo = res.buf_handle;
@@ -1576,7 +1576,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
     }
-    std::unique_lock<std::shared_mutex> lock(memory_lock_);
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
     allocation_map_[importAddress] =
         AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
     allocation_map_[importAddress].ldrm_bo = ldrm_bo;
@@ -3499,7 +3499,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 
   if (!alignment) alignment = rocr::os::PageSize();
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
     size_t requested = size + alignment - rocr::os::PageSize();
@@ -3540,7 +3540,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 }
 
 hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
 
   if (it == reserved_address_map_.end()) {
@@ -3572,7 +3572,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   if (!IsMultipleOf(size, memRegion->GetPageSize()))
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   ThunkHandle user_mode_driver_handle;
   hsa_status_t status =
       region->Allocate(size, alloc_flags, &user_mode_driver_handle, 0);
@@ -3589,7 +3589,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 }
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
 
   if (memoryHandleIt == memory_handle_map_.end()) {
@@ -3620,7 +3620,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   uint64_t offset = 0, ret;
   uint64_t drm_cpu_addr = 0;
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto addressHandle = VMemoryFindReservedAddressHandle(va);
   if (addressHandle == nullptr ||
       reinterpret_cast<uint8_t*>(va) + size >
@@ -3685,7 +3685,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 }
 
 hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
   std::list<std::pair<void*, MappedHandle*>> mappedHandles;
 
   // va + size may consist of multiple MappedHandle's.
@@ -3910,7 +3910,7 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
     if (targetAgent == NULL || !targetAgent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   auto addressHandle = VMemoryFindReservedAddressHandle(va);
   if (addressHandle == nullptr ||
@@ -4003,7 +4003,7 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
   *perms = HSA_ACCESS_PERMISSION_NONE;
   bool mappedHandleFound = false;
 
-  std::unique_lock<std::shared_mutex> lock(memory_lock_);
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
   if (mappedHandleIt != mapped_handle_map_.begin()) {
