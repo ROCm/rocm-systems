@@ -33,8 +33,9 @@ from ctypes import (
     c_size_t,
     c_void_p,
 )
+import os
 
-_lib = ctypes.CDLL("libhiprtc.so")
+_lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libhiprtc.so")
 
 
 _lib.hiprtcCreateProgram.restype = c_int
@@ -112,7 +113,6 @@ class HIPRTCProgram:
 
 # TODO: Handle headers
 def hiprtcCreateProgram(src: str, name: str) -> HIPRTCProgram:
-
     src_bytes = src.encode("utf-8")
     name_bytes = name.encode("utf-8")
 
@@ -128,7 +128,6 @@ def hiprtcCreateProgram(src: str, name: str) -> HIPRTCProgram:
 
 # TODO: Handle compile options
 def hiprtcCompileProgram(prog: HIPRTCProgram) -> None:
-
     res = _lib.hiprtcCompileProgram(prog.handle, 0, None)
 
     if res != 0:
@@ -136,7 +135,6 @@ def hiprtcCompileProgram(prog: HIPRTCProgram) -> None:
 
 
 def hiprtcGetProgramLogSize(prog: HIPRTCProgram) -> int:
-
     size = c_size_t(0)
 
     res = _lib.hiprtcGetProgramLogSize(prog.handle, byref(size))
@@ -148,7 +146,6 @@ def hiprtcGetProgramLogSize(prog: HIPRTCProgram) -> int:
 
 
 def hiprtcGetProgramLog(prog: HIPRTCProgram) -> str:
-
     size = hiprtcGetProgramLogSize(prog)
     buf = (ctypes.c_char * size)()
 
@@ -171,7 +168,6 @@ def hiprtcGetCodeSize(prog: HIPRTCProgram) -> int:
 
 
 def hiprtcGetCode(prog: HIPRTCProgram) -> POINTER:
-
     size = hiprtcGetCodeSize(prog)
     buf = (c_char * size)()
     res = _lib.hiprtcGetCode(prog.handle, buf)
@@ -183,7 +179,6 @@ def hiprtcGetCode(prog: HIPRTCProgram) -> POINTER:
 
 
 def hiprtcGetLoweredName(prog: HIPRTCProgram, name_expression: str) -> str:
-
     expr_bytes = name_expression.encode("utf-8")
     name_bytes = c_char_p()
 
@@ -196,7 +191,6 @@ def hiprtcGetLoweredName(prog: HIPRTCProgram, name_expression: str) -> str:
 
 
 def hiprtcAddNameExpression(prog: HIPRTCProgram, name_expression: str) -> None:
-
     expr_bytes = name_expression.encode("utf-8")
 
     res = _lib.hiprtcAddNameExpression(prog.handle, expr_bytes)
