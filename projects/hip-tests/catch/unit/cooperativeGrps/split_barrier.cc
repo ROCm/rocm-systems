@@ -65,7 +65,7 @@ TEST_CASE("Unit_coop_thread_block_split_barrier") {
 
   for (size_t i = 0; i < size; i++) {
     INFO("Index: " << i << " in: " << in[i] << " out: " << out[i]);
-    REQUIRE((in[i] * 3.0f) == Approx(out[i]));
+    REQUIRE((in[i] * 3.0f) == Catch::Approx(out[i]));
   }
 }
 
