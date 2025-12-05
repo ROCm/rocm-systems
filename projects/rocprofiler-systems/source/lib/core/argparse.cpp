@@ -979,7 +979,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument({ "--ainics" },
                           "AI NIC IDs for SMI queries. Supports integers and/or ranges")
-            .dtype("int and/or range")
+            .dtype("list of strings")
             .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
