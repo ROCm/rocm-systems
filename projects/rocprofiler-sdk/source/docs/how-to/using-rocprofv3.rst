@@ -913,12 +913,17 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 
 .. note::
 
-   **Counter Dimension Collection:**
-   
-   When collecting counters that have multiple dimensions or instances (for example, ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), you cannot collect individual dimension values separately using bracket notation like ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
-   
-   Instead, specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``), and ``rocprofv3`` will automatically collect the accumulated values across all instances. The individual per-instance counter values are aggregated by the hardware, and only the accumulated total is available for collection.
+   Counter Dimension Collection
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+
+   **To collect aggregated values:**
+      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
+
+   **To collect per-instance values:**
+      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
 
