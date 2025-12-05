@@ -16,6 +16,7 @@ set(TOOL_OUTPUT_HEADERS
     generateJSON.hpp
     generateOTF2.hpp
     generatePerfetto.hpp
+    generatePerfUserEvents.hpp
     generateStats.hpp
     generateRocpd.hpp
     generator.hpp
@@ -41,6 +42,7 @@ set(TOOL_OUTPUT_SOURCES
     generateJSON.cpp
     generateOTF2.cpp
     generatePerfetto.cpp
+    generatePerfUserEvents.cpp
     generateStats.cpp
     generateRocpd.cpp
     metadata.cpp

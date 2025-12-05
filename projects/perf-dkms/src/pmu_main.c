@@ -21,6 +21,7 @@
 #include "aql_perf.h"
 #include "aql_c/counter_registry.h"
 #include "pmu_dimension.h"
+#include "amdgpu_pmu_trace.h"
 
 /* Global PMU instance */
 static struct amdgpu_pmu *amdgpu_pmu_instance;
@@ -42,6 +43,7 @@ static void amdgpu_pmu_del(struct perf_event *event, int flags);
 static void amdgpu_pmu_start(struct perf_event *event, int flags);
 static void amdgpu_pmu_stop(struct perf_event *event, int flags);
 static void amdgpu_pmu_read(struct perf_event *event);
+static void __amdgpu_pmu_read_internal(struct perf_event *event);
 
 /*
  * PMU_FORMAT_ATTR - Define a perf format attribute
@@ -165,6 +167,74 @@ static const struct attribute_group *amdgpu_pmu_attr_groups[] = {
 };
 
 /**
+ * amdgpu_pmu_generate_samples - Update counter values for sampling events
+ * @session: AQL performance session (already looked up by timer handler)
+ *
+ * Called from timer handler - must be atomic-safe.
+ * For sampling events (perf record), the timer ensures counter values are
+ * kept up-to-date by reading from the cache. The perf subsystem will sample
+ * these values at the configured sample frequency via the read() callback.
+ *
+ * Phase 2: Also emits tracepoint events for explicit sample capture with
+ * perf record -e amdgpu_pmu:counter_sample
+ *
+ * Note: Direct perf_event_overflow() is not available to kernel modules as
+ * it's not exported. Instead, we rely on perf's built-in software-based
+ * sampling mechanism which reads counter values via our read() callback.
+ * The timer's job is to keep the cached values fresh.
+ */
+static void amdgpu_pmu_generate_samples(struct aql_perf_session *session)
+{
+	struct aql_measurement *meas;
+	unsigned long flags;
+
+	if (!session)
+		return;
+
+	spin_lock_irqsave(&session->measurement_lock, flags);
+
+	list_for_each_entry(meas, &session->active_measurements, list)
+	{
+		struct perf_event *event = meas->event;
+		const counter_def_t *counter;
+		u64 prev_value, curr_value, delta;
+		u32 counter_id;
+
+		/* Skip if not a valid event */
+		if (!event)
+			continue;
+
+		/* Skip if not a sampling event (sample_period = 0 means counting mode) */
+		if (!is_sampling_event(event))
+			continue;
+
+		/* Update counter value using quiet internal function (no logging).
+		 * This ensures the cached value is fresh when perf subsystem reads it
+		 * for sampling. The actual sampling is handled by perf core. */
+		__amdgpu_pmu_read_internal(event);
+
+		/* Phase 2: Emit tracepoint with counter information and delta */
+		counter_id = (u32)event->attr.config;
+		counter = lookup_counter_by_id((counter_id_t)counter_id);
+		if (!counter) {
+			/* Counter not found - skip tracepoint but continue processing */
+			continue;
+		}
+
+		/* Calculate delta since last sample */
+		curr_value = local64_read(&event->count);
+		prev_value = atomic64_read(&meas->prev_counter_value);
+		delta = curr_value - prev_value;
+		atomic64_set(&meas->prev_counter_value, curr_value);
+
+		/* Emit tracepoint: visible via perf record -e amdgpu_pmu:counter_sample */
+		trace_counter_sample(counter_id, counter->name, curr_value, delta, ktime_get_ns());
+	}
+
+	spin_unlock_irqrestore(&session->measurement_lock, flags);
+}
+
+/**
  * amdgpu_pmu_poll_measurements - Poll active measurements and schedule background reads
  * @session: AQL performance session
  * @wq: Workqueue to schedule work on
@@ -229,16 +299,19 @@ enum hrtimer_restart amdgpu_pmu_timer_handler(struct hrtimer *timer)
 		goto reschedule;
 	}
 
-	/* Get AQL session to poll measurements */
+	/* Get AQL session to poll measurements (lookup once, use for all operations) */
 	session = aql_pmu_get_session();
 	if (!session) {
 		pmu_debug("Timer: No AQL session available\n");
 		goto reschedule;
 	}
 
-	/* Poll all active measurements */
+	/* Poll all active measurements (for perf stat counting mode) */
 	count = amdgpu_pmu_poll_measurements(session, wq);
 	pmu_debug("Timer: Updated %d active measurements\n", count);
+
+	/* Generate samples for sampling events (for perf record sampling mode - Phase 1) */
+	amdgpu_pmu_generate_samples(session);
 
 	aql_pmu_put_session(session);
 
@@ -397,10 +470,32 @@ static int amdgpu_pmu_event_init(struct perf_event *event)
 		return -EINVAL;
 	}
 
-	/* We don't support sampling */
+	/* Allow both counting (sample_period=0) and sampling (sample_period>0) events.
+	 * Sampling is supported via hrtimer-based periodic sampling (Task 1.2). */
 	if (is_sampling_event(event)) {
-		pmu_err("Sampling events not supported\n");
-		return -EOPNOTSUPP;
+		u64 sample_period = event->attr.sample_period;
+
+		pmu_info("Sampling event requested with period %llu\n", sample_period);
+
+		/* Validate sampling period is reasonable */
+		if (sample_period == 0) {
+			pmu_err("Sampling event must have non-zero sample_period\n");
+			return -EINVAL;
+		}
+
+		/* Warn if sample_period is less than our timer period (20ms).
+		 * Users may expect hardware-based sampling with precise period,
+		 * but we use software timer at fixed interval. */
+		if (sample_period < timer_period_ms * 1000000ULL) {
+			pmu_warn(
+				"Sample period %llu ns < timer period %d ms - samples will be at timer rate\n",
+				sample_period, timer_period_ms);
+		}
+
+		/* Mark this event as a sampling event for the timer handler.
+		 * We use hwc->sample_period (set by perf core) to distinguish
+		 * sampling events from counting events at runtime. */
+		pmu_debug("Event marked for sampling mode (sample_period=%llu)\n", sample_period);
 	}
 
 	/* GPU PMU doesn't support inherit (GPU counters aren't per-process) */
@@ -652,6 +747,21 @@ static void amdgpu_pmu_stop(struct perf_event *event, int flags)
 	pmu_err("stop: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
+/* Internal read function - no logging, safe for high-frequency calls */
+static void __amdgpu_pmu_read_internal(struct perf_event *event)
+{
+	struct hw_perf_event *hwc = &event->hw;
+
+	/* Check if this is an AQL hardware event */
+	if (hwc->config_base != 0) {
+		uint64_t counter_value = aql_pmu_event_read(event);
+		local64_set(&event->count, counter_value);
+		return;
+	}
+
+	/* Only AQL hardware events are supported - silently return for others */
+}
+
 /* PMU callback: Read event counter */
 static void amdgpu_pmu_read(struct perf_event *event)
 {
@@ -663,25 +773,20 @@ static void amdgpu_pmu_read(struct perf_event *event)
 	pmu_info("read: ENTRY - config=0x%llx, old_count=%llu, hwc->config_base=0x%lx\n",
 		 event->attr.config, (unsigned long long)old_count, hwc->config_base);
 
-	/* Check if this is an AQL hardware event */
+	/* Call internal read function */
+	__amdgpu_pmu_read_internal(event);
+
+	/* Log results */
+	new_count = local64_read(&event->count);
 	if (hwc->config_base != 0) {
-		pmu_info("read: Reading AQL hardware counter for config=0x%llx\n",
-			 event->attr.config);
-		uint64_t counter_value = aql_pmu_event_read(event);
-		pmu_info("read: ========== SETTING event->count = %llu (0x%llx) ==========\n",
-			 counter_value, counter_value);
-		local64_set(&event->count, counter_value);
-		new_count = local64_read(&event->count);
 		pmu_info("read: AQL counter read complete - old=%llu, new=%llu, delta=%lld\n",
 			 (unsigned long long)old_count, (unsigned long long)new_count,
 			 (long long)(new_count - old_count));
 		pmu_info("read: ========== FINAL event->count = %llu (0x%llx) ==========\n",
 			 new_count, new_count);
-		return;
+	} else {
+		pmu_err("read: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 	}
-
-	/* Only AQL hardware events are supported */
-	pmu_err("read: Non-AQL event detected, config=0x%llx\n", event->attr.config);
 }
 
 /* Initialize event attributes from counter_registry */
@@ -835,7 +940,10 @@ static int __init amdgpu_pmu_init(void)
 		.stop = amdgpu_pmu_stop,
 		.read = amdgpu_pmu_read,
 		.attr_groups = amdgpu_pmu_attr_groups,
-		.capabilities = PERF_PMU_CAP_NO_INTERRUPT | PERF_PMU_CAP_NO_EXCLUDE,
+		/* Note: PERF_PMU_CAP_NO_INTERRUPT removed to enable sampling mode.
+		 * We use hrtimer-based sampling instead of hardware overflow interrupts.
+		 * See amdgpu_pmu_generate_samples() for sample generation. */
+		.capabilities = PERF_PMU_CAP_NO_EXCLUDE,
 	};
 
 	/* Register PMU with perf subsystem */
