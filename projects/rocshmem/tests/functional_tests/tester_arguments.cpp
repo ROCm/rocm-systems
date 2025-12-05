@@ -85,6 +85,8 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-nskip") {
       i++;
       skip = atoi(argv[i]);
+    } else if (arg == "-noverif") {
+      verif = false;
     } else {
       show_usage(argv[0]);
       exit(-1);
@@ -183,6 +185,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nloop Set loop count\n";
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
+  std::cout << "\t-noverif disable buffer verification\n";
 }
 
 void TesterArguments::get_arguments() {

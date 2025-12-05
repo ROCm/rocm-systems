@@ -674,7 +674,8 @@ void Tester::execute() {
     postLaunchKernel();
 
     // data validation
-    verifyResults(size);
+    if (args.verif)
+      verifyResults(size);
 
     barrier();
 
