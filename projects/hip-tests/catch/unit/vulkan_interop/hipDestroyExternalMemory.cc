@@ -25,7 +25,7 @@ THE SOFTWARE.
 constexpr bool enable_validation = false;
 #endif
 
-TEST_CASE("Unit_hipDestroyExternalMemory_Vulkan_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipDestroyExternalMemory_Vulkan_Negative_Parameters", "[interop][vulkan]") {
   SECTION("extMem == nullptr") {
     HIP_CHECK_ERROR(hipDestroyExternalMemory(nullptr), hipErrorInvalidValue);
   }
@@ -57,7 +57,7 @@ TEST_CASE("Unit_hipDestroyExternalMemory_Vulkan_Negative_Parameters", "[interop]
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDestroyExternalMemory_Vulkan_Capture", "[interop]") {
+TEST_CASE("Unit_hipDestroyExternalMemory_Vulkan_Capture", "[interop][vulkan]") {
 // Segfaults in CUDA
 // Disabled on AMD due to defect - EXSWHTEC-187
 #if HT_AMD && 0

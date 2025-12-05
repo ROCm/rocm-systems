@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic", "[interop]") {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic", "[interop][vulkan]") {
   SignalExternalSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic", "
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore", "[interop]") {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore", "[interop][vulkan]") {
   SignalExternalTimelineSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -105,7 +105,7 @@ TEST_CASE(
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters", "[interop][vulkan]") {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

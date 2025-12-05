@@ -91,7 +91,7 @@ static hipError_t GraphExecSemaphoreSetParamsSignalWrapper(
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Positive_Basic", "[interop]") {
+TEST_CASE("Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Positive_Basic", "[interop][vulkan]") {
   SignalExternalSemaphoreCommon(GraphExecSemaphoreSetParamsSignalWrapper);
 }
 
@@ -152,7 +152,7 @@ TEST_CASE(
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters", "[interop][vulkan]") {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

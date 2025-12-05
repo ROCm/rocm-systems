@@ -22,22 +22,22 @@ THE SOFTWARE.
 #include "vulkan_test.hh"
 #include "signal_semaphore_common.hh"
 
-TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Binary_Semaphore", "[interop]") {
+TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Binary_Semaphore", "[interop][vulkan]") {
   SignalExternalSemaphoreCommon(hipSignalExternalSemaphoresAsync);
 }
 
 // Timeline semaphores unsupported on AMD
 #if HT_NVIDIA
-TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Timeline_Semaphore", "[interop]") {
+TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Timeline_Semaphore", "[interop][vulkan]") {
   SignalExternalTimelineSemaphoreCommon(hipSignalExternalSemaphoresAsync);
 }
 
-TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Multiple_Semaphores", "[interop]") {
+TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Multiple_Semaphores", "[interop][vulkan]") {
   SignalExternalMultipleSemaphoresCommon(hipSignalExternalSemaphoresAsync);
 }
 #endif
 
-TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Negative_Parameters", "[interop][vulkan]") {
   VulkanTest vkt(enable_validation);
   hipExternalSemaphoreSignalParams signal_params = {};
   signal_params.params.fence.value = 1;

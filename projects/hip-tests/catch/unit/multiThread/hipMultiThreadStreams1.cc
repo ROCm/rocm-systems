@@ -103,7 +103,7 @@ void test_multiThread_1(hipStream_t stream0, hipStream_t stream1, bool serialize
   HIPCHECK(hipDeviceSynchronize());
 };
 
-TEST_CASE("Unit_hipMultiThreadStreams1_AsyncSync", "[multiThread]") {
+TEST_CASE("Unit_hipMultiThreadStreams1_AsyncSync", "[stream][multithread]") {
   hipStream_t stream;
   HIPCHECK(hipStreamCreate(&stream));
 
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipMultiThreadStreams1_AsyncSync", "[multiThread]") {
   HIPCHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMultiThreadStreams1_AsyncAsync", "[multiThread]") {
+TEST_CASE("Unit_hipMultiThreadStreams1_AsyncAsync", "[stream][multithread]") {
   hipStream_t stream0, stream1;
   HIPCHECK(hipStreamCreate(&stream0));
   HIPCHECK(hipStreamCreate(&stream1));
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMultiThreadStreams1_AsyncAsync", "[multiThread]") {
   HIPCHECK(hipStreamDestroy(stream0));
   HIPCHECK(hipStreamDestroy(stream1));
 }
-TEST_CASE("Unit_hipMultiThreadStreams1_AsyncSame", "[multiThread]") {
+TEST_CASE("Unit_hipMultiThreadStreams1_AsyncSame", "[stream][multithread]") {
   hipStream_t stream;
   HIPCHECK(hipStreamCreate(&stream));
 

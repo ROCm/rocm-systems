@@ -32,7 +32,7 @@ constexpr std::array<unsigned int, 3> kFlags{hipGraphicsRegisterFlagsNone,
                                              hipGraphicsRegisterFlagsWriteDiscard};
 }  // anonymous namespace
 
-TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Basic", "[interop]") {
+TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Basic", "[interop][gl]") {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -55,7 +55,7 @@ TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Basic", "[interop]") {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice", "[interop]") {
+TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice", "[interop][gl]") {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -78,7 +78,7 @@ TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Positive_Register_Twice", "[interop]
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource_2));
 }
 
-TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipGraphicsGLRegisterBuffer_Negative_Parameters", "[interop][gl]") {
   GLContextScopeGuard gl_context;
 
   GLBufferObject vbo;

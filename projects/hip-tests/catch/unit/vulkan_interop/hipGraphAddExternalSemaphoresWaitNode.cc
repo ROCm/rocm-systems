@@ -54,7 +54,7 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Positive_Basic", "[interop]") {
+TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Positive_Basic", "[interop][vulkan]") {
   WaitExternalSemaphoreCommon(GraphExtSemaphoreWaitWrapper<>);
 }
 
@@ -74,7 +74,7 @@ TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Positive_Basic", "[interop
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Timeline_Semaphore", "[interop]") {
+TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Timeline_Semaphore", "[interop][vulkan]") {
   WaitExternalTimelineSemaphoreCommon(GraphExtSemaphoreWaitWrapper<>);
 }
 #endif
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Timeline_S
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Multiple_Semaphores", "[interop]") {
+TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Multiple_Semaphores", "[interop][vulkan]") {
   WaitExternalMultipleSemaphoresCommon(GraphExtSemaphoreWaitWrapper<>);
 }
 
@@ -115,7 +115,7 @@ TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Positive_Multiple_S
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Negative_Parameters", "[interop]") {
+TEST_CASE("Unit_hipGraphAddExternalSemaphoresWaitNode_Vulkan_Negative_Parameters", "[interop][vulkan]") {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
