@@ -364,8 +364,17 @@ get_tmpdir();
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view tag);
 
+std::string
+get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
+
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_caching_perfetto() ROCPROFSYS_HOT;
+
+bool
+get_merge_perfetto_files();
 
 struct tmp_file
 {

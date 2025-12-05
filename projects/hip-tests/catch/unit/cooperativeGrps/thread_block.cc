@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <optional>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <random>
 
 #include <cmd_options.hh>
 

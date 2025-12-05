@@ -84,13 +84,16 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
             &agents),
         "Failed to iterate agents");
 
+    auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x3});
+
     for(auto id : agents)
     {
         ROCPROFILER_CALL(
             rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
                                                                 id,
-                                                                nullptr,
-                                                                0,
+                                                                parameters.data(),
+                                                                parameters.size(),
                                                                 dispatch_callback,
                                                                 Callbacks::shader_data_callback,
                                                                 nullptr),
