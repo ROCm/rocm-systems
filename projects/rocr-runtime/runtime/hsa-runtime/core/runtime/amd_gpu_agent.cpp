@@ -968,22 +968,22 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
 }
 
 void GpuAgent::SetCopyRequestRefCount(bool set) {
-  std::lock_guard<std::mutex> lock(blit_lock_);
+  std::unique_lock<std::mutex> lock(blit_lock_);
   while (pending_copy_stat_check_ref_) {
-    blit_lock_.unlock();
+    lock.unlock();
     os::YieldThread();
-    blit_lock_.lock();
+    lock.lock();
   }
   if (!set && pending_copy_req_ref_) pending_copy_req_ref_--;
   else pending_copy_req_ref_++;
 }
 
 void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
-  std::lock_guard<std::mutex> lock(blit_lock_);
+  std::unique_lock<std::mutex> lock(blit_lock_);
   while (pending_copy_req_ref_) {
-    blit_lock_.unlock();
+    lock.unlock();
     os::YieldThread();
-    blit_lock_.lock();
+    lock.lock();
   }
   if (!set && pending_copy_stat_check_ref_) pending_copy_stat_check_ref_--;
   else pending_copy_stat_check_ref_++;

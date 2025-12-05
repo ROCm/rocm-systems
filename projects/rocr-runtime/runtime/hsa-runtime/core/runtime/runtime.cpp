@@ -2256,7 +2256,8 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
 }
 
 void Runtime::PrintMemoryMapNear(void* ptr) {
-  runtime_singleton_->memory_lock_.lock();
+  std::unique_lock<std::shared_mutex> lock(runtime_singleton_->memory_lock_);
+
   auto it = runtime_singleton_->allocation_map_.upper_bound(ptr);
   for (int i = 0; i < 2; i++) {
     if (it != runtime_singleton_->allocation_map_.begin()) it--;
@@ -2281,8 +2282,9 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     it++;
   }
   fprintf(stderr, "\n");
-  it = start;
-  runtime_singleton_->memory_lock_.unlock();
+  it = start;  
+  lock.unlock();
+  
   hsa_amd_pointer_info_t info = {};
   PtrInfoBlockData block = {};
   uint32_t count = 0;
