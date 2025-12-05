@@ -261,13 +261,7 @@ bool Event::awaitCompletion() {
 
 // ================================================================================================
 bool Event::notifyCmdQueue(bool cpu_wait) {
-  if (status() <= CL_COMPLETE) {
-    return true;
-  }
   HostQueue* queue = command().queue();
-  if (queue == nullptr) {
-    return true;
-  }
   if (AMD_DIRECT_DISPATCH) {
     ScopedLock l(notify_lock_);
     if ((status() > CL_COMPLETE) && (nullptr != queue) &&
