@@ -138,6 +138,8 @@ TeamBroadcastTester<T1>::~TeamBroadcastTester() {
 
 template <typename T1>
 void TeamBroadcastTester<T1>::preLaunchKernel() {
+  bw_factor = n_pes;
+
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_bcast_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,

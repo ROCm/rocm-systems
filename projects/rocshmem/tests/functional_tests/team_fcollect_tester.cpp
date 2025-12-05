@@ -151,7 +151,7 @@ TeamFcollectTester<T1>::~TeamFcollectTester() {
 
 template <typename T1>
 void TeamFcollectTester<T1>::preLaunchKernel() {
-  bw_factor = n_pes;
+  bw_factor = n_pes * 2;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_fcollect_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;

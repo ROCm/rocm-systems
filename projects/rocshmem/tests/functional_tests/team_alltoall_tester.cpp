@@ -136,7 +136,7 @@ TeamAlltoallTester<T1>::~TeamAlltoallTester() {
 
 template <typename T1>
 void TeamAlltoallTester<T1>::preLaunchKernel() {
-  bw_factor = n_pes;
+  bw_factor = n_pes * n_pes;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
