@@ -1212,6 +1212,10 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 			props->NumSdmaQueuesPerEngine = prop_val;
 		else if (strcmp(prop_name, "num_cp_queues") == 0)
 			props->NumCpQueues = prop_val;
+		else if (strcmp(prop_name, "cwsr_size") == 0)
+			props->CwsrSize = prop_val;
+		else if (strcmp(prop_name, "ctl_stack_size") == 0)
+			props->CtlStackSize = prop_val;
 		else if (strcmp(prop_name, "num_xcc") == 0)
 			props->NumXcc = prop_val;
 		else if (strcmp(prop_name, "family_id") == 0)
