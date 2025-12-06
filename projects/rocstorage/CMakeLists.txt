@@ -224,6 +224,16 @@ set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
 export(PACKAGE ${PACKAGE_NAME})
 
 # ------------------------------------------------------------ #
+# rocstorage-reader (database reader library)
+# ------------------------------------------------------------ #
+
+option(ROCSTORAGE_BUILD_READER "Build rocstorage-reader library" ON)
+
+if(ROCSTORAGE_BUILD_READER)
+    add_subdirectory(rocstorage-reader)
+endif()
+
+# ------------------------------------------------------------ #
 # Tests and Benchmarks
 # ------------------------------------------------------------ #
 
