@@ -19,7 +19,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
   - Added C++ types to support NPM API:
     - `amdsmi_npm_status_t`: whether NPM is enabled or disabled
-    - `amdsmi_npm_status_t`: a struct containing the status and the Node-level power limit in Watts
+    - `amdsmi_npm_info_t`: a struct containing the status and the Node-level power limit in Watts
   - Added Python API wrappers for new node device functions
   - Added `amd-smi node` CLI command for Node Power Management operations
   - Currently supported for OAM_ID 0 only.
