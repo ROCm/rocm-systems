@@ -570,6 +570,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.ECCEnabled = info.errorCorrectionSupport_ ? 1 : 0;
   deviceProps.isLargeBar = info.largeBar_ ? 1 : 0;
   deviceProps.asicRevision = info.asicRevision_;
+  deviceProps.hasExpertSchedMode = info.hasExpertSchedMode_ ? 1 : 0;
   deviceProps.ipcEventSupported = 1;
   deviceProps.streamPrioritiesSupported = 1;
   deviceProps.multiGpuBoardGroupID = info.deviceTopology_.pcie.device;

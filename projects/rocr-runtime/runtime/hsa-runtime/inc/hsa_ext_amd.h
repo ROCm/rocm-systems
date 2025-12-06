@@ -715,6 +715,10 @@ typedef enum hsa_amd_agent_info_s {
    * valid on Windows. The type of this attribute is LUID.
    */
   HSA_AMD_AGENT_INFO_LUID = 0xA11A,
+  /**
+   * The agent supports expert scheduling mode. The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
 } hsa_amd_agent_info_t;
 
 /**
