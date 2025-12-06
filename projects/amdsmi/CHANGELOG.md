@@ -88,7 +88,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New C++ API added:
     - `amdsmi_get_gpu_ptl_state()`: retrieves whether PTL (Peak Tops Limiter) is currently enabled or disabled for the specified processor
     - `amdsmi_set_gpu_ptl_state()`: enables or disables PTL (Peak Tops Limiter) operation
-    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL fromats for the specified processor
+    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL formats for the specified processor
     - `amdsmi_set_gpu_ptl_formats()`: Set PTL with specified preferred data formats
   - New C++ type added:
     - `amdsmi_ptl_data_format_t`: Valid PTL data formats: I8, F16, BF16, F32, F64
