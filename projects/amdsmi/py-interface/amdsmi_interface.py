@@ -1728,6 +1728,10 @@ def amdsmi_get_cpu_current_io_bandwidth(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(encoding, int):
+        raise AmdSmiParameterException(encoding, int)
+    if not isinstance(link_name, str):
+        raise AmdSmiParameterException(link_name, str)
 
     link = amdsmi_wrapper.amdsmi_link_id_bw_type_t()
     link.bw_type = ctypes.c_uint32(encoding)
@@ -1750,6 +1754,10 @@ def amdsmi_get_cpu_current_xgmi_bw(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(encoding, int):
+        raise AmdSmiParameterException(encoding, int)
+    if not isinstance(link_name, str):
+        raise AmdSmiParameterException(link_name, str)
 
     link = amdsmi_wrapper.amdsmi_link_id_bw_type_t()
     link.bw_type = ctypes.c_uint32(encoding)
@@ -2304,6 +2312,8 @@ def amdsmi_get_gpu_reg_table_info(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(reg_type, AmdSmiRegType):
+        raise AmdSmiParameterException(reg_type, AmdSmiRegType)
 
     reg_metrics = POINTER(amdsmi_wrapper.amdsmi_name_value_t)()
     num_regs = ctypes.c_uint32(0)
@@ -2709,16 +2719,6 @@ def amdsmi_get_gpu_total_ecc_count(
         "deferred_count": ec.deferred_count,
     }
 
-def notifyTypeToString(notify_type_b):
-    idx = 0
-    guid = []
-    for i in notify_type_b:
-        guid.append(format(i, '02x'))
-        if idx == 7:
-            break
-        idx = idx +1
-    return "".join(guid[::-1])
-
 def amdsmi_get_gpu_cper_entries(
     processor_handle: processor_handle_t,
     severity_mask: int,
@@ -2730,6 +2730,12 @@ def amdsmi_get_gpu_cper_entries(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(severity_mask, int):
+        raise AmdSmiParameterException(severity_mask, int)
+    if not isinstance(buffer_size, int):
+        raise AmdSmiParameterException(buffer_size, int)
+    if not isinstance(cursor, int):
+        raise AmdSmiParameterException(cursor, int)
 
     # Allocate a buffer for CPER data.
     buf = ctypes.create_string_buffer(buffer_size)
@@ -2840,6 +2846,11 @@ def amdsmi_get_afids_from_cper(
             "bytes": list(cper_afid_data),
             "size": len(cper_afid_data)
         }]
+    elif isinstance(cper_afid_data, List[Dict[str, Any]]):
+        cper_records = cper_afid_data
+    else:
+        raise AmdSmiParameterException(cper_afid_data, bytes)
+
     all_afids: List[int] = []
 
     for record in cper_records:
@@ -3229,7 +3240,6 @@ def amdsmi_get_processor_handle_from_bdf(bdf):
         amdsmi_bdf, ctypes.byref(processor_handle)))
     return processor_handle
 
-
 def amdsmi_get_gpu_vendor_name(
     processor_handle: processor_handle_t,
 ) -> str:
@@ -3519,7 +3529,6 @@ def amdsmi_is_P2P_accessible(
     )
 
     return accessible.value
-
 
 def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -4035,6 +4044,8 @@ def amdsmi_set_soc_pstate(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(policy_id, int):
+        raise AmdSmiParameterException(policy_id, int)
     _check_res(
         amdsmi_wrapper.amdsmi_set_soc_pstate(
             processor_handle, policy_id
@@ -4050,6 +4061,8 @@ def amdsmi_set_xgmi_plpd(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(policy_id, int):
+        raise AmdSmiParameterException(policy_id, int)
     _check_res(
         amdsmi_wrapper.amdsmi_set_xgmi_plpd(
             processor_handle, policy_id
@@ -4066,6 +4079,8 @@ def amdsmi_set_gpu_process_isolation(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(pisolate, int):
+        raise AmdSmiParameterException(pisolate, int)
     _check_res(
         amdsmi_wrapper.amdsmi_set_gpu_process_isolation(
             processor_handle, pisolate
@@ -4326,6 +4341,10 @@ def amdsmi_set_gpu_clk_limit(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    if not isinstance(clk_type, str):
+        raise AmdSmiParameterException(clk_type, str)
+    if not isinstance(limit_type, str):
+        raise AmdSmiParameterException(limit_type, str)
     if not isinstance(value, int):
         raise AmdSmiParameterException(value, int)
     if clk_type.lower() == "sclk":
@@ -5510,6 +5529,13 @@ def amdsmi_get_link_topology_nearest(
     link_type: AmdSmiLinkType,
     )-> Dict[str, Any]:
 
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(link_type, AmdSmiLinkType):
+        raise AmdSmiParameterException(link_type, AmdSmiLinkType)
+
     topology_nearest_list = amdsmi_wrapper.amdsmi_topology_nearest_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_link_topology_nearest(
@@ -5531,6 +5557,11 @@ def amdsmi_get_link_topology_nearest(
 def amdsmi_get_gpu_virtualization_mode(
     processor_handle: processor_handle_t
     ) -> Dict[str, AmdSmiVirtualizationMode]:
+
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
 
     # make info struct here
     mode = amdsmi_wrapper.amdsmi_virtualization_mode_t()
@@ -5897,4 +5928,3 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     gpu_busy_percent = ctypes.c_uint32(0)
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent)))
     return gpu_busy_percent.value
-
