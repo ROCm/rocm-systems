@@ -35,7 +35,11 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs atomicMin_system from multiple threads on the same address.
+ *  - Performs atomicMin_system in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses multiple devices and launches multiple kernels.
  * Test source
  * ------------------------
@@ -46,83 +50,25 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 5.2
  */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
+TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs", "[multigpu]", int, unsigned int,
+                   unsigned long, unsigned long long, float, double) {
 #else
-TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long) {
-#endif
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::MultipleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMinSystem>(
-          2, 2, 1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin_system from multiple threads on adjacent addresses.
- *  - Uses multiple devices and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin_system.cc
- * Test requirements
- * ------------------------
- *  - Multi-device
- *  - HIP_VERSION >= 5.2
- */
-#if HT_AMD
-TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]",
-    int, unsigned int, unsigned long, unsigned long long, float, double) {
-#else
-TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]",
-    int, unsigned int, unsigned long, unsigned long long) {
-#endif
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::MultipleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMinSystem>(
-          2, 2, warp_size, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin_system from multiple threads on scaterred addresses.
- *  - Uses multiple devices and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin_system.cc
- * Test requirements
- * ------------------------
- *  - Multi-device
- *  - HIP_VERSION >= 5.2
- */
-#if HT_AMD
-TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses",
-    "[multigpu]", int, unsigned int, unsigned long, unsigned long long, float,
-    double) {
-#else
-TEMPLATE_TEST_CASE(
-    "Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses",
-    "[multigpu]", int, unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE("Unit_atomicMin_system_Positive_Peer_GPUs", "[multigpu]", int, unsigned int,
+                   unsigned long, unsigned long long) {
 #endif
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::MultipleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMinSystem>(
+          2, 2, 1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::MultipleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMinSystem>(
+          2, 2, warp_size, sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::MultipleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMinSystem>(
           2, 2, warp_size, cache_line_size);

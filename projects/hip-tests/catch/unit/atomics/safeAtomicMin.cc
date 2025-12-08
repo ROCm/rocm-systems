@@ -35,7 +35,11 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs safeAtomicMin from multiple threads on the same address.
+ *  - Performs safeAtomicMin in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses only one device and launches one kernel.
  * Test source
  * ------------------------
@@ -44,57 +48,20 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_SameAddress", "", float, double) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
-          1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs safeAtomicMin from multiple threads on adjacent addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/safeAtomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Adjacent_Addresses", "", float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
-          warp_size, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs safeAtomicMin from multiple threads on the scattered addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/safeAtomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Scattered_Addresses", "", float, double) {
+TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive", "", float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
+          1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
+          warp_size, sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
           warp_size, cache_line_size);
@@ -105,7 +72,11 @@ TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Scattered_Addresses", "", float,
 /**
  * Test Description
  * ------------------------
- *  - Performs safeAtomicMin from multiple threads on the same address.
+ *  - Performs safeAtomicMin in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses only one device and launches multiple kernels.
  * Test source
  * ------------------------
@@ -114,59 +85,20 @@ TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Scattered_Addresses", "", float,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address", "", float, double) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
-          2, 1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs safeAtomicMin from multiple threads on adjacent addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/safeAtomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses", "", float,
-                   double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
-          2, warp_size, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs safeAtomicMin from multiple threads on the scattered addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/safeAtomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses", "", float,
-                   double) {
+TEMPLATE_TEST_CASE("Unit_safeAtomicMin_Positive_Multi_Kernel", "", float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
+          2, 1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
+          2, warp_size, sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kSafeMin>(
           2, warp_size, cache_line_size);

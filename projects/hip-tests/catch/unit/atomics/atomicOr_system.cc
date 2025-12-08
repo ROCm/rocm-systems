@@ -35,7 +35,11 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs atomicOr_system from multiple threads on the same address.
+ *  - Performs atomicOr_system in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses multiple devices and launches multiple kernels.
  * Test source
  * ------------------------
@@ -45,65 +49,21 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long) {
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
-          2, 2, 1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicOr_system from multiple threads on adjacent addresses.
- *  - Uses multiple devices and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicOr_system.cc
- * Test requirements
- * ------------------------
- *  - Multi-device
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
-          2, 2, warp_size, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicOr_system from multiple threads on scattered addresses.
- *  - Uses multiple devices and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicOr_system.cc
- * Test requirements
- * ------------------------
- *  - Multi-device
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE(
-    "Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses", "[multigpu]",
-    int, unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs", "[multigpu]", int, unsigned int,
+                   unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
+          2, 2, 1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
+          2, 2, warp_size, sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
           2, 2, warp_size, cache_line_size);

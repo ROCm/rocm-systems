@@ -33,8 +33,11 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs a builtin atomic AND with memory scope WAVEFRONT from multiple threads on the same
- * address.
+ *  - Performs a builtin atomic AND with memory scope WAVEFRONT in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses only one device and launches one kernel.
  * Test source
  * ------------------------
@@ -43,63 +46,22 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront_SameAddress", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
-                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs a builtin atomic AND with memory scope WAVEFRONT from multiple threads on adjacent
- * addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/__hip_atomic_fetch_and.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront_Adjacent_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
-                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
-                                                                          sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs a builtin atomic AND with memory scope WAVEFRONT from multiple threads on scattered
- * addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/__hip_atomic_fetch_and.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront", "", int, unsigned int,
+                   unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
+                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
+                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
+                                                                          sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
                                             __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
@@ -108,11 +70,15 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Add
   }
 }
 
+
 /**
  * Test Description
  * ------------------------
- *  - Performs a builtin atomic AND with memory scope WORKGROUP from multiple threads on the same
- * address.
+ *  - Performs a builtin atomic AND with memory scope WORKGROUP in multiple memory patterns.
+ *    -# From multiple threads on the same address;
+ *    -# From multiple threads on adjacent addresses;
+ *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
+ *        size;
  *  - Uses only one device and launches one kernel.
  * Test source
  * ------------------------
@@ -121,63 +87,22 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Add
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Workgroup_SameAddress", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
-                                            __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs a builtin atomic AND with memory scope WORKGROUP from multiple threads on adjacent
- * addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/__hip_atomic_fetch_and.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Workgroup_Adjacent_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
-                                            __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
-                                                                          sizeof(TestType));
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Performs a builtin atomic AND with memory scope WORKGROUP from multiple threads on scattered
- * addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/__hip_atomic_fetch_and.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Workgroup_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
+TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Workgroup", "", int, unsigned int,
+                   unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
   for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
+                                            __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
+    }
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
+                                            __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
+                                                                          sizeof(TestType));
+    }
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinAnd,
                                             __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
