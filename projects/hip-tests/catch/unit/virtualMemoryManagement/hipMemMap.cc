@@ -364,7 +364,7 @@ void physicalMemoryReuse_MultiDev (hipMemAllocationProp prop) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
+TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev", "[multigpu]") {
   CHECK_P2P_SUPPORT
   SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
     hipMemAllocationProp prop{};
@@ -554,7 +554,7 @@ void vMMMemoryReuse_MultiGPU (hipMemAllocationProp prop) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
+TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU", "[multigpu]") {
   CHECK_P2P_SUPPORT
   SECTION("Memory Allocation Type as hipMemAllocationTypePinned") {
     hipMemAllocationProp prop{};

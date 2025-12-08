@@ -679,6 +679,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
   desc3d.Width = 8;
   desc3d.Height = 4;
   desc3d.Depth = 2;
+  desc3d.Flags = 0;
 
   HIP_CHECK(hipArray3DCreate(&array3d, &desc3d));
   HIP_CHECK(dyn_hipArray3DCreate_ptr(&array3d_ptr, &desc3d));
@@ -715,6 +716,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
   gd_desc3d.Width = 16;
   gd_desc3d.Height = 4;
   gd_desc3d.Depth = 8;
+  gd_desc3d.Flags = 0;
 
   HIP_CHECK(hipArray3DCreate(&gd_array3d, &gd_desc3d));
   HIP_CHECK(hipArray3DCreate(&gd_array3d_ptr, &gd_desc3d));
@@ -2705,7 +2707,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated") {
+TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy2D_ptr = nullptr;
@@ -6008,7 +6010,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer") {
+TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 

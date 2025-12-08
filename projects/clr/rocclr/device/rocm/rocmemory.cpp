@@ -122,7 +122,8 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   if (indirectMapCount_ == 1) {
     if (!allocateMapMemory(owner()->getSize())) {
       decIndMapCount();
-      DevLogPrintfError("Cannot allocate Map memory for size: %u", owner()->getSize());
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "Cannot allocate Map memory for size: %u", owner()->getSize());
       return nullptr;
     }
   } else {
@@ -180,7 +181,7 @@ void* Memory::cpuMap(device::VirtualDevice& vDev, uint flags, uint startLayer, u
   if (!isHostMemDirectAccess() && !IsPersistentDirectMap()) {
     if (!vDev.blitMgr().readBuffer(*this, mapTarget, amd::Coord3D(0), amd::Coord3D(size()), true)) {
       decIndMapCount();
-      DevLogError("Cannot read buffer");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Cannot read buffer");
       return nullptr;
     }
   }
@@ -268,11 +269,11 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   const auto& glenv = owner()->getContext().glenv();
   if (glenv->isEGL()) {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
                              glenv->getEglOrigCtx()))
       return false;
   } else {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_GLX, glenv->getDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_GLX, glenv->getDpy(),
                              glenv->getOrigCtx()))
       return false;
   }
@@ -1477,7 +1478,7 @@ void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& regi
     } else {
       // Did the map resource allocation fail?
       if (mapMemory_ == nullptr) {
-        DevLogError("Could not map target resource");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Could not map target resource");
         return nullptr;
       }
     }
@@ -1605,4 +1606,3 @@ amd::Image* Image::FindView(cl_image_format format) const {
 }
 
 }  // namespace amd::roc
-

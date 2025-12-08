@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -38,11 +40,11 @@ namespace code_object
 {
 namespace hsa
 {
-using context_t               = context::context;
-using user_data_t             = rocprofiler_user_data_t;
-using context_user_data_map_t = std::unordered_map<const context_t*, user_data_t>;
-using context_array_t         = context::context_array_t;
-using context_user_data_map_t = std::unordered_map<const context_t*, user_data_t>;
+using context_t                = context::context;
+using user_data_t              = rocprofiler_user_data_t;
+using context_user_data_map_t  = std::unordered_map<const context_t*, user_data_t>;
+using synchronized_user_data_t = common::Synchronized<context_user_data_map_t>;
+using context_array_t          = context::context_array_t;
 
 struct kernel_symbol
 {
@@ -58,14 +60,14 @@ struct kernel_symbol
     kernel_symbol& operator=(const kernel_symbol&) = delete;
     kernel_symbol& operator                        =(kernel_symbol&&) noexcept;
 
-    bool                    beg_notified   = false;
-    bool                    end_notified   = false;
-    const std::string*      name           = nullptr;
-    hsa_executable_t        hsa_executable = {};
-    hsa_agent_t             hsa_agent      = {};
-    hsa_executable_symbol_t hsa_symbol     = {};
-    kernel_symbol_data_t    rocp_data      = common::init_public_api_struct(kernel_symbol_data_t{});
-    context_user_data_map_t user_data      = {};
+    std::atomic<bool>        beg_notified   = false;
+    std::atomic<bool>        end_notified   = false;
+    const std::string*       name           = nullptr;
+    hsa_executable_t         hsa_executable = {};
+    hsa_agent_t              hsa_agent      = {};
+    hsa_executable_symbol_t  hsa_symbol     = {};
+    kernel_symbol_data_t     rocp_data = common::init_public_api_struct(kernel_symbol_data_t{});
+    synchronized_user_data_t user_data = {};
 };
 
 bool

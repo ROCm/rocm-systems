@@ -101,6 +101,17 @@ void TestPowerRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(i);
 
+      // Check and wake the device in runtime suspend
+      bool is_suspended = false;
+      err = amd::smi::check_runtime_pm_status(i, &is_suspended);
+      if (err == RSMI_STATUS_SUCCESS && is_suspended) {
+        err = amd::smi::wake_device(i);
+        if (err != RSMI_STATUS_SUCCESS) {
+          std::cout << "Failed to wake device, cannot read clock frequencies" << std::endl;
+          CHK_ERR_ASRT(err)
+        }
+      }
+
       err = rsmi_dev_power_cap_get(i, 0, &val_ui64);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Power Cap not supported on this device." << std::endl;

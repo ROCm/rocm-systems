@@ -75,6 +75,27 @@ test_init()
     [[maybe_unused]] static bool run_once = init();
 }
 
+rocprofiler_status_t
+get_sq_waves_counter(rocprofiler_agent_id_t /* id */,
+                     rocprofiler_counter_id_t* counters,
+                     size_t                    num_counters,
+                     void*                     userdata)
+{
+    for(size_t i = 0; i < num_counters; ++i)
+    {
+        auto _info = rocprofiler_counter_info_v1_t{};
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info),
+            "query counter");
+
+        if(_info.name && std::string_view(_info.name).find("SQ_WAVES") == 0)
+        {
+            static_cast<rocprofiler_thread_trace_parameter_t*>(userdata)->counter_id = counters[i];
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+    }
+    return ROCPROFILER_STATUS_ERROR;
+}
 }  // namespace rocprofiler
 
 using namespace rocprofiler;
@@ -172,6 +193,7 @@ TEST(thread_trace, configure_test)
 
 TEST(thread_trace, perfcounters_configure_test)
 {
+    constexpr int NUM_COUNTERS = 3;
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
@@ -181,32 +203,89 @@ TEST(thread_trace, perfcounters_configure_test)
     rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
-    // Only GFX9 SQ Block counters are supported
-    std::vector<std::pair<std::string, uint64_t>> perf_counters = {
-        {"SQ_WAVES", 0x1}, {"SQ_WAVES", 0x2}, {"SQ_WAVES", 0x2}, {"GRBM_COUNT", 0x3}};
-    std::set<std::pair<uint32_t, uint32_t>>           expected;
-    std::vector<rocprofiler_thread_trace_parameter_t> params;
-    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
-    auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
 
-    for(auto& [counter_name, simd_mask] : perf_counters)
-        for(auto& metric : metrics)
-            if(metric.name() == counter_name)
-            {
-                rocprofiler_thread_trace_parameter_t att_param;
-                att_param.type       = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
-                att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
-                att_param.simd_mask  = simd_mask;
-                params.push_back(att_param);
-                expected.insert({std::atoi(metric.event().c_str()), simd_mask});
-            }
+    for(auto& [_, agent] : agents)
+    {
+        auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+
+        auto sq_waves = rocprofiler_thread_trace_parameter_t{};
+        sq_waves.type = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+        ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                             agent.get_rocp_agent()->id, get_sq_waves_counter, &sq_waves),
+                         "iterate counters");
+
+        for(int i = 0; i < NUM_COUNTERS; i++)
+        {
+            sq_waves.simd_mask = 1 << i;
+            params.emplace_back(sq_waves);
+        }
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_dispatch_thread_trace_service(
+                ctx,
+                agent.get_rocp_agent()->id,
+                params.data(),
+                params.size(),
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_queue_id_t,
+                   rocprofiler_async_correlation_id_t,
+                   rocprofiler_kernel_id_t,
+                   rocprofiler_dispatch_id_t,
+                   void*,
+                   rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
+                [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+                nullptr),
+            "configure");
+    }
+
+    auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
+    auto* tracer  = context->dispatch_thread_trace.get();
+
+    ASSERT_NE(tracer, nullptr);
+    for(auto& [id, agent] : tracer->get_agents())
+    {
+        // We expect perfcounters.size() to match the number of counters we added
+        ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
+        ASSERT_EQ(agent->params.perfcounters.size(), NUM_COUNTERS);
+        for(const auto& param : agent->params.perfcounters)
+        {
+            // We expect a nonzero event id (.first) and nonzero simd mask (.second)
+            EXPECT_TRUE(param.first != 0);
+            EXPECT_TRUE(param.second != 0)
+                << "valid AQLprofile mask not generated for perfcounters";
+        }
+    }
+    context::pop_client(1);
+}
+
+TEST(thread_trace, perfcounters_configure_fail_test)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx{0};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
 
     for(auto& [_, agent] : agents)
     {
-        rocprofiler_configure_dispatch_thread_trace_service(
+        auto params = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+
+        auto sq_waves = rocprofiler_thread_trace_parameter_t{};
+        sq_waves.type = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+        // We are not initializing the counter, so we expect the configuration to fail
+        params.emplace_back(sq_waves);
+
+        auto status = rocprofiler_configure_dispatch_thread_trace_service(
             ctx,
             agent.get_rocp_agent()->id,
             params.data(),
@@ -220,20 +299,10 @@ TEST(thread_trace, perfcounters_configure_test)
                rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
             [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
             nullptr);
+
+        EXPECT_NE(status, ROCPROFILER_STATUS_SUCCESS);
     }
 
-    auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
-    auto* tracer  = context->dispatch_thread_trace.get();
-
-    ASSERT_NE(tracer, nullptr);
-    for(auto& [id, agent] : tracer->get_agents())
-    {
-        ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
-        ASSERT_EQ(agent->params.perfcounters.size(), 3);
-        for(const auto& param : agent->params.perfcounters)
-            EXPECT_TRUE(expected.find(param) != expected.end())
-                << "valid AQLprofile mask not generated for perfcounters";
-    }
     context::pop_client(1);
 }
 

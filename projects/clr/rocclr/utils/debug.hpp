@@ -258,12 +258,5 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
   ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfInfo(format, ...) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 
-#if (defined(DEBUG) || defined(DEV_LOG_ENABLE))
-#define DevLogPrintfError(format, ...) LogPrintfError(format, ##__VA_ARGS__)
-#define DevLogError(msg) LogError(msg)
-#else
-#define DevLogPrintfError(format, ...)
-#define DevLogError(msg)
-#endif
 
 #endif /*DEBUG_HPP_*/

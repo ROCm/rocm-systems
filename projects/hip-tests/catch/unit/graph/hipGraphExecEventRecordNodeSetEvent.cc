@@ -187,7 +187,8 @@ TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged") {
  * Scenario 3: This test verifies event in node of the executable graph can be changed to event on
  * different device
  */
-TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices") {
+TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices",
+          "[multigpu]") {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");

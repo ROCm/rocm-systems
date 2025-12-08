@@ -208,6 +208,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             _data = char_vec_t{ tracing_session->ReadTraceBlocking() };
         }
 
+        tracing_session.reset();
+
         return _data;
     };
 

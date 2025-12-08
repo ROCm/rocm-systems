@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
 /*
  * Verify that a device can read/write to the memory of another device
  */
-TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
+TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
   int devices_number = 0;
   HIP_CHECK(hipGetDeviceCount(&devices_number));
   std::vector<int*> devices_memories(devices_number);

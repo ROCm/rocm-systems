@@ -39,6 +39,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
@@ -53,11 +54,13 @@ set(core_sources
 
 set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
@@ -66,6 +69,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp

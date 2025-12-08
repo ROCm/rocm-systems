@@ -117,7 +117,7 @@ getMetricsForAgent(const rocprofiler_agent_t* agent);
  * applicable only for GFX9 agents and SQ block counters
  */
 std::unordered_map<uint64_t, int>
-getPerfCountersIdMap();
+getPerfCountersIdMap(const rocprofiler_agent_t* agent);
 
 /**
  * Checks if a metric is valid for a given agent

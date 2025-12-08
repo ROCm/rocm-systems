@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyParam2D_Positive_Basic") {
+TEST_CASE("Unit_hipMemcpyParam2D_Positive_Basic", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = false;
 

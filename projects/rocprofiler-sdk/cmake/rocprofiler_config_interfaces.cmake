@@ -23,6 +23,8 @@ target_compile_definitions(
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
 
+list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local")
+
 set(ROCPROFILER_DEFAULT_ROCM_PATH
     /opt/rocm
     CACHE PATH "Default search path for ROCM")
