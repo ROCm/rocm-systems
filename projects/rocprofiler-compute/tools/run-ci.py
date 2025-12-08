@@ -24,380 +24,296 @@
 ##############################################################################
 
 import argparse
+import glob
+import multiprocessing
 import os
-import subprocess
+import re
+import shutil
+import socket
 import sys
-import tempfile
-from pathlib import Path
 
 
-def detect_repo_structure():
-    """Detect if in monorepo or standalone structure"""
-    cwd = Path.cwd()
-
-    if "projects/rocprofiler-compute" in str(cwd):
-        parts = cwd.parts
-        idx = parts.index("rocprofiler-compute")
-        if idx > 0 and parts[idx - 1] == "projects":
-            monorepo_root = Path(*parts[: idx - 1])
-            project_root = monorepo_root / "projects" / "rocprofiler-compute"
-            return True, monorepo_root, project_root
-
-    if (cwd / "CMakeLists.txt").exists():
-        with open(cwd / "CMakeLists.txt") as f:
-            content = f.read()
-            if (
-                "project(rocprofiler-compute" in content
-                or "project(\n    rocprofiler-compute" in content
-            ):
-                return False, None, cwd
-
-    return False, None, cwd
+def which(cmd, require):
+    v = shutil.which(cmd)
+    if require and v is None:
+        raise RuntimeError(f"{cmd} not found")
+    return v if v is not None else ""
 
 
-def generate_ctest_dashboard_script(args, source_dir, binary_dir):
-    """
-    Generate a complete CTest dashboard script that handles:
-    - Configuration
-    - Build
-    - Test
-    - Coverage
-    - Submit to CDash
-    """
+def generate_custom(args, cmake_args, ctest_args):
+    if not os.path.exists(args.binary_dir):
+        os.makedirs(args.binary_dir)
 
-    cache_entries = [
-        "CMAKE_BUILD_TYPE:STRING=Release",
-        f"CMAKE_PREFIX_PATH:PATH={os.environ.get('ROCM_PATH', '/opt/rocm')}",
-        "ENABLE_TESTS:BOOL=ON",
-        "INSTALL_TESTS:BOOL=ON",
-        "ENABLE_COVERAGE:BOOL=ON",
-        f"PYTEST_NUMPROCS:STRING={args.pytest_numprocs}",
+    NAME = args.name
+    SITE = args.site
+    BUILD_JOBS = args.build_jobs
+    SUBMIT_URL = args.submit_url
+    SOURCE_DIR = os.path.realpath(args.source_dir)
+    BINARY_DIR = os.path.realpath(args.binary_dir)
+    CMAKE_ARGS = " ".join(cmake_args)
+    CTEST_ARGS = " ".join(ctest_args)
+
+    GIT_CMD = which("git", require=True)
+    GCOV_CMD = which("gcov", require=False)
+    CMAKE_CMD = which("cmake", require=True)
+    _ = which("ctest", require=True)
+
+    NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
+
+    return f"""
+        set(CTEST_PROJECT_NAME "rocprofiler-compute")
+        set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
+
+        set(CTEST_DROP_METHOD "http")
+        set(CTEST_DROP_SITE_CDASH TRUE)
+        set(CTEST_SUBMIT_URL "https://{SUBMIT_URL}")
+
+        set(CTEST_UPDATE_TYPE git)
+        set(CTEST_UPDATE_VERSION_ONLY TRUE)
+        set(CTEST_GIT_INIT_SUBMODULES TRUE)
+
+        set(CTEST_OUTPUT_ON_FAILURE TRUE)
+        set(CTEST_USE_LAUNCHERS TRUE)
+        set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
+
+        set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
+        set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
+        set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
+        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;.*external/.*;.*examples/.*")
+
+        set(CTEST_SITE "{SITE}")
+        set(CTEST_BUILD_NAME "{NAME}")
+
+        set(CTEST_SOURCE_DIRECTORY {SOURCE_DIR})
+        set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
+
+        set(CTEST_UPDATE_COMMAND {GIT_CMD})
+        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} {CMAKE_ARGS}")
+        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all --parallel {BUILD_JOBS}")
+        set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
+        """
+
+
+def generate_dashboard_script(args):
+    CODECOV = 1 if args.coverage else 0
+    DASHBOARD_MODE = args.mode
+    SOURCE_DIR = os.path.realpath(args.source_dir)
+    BINARY_DIR = os.path.realpath(args.binary_dir)
+
+    _script = """
+
+        include("${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
+
+        macro(handle_error _message _ret)
+            if(NOT ${${_ret}} EQUAL 0)
+                ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+                message(FATAL_ERROR "${_message} failed: ${${_ret}}")
+            endif()
+        endmacro()
+        """
+
+    _script += f"""
+        ctest_start({DASHBOARD_MODE})
+        ctest_update(SOURCE "{SOURCE_DIR}")
+        ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
+        ctest_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
+
+        handle_error("Configure" _configure_ret)
+
+        ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
+        ctest_submit(PARTS Build RETURN_VALUE _submit_ret)
+
+        handle_error("Build" _build_ret)
+
+        ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+        ctest_submit(PARTS Test RETURN_VALUE _submit_ret)
+
+        if("{CODECOV}" GREATER 0)
+            ctest_coverage(
+                BUILD "{BINARY_DIR}"
+                RETURN_VALUE _coverage_ret
+                CAPTURE_CMAKE_ERROR _coverage_err)
+            ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+        endif()
+
+        handle_error("Testing" _test_ret)
+
+        ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+        """
+    return _script
+
+
+def parse_cdash_args(args):
+    BUILD_JOBS = multiprocessing.cpu_count()
+    DASHBOARD_MODE = "Continuous"
+    DASHBOARD_STAGES = [
+        "Start",
+        "Update",
+        "Configure",
+        "Build",
+        "Test",
+        "Coverage",
+        "Submit",
     ]
+    SOURCE_DIR = os.getcwd()
+    BINARY_DIR = os.path.join(SOURCE_DIR, "build")
+    SITE = socket.gethostname()
+    SUBMIT_URL = "my.cdash.org/submit.php?project=rocprofiler-compute"
 
-    test_args = ""
-    if args.ctest_args:
-        test_args = " ".join(args.ctest_args)
-
-    # ruff: noqa
-    script_content = f"""
-cmake_minimum_required(VERSION 3.19)
-
-##############################################################################
-# CTest Dashboard Script for rocprofiler-compute
-# Auto-generated by run-ci.py
-##############################################################################
-
-# Dashboard configuration
-set(CTEST_PROJECT_NAME "{args.project_name}")
-set(CTEST_NIGHTLY_START_TIME "01:00:00 UTC")
-set(CTEST_DROP_SITE_CDASH TRUE)
-
-# CDash submission settings
-if(CMAKE_VERSION VERSION_GREATER 3.14)
-    set(CTEST_SUBMIT_URL "{args.submit_url}")
-else()
-    set(CTEST_DROP_METHOD "https")
-    set(CTEST_DROP_SITE "{args.cdash_host}")
-    set(CTEST_DROP_LOCATION "{args.submit_path}")
-endif()
-
-# Build identification
-set(CTEST_SITE "{args.site}")
-set(CTEST_BUILD_NAME "{args.build_name}")
-set(CTEST_SOURCE_DIRECTORY "{source_dir}")
-set(CTEST_BINARY_DIRECTORY "{binary_dir}")
-
-# Build config
-set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
-set(CTEST_BUILD_CONFIGURATION "Release")
-
-# Config CMake command with all required options
-set(CTEST_CONFIGURE_COMMAND "cmake -B ${{CTEST_BINARY_DIRECTORY}} ${{CTEST_SOURCE_DIRECTORY}} -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH={os.environ.get("ROCM_PATH", "/opt/rocm")} -DENABLE_TESTS=ON -DINSTALL_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS={args.pytest_numprocs}")
-
-message(STATUS "CMake configure command: ${{CTEST_CONFIGURE_COMMAND}}")
-
-message(STATUS "Starting {args.mode} dashboard...")
-ctest_start({args.mode})
-
-# Config step
-message(STATUS "Configuring project...")
-ctest_configure(
-    RETURN_VALUE configure_result
-    CAPTURE_CMAKE_ERROR configure_error
-)
-
-if(configure_result OR configure_error)
-    message(WARNING "Configuration had issues but continuing...")
-endif()
-
-# Build step
-message(STATUS "Building project...")
-set(CTEST_BUILD_FLAGS "-j{args.build_jobs}")
-ctest_build(
-    TARGET {"install" if args.install else "all"}
-    RETURN_VALUE build_result
-    CAPTURE_CMAKE_ERROR build_error
-)
-
-if(build_result OR build_error)
-    message(WARNING "Build had issues but continuing...")
-endif()
-
-# Test step
-message(STATUS "Running tests...")
-ctest_test(
-    {test_args}
-    PARALLEL_LEVEL 1
-    RETURN_VALUE test_result
-    CAPTURE_CMAKE_ERROR test_error
-)
-
-if(test_result OR test_error)
-    message(WARNING "Some tests failed but continuing with coverage and upload...")
-endif()
-
-# Coverage step (if coverage file exists)
-set(COVERAGE_FILE "${{CTEST_BINARY_DIRECTORY}}/coverage.xml")
-if(EXISTS "${{COVERAGE_FILE}}")
-    message(STATUS "Processing coverage data...")
-
-    file(MAKE_DIRECTORY "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo")
-    file(COPY "${{COVERAGE_FILE}}"
-         DESTINATION "${{CTEST_BINARY_DIRECTORY}}/Testing/CoverageInfo/")
-
-    ctest_coverage(
-        RETURN_VALUE coverage_result
-        CAPTURE_CMAKE_ERROR coverage_error
-    )
-
-    if(coverage_result OR coverage_error)
-        message(WARNING "Coverage processing had issues but continuing...")
-    endif()
-else()
-    message(STATUS "No coverage file found at ${{COVERAGE_FILE}}")
-    message(STATUS "Skipping coverage step")
-endif()
-
-message(STATUS "Submitting to CDash...")
-ctest_submit(
-    RETRY_COUNT 3
-    RETRY_DELAY 5
-    RETURN_VALUE submit_result
-    CAPTURE_CMAKE_ERROR submit_error
-)
-
-if(submit_result OR submit_error)
-    message(WARNING "CDash submission encountered issues")
-    message(STATUS "Results available locally in: ${{CTEST_BINARY_DIRECTORY}}/Testing/")
-else()
-    message(STATUS "Successfully submitted to CDash!")
-    message(STATUS "View at: {args.submit_url.replace("/submit.php?project=", "/index.php?project=")}")
-    message(STATUS "Build name: {args.build_name}")
-endif()
-
-message(STATUS "")
-message(STATUS "========================================")
-message(STATUS "Dashboard Summary")
-message(STATUS "========================================")
-if(test_result)
-    message(STATUS "Tests: FAILED (some tests failed or timed out)")
-else()
-    message(STATUS "Tests: PASSED")
-endif()
-if(submit_result OR submit_error)
-    message(STATUS "CDash Upload: FAILED")
-else()
-    message(STATUS "CDash Upload: SUCCESS")
-endif()
-message(STATUS "========================================")
-
-# For nightly/continuous, don't fail on test failures
-# Only warn in Experimental mode
-if("{args.mode}" STREQUAL "Experimental" AND test_result)
-    message(WARNING "Tests failed in Experimental mode")
-endif()
-"""
-
-    return script_content
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="CI script for rocprofiler-compute: build, test, and upload to CDash"
-    )
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--build-name",
-        "--name",
-        dest="build_name",
-        required=True,
-        help="Build name for CDash",
+        "-n", "--name", help="Job name", default=None, type=str, required=True
     )
-
+    parser.add_argument("-s", "--site", help="Site name", default=SITE, type=str)
     parser.add_argument(
-        "--project-name",
-        default="rocprofiler-compute",
-        help="CDash project name",
+        "-c", "--coverage", help="Enable code coverage", action="store_true"
     )
     parser.add_argument(
-        "--submit-url",
-        default="https://my.cdash.org/submit.php?project=rocprofiler-compute",
-        help="CDash submission URL",
+        "-j", "--build-jobs", help="Number of build tasks", default=BUILD_JOBS, type=int
     )
     parser.add_argument(
-        "--cdash-host",
-        default="my.cdash.org",
-        help="CDash host (for older CMake)",
+        "-B", "--binary-dir", help="Build directory", default=BINARY_DIR, type=str
     )
     parser.add_argument(
-        "--submit-path",
-        default="/submit.php?project=rocprofiler-compute",
-        help="CDash submission path (for older CMake)",
+        "-S", "--source-dir", help="Source directory", default=SOURCE_DIR, type=str
     )
     parser.add_argument(
-        "--site",
-        default=None,
-        help="Site name for CDash (auto-detected if not provided)",
-    )
-    parser.add_argument(
-        "--source-dir",
-        "-S",
-        default=None,
-        help="Source directory path (auto-detected if not provided)",
-    )
-    parser.add_argument(
-        "--binary-dir",
-        "-B",
-        default=None,
-        help="Binary directory path (defaults to source-dir/build)",
-    )
-    parser.add_argument(
+        "-M",
         "--mode",
-        default="Experimental",
-        choices=["Experimental", "Nightly", "Continuous"],
-        help="CTest dashboard mode",
+        help="Dashboard mode",
+        default=DASHBOARD_MODE,
+        choices=("Continuous", "Nightly", "Experimental"),
+        type=str,
     )
     parser.add_argument(
-        "--build-jobs",
-        "-j",
+        "-T",
+        "--stages",
+        help="Dashboard stages",
+        nargs="+",
+        default=DASHBOARD_STAGES,
+        choices=DASHBOARD_STAGES,
+        type=str,
+    )
+    parser.add_argument(
+        "--submit-url", help="CDash submission site", default=SUBMIT_URL, type=str
+    )
+    parser.add_argument(
+        "--repeat-until-pass",
+        help="<N> for --repeat until-pass:<N>",
+        default=3,
         type=int,
-        default=8,
-        help="Number of parallel build jobs",
     )
     parser.add_argument(
-        "--install",
-        action="store_true",
-        help="Build install target instead of all target",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Generate dashboard script but don't execute",
-    )
-    parser.add_argument(
-        "--pytest-numprocs",
+        "--repeat-until-fail",
+        help="<N> for --repeat until-fail:<N>",
+        default=None,
         type=int,
-        default=4,
-        help="Number of parallel processes for pytest",
+    )
+    parser.add_argument(
+        "--repeat-after-timeout",
+        help="<N> for --repeat after-timeout:<N>",
+        default=2,
+        type=int,
     )
 
-    args, unknown = parser.parse_known_args()
+    return parser.parse_args(args)
 
-    args.cmake_args = []
-    args.ctest_args = []
 
-    is_monorepo, monorepo_root, project_root = detect_repo_structure()
+def parse_args(args=None):
+    if args is None:
+        args = sys.argv[1:]
 
-    if not args.source_dir:
-        args.source_dir = str(project_root)
+    index = 0
+    input_args = []
+    ctest_args = []
+    cmake_args = []
+    data = [input_args, cmake_args, ctest_args]
 
-    if not args.binary_dir:
-        args.binary_dir = os.path.join(args.source_dir, "build")
-
-    if not args.site:
-        if is_monorepo:
-            args.site = f"Monorepo-{os.uname().nodename}"
+    for itr in args:
+        if itr == "--":
+            index += 1
+            if index > 2:
+                raise RuntimeError("Usage: <options> -- <ctest-args> -- <cdash-args>")
         else:
-            args.site = os.uname().nodename
+            data[index].append(itr)
 
-    source_dir = Path(args.source_dir).absolute()
-    binary_dir = Path(args.binary_dir).absolute()
+    cdash_args = parse_cdash_args(input_args)
 
-    print("=" * 80)
-    print("rocprofiler-compute CI Dashboard")
-    print("=" * 80)
-    print(f"Repository type: {'Monorepo' if is_monorepo else 'Standalone'}")
-    print(f"Source directory: {source_dir}")
-    print(f"Binary directory: {binary_dir}")
-    print(f"Build name: {args.build_name}")
-    print(f"Dashboard mode: {args.mode}")
-    print(f"CDash project: {args.project_name}")
-    print(f"Site: {args.site}")
-    print("=" * 80)
+    if cdash_args.coverage:
+        cmake_args += ["-DENABLE_COVERAGE=ON"]
 
-    script_content = generate_ctest_dashboard_script(args, source_dir, binary_dir)
+    def get_repeat_val(_param):
+        _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
+        return [f"{_param}:{_value}"] if _value is not None and _value > 1 else []
 
-    if args.dry_run:
-        print("\nGenerated CTest Dashboard Script:")
-        print("=" * 80)
-        print(script_content)
-        print("=" * 80)
-        return 0
+    repeat_args = (
+        get_repeat_val("until-pass")
+        + get_repeat_val("until-fail")
+        + get_repeat_val("after-timeout")
+    )
+    ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
-    binary_dir.mkdir(parents=True, exist_ok=True)
+    return [cdash_args, cmake_args, ctest_args]
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".cmake", delete=False, dir=binary_dir
-    ) as f:
-        f.write(script_content)
-        script_path = f.name
 
-    print(f"\nDashboard script: {script_path}")
-    print("=" * 80)
+def run(*args, **kwargs):
+    import subprocess
 
-    try:
-        cmd = ["ctest", "-S", script_path, "-V"]
-        print(f"Running: {' '.join(cmd)}")
-        print("=" * 80)
-        print()
-
-        process = subprocess.Popen(
-            cmd,
-            cwd=source_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-        )
-
-        for line in process.stdout:
-            print(line, end="")
-
-        returncode = process.wait()
-
-        print()
-        print("=" * 80)
-        if returncode == 0:
-            print("✅ Dashboard completed successfully!")
-        else:
-            print(f"⚠️  Dashboard completed with return code: {returncode}")
-        print("=" * 80)
-
-        return returncode
-
-    except Exception as e:
-        print(f"\n❌ Error executing dashboard script: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
-    finally:
-        try:
-            os.unlink(script_path)
-        except Exception:
-            pass
+    return subprocess.run(*args, **kwargs)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    args, cmake_args, ctest_args = parse_args()
+
+    if not os.path.exists(args.binary_dir):
+        os.makedirs(args.binary_dir)
+
+    from textwrap import dedent
+
+    _config = dedent(generate_custom(args, cmake_args, ctest_args))
+    _script = dedent(generate_dashboard_script(args))
+
+    with open(os.path.join(args.binary_dir, "CTestCustom.cmake"), "w") as f:
+        f.write(f"{_config}\n")
+
+    with open(os.path.join(args.binary_dir, "dashboard.cmake"), "w") as f:
+        f.write(f"{_script}\n")
+
+    CTEST_CMD = which("ctest", require=True)
+
+    dashboard_args = ["-D"]
+    for itr in args.stages:
+        dashboard_args.append(f"{args.mode}{itr}")
+
+    try:
+        run(
+            [CTEST_CMD]
+            + dashboard_args
+            + [
+                "-S",
+                os.path.join(args.binary_dir, "dashboard.cmake"),
+                "--output-on-failure",
+                "-V",
+            ]
+            + ctest_args,
+            check=True,
+        )
+    finally:
+        if "-VV" not in ctest_args:
+            for file in glob.glob(
+                os.path.join(args.binary_dir, "Testing/**"), recursive=True
+            ):
+                if not os.path.isfile(file):
+                    continue
+                print(f"\n\n\n###### Reading {file}... ######\n\n\n")
+                with open(file, "r") as inpf:
+                    fdata = inpf.read()
+                    if "LastTest" not in file and "Coverage" not in file:
+                        print(fdata)
+                    oname = os.path.basename(file)
+                    if oname.endswith(".log"):
+                        oname += ".log"
+                    with open(os.path.join(args.binary_dir, oname), "w") as outf:
+                        print(f"\n\n###### Writing {oname}... ######\n\n")
+                        outf.write(fdata)

@@ -1,7 +1,7 @@
 # rocprofiler-systems Pull Request
 
 ## Related Issue
-<!-- Please link to the external GitHub issue(s) that this PR addresses. 
+<!-- Please link to the external GitHub issue(s) that this PR addresses.
   If providing a JIRA ticket, please don't include an internal link -->
 - [ ] Closes #<issue number>
 
