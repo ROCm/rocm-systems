@@ -136,6 +136,19 @@ jobs:
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 
+    - name: Check for Leftover Buffered Files
+      timeout-minutes: 5
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+          echo "Error: Found leftover buffered storage files in /tmp:"
+          ls -lh /tmp/buffered*
+          exit 1
+        else
+          echo "✓ No buffered storage files found in /tmp"
+        fi
+
     - name: Test Clean Up
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/

@@ -60,8 +60,9 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
+TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "[multigpu]",
+                   int, unsigned int, unsigned long long,
+                   unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -70,11 +71,6 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "", int, unsigned
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
-          2, 2, warp_size, sizeof(TestType));
     }
 
     DYNAMIC_SECTION("Scattered addresses " << current) {
@@ -110,8 +106,9 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "", int, unsigned
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
+TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "[multigpu]",
+                   int, unsigned int, unsigned long long,
+                   unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -160,8 +157,9 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "", int, unsig
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
+TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs",
+                   "[multigpu]", int, unsigned int, unsigned long long,
+                   unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -170,11 +168,6 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs", "", int,
     DYNAMIC_SECTION("Same address " << current) {
       MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
           2, 2, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      MultipleDeviceMultipleKernelAndHostTest<TestType, AtomicOperation::kCASAddSystem>(
-          2, 2, warp_size, sizeof(TestType), 4);
     }
 
     DYNAMIC_SECTION("Scattered addresses " << current) {

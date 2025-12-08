@@ -47,7 +47,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 	/* Support is only for dGPUs */
 
 
-	if (!hsakmt_fmm_get_handle(MemoryAddress, &handle, &size_offset)) {
+	if (!hsakmt_fmm_get_handle(&hsakmt_primary_kfd_ctx, MemoryAddress, &handle, &size_offset)) {
 		pr_err("Address/size out of range: %p/%lu\n", MemoryAddress, MemorySizeInBytes);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -66,7 +66,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 	}
 
 	args.in.handle_offset = size_offset;
-	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_AIS_OP, &args);
+	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_AIS_OP, &args);
 
 	if (SizeCopiedInBytes)
 		*SizeCopiedInBytes = args.out.size_copied;

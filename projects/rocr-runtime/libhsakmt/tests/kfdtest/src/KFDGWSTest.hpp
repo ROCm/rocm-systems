@@ -33,6 +33,9 @@ class KFDGWSTest : public KFDBaseComponentTest {
     KFDGWSTest() {}
     ~KFDGWSTest() {}
 
+    void Allocate(int gpuNode);
+    void Semaphore(int gpuNode);
+
  protected:
     virtual void SetUp();
     virtual void TearDown();

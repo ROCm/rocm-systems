@@ -51,6 +51,8 @@ static pid_t parent_pid = -1;
 int hsakmt_debug_level;
 bool hsakmt_forked;
 
+HsaKFDContext hsakmt_primary_kfd_ctx = {.fd = -1};
+
 /* hsakmt_is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
  * because the process can fork without calling the fork function in
@@ -99,16 +101,18 @@ static void child_fork_handler(void)
  * The topology information is duplicated from the parent is valid
  * in the child process so it is not cleared
  */
-static void clear_after_fork(void)
+static void clear_after_fork(HsaKFDContext *ctx)
 {
-	hsakmt_clear_process_doorbells();
-	hsakmt_clear_events_page();
-	hsakmt_fmm_clear_all_mem();
+	hsakmt_clear_process_doorbells(ctx);
+	hsakmt_clear_events_page(ctx);
+	hsakmt_fmm_clear_all_mem(ctx);
 	hsakmt_destroy_device_debugging_memory();
-	if (hsakmt_kfd_fd) {
-		close(hsakmt_kfd_fd);
-		hsakmt_kfd_fd = -1;
-	}
+
+	int fd = ctx->fd;
+	if (fd >= 0) {
+		hsakmt_kfdcontext_clear_context(ctx);
+		close(fd);
+ 	}
 	if (hsakmt_udmabuf_dev_fd > 0) {
 		close(hsakmt_udmabuf_dev_fd);
 		hsakmt_udmabuf_dev_fd = -1;
@@ -150,7 +154,7 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 {
 	HSAKMT_STATUS result;
 	int fd = -1;
@@ -166,7 +170,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 	 * belong to the parent
 	 */
 	if (hsakmt_is_forked_child())
-		clear_after_fork();
+		clear_after_fork(&hsakmt_primary_kfd_ctx);
 
 	if (hsakmt_kfd_open_count == 0) {
 		static bool atfork_installed = false;
@@ -184,15 +188,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		// Check if we are using the hsakmtmodel and setup initial state
 		model_init_env_vars();
 
-		if (hsakmt_kfd_fd < 0 && !hsakmt_use_model) {
+		if (hsakmt_primary_kfd_ctx.fd < 0 && !hsakmt_use_model) {
 			fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
 			if (fd == -1) {
 				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 				goto open_failed;
 			}
-
-			hsakmt_kfd_fd = fd;
+			hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
 		}
 
 		init_page_size();
@@ -216,8 +219,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		useSvmStr = getenv("HSA_USE_SVM");
 		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
 		if(!hsakmt_use_model)
-			result = hsakmt_topology_sysfs_get_system_props(&sys_props);
-		
+			result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;
 
@@ -227,6 +230,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 			pr_warn("Insufficient Memory. Debugging unavailable\n");
 
 		hsakmt_init_counter_props(sys_props.NumNodes);
+		*pCtx = &hsakmt_primary_kfd_ctx;
 
 		if (!atfork_installed) {
 			/* Atfork handlers cannot be uninstalled and
@@ -241,6 +245,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		}
 	} else {
 		hsakmt_kfd_open_count++;
+		*pCtx = &hsakmt_primary_kfd_ctx;
 		result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
 	}
 
@@ -256,7 +261,7 @@ open_failed:
 	return result;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 {
 	HSAKMT_STATUS result;
 
@@ -266,7 +271,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 		if (--hsakmt_kfd_open_count == 0) {
 			hsakmt_destroy_counter_props();
 			hsakmt_destroy_device_debugging_memory();
-			hsakmt_fmm_clear_all_aperture();
+			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;
@@ -276,4 +281,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 	pthread_mutex_unlock(&hsakmt_mutex);
 
 	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
+{
+	HsaKFDContext *pCtx = NULL;
+	return hsaKmtOpenKFDCtx(&pCtx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
+{
+	return hsaKmtCloseKFDCtx();
 }

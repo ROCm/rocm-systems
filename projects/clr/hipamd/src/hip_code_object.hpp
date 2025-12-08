@@ -156,6 +156,7 @@ class StatCO : public CodeObject {
   FatBinaryInfo** addFatBinary(const void* data, bool initialized, bool& success);
   hipError_t removeFatBinary(FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
+  void RemoveAllFatBinaries();
 
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
   hipError_t registerStatFunction(const void* hostFunction, Function* func);

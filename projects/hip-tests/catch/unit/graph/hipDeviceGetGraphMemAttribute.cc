@@ -309,7 +309,8 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional") {
   Unit_hipDeviceGetGraphMemAttribute_Functional();
 }
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device") {
+TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device",
+          "[multigpu]") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

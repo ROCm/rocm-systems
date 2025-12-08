@@ -27,8 +27,8 @@ set -e
 # Arguments
 TEST_APP=$1
 ROCPROFV3=$2
-OUTPUT_DIR=$3
-LOG_LEVEL=$4
+OUTPUT_DIR=${3:-${PWD}}
+LOG_LEVEL=${4:-info}
 OUTPUT_FILENAME=${5:-out}
 
 # Set environment variables required for attachment
@@ -43,6 +43,21 @@ OUTPUT_FORMAT="csv json rocpd"
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+
+# Check for permissions. We need to be able to ptrace any process in the system. (ptrace_scope == 0)
+# First, if the ptrace_scope variable is not present, we assume there is no restriction and we can proceed normally.
+# Next, if ptrace_scope would disallow this test, also confirm we are not root (which would allow it anyways.) (id -u != 0)
+# Finally, confirm this process or python3 doesn't have CAP_SYS_PTRACE, which would allow the test also.
+if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
+&& [ $(cat /proc/sys/kernel/yama/ptrace_scope) -ne 0 ]                   \
+&& [ $(id -u) -ne 0 ]                                                    \
+&& [[ $(getpcaps self) != *"cap_sys_ptrace"* ]]                          \
+&& [[ $(getcap $(readlink -f $(which python3))) != *"cap_sys_ptrace"* ]]
+    then
+    echo "ptrace_scope is not 0, user is not root, and CAP_SYS_PTRACE is not present, so test cannot be completed. This test is skipped."
+    touch ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped
+    exit 0
+fi
 
 echo "Starting attachment test (${OUTPUT_FORMAT} format)..."
 
@@ -72,7 +87,7 @@ echo "Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)
 
 # Output the command and environment for debugging
 echo "===== COMMAND TO EXECUTE ====="
-echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}"
+echo "${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}"
 echo ""
 echo "===== ENVIRONMENT VARIABLES ====="
 env | sort
@@ -80,7 +95,7 @@ echo "===== END ENVIRONMENT ====="
 echo ""
 
 # Run rocprofv3 with --attach option
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} -o ${OUTPUT_FILENAME:-out}
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out}
 
 echo "${OUTPUT_FORMAT} profiler detached successfully"
 

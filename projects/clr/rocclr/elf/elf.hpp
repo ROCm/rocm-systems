@@ -36,12 +36,6 @@ using amd::ELFIO::Elf64_Shdr;
 // These two definitions need to stay in sync with
 // the definitions elfdefinitions.h until they get
 // properly upstreamed to gcc/libelf.
-#ifndef EM_HSAIL
-#define EM_HSAIL 0xAF5A
-#endif
-#ifndef EM_HSAIL_64
-#define EM_HSAIL_64 0xAF5B
-#endif
 #ifndef EM_AMDIL
 #define EM_AMDIL 0x4154
 #endif
@@ -56,9 +50,6 @@ using amd::ELFIO::Elf64_Shdr;
 #endif
 #ifndef ELFOSABI_AMD_OPENCL
 #define ELFOSABI_AMD_OPENCL 201
-#endif
-#ifndef ELFOSABI_HSAIL
-#define ELFOSABI_HSAIL 202
 #endif
 #ifndef ELFOSABI_AMDIL
 #define ELFOSABI_AMDIL 203
@@ -88,14 +79,6 @@ class Elf {
 
     OCL_TARGETS_LAST,
   } ElfTargets;
-
-  typedef enum {
-    CAL_PLATFORM = 0,
-    CPU_PLATFORM = 1,
-    COMPLIB_PLATFORM = 2,
-    LC_PLATFORM = 3,
-    LAST_PLATFORM = 4
-  } ElfPlatform;
 
   typedef enum {
     LLVMIR = 0,
@@ -301,9 +284,8 @@ class Elf {
   bool getNote(const char* noteName, char** noteDesc, size_t* descSize);
 
 
-  /* Get/set machine and platform (target) for which elf is built */
-  bool getTarget(uint16_t& machine, ElfPlatform& platform) const;
-  bool setTarget(uint16_t machine, ElfPlatform platform);
+  /* Set machine and platform (target) for which elf is built */
+  bool setTarget(uint16_t machine);
 
   /* Get/set elf type field from header */
   bool getType(uint16_t& type) const;

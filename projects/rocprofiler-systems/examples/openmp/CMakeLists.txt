@@ -32,7 +32,11 @@ add_executable(
 )
 
 option(USE_CLANG_OMP "Use the clang OpenMP if available" ON)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(OpenMP_C_FLAGS "-fopenmp=libomp")
+    set(OpenMP_CXX_FLAGS "-fopenmp=libomp")
+
     find_package(OpenMP REQUIRED)
     target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
     set(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY

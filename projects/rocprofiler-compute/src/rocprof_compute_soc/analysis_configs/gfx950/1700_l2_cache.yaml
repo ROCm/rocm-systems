@@ -706,7 +706,7 @@ Panel Config:
       requests are only considered atomic by Infinity Fabric if they are targeted
       at non-write-cacheable memory, such as fine-grained memory allocations or uncached
       memory allocations on the MI2XX.
-    Read Stall: |-
+    Read Stall: >-
       The ratio of the total number of cycles the L2-Fabric interface was
       stalled on a read request to any destination (local HBM, remote PCIe\xAE
       connected accelerator or CPU, or remote Infinity Fabric connected accelerator

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3762,6 +3762,11 @@ inline static hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t 
 
 inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   return hipCUResultTohipError(cuKernelGetName(name, kernel));
+}
+
+inline static hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                               size_t* paramSize) {
+  return hipCUResultTohipError(cuKernelGetParamInfo(kernel, paramIndex, paramOffset, paramSize));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,

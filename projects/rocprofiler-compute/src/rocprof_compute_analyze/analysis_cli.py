@@ -60,6 +60,12 @@ class cli_analysis(OmniAnalyze_Base):
                     workload.raw_pmc
                 )
 
+            if self._profiling_config.get("iteration_multiplexing") is not None:
+                workload.raw_pmc = self.iteration_multiplex_merge_counters(
+                    workload.raw_pmc,
+                    policy=self._profiling_config["iteration_multiplexing"],
+                )
+
             file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
                 raw_data_dir=path_info[0],

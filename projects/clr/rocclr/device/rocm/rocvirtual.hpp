@@ -118,6 +118,11 @@ class Timestamp : public amd::ReferenceCountedObject {
   bool hasHwProfiling_ = false;   //!< If TRUE then HwProfiling is enabled for the command
   bool blocking_ = true;          //!< If TRUE callback is blocking
 
+  //! Extract timing from a single signal and update accumulators
+  void ExtractSignalTiming(ProfilingSignal* signal,
+                           uint64_t& start, uint64_t& end,
+                           uint64_t& sdmaStart, uint64_t& sdmaEnd);
+
   Timestamp(const Timestamp&) = delete;
   Timestamp& operator=(const Timestamp&) = delete;
 
@@ -149,7 +154,9 @@ class Timestamp : public amd::ReferenceCountedObject {
   const bool HwProfiling() const { return hasHwProfiling_; }
 
   //! Finds execution ticks on GPU
-  void checkGpuTime();
+  //! If single_signal is nullptr, processes all signals and clears the list
+  //! If single_signal is provided, processes only that signal with merge enabled
+  void checkGpuTime(ProfilingSignal* single_signal = nullptr);
 
   // Start a timestamp (get timestamp from OS)
   void start() { start_ = amd::Os::timeNanos(); }
@@ -196,7 +203,7 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 4;
+    static constexpr uint32_t kPoolNumSignals = 16;
     ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
         : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
     ~ManagedBuffer();
@@ -272,10 +279,7 @@ class VirtualGPU : public device::VirtualDevice {
                               Timestamp* ts = nullptr, bool attach_signal = true);
 
     //! Wait for the curent active signal. Can idle the queue
-    bool WaitCurrent() {
-      ProfilingSignal* signal = signal_list_[current_id_];
-      return CpuWaitForSignal(signal);
-    }
+    bool WaitCurrent();
 
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
@@ -311,11 +315,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
 
     //! Wait for the next active signal
-    void WaitNext() {
-      size_t next = (current_id_ + 1) % signal_list_.size();
-      ProfilingSignal* signal = signal_list_[next];
-      CpuWaitForSignal(signal);
-    }
+    void WaitNext();
 
     //! Wait for the provided signal
     bool CpuWaitForSignal(ProfilingSignal* signal);
@@ -411,7 +411,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Returns memory dependency class
   MemoryDependency& memoryDependency() { return memoryDependency_; }
 
-  //! Detects memory dependency for HSAIL kernels and uses appropriate AQL header
+  //! Detects memory dependency for HSA kernels and uses appropriate AQL header
   bool processMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
                          const_address params,       //!< Pointer to the param's store
                          size_t& ldsAddress,         //!< LDS usage
@@ -448,13 +448,11 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command() const { return command_; }
 
   void* allocKernArg(size_t size, size_t alignment);
-  bool isFenceDirty() const { return fence_dirty_; }
-  void setFenceDirty(bool state) { fence_dirty_ = state; }
+  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
   void HiddenHeapInit();
-  void setLastUsedSdmaEngine(uint32_t mask) { lastUsedSdmaEngineMask_ = mask; }
-  uint32_t getLastUsedSdmaEngine() const { return lastUsedSdmaEngineMask_.load(); }
   uint64_t getQueueID();
 
   //! Analyzes a crashed AQL queue to find a broken AQL packet
@@ -623,7 +621,6 @@ class VirtualGPU : public device::VirtualDevice {
                                        //!< kUnknown/kFlushedToDevice/kFlushedToSystem
   std::atomic<bool> fence_dirty_;      //!< Fence modified flag
 
-  std::atomic<uint> lastUsedSdmaEngineMask_;  //!< Last Used SDMA Engine mask
   uint64_t last_write_index_ = 0;             //!< The last HW queue write index for any packet
   uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
                                               //!< with a complition signal

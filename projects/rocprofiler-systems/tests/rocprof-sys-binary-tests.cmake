@@ -232,7 +232,7 @@ rocprofiler_systems_add_bin_test(
     LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
-        "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
+        "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
     FAIL_REGEX "ROCPROFSYS_TRACE|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
@@ -322,8 +322,7 @@ rocprofiler_systems_add_bin_test(
 
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
 file(
-    WRITE
-    "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
+    WRITE "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
     "
 #
 # empty config file

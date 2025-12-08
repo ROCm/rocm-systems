@@ -54,12 +54,12 @@ ModuleGuard ModuleGuard::LoadModuleDataRTC(const char* code) {
 
 // Load module into buffer instead of mapping file to avoid platform specific mechanisms
 std::vector<char> LoadModuleIntoBuffer(const char* path_string) {
-  fs::path p(path_string);
-  const auto file_size = fs::file_size(p);
-  std::ifstream f(p, std::ios::binary | std::ios::in);
-  REQUIRE(f);
-  std::vector<char> empty_module(file_size);
-  REQUIRE(f.read(empty_module.data(), file_size));
+  std::ifstream file_stream(path_string, std::ios::binary | std::ios::in);
+  REQUIRE(file_stream);
+  std::vector<char> empty_module((std::istreambuf_iterator<char>(file_stream)),
+                                 std::istreambuf_iterator<char>());
+  file_stream.close();
+  empty_module.push_back('\0');
   return empty_module;
 }
 

@@ -43,7 +43,6 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 # Options
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
-option(HIP_OFFICIAL_BUILD "Enable/Disable for mainline/staging builds" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 if(MSVC)
@@ -86,7 +85,7 @@ endmacro()
 #############################
 # Setup version information
 #############################
-find_package(Perl REQUIRED)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Git)
 
 set(ENV{HIP_PATH} "")
@@ -147,7 +146,7 @@ if(GIT_FOUND)
 
   # get date information based on UTC
   # use the last two digits of year + week number + day in the week as HIP_VERSION_GITDATE
-  execute_process(COMMAND ${PERL_EXECUTABLE} "-MPOSIX=strftime" "-le" "print strftime \'%y%W%w\',gmtime(${HIP_VERSION_UNIXDATE})"
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import time; print(time.strftime('%y%W%w', time.gmtime(${HIP_VERSION_UNIXDATE})))"
     RESULT_VARIABLE git_result
     OUTPUT_VARIABLE git_output
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -168,9 +167,6 @@ if(GIT_FOUND)
 
   set(HIP_VERSION_BUILD_ID 0)
   set(HIP_VERSION_BUILD_NAME "")
-  if(NOT DEFINED ENV{HIP_OFFICIAL_BUILD} AND NOT HIP_OFFICIAL_BUILD)
-    set(HIP_VERSION_PATCH ${HIP_VERSION_GITDATE})
-  endif()
 
   if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(HIP_PACKAGING_VERSION_PATCH ${HIP_VERSION_PATCH}.$ENV{ROCM_LIBPATCH_VERSION})
@@ -303,10 +299,6 @@ if (UNIX)
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX ${HIP_DEFAULT_INSTALL_PREFIX} CACHE PATH "Installation path for HIP" FORCE)
-endif()
-
-if(DEV_LOG_ENABLE MATCHES "yes")
-  add_definitions(-DDEV_LOG_ENABLE)
 endif()
 
 # Set default install path as "${ROCM_PATH}", can override the path from cmake build.

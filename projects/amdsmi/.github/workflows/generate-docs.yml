@@ -1,0 +1,83 @@
+name: Generate Documentation
+
+on:
+  pull_request:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  push:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+
+jobs:
+  generate-docs:
+    name: Generate Documentation
+    runs-on: AMD-ROCm-Internal-dev1
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Get branch name for artifact naming
+        id: get_branch_info
+        run: |
+          BRANCH_NAME=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BRANCH_NAME="${{ github.head_ref }}"
+          else
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+          SANITIZED_NAME=$(echo "$BRANCH_NAME" | sed -e 's|/|-|g' -e 's|[^a-zA-Z0-9._-]||g' -e 's|^-*||' -e 's|-*$||')
+          if [[ -z "$SANITIZED_NAME" ]]; then
+            SANITIZED_NAME="docs-$(date +%s)"
+          fi
+          echo "sanitized_name=${SANITIZED_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Set Up Python Environment
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r docs/sphinx/requirements.txt
+
+      - name: Build Documentation
+        run: |
+          if [ ! -e "docs/.git" ]; then
+            if [ -d ".git" ]; then
+              ln -s ../.git docs/.git
+            fi
+          fi
+          cd docs
+          python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+      - name: Upload Documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-${{ steps.get_branch_info.outputs.sanitized_name }}
+          path: docs/_build/html/
+
+      - name: Generate Job Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # 📚 Documentation Generated Successfully!
+
+          ## 🚀 Quick Start
+          
+          1. **📥 Download** the artifact `documentation-${{ steps.get_branch_info.outputs.sanitized_name }}`
+          2. **📂 Extract** the ZIP file 
+          3. **🖱️ Double-click** `index.html`
+          4. **✅ Done!** Documentation opens with full formatting in your browser
+          EOF
