@@ -197,6 +197,8 @@ def to_int(
     if a is None:
         return None
     elif isinstance(a, (int, float, np.integer)):
+        if pd.isna(a):
+            return None
         return int(a)
     elif isinstance(a, pd.Series):
         return a.astype(int)
@@ -486,11 +488,17 @@ def update_denominator_string(equation: str, normal_unit: str) -> str:
         return ""
 
     equation_string = str(equation)
-
+    if "$denom" in equation_string:
+        print(f"DEBUG: normal_unit='{normal_unit}', keys={list(SUPPORTED_DENOM.keys())}")
+    
     if normal_unit in SUPPORTED_DENOM.keys():
         equation_string = re.sub(
             r"\$denom", SUPPORTED_DENOM[normal_unit], equation_string
         )
+    else:
+        # ADD THIS WARNING
+        if "$denom" in equation_string:
+            print(f"WARNING: normal_unit '{normal_unit}' not in SUPPORTED_DENOM!")
 
     return equation_string
 
@@ -808,7 +816,7 @@ def build_metric_value_string(
     for id, df in dfs.items():
         if dfs_type[id] == "metric_table":
             for expr in df.columns:
-                if expr in schema.SUPPORTED_FIELD:
+                if any(expr.lower() == field.lower() for field in schema.SUPPORTED_FIELD):
                     # NB: apply all build-in before building the whole string
                     df[expr] = df[expr].apply(
                         update_denominator_string, normal_unit=normal_unit
@@ -997,7 +1005,7 @@ def eval_metric(
         if dfs_type[df_id] == "metric_table":
             for row_id, row in df.iterrows():
                 for expr in df.columns:
-                    if expr in schema.SUPPORTED_FIELD and expr.lower() != "alias":
+                    if any(expr.lower() == field.lower() for field in schema.SUPPORTED_FIELD) and expr.lower() != "alias":
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
@@ -1011,7 +1019,10 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
+        console_warning(f"DEBUG: Evaluating {col} for row {row_id}")  
+        console_warning(f"DEBUG: Expression: {expr[:100]}...") 
         eval_result = metric_evaluator.eval_expression(expr)
+        console_warning(f"DEBUG: Result type: {type(eval_result)}, value: {str(eval_result)[:50]}") 
         dfs[df_id].loc[row_id, col] = eval_result
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)

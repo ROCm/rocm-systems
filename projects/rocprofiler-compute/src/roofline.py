@@ -563,6 +563,14 @@ class Roofline:
 
                 subplot_row = 1
                 skipAI = False
+            else:
+                console_warning('fig is None and no kernel names data provided')
+                # New figure without kernel names table
+                fig = make_subplots(
+                    rows=1,
+                    cols=1,
+                    subplot_titles=["Roofline Analysis - NO DATA"],
+                )
         else:
             # Adding to existing figure
             if hasattr(fig, "_grid_ref") and fig._grid_ref is not None:

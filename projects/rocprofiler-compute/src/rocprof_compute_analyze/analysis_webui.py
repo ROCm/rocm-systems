@@ -152,9 +152,27 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui gpu filter is {gcd_filter}")
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-            base_data[base_run].filter_kernel_ids = (
-                [str(k) for k in kernel_filter] if kernel_filter else []
-            )
+            # Convert kernel names to kernel ids
+            kernel_ids = []
+            if kernel_filter:
+                # Need to load raw kernel data to do the name->ID lookup
+                # Use raw_pmc to build a temporary mapping
+                if all([isinstance(k, int) for k in kernel_filter]):
+                    kernel_ids = [str(k) for k in kernel_filter]
+                else:
+                    raw_pmc = base_data[base_run].raw_pmc
+                    for kernel_item in kernel_filter:
+                        try:
+                            # Already an ID
+                            kernel_id = str(int(kernel_item))
+                            kernel_ids.append(kernel_id)
+                        except (ValueError, TypeError):
+                            matching_indices = raw_pmc[raw_pmc[('pmc_perf', 'Kernel_Name')] == kernel_item].index.tolist()
+                            kernel_ids.extend([str(idx) for idx in matching_indices])
+
+            
+            base_data[base_run].filter_kernel_ids = kernel_ids
+
             base_data[base_run].filter_gpu_ids = (
                 [int(g) for g in gcd_filter] if gcd_filter else []
             )
@@ -172,6 +190,16 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
+            )
+
+
+            # All filtering will occur here
+            parser.load_table_data(
+                workload=base_data[base_run],
+                dir_path=self.dest_dir,
+                is_gui=True,
+                args=args,
+                config=self._profiling_config,
             )
 
             # Only display basic metrics if no filters are applied
@@ -192,15 +220,6 @@ class webui_analysis(OmniAnalyze_Base):
                     for key in panel_configs
                     if key in basic_panels_keep
                 }
-
-            # All filtering will occur here
-            parser.load_table_data(
-                workload=base_data[base_run],
-                dir_path=self.dest_dir,
-                is_gui=True,
-                args=args,
-                config=self._profiling_config,
-            )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
@@ -252,6 +271,11 @@ class webui_analysis(OmniAnalyze_Base):
                     .lower()
                 )
 
+                console_debug('kernel_filter', kernel_filter)
+                console_debug('kernel_ids', kernel_ids)
+            
+                console_debug('base_data',base_data[base_run].dfs.keys())
+                console_debug('panel_configs',panel_configs.keys())
                 # Build content for a single panel
                 html_section = []
                 # Iterate over each table per section
@@ -261,7 +285,8 @@ class webui_analysis(OmniAnalyze_Base):
 
                         # The sys info table need to add index back
                         if t_type == "raw_csv_table" and "Info" in original_df.keys():
-                            original_df.reset_index(inplace=True)
+                            if original_df.index.name is not None and 'level_0' not in original_df.columns:
+                                original_df.reset_index(inplace=True)
 
                         content = determine_chart_type(
                             original_df=original_df,
