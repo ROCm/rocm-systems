@@ -1958,7 +1958,8 @@ static struct perf_counter_block navi_blocks[PERFCOUNTER_BLOCKID__MAX] = {
 	},
 };
 
-HSAKMT_STATUS hsakmt_get_block_properties(uint32_t node_id,
+HSAKMT_STATUS hsakmt_get_block_properties(HsaKFDContext *ctx,
+				   uint32_t node_id,
 				   enum perf_block_id block_id,
 				   struct perf_counter_block *block)
 {

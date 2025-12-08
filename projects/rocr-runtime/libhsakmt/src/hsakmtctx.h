@@ -838,6 +838,32 @@ hsaKmtGetClockCountersCtx(
     HSAuint32         NodeId,         //IN
     HsaClockCounters  *Counters);     //OUT
 
+/**
+  Retrieves information on the available HSA counters
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtPmcGetCounterPropertiesCtx(
+    HsaKFDContext         *ctx,                //IN
+    HSAuint32              NodeId,             //IN
+    HsaCounterProperties** CounterProperties   //OUT
+    );
+
+/**
+  Registers a set of (HW) counters to be used for tracing/profiling
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtPmcRegisterTraceCtx(
+    HsaKFDContext      *ctx,                //IN
+    HSAuint32           NodeId,             //IN
+    HSAuint32           NumberOfCounters,   //IN
+    HsaCounter*         Counters,           //IN
+    HsaPmcTraceRoot*    TraceRoot           //OUT
+    );
+
 /* Helper functions for calling KFD SVM ioctl */
 HSAKMT_STATUS
 HSAKMTAPI
