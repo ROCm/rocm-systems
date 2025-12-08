@@ -200,7 +200,8 @@ if(${ENABLE_TESTS})
     rocm_package_setup_client_component(
         tests
         DEPENDS
-            COMMON ${PACKAGE_NAME}
+            DEB ${PACKAGE_NAME}-dev
+            RPM ${PACKAGE_NAME}-devel
     )
     add_subdirectory(tests)
 endif()
