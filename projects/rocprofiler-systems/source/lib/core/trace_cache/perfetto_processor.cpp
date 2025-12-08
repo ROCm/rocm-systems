@@ -437,7 +437,70 @@ perfetto_processor_t::prepare_for_processing()
 {
     initialize_perfetto();
     setup_perfetto();
+
+    enable_categories_for_post_processing();
+
     start_session();
+}
+
+void
+perfetto_processor_t::enable_categories_for_post_processing()
+{
+    // Enable categories used for kernel/memory operations
+    trait::runtime_enabled<category::rocm>::set(true);
+    trait::runtime_enabled<category::rocm_kernel_dispatch>::set(true);
+    trait::runtime_enabled<category::rocm_memory_copy>::set(true);
+    trait::runtime_enabled<category::rocm_memory_allocate>::set(true);
+
+    // Enable categories used for sampling
+    trait::runtime_enabled<category::timer_sampling>::set(true);
+    trait::runtime_enabled<category::overflow_sampling>::set(true);
+    trait::runtime_enabled<category::sampling>::set(true);
+
+    // Enable categories used for user/host events
+    trait::runtime_enabled<category::user>::set(true);
+    trait::runtime_enabled<category::host>::set(true);
+
+    // Enable categories used for process/thread metrics
+    trait::runtime_enabled<category::process_page>::set(true);
+    trait::runtime_enabled<category::process_virt>::set(true);
+    trait::runtime_enabled<category::process_peak>::set(true);
+    trait::runtime_enabled<category::process_context_switch>::set(true);
+    trait::runtime_enabled<category::process_page_fault>::set(true);
+    trait::runtime_enabled<category::process_user_mode_time>::set(true);
+    trait::runtime_enabled<category::process_kernel_mode_time>::set(true);
+    trait::runtime_enabled<category::cpu_freq>::set(true);
+
+    // Enable categories used for thread metrics and counters
+    trait::runtime_enabled<category::thread_cpu_time>::set(true);
+    trait::runtime_enabled<category::thread_peak_memory>::set(true);
+    trait::runtime_enabled<category::thread_context_switch>::set(true);
+    trait::runtime_enabled<category::thread_page_fault>::set(true);
+    trait::runtime_enabled<category::thread_hardware_counter>::set(true);
+
+    // Enable categories used for GPU counter collection and communication
+    trait::runtime_enabled<category::rocm_counter_collection>::set(true);
+    trait::runtime_enabled<category::comm_data>::set(true);
+    trait::runtime_enabled<category::mpi>::set(true);
+
+    // Enable AMD SMI categories
+    trait::runtime_enabled<category::amd_smi>::set(true);
+    trait::runtime_enabled<category::amd_smi_gfx_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_umc_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_mm_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_temp>::set(true);
+    trait::runtime_enabled<category::amd_smi_power>::set(true);
+    trait::runtime_enabled<category::amd_smi_memory_usage>::set(true);
+    trait::runtime_enabled<category::amd_smi_vcn_activity>::set(true);
+    trait::runtime_enabled<category::amd_smi_jpeg_activity>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_link_width>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_link_speed>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_read_data>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_write_data>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_link_width>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_link_speed>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_acc>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_inst>::set(true);
 }
 
 void
@@ -668,9 +731,38 @@ perfetto_processor_t::handle(const region_sample& _rs)
         annotate_perfetto(ctx, annotations);
     };
 
-    tracing::push_perfetto_ts(category::rocm{}, _name.c_str(), _beg_ts,
-                              ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
-    tracing::pop_perfetto_ts(category::rocm{}, _name.c_str(), _end_ts);
+    auto emit_trace = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
+                                  ::perfetto::Flow::ProcessScoped(_corr_id),
+                                  add_annotations);
+        tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
+    };
+
+    auto try_category = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        if(_category == trait::name<CategoryT>::value)
+        {
+            emit_trace(category_tag);
+            return true;
+        }
+        return false;
+    };
+
+    bool dispatched =
+        (try_category(category::host{}) || try_category(category::user{}) ||
+         try_category(category::python{}) || try_category(category::mpi{}) ||
+         try_category(category::pthread{}) || try_category(category::kokkos{}) ||
+         try_category(category::rocm_hip_api{}) ||
+         try_category(category::rocm_hsa_api{}) ||
+         try_category(category::rocm_marker_api{}) ||
+         try_category(category::rocm_rccl{}));
+
+    if(!dispatched)
+    {
+        // Default to rocm category for backward compatibility
+        emit_trace(category::rocm{});
+    }
 }
 
 void

@@ -72,6 +72,7 @@ private:
     void       stop_session();
     void       flush(bool& perfetto_output_error);
     char_vec_t get_session_data();
+    void       enable_categories_for_post_processing();
 
     metadata_registry&                          m_metadata;
     uint64_t                                    m_process_id;
