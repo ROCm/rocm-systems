@@ -4,13 +4,13 @@ ROCM-CORE is a package which can be used to get ROCm release version, get ROCm i
 It is also important to note that ROCM-CORE takes the role as a base component on which all of ROCm can depend,
 to make it easy to remove all of ROCm with a package manager.
 
-getROCmVersion function provides the ROCm version. 
+getROCmVersion function provides the ROCm version.
 
 It also provides an example Lmod modules files for the ROCm release.
 
 Lmod module files can be loaded with the following commands.
 ``` shell
-module load rocm/x.y or 
+module load rocm/x.y or
 module load rocm
 ```
 
