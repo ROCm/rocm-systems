@@ -388,9 +388,7 @@ def create_summary_region_queries(
             region_categories.add(f"{matching_prefix}{first_part}")
 
     category_map = {
-        cat: [
-            c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")
-        ]
+        cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
         for cat in region_categories
         if "MARKER" not in cat.upper()
     }
