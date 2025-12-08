@@ -10,11 +10,13 @@ This directory contains simple, well-documented HIP examples specifically design
 **Concepts:** Basic HIP kernel, memory transfers, memory-bound kernels
 
 A simple vector addition example that demonstrates:
+
 - Basic HIP API usage (memory allocation, transfers, kernel launch)
 - Memory-bound kernel characteristics
 - How to identify data transfer bottlenecks
 
 **Profile it:**
+
 ```bash
 # Quick profiling
 rocprof-sys-sample --quick --hip-trace -- ./vector_add
@@ -24,6 +26,7 @@ rocprof-sys-sample --quick --hip-trace -- ./vector_add
 ```
 
 **What to look for:**
+
 - Ratio of kernel execution time to memory transfer time
 - Memory bandwidth utilization
 - GPU busy time vs. idle time
@@ -34,10 +37,12 @@ rocprof-sys-sample --quick --hip-trace -- ./vector_add
 **Concepts:** Kernel optimization, shared memory, performance comparison
 
 Implements two versions of matrix multiplication:
+
 - **Naive**: Straightforward implementation with poor memory locality
 - **Tiled**: Optimized version using shared memory for better cache utilization
 
 **Profile it:**
+
 ```bash
 # Compare kernel performance
 rocprof-sys-sample --quick --hip-trace -- ./matrix_multiply
@@ -48,6 +53,7 @@ rocprof-sys-run --hip-trace --rocm-events=MemUnitBusy,TCC_HIT,TCC_MISS -- ./matr
 ```
 
 **What to look for:**
+
 - Performance difference between naive and tiled kernels
 - Memory access patterns (naive has more cache misses)
 - Arithmetic intensity differences
@@ -61,11 +67,13 @@ rocprof-sys-run --hip-trace --rocm-events=MemUnitBusy,TCC_HIT,TCC_MISS -- ./matr
 **Concepts:** Async operations, concurrent kernel execution, stream management
 
 Demonstrates three execution modes:
+
 - **Sequential**: All kernels execute one after another
 - **Concurrent**: Multiple kernels execute simultaneously using HIP streams
 - **Async Memory**: Overlapping memory transfers with computation
 
 **Profile it:**
+
 ```bash
 # View concurrent execution timeline
 rocprof-sys-sample --quick --hip-trace -- ./streams
@@ -74,6 +82,7 @@ rocprof-sys-sample --quick --hip-trace -- ./streams
 ```
 
 **What to look for:**
+
 - In Perfetto timeline: overlapping kernel executions in concurrent mode
 - GPU utilization % (higher with concurrent execution)
 - Gaps between kernels in sequential mode
@@ -91,7 +100,7 @@ rocprof-sys-sample --quick --hip-trace -- ./streams
 
 ### Build Instructions
 
-#### As part of rocprofiler-systems build:
+#### As part of rocprofiler-systems build
 
 ```bash
 cd /path/to/rocprofiler-systems
@@ -99,7 +108,7 @@ cmake -B build -DROCPROFSYS_BUILD_EXAMPLES=ON
 cmake --build build --target vector_add matrix_multiply streams
 ```
 
-#### Standalone build:
+#### Standalone build
 
 ```bash
 cd examples/hip-quickstart
@@ -130,6 +139,7 @@ The executables will be in the `build` directory.
 #### Beginner Workflow (Sampling)
 
 1. **Quick profile:**
+
    ```bash
    rocprof-sys-sample --quick --hip-trace -- ./vector_add
    ```
@@ -141,11 +151,13 @@ The executables will be in the `build` directory.
 #### Intermediate Workflow (Instrumentation)
 
 1. **Instrument the binary:**
+
    ```bash
    rocprof-sys-instrument -o vector_add.inst -- ./vector_add
    ```
 
 2. **Run with profiling:**
+
    ```bash
    rocprof-sys-run --hip-trace --trace -- ./vector_add.inst
    ```
@@ -158,6 +170,7 @@ The executables will be in the `build` directory.
 #### Advanced Workflow (Hardware Counters)
 
 1. **Profile with specific counters:**
+
    ```bash
    export ROCPROFSYS_USE_ROCPROFILER=ON
    export ROCPROFSYS_ROCM_EVENTS="TCC_HIT,TCC_MISS,MemUnitBusy,GPUBusy"
@@ -175,7 +188,7 @@ The executables will be in the `build` directory.
 
 The text output shows function-level statistics:
 
-```
+```text
 |------------------|-------|---------|---------|
 | FUNCTION         | COUNT | SUM(ms) | % TOTAL |
 |------------------|-------|---------|---------|
@@ -190,12 +203,14 @@ The text output shows function-level statistics:
 ### Perfetto Traces
 
 Open in [ui.perfetto.dev](https://ui.perfetto.dev) to see:
+
 - **Timeline view**: When each operation occurred
 - **Thread activity**: CPU and GPU thread execution
 - **HIP API calls**: Memory operations, kernel launches
 - **Kernel execution**: Individual kernel instances
 
 **Navigation tips:**
+
 - Press `W` to zoom in, `S` to zoom out
 - Use `A` and `D` to pan left and right
 - Click on events to see details
@@ -206,12 +221,14 @@ Open in [ui.perfetto.dev](https://ui.perfetto.dev) to see:
 ### Q: Why is my kernel so slow?
 
 **Check:**
+
 1. Memory bandwidth utilization (is it memory-bound?)
 2. Kernel occupancy (are enough threads running?)
 3. Arithmetic intensity (FLOPs per byte transferred)
 4. Cache hit rates (is data reused effectively?)
 
 **Profile with:**
+
 ```bash
 rocprof-sys-run --rocm-events=MemUnitBusy,VALUBusy,TCC_HIT,TCC_MISS -- ./app.inst
 ```
@@ -219,12 +236,14 @@ rocprof-sys-run --rocm-events=MemUnitBusy,VALUBusy,TCC_HIT,TCC_MISS -- ./app.ins
 ### Q: How do I reduce memory transfer overhead?
 
 **Strategies:**
+
 1. Batch operations to amortize transfer cost
 2. Use async memory operations (`hipMemcpyAsync`)
 3. Keep data on device between kernels
 4. Use unified memory when appropriate
 
 **Profile with:**
+
 ```bash
 rocprof-sys-sample --hip-trace -- ./app
 # Look for hipMemcpy time in trace
@@ -233,12 +252,14 @@ rocprof-sys-sample --hip-trace -- ./app
 ### Q: How do I improve GPU utilization?
 
 **Strategies:**
+
 1. Use streams for concurrent kernel execution
 2. Overlap memory transfers with computation
 3. Launch multiple smaller kernels instead of sequential large ones
 4. Ensure kernel execution time > launch overhead
 
 **Profile with:**
+
 ```bash
 rocprof-sys-sample --quick --hip-trace -- ./app
 # Check GPUBusy percentage and timeline gaps
@@ -258,6 +279,7 @@ rocprof-sys-sample --quick --hip-trace -- ./app
 **Problem:** HIP not found
 
 **Solution:**
+
 ```bash
 # Ensure ROCm is in your path
 export PATH=/opt/rocm/bin:$PATH
@@ -272,6 +294,7 @@ hipconfig
 **Problem:** ROCm Systems Profiler not properly installed
 
 **Solution:**
+
 ```bash
 # Source the setup script
 source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
@@ -285,6 +308,7 @@ rocprof-sys-sample --version
 **Problem:** Trace file too large
 
 **Solution:**
+
 ```bash
 # Reduce trace size by profiling shorter runs
 ./vector_add 100000  # Smaller problem size

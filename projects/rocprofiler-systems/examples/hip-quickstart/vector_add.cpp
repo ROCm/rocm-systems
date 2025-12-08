@@ -46,21 +46,21 @@ SOFTWARE.
  * - Ratio of compute time to data transfer time
  */
 
+#include <cmath>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
-#include <cmath>
 
 // Error checking macro
-#define HIP_CHECK(cmd)                                                                       \
-    {                                                                                        \
-        hipError_t error = (cmd);                                                            \
-        if(error != hipSuccess)                                                              \
-        {                                                                                    \
-            std::cerr << "HIP error: " << hipGetErrorString(error)                           \
-                      << " at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
-            exit(EXIT_FAILURE);                                                              \
-        }                                                                                    \
+#define HIP_CHECK(cmd)                                                                   \
+    {                                                                                    \
+        hipError_t error = (cmd);                                                        \
+        if(error != hipSuccess)                                                          \
+        {                                                                                \
+            std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ \
+                      << ":" << __LINE__ << std::endl;                                   \
+            exit(EXIT_FAILURE);                                                          \
+        }                                                                                \
     }
 
 /**
@@ -77,7 +77,7 @@ __global__ void
 vector_add_kernel(const float* a, const float* b, float* c, size_t n)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if(idx < n)
     {
         // Simple addition - very low computational intensity
@@ -89,18 +89,15 @@ vector_add_kernel(const float* a, const float* b, float* c, size_t n)
  * @brief Verify the computation results
  */
 bool
-verify_results(const std::vector<float>& a, 
-               const std::vector<float>& b,
-               const std::vector<float>& c,
-               float tolerance = 1e-5f)
+verify_results(const std::vector<float>& a, const std::vector<float>& b,
+               const std::vector<float>& c, float tolerance = 1e-5f)
 {
     for(size_t i = 0; i < a.size(); ++i)
     {
         float expected = a[i] + b[i];
         if(std::abs(c[i] - expected) > tolerance)
         {
-            std::cerr << "Verification failed at index " << i 
-                      << ": expected " << expected 
+            std::cerr << "Verification failed at index " << i << ": expected " << expected
                       << ", got " << c[i] << std::endl;
             return false;
         }
@@ -121,7 +118,8 @@ main(int argc, char** argv)
     std::cout << "Vector Addition Example\n";
     std::cout << "======================\n";
     std::cout << "Vector size: " << n << " elements\n";
-    std::cout << "Memory per vector: " << (n * sizeof(float)) / (1024.0 * 1024.0) << " MB\n\n";
+    std::cout << "Memory per vector: " << (n * sizeof(float)) / (1024.0 * 1024.0)
+              << " MB\n\n";
 
     // Allocate and initialize host vectors
     std::vector<float> h_a(n);
@@ -152,16 +150,14 @@ main(int argc, char** argv)
 
     // Configure kernel launch parameters
     const int threads_per_block = 256;
-    const int blocks = (n + threads_per_block - 1) / threads_per_block;
+    const int blocks            = (n + threads_per_block - 1) / threads_per_block;
 
-    std::cout << "Launching kernel with " << blocks << " blocks of " 
-              << threads_per_block << " threads\n";
+    std::cout << "Launching kernel with " << blocks << " blocks of " << threads_per_block
+              << " threads\n";
 
     // Launch kernel
     // PROFILING POINT: Look for vector_add_kernel execution time
-    hipLaunchKernelGGL(vector_add_kernel,
-                       dim3(blocks),
-                       dim3(threads_per_block),
+    hipLaunchKernelGGL(vector_add_kernel, dim3(blocks), dim3(threads_per_block),
                        0,  // Shared memory
                        0,  // Stream
                        d_a, d_b, d_c, n);
@@ -196,10 +192,11 @@ main(int argc, char** argv)
 
     std::cout << "\nPROFILING TIPS:\n";
     std::cout << "1. Check the ratio of kernel time to memory transfer time\n";
-    std::cout << "2. For memory-bound kernels like this, look at memory bandwidth utilization\n";
-    std::cout << "3. Compare actual bandwidth to theoretical peak (~1.6 TB/s for MI200)\n";
+    std::cout << "2. For memory-bound kernels like this, look at memory bandwidth "
+                 "utilization\n";
+    std::cout
+        << "3. Compare actual bandwidth to theoretical peak (~1.6 TB/s for MI200)\n";
     std::cout << "4. Try varying vector size to see impact on performance\n";
 
     return EXIT_SUCCESS;
 }
-

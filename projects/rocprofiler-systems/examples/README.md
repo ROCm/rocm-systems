@@ -79,7 +79,7 @@ rocprof-sys-python -- ./script.py
 
 ### Building Examples
 
-#### Build all examples:
+#### Build all examples
 
 ```bash
 cd /path/to/rocprofiler-systems
@@ -87,7 +87,7 @@ cmake -B build -DROCPROFSYS_BUILD_EXAMPLES=ON
 cmake --build build
 ```
 
-#### Build specific example:
+#### Build specific example
 
 ```bash
 cd examples/hip-quickstart
@@ -260,12 +260,14 @@ Open `.proto` files in [ui.perfetto.dev](https://ui.perfetto.dev):
 ### Examples fail to build
 
 **Check ROCm installation:**
+
 ```bash
 hipconfig
 rocminfo
 ```
 
 **Verify CMake version:**
+
 ```bash
 cmake --version  # Should be 3.21+
 ```
@@ -273,12 +275,14 @@ cmake --version  # Should be 3.21+
 ### Profiling produces no output
 
 **Check environment:**
+
 ```bash
 which rocprof-sys-sample
 rocprof-sys-sample --version
 ```
 
 **Verify permissions:**
+
 ```bash
 # For CPU hardware counters
 cat /proc/sys/kernel/perf_event_paranoid  # Should be <= 2
@@ -287,6 +291,7 @@ cat /proc/sys/kernel/perf_event_paranoid  # Should be <= 2
 ### Application behavior changes when profiled
 
 **Reduce overhead:**
+
 ```bash
 # Use sampling instead of instrumentation
 rocprof-sys-sample -f 20 -- ./app  # Lower frequency

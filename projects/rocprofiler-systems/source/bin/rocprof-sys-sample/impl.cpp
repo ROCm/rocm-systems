@@ -233,25 +233,29 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     const auto* _desc = R"(
 Call-stack sampling profiler for applications without binary instrumentation.
 
-EXAMPLES:
-  Beginner (Quick Start):
-    rocprof-sys-sample --quick -- ./myapp
-    rocprof-sys-sample --wizard                    # Interactive setup
+QUICK REFERENCE:
+  Presets:  --quick (fast), --simple (minimal), --trace-hpc (HPC/MPI), --trace-ai (GPU/ML)
+  Output:   Results saved to rocprof-sys-output/ directory
+  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
 
-  Intermediate (Workload-Specific Presets):
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-sample --quick -- ./myapp
+
+  Workload-Specific Presets:
     rocprof-sys-sample --trace-hpc -- ./hpc_app    # HPC/MPI/OpenMP
     rocprof-sys-sample --trace-ai -- python train.py  # AI/ML/GPU
     rocprof-sys-sample --simple -- ./myapp          # Minimal overhead
 
-  Advanced (Custom Configuration):
+  Custom Configuration:
     rocprof-sys-sample -f 100 --trace --hip-trace -- ./myapp
     rocprof-sys-sample -o ./results myrun -- ./myapp
     mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
 
-QUICK HELP:
-  --cheatsheet        Show quick reference card
-  --wizard            Run interactive setup wizard
-  --help              Show full help (you are here)
+PROFILING WORKFLOW:
+  1. Profile:   rocprof-sys-sample --quick -- ./app
+  2. Analyze:   cat rocprof-sys-output/wall_clock.txt
+  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev
 )";
 
     auto parser = parser_t(argv[0], _desc);
@@ -305,28 +309,6 @@ QUICK HELP:
     if(_cols > parser.get_help_width() + 8)
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
-
-    parser.start_group("QUICK HELP", "Quick reference and setup assistance");
-    parser.add_argument({ "--cheatsheet" }, "Print quick reference card and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([&](parser_t& p) {
-            if(p.get<bool>("cheatsheet"))
-            {
-                rocprofsys::user_experience::print_cheatsheet();
-                exit(EXIT_SUCCESS);
-            }
-        });
-    parser.add_argument({ "--wizard" }, "Run interactive setup wizard and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([&](parser_t& p) {
-            if(p.get<bool>("wizard"))
-            {
-                rocprofsys::user_experience::run_interactive_wizard("sample");
-                exit(EXIT_SUCCESS);
-            }
-        });
 
     parser.start_group("DEBUG OPTIONS", "");
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
@@ -1012,7 +994,7 @@ QUICK HELP:
                                                "mutex-locks", "spin-locks", "rw-locks",
                                                "rocm" };
 
-#if (!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                         \
+#if(!defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0) &&                          \
     (!defined(ROCPROFSYS_USE_MPI_HEADERS) || ROCPROFSYS_USE_MPI_HEADERS == 0)
     _backend_choices.erase("mpip");
 #endif

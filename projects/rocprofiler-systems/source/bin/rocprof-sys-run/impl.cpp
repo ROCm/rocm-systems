@@ -303,25 +303,29 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     const auto* _desc = R"desc(
 Execute instrumented binaries with ROCm Systems Profiler configuration.
 
-EXAMPLES:
-  Beginner (Quick Start):
-    rocprof-sys-run --quick -- ./myapp.inst
-    rocprof-sys-run --wizard                     # Interactive setup
+QUICK REFERENCE:
+  Presets:  --quick (fast), --simple (minimal), --trace-hpc (HPC/MPI), --trace-ai (GPU/ML)
+  Output:   Results saved to rocprof-sys-output/ directory
+  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
 
-  Intermediate (Workload-Specific Presets):
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-run --quick -- ./myapp.inst
+
+  Workload-Specific Presets:
     rocprof-sys-run --trace-hpc -- ./hpc_app.inst   # HPC/MPI/OpenMP
     rocprof-sys-run --trace-ai -- ./gpu_app.inst    # AI/ML/GPU
     rocprof-sys-run --simple -- ./myapp.inst        # Minimal overhead
 
-  Advanced (Custom Configuration):
+  Custom Configuration:
     rocprof-sys-run --trace-buffer-size=500000 -- ./myapp.inst
     rocprof-sys-run -o ./results -- ./myapp.inst
     mpirun -n 4 rocprof-sys-run --trace-hpc -- ./mpi_app.inst
 
-QUICK HELP:
-  --cheatsheet        Show quick reference card
-  --wizard            Run interactive setup wizard
-  --help              Show full help (you are here)
+INSTRUMENTATION WORKFLOW:
+  1. Instrument: rocprof-sys-instrument -o app.inst -- ./app
+  2. Run:        rocprof-sys-run --quick -- ./app.inst
+  3. Analyze:    cat rocprof-sys-output/wall_clock.txt
     )desc";
 
     auto parser = parser_t{ basename(argv[0]), _desc };
@@ -344,28 +348,6 @@ QUICK HELP:
 
     rocprofsys::argparse::add_core_arguments(parser, _parser_data);
     rocprofsys::argparse::add_extended_arguments(parser, _parser_data);
-
-    parser.start_group("QUICK HELP", "Quick reference and setup assistance");
-    parser.add_argument({ "--cheatsheet" }, "Print quick reference card and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([&](parser_t& p) {
-            if(p.get<bool>("cheatsheet"))
-            {
-                rocprofsys::user_experience::print_cheatsheet();
-                exit(EXIT_SUCCESS);
-            }
-        });
-    parser.add_argument({ "--wizard" }, "Run interactive setup wizard and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([&](parser_t& p) {
-            if(p.get<bool>("wizard"))
-            {
-                rocprofsys::user_experience::run_interactive_wizard("run");
-                exit(EXIT_SUCCESS);
-            }
-        });
 
     parser.start_group("PRESET MODES",
                        "Simplified profiling presets for common use cases");

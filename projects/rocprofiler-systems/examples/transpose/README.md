@@ -59,12 +59,14 @@ rocprof-sys-run --hip-trace -- ./transpose.inst
 ## Understanding the Results
 
 **Good transpose implementation characteristics:**
+
 - High memory bandwidth utilization (close to theoretical peak)
 - High L2 cache hit rate
 - Minimal warp divergence
 - Efficient use of shared memory
 
 **Poor transpose implementation characteristics:**
+
 - Uncoalesced global memory accesses
 - Many cache misses
 - Bank conflicts in shared memory
@@ -78,4 +80,3 @@ rocprof-sys-run --hip-trace -- ./transpose.inst
 
 - [Metrics Glossary](../../docs/reference/metrics-glossary.rst) - Understanding performance metrics
 - [Hardware Counters Reference](../../docs/reference/hardware-counters-reference.rst) - GPU counter details
-

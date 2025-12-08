@@ -88,6 +88,79 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - I/O metrics
 - ... many more
 
+## New User Experience Features
+
+ROCm Systems Profiler includes several features designed to improve the experience for first-time users and streamline common profiling workflows.
+
+### Workload-Specific Presets
+
+Instead of manually configuring numerous options, use preset modes optimized for common workloads:
+
+- **`--quick`** - Fast profiling with sensible defaults for immediate insights
+- **`--simple`** - Flat profile only, minimal overhead
+- **`--detailed`** - Full trace with hardware counters
+- **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
+  - Automatically enables OMPT, MPIP, and relevant hardware counters
+- **`--trace-ai`** - Optimized for AI/ML/GPU workloads (PyTorch, TensorFlow, JAX)
+  - Automatically enables GPU tracing, RCCL, and increases buffer sizes
+
+**Example:**
+
+```bash
+# HPC application with MPI
+mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+
+# AI/ML application
+rocprof-sys-sample --trace-ai -- python train.py
+
+# Quick profiling any application
+rocprof-sys-sample --quick -- ./myapp
+```
+
+### Pre-Execution Information
+
+When using preset modes, ROCm Systems Profiler displays helpful information before execution:
+
+- Which preset is active
+- Where results will be saved
+- How to visualize the results
+- Warnings about potential issues (e.g., unwritable output directory)
+
+### Smart Validation
+
+The tools now validate your command-line options and provide clear guidance:
+
+- **Preset conflict detection**: Warns if multiple conflicting presets are specified
+- **Clear error messages**: Contextual help when problems occur
+- **Actionable solutions**: Step-by-step troubleshooting for common issues
+
+### Enhanced Help Text
+
+All binaries now feature structured help organized by skill level:
+
+- **Quick Start**: Get profiling immediately with minimal configuration
+- **Workload-Specific**: Use presets optimized for your application type
+- **Custom Configuration**: Advanced options for fine-grained control
+
+### Comprehensive Examples and Documentation
+
+New resources to help you learn profiling:
+
+**Examples:**
+
+- [examples/README.md](examples/README.md) - Complete guide to all examples with learning paths
+- [examples/hip-quickstart/](examples/hip-quickstart/) - Three well-documented HIP examples perfect for learning:
+  - `vector_add.cpp` - Memory-bound kernel basics
+  - `matrix_multiply.cpp` - Performance optimization comparison
+  - `streams.cpp` - Concurrent kernel execution
+
+**Documentation:**
+
+- [Quickstart Guide](docs/tutorials/quickstart.rst) - 5-minute guide to get started
+- [Profiling HIP Applications](docs/tutorials/profiling-hip-applications.rst) - GPU profiling tutorial
+- [Metrics Glossary](docs/reference/metrics-glossary.rst) - Understanding performance metrics
+- [Hardware Counters Reference](docs/reference/hardware-counters-reference.rst) - CPU and GPU counters explained
+
 ## Quick start
 
 ### Installation

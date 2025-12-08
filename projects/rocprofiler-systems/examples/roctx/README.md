@@ -90,9 +90,9 @@ for(int iter = 0; iter < max_iters; iter++)
     char label[64];
     snprintf(label, sizeof(label), "iteration_%d", iter);
     roctxRangePush(label);
-    
+
     // iteration work
-    
+
     roctxRangePop();
 }
 ```
@@ -134,4 +134,3 @@ Both can be used together for comprehensive profiling!
 - [ROCm Systems Profiler User API Guide](../../docs/how-to/using-rocprof-sys-api.rst)
 - [Understanding Output](../../docs/how-to/understanding-rocprof-sys-output.rst)
 - [ROCTracer Documentation](https://rocm.docs.amd.com/projects/roctracer/en/latest/)
-

@@ -484,25 +484,28 @@ main(int argc, char** argv)
     const auto* _desc = R"(
 Binary instrumentation tool for profiling and tracing applications.
 
-EXAMPLES:
-  Beginner (Quick Start):
-    rocprof-sys-instrument --quick -- ./myapp
-    rocprof-sys-instrument --wizard                  # Interactive setup
+QUICK REFERENCE:
+  Presets:  --quick (fast), --profile-only, --trace-hpc (HPC/MPI), --trace-ai (GPU/ML)
+  Modes:    Binary rewrite (-o file.inst) or runtime (no -o)
+  Output:   Results saved to rocprof-sys-output/ directory
 
-  Intermediate (Workload-Specific Presets):
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-instrument --quick -- ./myapp
+
+  Workload-Specific Presets:
     rocprof-sys-instrument --trace-hpc -o myapp.inst -- ./myapp  # HPC/MPI/OpenMP
     rocprof-sys-instrument --trace-ai -- python train.py         # AI/ML/GPU
     rocprof-sys-instrument --profile-only -o myapp.inst -- ./myapp
 
-  Advanced (Custom Configuration):
+  Custom Configuration:
     rocprof-sys-instrument -R '^compute_' -o myapp.inst -- ./myapp
     rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- ./myapp
     rocprof-sys-instrument -o myapp.inst -- ./myapp && rocprof-sys-run -- ./myapp.inst
 
-QUICK HELP:
-  --cheatsheet        Show quick reference card
-  --wizard            Run interactive setup wizard
-  --help              Show full help (you are here)
+INSTRUMENTATION MODES:
+  Binary Rewrite:  rocprof-sys-instrument -o app.inst -- ./app && rocprof-sys-run -- ./app.inst
+  Runtime:         rocprof-sys-instrument -- ./app
 )";
 
     parser_t parser("rocprof-sys-instrument", _desc);
@@ -510,30 +513,6 @@ QUICK HELP:
 
     parser.enable_help();
     parser.enable_version("rocprof-sys-instrument", ROCPROFSYS_ARGPARSE_VERSION_INFO);
-
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[QUICK HELP]" }, "");
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "--cheatsheet" }, "Print quick reference card and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([](parser_t& p) {
-            if(p.get<bool>("cheatsheet"))
-            {
-                rocprofsys::user_experience::print_cheatsheet();
-                exit(EXIT_SUCCESS);
-            }
-        });
-    parser.add_argument({ "--wizard" }, "Run interactive setup wizard and exit")
-        .max_count(1)
-        .dtype("bool")
-        .action([](parser_t& p) {
-            if(p.get<bool>("wizard"))
-            {
-                rocprofsys::user_experience::run_interactive_wizard("instrument");
-                exit(EXIT_SUCCESS);
-            }
-        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DEBUG OPTIONS]" }, "");

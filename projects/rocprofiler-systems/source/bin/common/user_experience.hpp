@@ -22,73 +22,18 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
-#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 namespace rocprofsys
 {
 namespace user_experience
 {
-inline void
-print_cheatsheet()
-{
-    std::cout << R"(
-╔════════════════════════════════════════════════════════════════════════╗
-║              ROCm Systems Profiler Quick Reference                     ║
-╠════════════════════════════════════════════════════════════════════════╣
-║                                                                        ║
-║ BASIC USAGE                                                            ║
-║   rocprof-sys-sample --quick -- ./app                                  ║
-║   rocprof-sys-instrument --quick -- ./app                              ║
-║   rocprof-sys-run --quick -- ./app.inst                                ║
-║                                                                        ║
-║ WORKLOAD PRESETS                                                       ║
-║   --quick           Fast profiling with sensible defaults              ║
-║   --simple          Flat profile, minimal overhead                     ║
-║   --detailed        Full trace + hardware counters                     ║
-║   --trace-hpc       MPI/OpenMP/HPC applications                        ║
-║   --trace-ai        PyTorch/TensorFlow/JAX                             ║
-║                                                                        ║
-║ PROFILING WORKFLOW                                                     ║
-║   1. Sample    rocprof-sys-sample --quick -- ./app                     ║
-║   2. Analyze   cat rocprof-sys-output/wall_clock.txt                   ║
-║   3. Visualize Open rocprof-sys-output/perfetto-trace.proto            ║
-║                in ui.perfetto.dev                                      ║
-║                                                                        ║
-║ COMMON OPTIONS                                                         ║
-║   -f 100            Sample at 100Hz (rocprof-sys-sample)               ║
-║   -o ./results      Custom output directory                            ║
-║   --hip-trace       Enable GPU tracing                                 ║
-║   -v, --verbose     Show detailed information                          ║
-║                                                                        ║
-║ INSTRUMENTATION                                                        ║
-║   Binary Rewrite:                                                      ║
-║     rocprof-sys-instrument -o app.inst -- ./app                        ║
-║     rocprof-sys-run -- ./app.inst                                      ║
-║                                                                        ║
-║   Runtime:                                                             ║
-║     rocprof-sys-instrument -- ./app                                    ║
-║                                                                        ║
-║ TIPS                                                                   ║
-║   • Start with --quick for immediate insights                          ║
-║   • Use --trace-hpc for compute-intensive codes                        ║
-║   • Use --trace-ai for GPU-heavy ML workloads                          ║
-║   • Check rocprof-sys-output/ for all results                          ║
-║                                                                        ║
-╚════════════════════════════════════════════════════════════════════════╝
-
-📖 Full help: rocprof-sys-sample --help
-🎓 Documentation: /opt/rocprofiler-systems/share/docs/
-🌐 Online: https://rocm.docs.amd.com/projects/rocprofiler-systems/
-
-)" << std::endl;
-}
-
 inline std::string
 get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH")
 {
@@ -238,117 +183,6 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
     return EXIT_SUCCESS;
 }
 
-inline void
-run_interactive_wizard(const std::string& tool_name)
-{
-    std::cout << "\n";
-    std::cout << "╔════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║       ROCm Systems Profiler Setup Wizard                  ║\n";
-    std::cout << "╚════════════════════════════════════════════════════════════╝\n";
-    std::cout << "\n";
-    std::cout << "This wizard will help you choose the right profiling options.\n\n";
-
-    std::cout << "What type of application are you profiling?\n";
-    std::cout << "  1. HIP/GPU application (ML, rendering, compute)\n";
-    std::cout << "  2. HPC application (MPI, OpenMP, parallel compute)\n";
-    std::cout << "  3. General CPU application\n";
-    std::cout << "  4. Python application\n";
-    std::cout << "\nYour choice [1-4]: ";
-    std::cout.flush();
-
-    int app_type = 0;
-    std::cin >> app_type;
-
-    if(app_type < 1 || app_type > 4)
-    {
-        std::cerr << "Invalid choice. Exiting wizard.\n";
-        exit(EXIT_FAILURE);
-    }
-
-    std::cout << "\nDo you want detailed traces or quick profiling?\n";
-    std::cout << "  1. Quick profile (faster, less overhead)\n";
-    std::cout << "  2. Detailed trace (more data, slower)\n";
-    std::cout << "\nYour choice [1-2]: ";
-    std::cout.flush();
-
-    int detail_level = 0;
-    std::cin >> detail_level;
-
-    if(detail_level < 1 || detail_level > 2)
-    {
-        std::cerr << "Invalid choice. Exiting wizard.\n";
-        exit(EXIT_FAILURE);
-    }
-
-    std::string preset          = "--quick";
-    std::string additional_opts = "";
-
-    if(app_type == 1)
-    {
-        preset          = (detail_level == 1) ? "--trace-ai" : "--trace-ai";
-        additional_opts = "--hip-trace";
-    }
-    else if(app_type == 2)
-    {
-        preset = (detail_level == 1) ? "--trace-hpc" : "--trace-hpc";
-    }
-    else if(app_type == 3)
-    {
-        preset = (detail_level == 1) ? "--quick" : "--detailed";
-    }
-    else if(app_type == 4)
-    {
-        preset = (detail_level == 1) ? "--trace-ai" : "--trace-ai";
-    }
-
-    std::cout << "\n✅ Configuration complete!\n\n";
-    std::cout << "Recommended command:\n";
-    std::cout << "  rocprof-sys-" << tool_name << " " << preset;
-    if(!additional_opts.empty()) std::cout << " " << additional_opts;
-    std::cout << " -- <your_command>\n\n";
-
-    std::cout << "Examples:\n";
-    if(app_type == 1)
-    {
-        std::cout << "  rocprof-sys-" << tool_name << " " << preset << " "
-                  << additional_opts << " -- ./gpu_app\n";
-    }
-    else if(app_type == 2)
-    {
-        std::cout << "  mpirun -n 4 rocprof-sys-" << tool_name << " " << preset
-                  << " -- ./mpi_app\n";
-    }
-    else if(app_type == 3)
-    {
-        std::cout << "  rocprof-sys-" << tool_name << " " << preset << " -- ./my_app\n";
-    }
-    else if(app_type == 4)
-    {
-        std::cout << "  rocprof-sys-" << tool_name << " " << preset
-                  << " -- python script.py\n";
-    }
-
-    std::cout << "\nWould you like to:\n";
-    std::cout << "  1. Run this command now\n";
-    std::cout << "  2. Exit and run manually\n";
-    std::cout << "\nYour choice [1-2]: ";
-    std::cout.flush();
-
-    int run_choice = 0;
-    std::cin >> run_choice;
-
-    if(run_choice == 1)
-    {
-        std::cout << "\nPlease run the command manually with your application.\n";
-        std::cout << "The wizard cannot execute your command directly.\n\n";
-    }
-
-    std::cout << "💡 TIP: See all options with: rocprof-sys-" << tool_name << " --help\n";
-    std::cout << "📖 Documentation: /opt/rocprofiler-systems/share/docs/\n\n";
-
-    exit(EXIT_SUCCESS);
-}
-
 inline bool
 check_rocm_available()
 {
@@ -357,7 +191,7 @@ check_rocm_available()
 }
 
 inline void
-warn_if_hip_trace_without_rocm(bool hip_trace_requested, const std::string& tool_name)
+warn_if_hip_trace_without_rocm(bool hip_trace_requested, const std::string& /*tool_name*/)
 {
     if(hip_trace_requested && !check_rocm_available())
     {

@@ -47,20 +47,20 @@ SOFTWARE.
  * - GPU utilization should be higher with concurrent execution
  */
 
+#include <chrono>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
-#include <chrono>
 
-#define HIP_CHECK(cmd)                                                                       \
-    {                                                                                        \
-        hipError_t error = (cmd);                                                            \
-        if(error != hipSuccess)                                                              \
-        {                                                                                    \
-            std::cerr << "HIP error: " << hipGetErrorString(error)                           \
-                      << " at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
-            exit(EXIT_FAILURE);                                                              \
-        }                                                                                    \
+#define HIP_CHECK(cmd)                                                                   \
+    {                                                                                    \
+        hipError_t error = (cmd);                                                        \
+        if(error != hipSuccess)                                                          \
+        {                                                                                \
+            std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ \
+                      << ":" << __LINE__ << std::endl;                                   \
+            exit(EXIT_FAILURE);                                                          \
+        }                                                                                \
     }
 
 /**
@@ -76,18 +76,18 @@ __global__ void
 compute_kernel(float* data, size_t n, int iterations)
 {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if(idx < n)
     {
         float value = data[idx];
-        
+
         // Perform multiple operations to increase kernel time
         for(int i = 0; i < iterations; ++i)
         {
             value = value * 1.001f + 0.001f;
             value = sqrtf(value);
         }
-        
+
         data[idx] = value;
     }
 }
@@ -99,15 +99,15 @@ double
 run_sequential(std::vector<float*>& d_arrays, size_t n, int num_streams, int iterations)
 {
     const int threads = 256;
-    const int blocks = (n + threads - 1) / threads;
+    const int blocks  = (n + threads - 1) / threads;
 
     auto start = std::chrono::high_resolution_clock::now();
 
     // Launch all kernels in default stream (sequential execution)
     for(int i = 0; i < num_streams; ++i)
     {
-        hipLaunchKernelGGL(compute_kernel, dim3(blocks), dim3(threads), 0, 0,
-                           d_arrays[i], n, iterations);
+        hipLaunchKernelGGL(compute_kernel, dim3(blocks), dim3(threads), 0, 0, d_arrays[i],
+                           n, iterations);
     }
 
     HIP_CHECK(hipDeviceSynchronize());
@@ -120,11 +120,11 @@ run_sequential(std::vector<float*>& d_arrays, size_t n, int num_streams, int ite
  * @brief Run kernels concurrently using HIP streams
  */
 double
-run_concurrent(std::vector<float*>& d_arrays, std::vector<hipStream_t>& streams,
-               size_t n, int num_streams, int iterations)
+run_concurrent(std::vector<float*>& d_arrays, std::vector<hipStream_t>& streams, size_t n,
+               int num_streams, int iterations)
 {
     const int threads = 256;
-    const int blocks = (n + threads - 1) / threads;
+    const int blocks  = (n + threads - 1) / threads;
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -154,7 +154,7 @@ run_with_async_memory(std::vector<float*>& h_arrays, std::vector<float*>& d_arra
                       int iterations)
 {
     const int threads = 256;
-    const int blocks = (n + threads - 1) / threads;
+    const int blocks  = (n + threads - 1) / threads;
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -166,10 +166,10 @@ run_with_async_memory(std::vector<float*>& h_arrays, std::vector<float*>& d_arra
     {
         HIP_CHECK(hipMemcpyAsync(d_arrays[i], h_arrays[i], n * sizeof(float),
                                  hipMemcpyHostToDevice, streams[i]));
-        
+
         hipLaunchKernelGGL(compute_kernel, dim3(blocks), dim3(threads), 0, streams[i],
                            d_arrays[i], n, iterations);
-        
+
         HIP_CHECK(hipMemcpyAsync(h_arrays[i], d_arrays[i], n * sizeof(float),
                                  hipMemcpyDeviceToHost, streams[i]));
     }
@@ -188,9 +188,9 @@ int
 main(int argc, char** argv)
 {
     // Parse parameters
-    size_t n = 1000000;  // Array size per stream
-    int num_streams = 4;  // Number of concurrent streams
-    int iterations = 1000;  // Iterations per kernel (to increase kernel time)
+    size_t n           = 1000000;  // Array size per stream
+    int    num_streams = 4;        // Number of concurrent streams
+    int    iterations  = 1000;     // Iterations per kernel (to increase kernel time)
 
     if(argc > 1) n = std::atoll(argv[1]);
     if(argc > 2) num_streams = std::atoi(argv[2]);
@@ -207,7 +207,7 @@ main(int argc, char** argv)
     for(int i = 0; i < num_streams; ++i)
     {
         HIP_CHECK(hipHostMalloc(&h_arrays[i], n * sizeof(float)));
-        
+
         // Initialize
         for(size_t j = 0; j < n; ++j)
         {
@@ -241,18 +241,20 @@ main(int argc, char** argv)
 
     // === WITH ASYNC MEMORY OPERATIONS ===
     std::cout << "Running with ASYNC MEMORY operations...\n";
-    double async_time = run_with_async_memory(h_arrays, d_arrays, streams, n,
-                                               num_streams, iterations);
+    double async_time =
+        run_with_async_memory(h_arrays, d_arrays, streams, n, num_streams, iterations);
     std::cout << "  Execution time: " << async_time << " ms\n\n";
 
     // Calculate speedups
     double stream_speedup = seq_time / conc_time;
-    double async_speedup = seq_time / async_time;
+    double async_speedup  = seq_time / async_time;
 
     std::cout << "RESULTS:\n";
     std::cout << "  Sequential time:  " << seq_time << " ms\n";
-    std::cout << "  Concurrent time:  " << conc_time << " ms (speedup: " << stream_speedup << "x)\n";
-    std::cout << "  Async mem time:   " << async_time << " ms (speedup: " << async_speedup << "x)\n\n";
+    std::cout << "  Concurrent time:  " << conc_time << " ms (speedup: " << stream_speedup
+              << "x)\n";
+    std::cout << "  Async mem time:   " << async_time << " ms (speedup: " << async_speedup
+              << "x)\n\n";
 
     // Clean up
     for(int i = 0; i < num_streams; ++i)
@@ -276,4 +278,3 @@ main(int argc, char** argv)
 
     return EXIT_SUCCESS;
 }
-

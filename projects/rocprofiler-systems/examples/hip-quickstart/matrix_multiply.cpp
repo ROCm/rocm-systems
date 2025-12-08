@@ -37,7 +37,8 @@ SOFTWARE.
  *   rocprof-sys-sample --quick --hip-trace -- ./matrix_multiply
  *
  *   # Compare kernel performance
- *   rocprof-sys-run --hip-trace --rocm-events=SQ_WAVES,MemUnitBusy -- ./matrix_multiply.inst
+ *   rocprof-sys-run --hip-trace --rocm-events=SQ_WAVES,MemUnitBusy --
+ * ./matrix_multiply.inst
  *
  * WHAT TO LOOK FOR:
  * - Execution time difference between naive and tiled kernels
@@ -45,21 +46,21 @@ SOFTWARE.
  * - GPU utilization during each kernel
  */
 
+#include <chrono>
+#include <cmath>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
-#include <cmath>
-#include <chrono>
 
-#define HIP_CHECK(cmd)                                                                       \
-    {                                                                                        \
-        hipError_t error = (cmd);                                                            \
-        if(error != hipSuccess)                                                              \
-        {                                                                                    \
-            std::cerr << "HIP error: " << hipGetErrorString(error)                           \
-                      << " at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
-            exit(EXIT_FAILURE);                                                              \
-        }                                                                                    \
+#define HIP_CHECK(cmd)                                                                   \
+    {                                                                                    \
+        hipError_t error = (cmd);                                                        \
+        if(error != hipSuccess)                                                          \
+        {                                                                                \
+            std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ \
+                      << ":" << __LINE__ << std::endl;                                   \
+            exit(EXIT_FAILURE);                                                          \
+        }                                                                                \
     }
 
 // Tile size for optimized kernel
@@ -85,14 +86,14 @@ matmul_naive(const float* A, const float* B, float* C, int M, int K, int N)
     if(row < M && col < N)
     {
         float sum = 0.0f;
-        
+
         // Each thread computes one element of C
         // Problem: Redundant global memory accesses
         for(int k = 0; k < K; ++k)
         {
             sum += A[row * K + k] * B[k * N + col];
         }
-        
+
         C[row * N + col] = sum;
     }
 }
@@ -121,7 +122,7 @@ matmul_tiled(const float* A, const float* B, float* C, int M, int K, int N)
 
     // Loop over tiles
     int num_tiles = (K + TILE_SIZE - 1) / TILE_SIZE;
-    
+
     for(int t = 0; t < num_tiles; ++t)
     {
         // Load tile from A into shared memory
@@ -183,16 +184,14 @@ matmul_cpu(const std::vector<float>& A, const std::vector<float>& B,
  * @brief Verify GPU results against CPU reference
  */
 bool
-verify_results(const std::vector<float>& gpu_result,
-               const std::vector<float>& cpu_result,
+verify_results(const std::vector<float>& gpu_result, const std::vector<float>& cpu_result,
                float tolerance = 1e-3f)
 {
     for(size_t i = 0; i < gpu_result.size(); ++i)
     {
         if(std::abs(gpu_result[i] - cpu_result[i]) > tolerance)
         {
-            std::cerr << "Verification failed at index " << i
-                      << ": GPU=" << gpu_result[i]
+            std::cerr << "Verification failed at index " << i << ": GPU=" << gpu_result[i]
                       << ", CPU=" << cpu_result[i] << std::endl;
             return false;
         }
@@ -227,8 +226,10 @@ main(int argc, char** argv)
     std::vector<float> h_C_cpu(size_C);
 
     // Initialize matrices
-    for(size_t i = 0; i < size_A; ++i) h_A[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-    for(size_t i = 0; i < size_B; ++i) h_B[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    for(size_t i = 0; i < size_A; ++i)
+        h_A[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    for(size_t i = 0; i < size_B; ++i)
+        h_B[i] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 
     // Allocate device memory
     float *d_A, *d_B, *d_C;
@@ -251,32 +252,32 @@ main(int argc, char** argv)
     // === NAIVE KERNEL ===
     std::cout << "Running NAIVE kernel...\n";
     auto start = std::chrono::high_resolution_clock::now();
-    
-    hipLaunchKernelGGL(matmul_naive, grid_size, block_size, 0, 0,
-                       d_A, d_B, d_C, M, K, N);
+
+    hipLaunchKernelGGL(matmul_naive, grid_size, block_size, 0, 0, d_A, d_B, d_C, M, K, N);
     HIP_CHECK(hipDeviceSynchronize());
-    
-    auto end = std::chrono::high_resolution_clock::now();
+
+    auto   end        = std::chrono::high_resolution_clock::now();
     double naive_time = std::chrono::duration<double, std::milli>(end - start).count();
     std::cout << "  Execution time: " << naive_time << " ms\n";
 
     // Copy result
-    HIP_CHECK(hipMemcpy(h_C_naive.data(), d_C, size_C * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(h_C_naive.data(), d_C, size_C * sizeof(float), hipMemcpyDeviceToHost));
 
     // === TILED KERNEL ===
     std::cout << "Running TILED kernel...\n";
     start = std::chrono::high_resolution_clock::now();
-    
-    hipLaunchKernelGGL(matmul_tiled, grid_size, block_size, 0, 0,
-                       d_A, d_B, d_C, M, K, N);
+
+    hipLaunchKernelGGL(matmul_tiled, grid_size, block_size, 0, 0, d_A, d_B, d_C, M, K, N);
     HIP_CHECK(hipDeviceSynchronize());
-    
-    end = std::chrono::high_resolution_clock::now();
+
+    end               = std::chrono::high_resolution_clock::now();
     double tiled_time = std::chrono::duration<double, std::milli>(end - start).count();
     std::cout << "  Execution time: " << tiled_time << " ms\n\n";
 
     // Copy result
-    HIP_CHECK(hipMemcpy(h_C_tiled.data(), d_C, size_C * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(h_C_tiled.data(), d_C, size_C * sizeof(float), hipMemcpyDeviceToHost));
 
     // Compute speedup
     double speedup = naive_time / tiled_time;
@@ -287,18 +288,17 @@ main(int argc, char** argv)
     {
         std::cout << "Computing CPU reference...\n";
         matmul_cpu(h_A, h_B, h_C_cpu, M, K, N);
-        
+
         std::cout << "Verifying naive kernel...\n";
-        if(verify_results(h_C_naive, h_C_cpu))
-            std::cout << "  Naive kernel: CORRECT\n";
-        
+        if(verify_results(h_C_naive, h_C_cpu)) std::cout << "  Naive kernel: CORRECT\n";
+
         std::cout << "Verifying tiled kernel...\n";
-        if(verify_results(h_C_tiled, h_C_cpu))
-            std::cout << "  Tiled kernel: CORRECT\n";
+        if(verify_results(h_C_tiled, h_C_cpu)) std::cout << "  Tiled kernel: CORRECT\n";
     }
     else
     {
-        std::cout << "Matrix too large for CPU verification, checking GPU consistency...\n";
+        std::cout
+            << "Matrix too large for CPU verification, checking GPU consistency...\n";
         if(verify_results(h_C_naive, h_C_tiled))
             std::cout << "  Naive and tiled results match!\n";
     }
@@ -317,4 +317,3 @@ main(int argc, char** argv)
 
     return EXIT_SUCCESS;
 }
-
