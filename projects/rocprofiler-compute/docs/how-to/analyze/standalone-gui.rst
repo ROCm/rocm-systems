@@ -8,9 +8,7 @@ Standalone GUI analysis
 
 ROCm Compute Profiler's standalone analysis GUI is a lightweight web page that you can
 generate straight from the command line. The standalone analysis GUI is an
-alternative to the CLI if you want to explore profiling results visually, but
-without the additional setup requirements or server-side overhead of ROCm Compute Profiler's
-detailed :doc:`Grafana interface <grafana-gui>` option. This analysis
+alternative to the CLI if you want to explore profiling results visually. This analysis
 option is implemented as a simple `Flask <https://flask.palletsprojects.com>`_
 application that lets you view results from your preferred web browser.
 
@@ -83,12 +81,11 @@ application's profiling data:
 #. Top Stats (Top Kernel Statistics)
 #. System Info
 #. System Speed-of-Light
+#. Roofline AI Data Metrics
 
 To dive deeper, use the dropdown menus at the top of the screen to isolate
 particular kernels or dispatches. You should see the web page update with
 metrics specific to your selected filters.
 
 Once a filter is applied, you'll see several additional sections become
-available with detailed metrics specific to that area of AMD hardware. These
-detailed sections mirror the data displayed in ROCm Compute Profiler's
-:doc:`Grafana interface <grafana-gui>`.
+available with detailed metrics specific to that area of AMD hardware.

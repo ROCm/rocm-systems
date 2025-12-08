@@ -21,7 +21,6 @@ trigger:
     - ISSUE_TEMPLATE
     - '*.md'
     - CODEOWNERS
-    - LICENSE
 
 pr:
   autoCancel: true
@@ -35,7 +34,6 @@ pr:
     - ISSUE_TEMPLATE
     - '*.md'
     - CODEOWNERS
-    - LICENSE
   drafts: false
 
 jobs:

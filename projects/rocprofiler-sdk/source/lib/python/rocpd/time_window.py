@@ -26,9 +26,11 @@
 import argparse
 import sqlite3
 from argparse import ArgumentParser
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any
 
 from .importer import RocpdImportData, execute_statement
+
+__all__ = ["apply_time_window", "execute", "add_args", "main"]
 
 
 def get_marker_timestamp(
@@ -265,7 +267,7 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 #
 # Command-line interface functions
 #
-def add_args(parser: ArgumentParser) -> List[str]:
+def add_args(parser: ArgumentParser):
     """Add time slice arguments to an existing parser."""
 
     tw_options = parser.add_argument_group("Time window options")
@@ -307,18 +309,21 @@ def add_args(parser: ArgumentParser) -> List[str]:
         default=True,
     )
 
-    return ["start", "end", "inclusive", "start_marker", "end_marker"]
+    def process_args(input, args):
+        valid_args = ["start", "end", "inclusive", "start_marker", "end_marker"]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
 
+        if ret and input is not None:
+            apply_time_window(input, **ret)
 
-def process_args(args, valid_args):
+        return ret
 
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    return process_args
 
 
 def execute(input_rpd: str, **kwargs: Any) -> RocpdImportData:

@@ -83,6 +83,6 @@ TEST_CASE("Unit_hipDrvGetErrorString_Negative_Parameters") {
 }
 
 /**
-* End doxygen group ErrorTest.
-* @}
-*/
+ * End doxygen group ErrorTest.
+ * @}
+ */

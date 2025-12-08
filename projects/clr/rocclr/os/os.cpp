@@ -39,11 +39,11 @@ namespace amd {
 
 // ================================================================================================
 bool Os::isValidFileDesc(const amd::Os::FileDesc& desc) {
-  #if IS_WINDOWS
-    return desc != nullptr;
-  #else
-    return desc > 0;
-  #endif
+#if IS_WINDOWS
+  return desc != nullptr;
+#else
+  return desc > 0;
+#endif
   return false;
 }
 
@@ -175,12 +175,6 @@ bool Os::skipIDIV(address& pc) {
     return true;
   }
   return false;
-}
-
-void Os::setThreadAffinity(const void* handle, unsigned int cpu) {
-  ThreadAffinityMask mask;
-  mask.set(cpu);
-  setThreadAffinity(handle, mask);
 }
 
 }  // namespace amd

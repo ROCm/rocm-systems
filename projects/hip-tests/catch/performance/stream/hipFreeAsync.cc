@@ -32,11 +32,10 @@ class FreeAsyncBenchmark : public Benchmark<FreeAsyncBenchmark> {
     const StreamGuard stream_guard{Streams::created};
     const hipStream_t stream = stream_guard.stream();
     float* dev_ptr{nullptr};
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&dev_ptr), array_size * sizeof(float), stream));
+    HIP_CHECK(
+        hipMallocAsync(reinterpret_cast<void**>(&dev_ptr), array_size * sizeof(float), stream));
 
-    TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
-      HIP_CHECK(hipFreeAsync(dev_ptr, stream));
-    }
+    TIMED_SECTION_STREAM(kTimerTypeEvent, stream) { HIP_CHECK(hipFreeAsync(dev_ptr, stream)); }
 
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -69,6 +68,6 @@ TEST_CASE("Performance_hipFreeAsync") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

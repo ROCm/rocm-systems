@@ -18,23 +18,16 @@
  */
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 struct things {
-    char c;
-    short s;
-    int i;
+  char c;
+  short s;
+  int i;
 };
 
-typedef enum func{
-   mykernel,
-   mykernel1,
-   mykernel2,
-   mykernel3,
-   mykernel4
-}func;
+typedef enum func { mykernel, mykernel1, mykernel2, mykernel3, mykernel4 } func;
 
 extern const void* getKernelFunc(enum func f);
 

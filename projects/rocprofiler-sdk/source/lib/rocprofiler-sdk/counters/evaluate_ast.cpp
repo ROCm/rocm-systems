@@ -25,6 +25,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
@@ -134,7 +135,10 @@ perform_reduction(
         perform_reduction_to_single_instance(reduce_op, input_array, &result);
         input_array->clear();
         input_array->push_back(result);
+        // Preserve DIMENSION_AGENT when reducing to single instance
+        auto agent_dim = rec_to_dim_pos(result.id, ROCPROFILER_DIMENSION_AGENT);
         set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT, agent_dim);
         return input_array;
     }
 
@@ -167,7 +171,10 @@ perform_reduction(
     }
     if(input_array->size() == 1)
     {
+        // Preserve DIMENSION_AGENT when reducing to single instance
+        auto agent_dim = rec_to_dim_pos(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT);
         set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_AGENT, agent_dim);
     }
     return input_array;
 }
@@ -441,14 +448,36 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
 }
 
 std::vector<MetricDimension>
-EvaluateAST::set_dimensions()
+EvaluateAST::set_dimensions(rocprofiler_agent_id_t agent_id)
 {
     if(!_dimension_types.empty())
     {
         return _dimension_types;
     }
 
-    auto get_dim_types = [&](auto& metric) { return getBlockDimensions(_agent, metric); };
+    auto get_dim_types = [&](auto& metric) {
+        // If agent_id is provided, use it directly
+        if(agent_id.handle != 0)
+        {
+            return getBlockDimensions(agent_id, metric);
+        }
+
+        // Otherwise, find an agent with matching architecture name
+        // NOTE: In multi-GPU scenarios, architecture name alone is unreliable when
+        // GPUs share the same architecture but have different configurations.
+        ROCP_WARNING << "set_dimensions: Using architecture name fallback. In multi-GPU "
+                     << "scenarios with identical architectures, this may be unreliable. "
+                     << "Consider providing agent_id explicitly.";
+        for(const auto* agent : rocprofiler::agent::get_agents())
+        {
+            if(agent && std::string(agent->name) == _agent)
+            {
+                return getBlockDimensions(agent->id, metric);
+            }
+        }
+        // If no agent found, return empty dimensions
+        return std::vector<MetricDimension>{};
+    };
 
     switch(_type)
     {
@@ -468,8 +497,8 @@ EvaluateAST::set_dimensions()
         case MULTIPLY_NODE:
         case DIVIDE_NODE:
         {
-            auto first  = _children[0].set_dimensions();
-            auto second = _children[1].set_dimensions();
+            auto first  = _children.at(0).set_dimensions(agent_id);
+            auto second = _children.at(1).set_dimensions(agent_id);
             // - first.size() > 1 && second.size() > 1
             // This is an explicit compatibility change to allow existing integer * COUNTER
             // derived counters to function
@@ -477,9 +506,9 @@ EvaluateAST::set_dimensions()
                 throw std::runtime_error(
                     fmt::format("Dimension mis-mismatch: {} (dims: {}) and {} (dims: {})",
                                 _children[0].metric(),
-                                fmt::join(_children[0].set_dimensions(), ","),
+                                fmt::join(_children[0].set_dimensions(agent_id), ","),
                                 _children[1].metric(),
-                                fmt::join(_children[1].set_dimensions(), ",")));
+                                fmt::join(_children[1].set_dimensions(agent_id), ",")));
             _dimension_types = first.size() > second.size() ? first : second;
         }
         break;
@@ -505,7 +534,7 @@ EvaluateAST::set_dimensions()
                     {dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
                      1,
                      ROCPROFILER_DIMENSION_INSTANCE}};
-                auto first = _children[0].set_dimensions();
+                auto first = _children[0].set_dimensions(agent_id);
                 first.erase(std::remove_if(first.begin(),
                                            first.end(),
                                            [&](const MetricDimension& dim) {
@@ -519,7 +548,7 @@ EvaluateAST::set_dimensions()
         break;
         case SELECT_NODE:
         {
-            auto first = _children[0].set_dimensions();
+            auto first = _children[0].set_dimensions(agent_id);
             first.erase(std::remove_if(first.begin(),
                                        first.end(),
                                        [&](const MetricDimension& dim) {
@@ -706,7 +735,10 @@ EvaluateAST::read_special_counters(
         if(!out_map[metric.id()].empty()) out_map[metric.id()].clear();
         auto& record = out_map[metric.id()].emplace_back();
         set_counter_in_rec(record.id, {.handle = metric.id()});
-        set_dim_in_rec(record.id, ROCPROFILER_DIMENSION_NONE, 0);
+        // Don't use DIMENSION_NONE as it overwrites the DIMENSION_AGENT field
+        // Instead, explicitly set DIMENSION_AGENT with the agent's logical_node_id
+        set_dim_in_rec(
+            record.id, ROCPROFILER_DIMENSION_AGENT, agent.logical_node_id + AGENT_ENCODING_OFFSET);
 
         record.counter_value = get_agent_property(metric.name(), agent);
     }
@@ -746,6 +778,13 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
             CHECK_EQ(aql_status, ROCPROFILER_STATUS_SUCCESS)
                 << rocprofiler_get_status_string(aql_status);
 
+            // Set DIMENSION_AGENT with the agent's logical_node_id
+            auto        agent_id = it.pkt_gen->agent();
+            const auto* agent    = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+            set_dim_in_rec(next_rec.id,
+                           ROCPROFILER_DIMENSION_AGENT,
+                           agent->logical_node_id + AGENT_ENCODING_OFFSET);
+
             // set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
             // Note: in the near future we need to use hw_counter here instead
             next_rec.counter_value = counter_value;
@@ -765,7 +804,14 @@ EvaluateAST::set_out_id(std::vector<rocprofiler_counter_record_t>& results) cons
 {
     for(auto& record : results)
     {
+        // Preserve the agent encoding from the instance record
+        auto agent_encoded = rec_to_dim_pos(record.id, ROCPROFILER_DIMENSION_AGENT);
+
+        // Update the counter ID (this will overwrite DIMENSION_AGENT)
         set_counter_in_rec(record.id, _out_id);
+
+        // Restore the agent encoding that was in the original record
+        set_dim_in_rec(record.id, ROCPROFILER_DIMENSION_AGENT, agent_encoded);
     }
 }
 

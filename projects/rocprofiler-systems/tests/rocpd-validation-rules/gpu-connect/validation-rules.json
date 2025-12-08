@@ -1,0 +1,93 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for hip_api",
+            "name": "events_args",
+            "required_columns": [
+                "event_id",
+                "category",
+                "stack_id",
+                "parent_stack_id",
+                "correlation_id"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hip_api' appears in category at least 100 times in table events_args",
+                    "error_message": "'rocm_hip_api' category entries are fewer than expected in events_args",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category = 'rocm_hip_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for missing category entries",
+                    "error_message": "Empty or NULL category entries found in events_args",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM events_args WHERE category IS NULL OR TRIM(category) = '';"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for hip_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hip_api' appears in category at least 50 times in table regions",
+                    "error_message": "'rocm_hip_api' category entries are fewer than expected in regions",
+                    "expected_result": 50,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Ensure there are no HIP API calls that last 0 seconds",
+                    "error_message": "Found HIP API captures where duration is 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hip_api' AND duration = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                }
+            ]
+        },
+        {
+            "name": "rocpd_info_agent",
+            "required_columns": [
+                "id",
+                "guid",
+                "nid",
+                "pid",
+                "type",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that we have GPU agents detected",
+                    "error_message": "No GPU agents found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE type = 'GPU'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for NULL agent names",
+                    "error_message": "Found agents with NULL names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE name IS NULL"
+                }
+            ]
+        }
+    ]
+}
+
+

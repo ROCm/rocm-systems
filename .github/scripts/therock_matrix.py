@@ -2,22 +2,35 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 subtree_to_project_map = {
-    "projects/rocprim": "prim",
-    "projects/rocthrust": "prim",
-    "projects/hipcub": "prim",
-    "projects/rocrand": "rand",
-    "projects/hiprand": "rand"
+    'projects/aqlprofile': 'profiler', 
+    'projects/clr': 'core', 
+    'projects/hip': 'core', 
+    'projects/hip-tests': 'core', 
+    'projects/hipother': 'core', 
+    'projects/rdc': 'rdc', 
+    'projects/rocm-core': 'core', 
+    'projects/rocm-smi-lib': 'core', 
+    'projects/rocminfo': 'core', 
+    'projects/rocprofiler-compute': 'profiler', 
+    'projects/rocprofiler-register': 'profiler', 
+    'projects/rocprofiler-sdk': 'profiler', 
+    'projects/rocprofiler-systems': 'profiler', 
+    'projects/rocprofiler': 'profiler', 
+    'projects/rocr-runtime': 'core', 
+    'projects/roctracer': 'profiler'
 }
 
 project_map = {
-    "prim": {
-        "cmake_options": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "project_to_test": "rocprim, rocthrust, hipcub",
-        "subtree_checkout": "projects/rocprim\nprojects/hipcub\nprojects/rocthrust",
+    "core": {
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_HIP_RUNTIME=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "hip-tests",
     },
-    "rand": {
-        "cmake_options": "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "project_to_test": "rocrand, hiprand",
-        "subtree_checkout": "projects/rocrand\nprojects/hiprand",
+    "profiler": {
+        "cmake_options": "-DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "rocprofiler-tests",
     },
+    "all": {
+        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "hip-tests, rocprofiler-tests",
+    }
 }

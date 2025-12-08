@@ -78,7 +78,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgRegister(HSAuint32 NodeId)
 
 	args.gpu_id = gpu_id;
 
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_REGISTER_DEPRECATED, &args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_REGISTER_DEPRECATED, &args);
 
 	if (err == 0)
 		result = HSAKMT_STATUS_SUCCESS;
@@ -105,7 +105,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgUnregister(HSAuint32 NodeId)
 	struct kfd_ioctl_dbg_unregister_args args = {0};
 
 	args.gpu_id = gpu_id;
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED, &args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED, &args);
 
 	if (err)
 		return HSAKMT_STATUS_ERROR;
@@ -168,7 +168,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgWavefrontControl(HSAuint32 NodeId,
 	run_ptr += sizeof(DbgWaveMsgRing->MemoryVA);
 
 	/* send to kernel */
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED, args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED, args);
 
 	free(args);
 
@@ -256,7 +256,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgAddressWatch(HSAuint32 NodeId,
 	}
 
 	/* send to kernel */
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED, args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED, args);
 
 	free(args);
 
@@ -316,7 +316,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug,
 		((setupTtmp) ? KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK : 0);
 	args.r_debug = (HSAuint64)rDebug;
 
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_RUNTIME_ENABLE, &args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RUNTIME_ENABLE, &args);
 
 	if (err) {
 		if (errno == EBUSY)
@@ -340,7 +340,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void)
 	memset(&args, 0x00, sizeof(args));
 	args.mode_mask = 0; //Disable
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_RUNTIME_ENABLE, &args))
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_RUNTIME_ENABLE, &args))
 		return HSAKMT_STATUS_ERROR;
 
 	return HSAKMT_STATUS_SUCCESS;
@@ -363,7 +363,7 @@ static HSAKMT_STATUS dbg_trap_get_device_data(void *data,
 	args.device_snapshot.entry_size = entry_size;
 	args.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
 	args.pid = getpid();
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, &args))
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, &args))
 		return HSAKMT_STATUS_ERROR;
 	*n_entries = args.device_snapshot.num_devices;
 
@@ -384,7 +384,7 @@ static HSAKMT_STATUS dbg_trap_get_queue_data(void *data,
 	args.queue_snapshot.snapshot_buf_ptr = (uint64_t) data;
 	args.pid = getpid();
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, &args))
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, &args))
 		return HSAKMT_STATUS_ERROR;
 
 	*n_entries = args.queue_snapshot.num_queues;
@@ -410,7 +410,7 @@ static HSAKMT_STATUS dbg_trap_suspend_queues(uint32_t *queue_ids,
 	args.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
 	args.pid = getpid();
 
-	r = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, &args);
+	r = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, &args);
 	if (r < 0)
 		return HSAKMT_STATUS_ERROR;
 
@@ -429,7 +429,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnable(void **runtime_info,
 	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
 	*data_size = sizeof(struct kfd_runtime_info);
 	args.enable.rinfo_size = *data_size;
-	args.enable.dbg_fd = hsakmt_kfd_fd;
+	args.enable.dbg_fd = hsakmt_primary_kfd_ctx.fd;
 	*runtime_info = malloc(args.enable.rinfo_size);
 	if (!*runtime_info)
 		return HSAKMT_STATUS_NO_MEMORY;
@@ -437,7 +437,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnable(void **runtime_info,
 	args.op = KFD_IOC_DBG_TRAP_ENABLE;
 	args.pid = getpid();
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, &args)) {
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, &args)) {
 		free(*runtime_info);
 		return HSAKMT_STATUS_ERROR;
 	}
@@ -450,11 +450,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgDisable(void)
 
 	CHECK_KFD_OPEN();
 	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
-	args.enable.dbg_fd = hsakmt_kfd_fd;
+	args.enable.dbg_fd = hsakmt_primary_kfd_ctx.fd;
 	args.op = KFD_IOC_DBG_TRAP_DISABLE;
 	args.pid = getpid();
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, &args))
+	if (hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, &args))
 		return HSAKMT_STATUS_ERROR;
 
 	return HSAKMT_STATUS_SUCCESS;
@@ -540,7 +540,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *arg
 		free(queue_ids);
 	}
 
-	long err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_DBG_TRAP, args);
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_TRAP, args);
 	if (DebugReturn)
 		*DebugReturn = err;
 

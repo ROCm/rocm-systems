@@ -45,9 +45,11 @@
 #include <memory>
 #include <string>
 
+#if defined(__linux__)
 #include <amdgpu_drm.h>
 #include <link.h>
 #include <sys/ioctl.h>
+#endif
 
 #include "hsakmt/hsakmt.h"
 
@@ -55,11 +57,16 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 
+#if defined(_WIN32)
+#include "loader/executable.hpp"
+#endif
+
 extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
 namespace AMD {
 
+#if defined(__linux__)
 static_assert(
     (sizeof(core::ShareableHandle::handle) >= sizeof(amdgpu_bo_handle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(amdgpu_bo_handle)),
@@ -82,6 +89,7 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
 }
 
 } // namespace
+#endif
 
 KfdDriver::KfdDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
@@ -240,6 +248,15 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
       (alloc_flags & core::MemoryRegion::AllocateUncached
             ? 1
             : kmt_alloc_flags.ui32.Uncached);
+
+  kmt_alloc_flags.ui32.QueueObject =
+      (alloc_flags & core::MemoryRegion::AllocateQueueObject ? 1
+                                                             : kmt_alloc_flags.ui32.QueueObject);
+  if (kmt_alloc_flags.ui32.Uncached) {
+    /* Uncached overwrites CoarseGrain and ExtendedCoherent */
+    kmt_alloc_flags.ui32.CoarseGrain = 0;
+    kmt_alloc_flags.ui32.ExtendedCoherent = 0;
+  }
 
   kmt_alloc_flags.ui32.ExecuteBlit =
     !!(alloc_flags & core::MemoryRegion::AllocateExecutableBlitKernelObject);
@@ -419,6 +436,7 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
 
 hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
                                      core::ShareableHandle &handle) {
+#if defined(__linux__)
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
   auto ret = DRM_CALL(amdgpu_bo_import(
@@ -427,12 +445,16 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
     return HSA_STATUS_ERROR;
 
   handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
+#else
+  assert(!"Unimplemented!");
+#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             size_t offset, size_t size,
                             hsa_access_permission_t perms) {
+#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -440,12 +462,15 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
   if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem),
                       drm_perm(perms), AMDGPU_VA_OP_MAP)) != 0)
     return HSA_STATUS_ERROR;
-
+#else
+  assert(!"Unimplemented!");
+#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
                               size_t offset, size_t size) {
+#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -453,11 +478,14 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
   if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
                       AMDGPU_VA_OP_UNMAP)) != 0)
     return HSA_STATUS_ERROR;
-
+#else
+  assert(!"Unimplemented!");
+#endif
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
+#if defined(__linux__)
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -467,6 +495,9 @@ hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
     return HSA_STATUS_ERROR;
 
   handle = {};
+#else
+  assert(!"Unimplemented!");
+#endif
   return HSA_STATUS_SUCCESS;
 }
 
@@ -657,7 +688,6 @@ hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_
     debug_print("Invalid memory flags ptr:%p nodes ptr:%p\n", mem_flags, nodes);
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -689,103 +719,6 @@ hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* freque
   // Reported by libdrm in KHz.
   *frequency = uint64_t(info.gpu_counter_freq) * 1000ull;
 
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::ShareMemory(void* mem, size_t size,
-                                    HsaSharedMemoryHandle* share_mem) const {
-  assert(share_mem);
-
-  if (HSAKMT_CALL(hsaKmtShareMemory(mem, size, share_mem)) != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
-                                             uint64_t* size) const {
-  assert(share_mem);
-  assert(mem);
-  assert(size);
-
-  if (HSAKMT_CALL(hsaKmtRegisterSharedHandle(share_mem, mem, size)) != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::ReplaceAsanHeaderPage(void* mem) const {
-  if (HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::ReturnAsanHeaderPage(void* mem) const {
-  if (HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
-                                                    uint32_t sample_info_sz,
-                                                    uint32_t* sz_needed) const {
-  HSAKMT_STATUS status = HSAKMT_CALL(
-      hsaKmtPcSamplingQueryCapabilities(node_id, sample_info, sample_info_sz, sz_needed));
-  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
-  }
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
-                                         uint32_t* trace_id) const {
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id, sample_info, trace_id));
-  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
-  }
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::PcSamplingDestroy(uint32_t node_id, uint32_t trace_id) const {
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id, trace_id));
-  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
-  }
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::PcSamplingStart(uint32_t node_id, uint32_t trace_id) const {
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingStart(node_id, trace_id));
-  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
-  }
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
-}
-
-hsa_status_t KfdDriver::PcSamplingStop(uint32_t node_id, uint32_t trace_id) const {
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id, trace_id));
-  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
-    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
-  }
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
   return HSA_STATUS_SUCCESS;
 }
 

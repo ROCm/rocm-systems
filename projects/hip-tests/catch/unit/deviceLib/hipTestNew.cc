@@ -23,16 +23,15 @@ THE SOFTWARE.
 
 class A {
  public:
-    __device__ A() {
-      a = threadIdx.x + blockIdx.x * blockDim.x;
-    }
+  __device__ A() { a = threadIdx.x + blockIdx.x * blockDim.x; }
+
  private:
   int a;
 };
 
 static __global__ void kernel(int* Ad) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  new(Ad+tid) A();
+  new (Ad + tid) A();
 }
 
 TEST_CASE("Unit_hipTest_DeviceNewOperator") {
@@ -50,5 +49,7 @@ TEST_CASE("Unit_hipTest_DeviceNewOperator") {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(i == A[i]);
   }
+
+  HIP_CHECK(hipFree(Ad));
   delete[] A;
 }

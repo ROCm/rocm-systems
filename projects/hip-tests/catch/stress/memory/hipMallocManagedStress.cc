@@ -34,8 +34,7 @@
 
 #define INCRMNT 10
 // Kernel function
-__global__ void KrnlWth2MemTypesC(unsigned char *Hmm, unsigned char *Dptr,
-                                  size_t n) {
+__global__ void KrnlWth2MemTypesC(unsigned char* Hmm, unsigned char* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = index; i < n; i += stride) {
@@ -45,14 +44,14 @@ __global__ void KrnlWth2MemTypesC(unsigned char *Hmm, unsigned char *Dptr,
 static bool IfTestPassed = true;
 
 // Kernel functions
-__global__ void KrnlWth2MemTypes(int *Hmm, int *Dptr, size_t n) {
+__global__ void KrnlWth2MemTypes(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   for (size_t i = index; i < n; i++) {
     Hmm[i] = Dptr[i] + 10;
   }
 }
 
-__global__ void KernelMulAdd_MngdMem(int *Hmm, size_t n) {
+__global__ void KernelMulAdd_MngdMem(int* Hmm, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = index; i < n; i += stride) {
@@ -60,7 +59,7 @@ __global__ void KernelMulAdd_MngdMem(int *Hmm, size_t n) {
   }
 }
 
-__global__ void KernelMul_MngdMem(int *Hmm, int *Dptr, size_t n) {
+__global__ void KernelMul_MngdMem(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = index; i < n; i += stride) {
@@ -74,14 +73,13 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
   HIP_CHECK(hipStreamCreate(&strm));
   HIP_CHECK(hipMallocManaged(&Hmm, (sizeof(int) * NumElms)));
   HIP_CHECK(hipMalloc(&Dptr, (sizeof(int) * NumElms)));
-  int *Hstptr = reinterpret_cast<int*>(new int[NumElms]);
+  int* Hstptr = reinterpret_cast<int*>(new int[NumElms]);
   for (size_t i = 0; i < NumElms; ++i) {
     Hstptr[i] = InitVal;
   }
-  HIP_CHECK(hipMemcpy(Dptr, Hstptr, (NumElms * sizeof(int)),
-                      hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Dptr, Hstptr, (NumElms * sizeof(int)), hipMemcpyHostToDevice));
   dim3 dimBlock(blockSize, 1, 1);
-  dim3 dimGrid((NumElms + blockSize -1)/blockSize, 1, 1);
+  dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
   HIP_CHECK(hipStreamSynchronize(strm));
   for (size_t i = 0; i < NumElms; ++i) {
@@ -125,24 +123,20 @@ static void LaunchKrnl4(size_t NumElms, int InitVal) {
 
 static int HmmAttrPrint() {
   int managed = 0;
-  INFO("The following are the attribute values related to HMM for"
-         " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-              hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+  INFO(
+      "The following are the attribute values related to HMM for"
+      " device 0:\n");
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
   INFO("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-                                 hipDeviceAttributeConcurrentManagedAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
   INFO("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-                                 hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
   INFO("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-              hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  INFO("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:"
-         << managed);
+  HIP_CHECK(
+      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
+  INFO("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
 
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   INFO("hipDeviceAttributeManagedMemory: " << managed);
   return managed;
 }
@@ -158,13 +152,13 @@ TEST_CASE("Stress_hipMallocManaged_MultiSize") {
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     dim3 dimBlock(blockSize, 1, 1);
-    for (int i = 1; i < (1024*100); ++i) {
+    for (int i = 1; i < (1024 * 100); ++i) {
       HIP_CHECK(hipMallocManaged(&Hmm1, i));
       HIP_CHECK(hipMallocManaged(&Hmm2, i));
       for (int j = 0; j < i; ++j) {
         Hmm1[j] = InitVal;
       }
-      dim3 dimGrid((i + blockSize -1)/blockSize, 1, 1);
+      dim3 dimGrid((i + blockSize - 1) / blockSize, 1, 1);
       KrnlWth2MemTypesC<<<dimGrid, dimBlock, 0, strm>>>(Hmm2, Hmm1, i);
       HIP_CHECK(hipStreamSynchronize(strm));
       //  Verifying the results
@@ -187,8 +181,9 @@ TEST_CASE("Stress_hipMallocManaged_MultiSize") {
     }
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
-    SUCCEED("GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-           "attribute. Hence skipping the testing with Pass result.\n");
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -200,7 +195,7 @@ TEST_CASE("Stress_hipMallocManaged_KrnlWth2MemTypes") {
   int *Hmm = NULL, *Dptr = NULL, InitVal = 123;
   size_t NumElms = (1024 * 1024);
   int *Hptr = new int[NumElms], blockSize = 64, DataMismatch = 0;
-  int managed =  HmmAttrPrint();
+  int managed = HmmAttrPrint();
   if (managed == 1) {
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
@@ -210,10 +205,9 @@ TEST_CASE("Stress_hipMallocManaged_KrnlWth2MemTypes") {
       Hmm[i] = 0;
       Hptr[i] = InitVal;
     }
-    HIP_CHECK(hipMemcpy(Dptr, Hptr, sizeof(int) * NumElms,
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(Dptr, Hptr, sizeof(int) * NumElms, hipMemcpyHostToDevice));
     dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize -1)/blockSize, 1, 1);
+    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
     KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Dptr, NumElms);
     HIP_CHECK(hipStreamSynchronize(strm));
     // Verifying the results
@@ -232,8 +226,9 @@ TEST_CASE("Stress_hipMallocManaged_KrnlWth2MemTypes") {
     delete[] Hptr;
     REQUIRE(IfTestPassed);
   } else {
-    SUCCEED("GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-           "attribute. Hence skipping the testing with Pass result.\n");
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -246,8 +241,9 @@ TEST_CASE("Stress_hipMallocManaged_MultiKrnlHmmAccess") {
     int InitVal = 123, NumElms = (1024 * 1024);
     LaunchKrnl4(NumElms, InitVal);
   } else {
-    SUCCEED("GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-           "attribute. Hence skipping the testing with Pass result.\n");
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }
 
@@ -257,7 +253,7 @@ TEST_CASE("Stress_hipMallocManaged_ExtremeSizes") {
   if (managed == 1) {
     bool IfTestPassed = true;
     hipError_t err;
-    void *Hmm = NULL;
+    void* Hmm = NULL;
     size_t totalDevMem = 0, freeDevMem = 0;
     int NumDevs = 0;
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
@@ -316,8 +312,10 @@ TEST_CASE("Stress_hipMallocManaged_ExtremeSizes") {
       if (hipSuccess == err) {
         HIP_CHECK(hipFree(Hmm));
       } else {
-        WARN("Observed error while allocating max (freeDevMem - 1) memory"
-               " on GPU: " << i);
+        WARN(
+            "Observed error while allocating max (freeDevMem - 1) memory"
+            " on GPU: "
+            << i);
         WARN(" with hipMallocManaged() api with flag 'hipMemAttachHost'\n");
         WARN("Error: " << hipGetErrorString(err));
         IfTestPassed = false;

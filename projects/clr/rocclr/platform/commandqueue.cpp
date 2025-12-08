@@ -36,8 +36,8 @@ namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
                      uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
-    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs,
-                   priority, cuMask),
+    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
+                   cuMask),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
@@ -72,10 +72,10 @@ bool HostQueue::terminate() {
       Command* lastCommand = getLastQueuedCommand(true);
       if (lastCommand != nullptr) {
         // Check if CPU batch wasn't flushed for completion with the last command
-        if (GetSubmissionBatch() != nullptr) {
+        if (GetSubmissionBatchSize() != 0) {
           auto command = new Marker(*this, false);
           if (command != nullptr) {
-            ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to ensure finish");
+            ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Marker queued to ensure finish");
             command->enqueue();
             lastCommand->release();
             lastCommand = command;
@@ -145,7 +145,7 @@ void HostQueue::finishCommand(Command* command) {
   if (command == nullptr) {
     command = getLastQueuedCommand(true);
     if (command != nullptr) {
-      ClPrint(LOG_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
+      ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No command, awaiting complete status on host");
       command->awaitCompletion();
       command->release();
     }
@@ -154,7 +154,7 @@ void HostQueue::finishCommand(Command* command) {
   // Check hardware event status for the specific command
   static constexpr bool kWaitCompletion = true;
   if (!device().IsHwEventReady(command->event(), kWaitCompletion)) {
-    ClPrint(LOG_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "No HW event, awaiting complete status on host");
     command->awaitCompletion();
   }
 }
@@ -168,6 +168,7 @@ void HostQueue::finish(bool cpu_wait) {
 
     command = getLastQueuedCommand(true);
     if (command == nullptr) {
+      ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
       return;
     }
     // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
@@ -181,13 +182,13 @@ void HostQueue::finish(bool cpu_wait) {
   }
 
   size_t batchSize = GetSubmissionBatchSize();
-  ClPrint(LOG_DEBUG, LOG_CMD,
+  ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
           "finish() called with batch size: %zu, cpu_wait: %d, "
           "fence dirty: %d",
           batchSize, cpu_wait, vdev()->isFenceDirty());
 
   // Force marker if the batch wasn't sent for CPU update or fence is dirty
-  if (nullptr == command || (GetSubmissionBatch() != nullptr) || vdev()->isFenceDirty()) {
+  if (nullptr == command || (batchSize != 0)|| vdev()->isFenceDirty()) {
     if (nullptr != command) {
       command->release();
     }
@@ -203,25 +204,23 @@ void HostQueue::finish(bool cpu_wait) {
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
-    ClPrint(LOG_DEBUG, LOG_CMD,
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
             "No HW event or batch size is less than %zu, "
             "await command completion",
             minBatchSize);
     command->awaitCompletion();
-
-    if (IS_HIP) {
-      ScopedLock sl(vdev()->execution());
-      ScopedLock l(lastCmdLock_);
-      // Runtime can clear the last command only if no other submissions occured
-      // during finish()
-      if (command == lastEnqueueCommand_) {
-        device_.removeFromActiveQueues(this);
-        lastEnqueueCommand_->release();
-        lastEnqueueCommand_ = nullptr;
-      }
+  }
+  if (IS_HIP) {
+    ScopedLock sl(vdev()->execution());
+    ScopedLock l(lastCmdLock_);
+    // Runtime can clear the last command only if no other submissions occured
+    // during finish()
+    if (command == lastEnqueueCommand_) {
+      device_.removeFromActiveQueues(this);
+      lastEnqueueCommand_->release();
+      lastEnqueueCommand_ = nullptr;
     }
   }
-
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 
@@ -258,16 +257,15 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     // Process the command's event wait list.
     const Command::EventWaitList& events = command->eventWaitList();
     bool dependencyFailed = false;
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) processing: %p ,events.size(): %d",
             amd::activity_prof::getOclCommandKindString(command->type()), command, events.size());
     for (const auto& it : events) {
       // Only wait if the command is enqueued into another queue.
       if (it->command().queue() != this) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
-          ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
-                  amd::activity_prof::getOclCommandKindString(command->type()),
-                  command, it);
+          ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
+                  amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
           dependencyFailed |= !it->awaitCompletion();
@@ -288,9 +286,8 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
       continue;
     }
 
-    ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
-            amd::activity_prof::getOclCommandKindString(command->type()),
-            command);
+    ClPrint(LOG_DETAIL_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
+            amd::activity_prof::getOclCommandKindString(command->type()), command);
 
     command->setStatus(CL_SUBMITTED);
 

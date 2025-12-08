@@ -15,7 +15,7 @@
  * LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
-*/
+ */
 
 /**
  Testcase Scenarios :
@@ -36,13 +36,11 @@
 #define NUM_W 256
 
 
-
-void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch,
-                                  size_t width, hipStream_t stream) {
+void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch, size_t width,
+                                  hipStream_t stream) {
   constexpr int memsetval = 0x22;
   HIPCHECK(hipMemset2DAsync(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
-  HIPCHECK(hipMemcpy2DAsync(A_h, width, A_d, pitch, NUM_W, NUM_H,
-                            hipMemcpyDeviceToHost, stream));
+  HIPCHECK(hipMemcpy2DAsync(A_h, width, A_d, pitch, NUM_W, NUM_H, hipMemcpyDeviceToHost, stream));
 }
 
 
@@ -65,39 +63,33 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   int validateCount{};
 
   blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A,
-                                                               width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B,
-                                                               width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
 
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   B_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(B_h != nullptr);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&C_d), &pitch_C,
-                                                               width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&C_d), &pitch_C, width, NUM_H));
 
   for (size_t i = 0; i < elements; i++) {
     B_h[i] = i;
   }
-  HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H,
-                       hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H, hipMemcpyHostToDevice));
   SECTION("Using User created stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     for (size_t k = 0; k < ITER; k++) {
-      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                     dim3(threadsPerBlock), 0, stream, B_d, C_d, elements);
+      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream,
+                         B_d, C_d, elements);
       HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
-                stream));
-      HIP_CHECK(hipStreamSynchronize(stream)); 
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
-                           hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
 
-      for (size_t p = 0 ; p < elements ; p++) {
+      for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
-          validateCount+= 1;
+          validateCount += 1;
         }
       }
     }
@@ -105,19 +97,17 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   }
   SECTION("Using hipStreamPerThread stream") {
     for (size_t k = 0; k < ITER; k++) {
-      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                   dim3(threadsPerBlock), 0, hipStreamPerThread, B_d, C_d, elements);
+      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0,
+                         hipStreamPerThread, B_d, C_d, elements);
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
-                hipStreamPerThread));
-      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread)); 
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
-                           hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, hipStreamPerThread));
+      HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
 
-      for (size_t p = 0 ; p < elements ; p++) {
+      for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
-          validateCount+= 1;
+          validateCount += 1;
         }
       }
     }
@@ -125,8 +115,11 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
 
   REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
 
-  HIP_CHECK(hipFree(A_d)); HIP_CHECK(hipFree(B_d)); HIP_CHECK(hipFree(C_d));
-  free(A_h); free(B_h);
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
+  free(A_h);
+  free(B_h);
 }
 
 
@@ -153,52 +146,49 @@ TEST_CASE("Unit_hipMemset2DAsync_MultiThread") {
     return;
   }
 
-  std::thread *t = new std::thread[thread_count];
+  std::thread* t = new std::thread[thread_count];
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A,
-                                                               width, NUM_H));
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B,
-                                                               width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   B_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(B_h != nullptr);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&C_d), &pitch_C,
-                                                               width, NUM_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&C_d), &pitch_C, width, NUM_H));
 
-  for (size_t i = 0 ; i < elements ; i++) {
+  for (size_t i = 0; i < elements; i++) {
     B_h[i] = i;
   }
-  HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H,
-                       hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2D(B_d, width, B_h, pitch_B, NUM_W, NUM_H, hipMemcpyHostToDevice));
   HIP_CHECK(hipStreamCreate(&stream));
 
-  for (int i = 0 ; i < ITER ; i++) {
-    for (size_t k = 0 ; k < thread_count; k++) {
-      if (k%2) {
-        t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, A_h, pitch_A,
-                           width, stream);
+  for (int i = 0; i < ITER; i++) {
+    for (size_t k = 0; k < thread_count; k++) {
+      if (k % 2) {
+        t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, A_h, pitch_A, width, stream);
       } else {
-        t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, B_h, pitch_A,
-                           width, stream);
+        t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, B_h, pitch_A, width, stream);
       }
     }
-    for (size_t j = 0 ; j < thread_count; j++) {
+    for (size_t j = 0; j < thread_count; j++) {
       t[j].join();
     }
 
     HIP_CHECK(hipStreamSynchronize(stream));
-    for (size_t k = 0 ; k < elements ; k++) {
+    for (size_t k = 0; k < elements; k++) {
       if ((A_h[k] == memsetval) && (B_h[k] == memsetval)) {
-        validateCount+= 1;
+        validateCount += 1;
       }
     }
   }
 
   REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
 
-  HIP_CHECK(hipFree(A_d)); HIP_CHECK(hipFree(B_d)); HIP_CHECK(hipFree(C_d));
-  free(A_h); free(B_h);
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
+  free(A_h);
+  free(B_h);
   HIP_CHECK(hipStreamDestroy(stream));
 
   delete[] t;

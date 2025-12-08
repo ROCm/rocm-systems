@@ -23,13 +23,9 @@
 #include "rocprof-sys-run.hpp"
 
 #include "common/defines.h"
-#include "common/delimit.hpp"
 #include "common/environment.hpp"
-#include "common/join.hpp"
-#include "common/setup.hpp"
+#include "common/path.hpp"
 #include "core/argparse.hpp"
-#include "core/config.hpp"
-#include "core/state.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/environment.hpp>
@@ -43,11 +39,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-#include <array>
 #include <cctype>
-#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -57,7 +50,6 @@
 #include <string>
 #include <string_view>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -66,6 +58,7 @@ namespace filepath = ::tim::filepath;  // NOLINT
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
+namespace path     = rocprofsys::common::path;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
@@ -82,32 +75,9 @@ to_string(bool _v)
 
 namespace
 {
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
-}
+using rocprofsys::common::update_mode;
 
-parser_data_t&
-get_initial_environment(parser_data_t& _data)
-{
-    if(environ != nullptr)
-    {
-        int idx = 0;
-        while(environ[idx] != nullptr)
-        {
-            auto* _v = environ[idx++];
-            _data.initial.emplace(_v);
-            _data.current.emplace_back(strdup(_v));
-        }
-    }
-
-    return _data;
-}
+auto original_envs = std::unordered_set<std::string>{};
 
 int
 get_verbose(parser_data_t& _data)
@@ -121,13 +91,42 @@ get_verbose(parser_data_t& _data)
     return verbose;
 }
 
-std::string
-get_realpath(const std::string& _v)
+parser_data_t&
+get_initial_environment(parser_data_t& _data)
 {
-    auto* _tmp = realpath(_v.c_str(), nullptr);
-    auto  _ret = std::string{ _tmp };
-    free(_tmp);
-    return _ret;
+    if(environ != nullptr)
+    {
+        int idx = 0;
+        while(environ[idx] != nullptr)
+        {
+            auto* _v = environ[idx++];
+            _data.initial.emplace(_v);
+            _data.current.emplace_back(strdup(_v));
+            original_envs.emplace(_v);
+        }
+    }
+
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
+    if(!_libexecpath.empty())
+    {
+        rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
+                                       _libexecpath, update_mode::REPLACE, ":",
+                                       _data.updated, original_envs);
+    }
+
+    const bool verbose = (get_verbose(_data) > 0);
+    if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt(verbose);
+       !llvm_dir.empty())
+    {
+        rocprofsys::common::update_env(_data.current, "LD_LIBRARY_PATH", llvm_dir,
+                                       update_mode::APPEND, ":", _data.updated,
+                                       original_envs);
+        auto        current_ld = getenv("LD_LIBRARY_PATH");
+        std::string new_ld     = current_ld ? (llvm_dir + ":" + current_ld) : llvm_dir;
+        setenv("LD_LIBRARY_PATH", new_ld.c_str(), 1);
+    }
+
+    return _data;
 }
 
 auto
@@ -254,7 +253,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     using parser_err_t = typename parser_t::result_type;
 
     auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        std::unordered_set<std::string> help_args = { "-h", "--help", "-?" };
         return (p.exists("help") || _argc == 1 ||
                 (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
     };

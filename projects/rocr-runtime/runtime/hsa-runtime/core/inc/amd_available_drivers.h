@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -43,11 +43,10 @@
 #ifndef HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 #define HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 
-#ifdef __linux__
-
 #include "core/inc/amd_kfd_driver.h"
-#include "core/inc/amd_xdna_driver.h"
 
+#ifdef __linux__
+#include "core/inc/amd_xdna_driver.h"
 #endif
 
 #endif  // header guard

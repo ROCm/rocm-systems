@@ -1,4 +1,7 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-openmp LANGUAGES CXX)
 
@@ -29,7 +32,11 @@ add_executable(
 )
 
 option(USE_CLANG_OMP "Use the clang OpenMP if available" ON)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(OpenMP_C_FLAGS "-fopenmp=libomp")
+    set(OpenMP_CXX_FLAGS "-fopenmp=libomp")
+
     find_package(OpenMP REQUIRED)
     target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
     set(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY
@@ -87,6 +94,31 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
         TARGETS openmp-cg openmp-lu
         DESTINATION bin
         COMPONENT rocprofiler-systems-examples
+    )
+endif()
+
+set(DEFAULT_GPU_TARGETS
+    "gfx900"
+    "gfx906"
+    "gfx908"
+    "gfx90a"
+    "gfx942"
+    "gfx950"
+    "gfx1030"
+    "gfx1010"
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+)
+
+set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
+
+if(ROCPROFSYS_USE_ROCM)
+    add_subdirectory(external)
+else()
+    rocprofiler_systems_message(
+      WARNING
+      "ROCPROFSYS OMPVV CTests requires ROCm to be installed. Disabling OMPVV CTests..."
     )
 endif()
 

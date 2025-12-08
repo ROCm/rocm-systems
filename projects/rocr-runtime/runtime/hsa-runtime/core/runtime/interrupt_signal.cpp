@@ -372,7 +372,6 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
-    std::atomic_signal_fence(std::memory_order_seq_cst);
     if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
   }
 

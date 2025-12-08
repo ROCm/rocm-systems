@@ -65,10 +65,10 @@ struct metric_dims
 
 // get all dimensions for an agent, block_name
 std::vector<MetricDimension>
-getBlockDimensions(std::string_view agent, const counters::Metric&);
+getBlockDimensions(rocprofiler_agent_id_t agent_id, const counters::Metric&);
 
 std::shared_ptr<const metric_dims>
-get_dimension_cache(bool reload = false);
+get_dimension_cache(rocprofiler_agent_id_t agent_id, bool reload = false);
 }  // namespace counters
 }  // namespace rocprofiler
 

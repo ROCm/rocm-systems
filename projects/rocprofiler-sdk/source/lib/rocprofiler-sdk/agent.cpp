@@ -153,7 +153,7 @@ parse_cpu_info()
                     return 0;
                 };
 
-                auto value = match.back();
+                const auto& value = match.back();
 
                 if(itr.find("vendor_id") == 0)
                     info_v.vendor_id = value;

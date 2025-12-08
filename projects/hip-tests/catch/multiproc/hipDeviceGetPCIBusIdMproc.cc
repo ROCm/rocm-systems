@@ -38,7 +38,7 @@ namespace hipDeviceGetPCIBusIdTests {
 /**
  * Fetches Gpu device count
  */
-void getDeviceCount(int *pdevCnt) {
+void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
 
@@ -112,14 +112,13 @@ bool testWithMaskedDevices(int actualNumGPUs) {
     setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
 #endif
 
-    for (int count = 1;
-        count < actualNumGPUs; count++) {
+    for (int count = 1; count < actualNumGPUs; count++) {
       err = hipDeviceGetPCIBusId(pciBusId, MAX_DEVICE_LENGTH, count);
       if (err == hipSuccess) {
         testResult &= false;
       } else {
-        printf("hipGetDeviceProperties: Error Code Returned: '%s'(%d)\n",
-              hipGetErrorString(err), err);
+        printf("hipGetDeviceProperties: Error Code Returned: '%s'(%d)\n", hipGetErrorString(err),
+               err);
       }
     }
     close(fd[0]);
@@ -143,8 +142,7 @@ bool testWithMaskedDevices(int actualNumGPUs) {
 }
 
 
-bool getPciBusId(int deviceCount,
-                 char **hipDeviceList) {
+bool getPciBusId(int deviceCount, char** hipDeviceList) {
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipDeviceGetPCIBusId(hipDeviceList[i], MAX_DEVICE_LENGTH, i));
   }
@@ -174,12 +172,35 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_MaskedDevices") {
 /* Compare {pciDomainID, pciBusID, pciDeviceID} values
  * hipDeviceGetPCIBusId vs lspci
  */
+
 TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
-  FILE *fpipe;
+  auto are_devices_hidden = []() -> bool {
+#if HT_AMD
+    auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+    if (env_res == nullptr) {
+      env_res = std::getenv("ROCR_VISIBLE_DEVICES");
+      if (env_res == nullptr) {
+        return false;
+      }
+    }
+    return true;
+#else
+    auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+    return env_res != nullptr;
+#endif
+  }();
+
+  if (are_devices_hidden) {
+    HipTest::HIP_SKIP_TEST(
+        "There are hidden devices, which means lscpi might report something different than what we "
+        "have here");
+  }
+
+  FILE* fpipe;
   {
     // Check if lspci is installed, if not, don't proceed
-    char const *cmd = "lspci --version";
-    char *lspciCheck{nullptr};
+    char const* cmd = "lspci --version";
+    char* lspciCheck{nullptr};
     constexpr auto MaxLen = 50;
     char temp[MaxLen]{};
 
@@ -199,9 +220,9 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE_FALSE(deviceCount == 0);
   // Allocate an array of pointer to characters
-  char **hipDeviceList = new char*[deviceCount];
+  char** hipDeviceList = new char*[deviceCount];
   REQUIRE_FALSE(hipDeviceList == nullptr);
-  char **pciDeviceList = new char*[deviceCount];
+  char** pciDeviceList = new char*[deviceCount];
   REQUIRE_FALSE(pciDeviceList == nullptr);
   for (int i = 0; i < deviceCount; i++) {
     hipDeviceList[i] = new char[MAX_DEVICE_LENGTH];
@@ -211,14 +232,16 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
   }
 
   hipDeviceGetPCIBusIdTests::getPciBusId(deviceCount, hipDeviceList);
-  char const *command = nullptr;
+  char const* command = nullptr;
   // Get lspci device list and compare with hip device list
   if ((TestContext::get()).isNvidia()) {
-    command = "lspci -D | grep controller | grep NVIDIA | "
-              "cut -d ' ' -f 1";
+    command =
+        "lspci -D | grep controller | grep NVIDIA | "
+        "cut -d ' ' -f 1";
   } else {
-    command = "lspci -D | grep -e controller -e accelerator | grep AMD/ATI | "
-              "cut -d ' ' -f 1";
+    command =
+        "lspci -D | grep -e controller -e accelerator | grep AMD/ATI | "
+        "cut -d ' ' -f 1";
   }
   fpipe = popen(command, "r");
   REQUIRE_FALSE(fpipe == nullptr);
@@ -229,15 +252,13 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
   while (fgets(pciDeviceList[index], MAX_DEVICE_LENGTH, fpipe)) {
     bool bMatchFound = false;
     for (int deviceNo = 0; deviceNo < deviceCount; deviceNo++) {
-      if (!strncasecmp(pciDeviceList[index], hipDeviceList[deviceNo],
-                                                             cmpLen)) {
+      if (!strncasecmp(pciDeviceList[index], hipDeviceList[deviceNo], cmpLen)) {
         deviceMatchCount++;
         bMatchFound = true;
       }
     }
     if (bMatchFound == false) {
-      printf("PCI device: %s is not reported by HIP\n",
-                                   pciDeviceList[index]);
+      printf("PCI device: %s is not reported by HIP\n", pciDeviceList[index]);
     }
     index++;
     if (index >= deviceCount) break;

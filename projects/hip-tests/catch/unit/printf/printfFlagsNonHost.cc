@@ -18,27 +18,28 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
- 
+
 
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify the printf return value from other process for the compiler option -mprintf-kind=buffered
-* - Fetch the printf content from a process. Compare it with reference string.
-* Test source
-* ------------------------
-* - catch/unit/printf/printfFlagsNonHost.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 5.7
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify the printf return value from other process for the compiler option
+ * -mprintf-kind=buffered
+ * - Fetch the printf content from a process. Compare it with reference string.
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/printfFlagsNonHost.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 5.7
+ */
 
 TEST_CASE("Unit_Buffered_Printf_Flags") {
   int pcieAtomic = 0;
@@ -67,6 +68,6 @@ xyzzy
 
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

@@ -67,12 +67,11 @@ TEST_CASE("Unit_all_fp4_from_double") {
   SECTION("sanityx4") {
     std::vector<double4> inputs{
         {-1.0, 0.5, 1.5, 1.0}, {-2.0, 0.5, 1.5, 2.0}, {-3.0, 0.5, 1.5, 3.0}};
-    for (const auto &input : inputs) {
+    for (const auto& input : inputs) {
       __hip_fp4x4_e2m1 fp4x4(input);
       double4 ret = fp4x4;
-      INFO("Original: " << input.x << ", " << input.y << ", " << input.z << ", "
-                        << input.w << " Return: " << ret.x << ", " << ret.y
-                        << ret.z << ", " << ret.w);
+      INFO("Original: " << input.x << ", " << input.y << ", " << input.z << ", " << input.w
+                        << " Return: " << ret.x << ", " << ret.y << ret.z << ", " << ret.w);
       REQUIRE(ret.x == input.x);
       REQUIRE(ret.y == input.y);
       REQUIRE(ret.z == input.z);
@@ -104,17 +103,17 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
     };
 
     std::vector<double> inputs{-1.0, 0.0, 1.0};
-    double *d_in;
-    float *d_out;
+    double* d_in;
+    float* d_out;
     HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()));
     HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
 
-    HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(), hipMemcpyHostToDevice));
     lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
     std::vector<float> outputs(inputs.size(), 0.0f);
-    HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
 
     for (size_t i = 0; i < inputs.size(); i++) {
       INFO("Original: " << inputs[i] << " Output: " << outputs[i]);
@@ -126,8 +125,7 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
   }
 
   SECTION("sanityx2") {
-    auto fp4x2_l = [] __device__(double2 * inputs, float2 * outputs,
-                                 size_t size) {
+    auto fp4x2_l = [] __device__(double2 * inputs, float2 * outputs, size_t size) {
       int i = threadIdx.x;
       if (i < size) {
         __hip_fp4x2_e2m1 fp4(inputs[i]);
@@ -135,23 +133,22 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
       }
     };
 
-    std::vector<double2> inputs{
-        {-1.0, 0.0}, {0.0, 1.0}, {1.0, -1.0}, {1.0, 0.0}, {0.0, -1.0}};
-    double2 *d_in;
-    float2 *d_out;
+    std::vector<double2> inputs{{-1.0, 0.0}, {0.0, 1.0}, {1.0, -1.0}, {1.0, 0.0}, {0.0, -1.0}};
+    double2* d_in;
+    float2* d_out;
     HIP_CHECK(hipMalloc(&d_in, sizeof(double2) * inputs.size()));
     HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * inputs.size()));
 
-    HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double2) * inputs.size(),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_in, inputs.data(), sizeof(double2) * inputs.size(), hipMemcpyHostToDevice));
     lambda_kernel_launch<<<1, 32>>>(fp4x2_l, d_in, d_out, inputs.size());
     std::vector<float2> outputs(inputs.size());
-    HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float2) * inputs.size(),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(outputs.data(), d_out, sizeof(float2) * inputs.size(), hipMemcpyDeviceToHost));
 
     for (size_t i = 0; i < inputs.size(); i++) {
-      INFO("Original: " << inputs[i].x << ", " << inputs[i].y << " Output: "
-                        << outputs[i].x << ", " << outputs[i].y);
+      INFO("Original: " << inputs[i].x << ", " << inputs[i].y << " Output: " << outputs[i].x << ", "
+                        << outputs[i].y);
       REQUIRE(inputs[i].x == outputs[i].x);
       REQUIRE(inputs[i].y == outputs[i].y);
     }
@@ -161,8 +158,7 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
   }
 
   SECTION("sanityx4") {
-    auto fp4x4_l = [] __device__(double4 * inputs, float4 * outputs,
-                                 size_t size) {
+    auto fp4x4_l = [] __device__(double4 * inputs, float4 * outputs, size_t size) {
       int i = threadIdx.x;
       if (i < size) {
         __hip_fp4x4_e2m1 fp4(inputs[i]);
@@ -172,22 +168,21 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
 
     std::vector<double4> inputs{
         {-1.0, 0.0, 1.0, 0.5}, {0.0, 1.0, -0.5, -1.0}, {1.0, 0.0, 1.0, -1.0}};
-    double4 *d_in;
-    float4 *d_out;
+    double4* d_in;
+    float4* d_out;
     HIP_CHECK(hipMalloc(&d_in, sizeof(double4) * inputs.size()));
     HIP_CHECK(hipMalloc(&d_out, sizeof(float4) * inputs.size()));
 
-    HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double4) * inputs.size(),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_in, inputs.data(), sizeof(double4) * inputs.size(), hipMemcpyHostToDevice));
     lambda_kernel_launch<<<1, 32>>>(fp4x4_l, d_in, d_out, inputs.size());
     std::vector<float4> outputs(inputs.size());
-    HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float4) * inputs.size(),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(outputs.data(), d_out, sizeof(float4) * inputs.size(), hipMemcpyDeviceToHost));
 
     for (size_t i = 0; i < inputs.size(); i++) {
-      INFO("Original: " << inputs[i].x << ", " << inputs[i].y << ", "
-                        << inputs[i].z << ", " << inputs[i].w << " Output: "
-                        << outputs[i].x << ", " << outputs[i].y
+      INFO("Original: " << inputs[i].x << ", " << inputs[i].y << ", " << inputs[i].z << ", "
+                        << inputs[i].w << " Output: " << outputs[i].x << ", " << outputs[i].y
                         << ", " << outputs[i].z << ", " << outputs[i].w);
       REQUIRE(inputs[i].x == outputs[i].x);
       REQUIRE(inputs[i].y == outputs[i].y);
@@ -212,8 +207,7 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int,
-                   long long int, short int) {
+TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long long int, short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{-1, 0, 1};
     for (const auto val : input) {
@@ -238,9 +232,8 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int,
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int,
-                   unsigned long int, unsigned long long int,
-                   unsigned short int) {
+TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int, unsigned long int,
+                   unsigned long long int, unsigned short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{1, 2, 3};
     for (const auto val : input) {
@@ -266,13 +259,11 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int,
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int,
-                   long int, long long int,
+TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, long long int,
                    short int) {
-  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f,
-                             -1.0f, -0.5f, 0.0f,  0.5f,  1.0f,
-                             1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-  auto fp4x1_l = [] __device__(TestType *inputs, float *outputs, size_t size) {
+  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
+                             0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
+  auto fp4x1_l = [] __device__(TestType * inputs, float* outputs, size_t size) {
     int i = threadIdx.x;
     if (i < size) {
       __hip_fp4_e2m1 fp4(inputs[i]);
@@ -285,18 +276,17 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int,
   for (int i = 0; i <= 6; i += 1) {
     inputs.push_back(i);
   }
-  TestType *d_in;
-  float *d_out;
+  TestType* d_in;
+  float* d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()));
   HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
 
-  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(),
-                      hipMemcpyHostToDevice));
+  HIP_CHECK(
+      hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(), hipMemcpyHostToDevice));
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(),
-                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
@@ -320,13 +310,11 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int,
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "",
-                   unsigned int, unsigned long int, unsigned long long int,
-                   unsigned short int) {
-  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f,
-                             -1.0f, -0.5f, 0.0f,  0.5f,  1.0f,
-                             1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-  auto fp4x1_l = [] __device__(TestType *inputs, float *outputs, size_t size) {
+TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsigned int,
+                   unsigned long int, unsigned long long int, unsigned short int) {
+  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
+                             0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
+  auto fp4x1_l = [] __device__(TestType * inputs, float* outputs, size_t size) {
     int i = threadIdx.x;
     if (i < size) {
       __hip_fp4_e2m1 fp4(inputs[i]);
@@ -339,18 +327,17 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "",
   for (int i = -6; i <= 6; i += 1) {
     inputs.push_back(i);
   }
-  TestType *d_in;
-  float *d_out;
+  TestType* d_in;
+  float* d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()));
   HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
 
-  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(),
-                      hipMemcpyHostToDevice));
+  HIP_CHECK(
+      hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(), hipMemcpyHostToDevice));
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(),
-                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
@@ -381,16 +368,14 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
     in.push_back(i);
   }
 
-  std::vector<float> expected{-6.0f, -6.0f, -4.0f, -4.0f, -4.0f, -4.0f, -3.0f,
-                              -2.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,  0.5f,
-                              1.0f,  1.5f,  2.0f,  2.0f,  3.0f,  4.0f,  4.0f,
-                              4.0f,  4.0f,  6.0f,  6.0f};
+  std::vector<float> expected{-6.0f, -6.0f, -4.0f, -4.0f, -4.0f, -4.0f, -3.0f, -2.0f, -2.0f,
+                              -1.5f, -1.0f, -0.5f, 0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  2.0f,
+                              3.0f,  4.0f,  4.0f,  4.0f,  4.0f,  6.0f,  6.0f};
 
   for (size_t i = 0; i < in.size(); i++) {
     __hip_fp4_e2m1 fp4(in[i]);
     float fp32 = fp4;
-    INFO("Original: " << in[i] << " Output: " << fp32
-                      << " Expected: " << expected[i]);
+    INFO("Original: " << in[i] << " Output: " << fp32 << " Expected: " << expected[i]);
     REQUIRE(expected[i] == fp32);
   }
 }
@@ -409,10 +394,9 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
  */
 
 TEST_CASE("Unit_ocp_fp4_from_double_full_range_device") {
-  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f,
-                             -1.0f, -0.5f, 0.0f,  0.5f,  1.0f,
-                             1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-  auto fp4x1_l = [] __device__(double *inputs, float *outputs, size_t size) {
+  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
+                             0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
+  auto fp4x1_l = [] __device__(double* inputs, float* outputs, size_t size) {
     int i = threadIdx.x;
     if (i < size) {
       __hip_fp4_e2m1 fp4(inputs[i]);
@@ -425,18 +409,16 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_device") {
   for (double i = -6.0; i <= 6.0; i += 0.5) {
     inputs.push_back(i);
   }
-  double *d_in;
-  float *d_out;
+  double* d_in;
+  float* d_out;
   HIP_CHECK(hipMalloc(&d_in, sizeof(double) * inputs.size()));
   HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
 
-  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(),
-                      hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in, inputs.data(), sizeof(double) * inputs.size(), hipMemcpyHostToDevice));
   lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
 
   std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(),
-                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);

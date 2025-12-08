@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -33,7 +14,16 @@ execute_process(
     OUTPUT_VARIABLE _network_interface
 )
 
-message(STATUS "Default network interface is ${_network_interface}")
+message(STATUS "The list of default network interfaces is ${_network_interface}")
+
+# Generate the list of all events that we want PAPI to record.
+execute_process(
+    COMMAND "${CMAKE_SOURCE_DIR}/tests/generate_papi_nic_events.sh"
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    OUTPUT_VARIABLE _event_list
+)
+
+message(STATUS "The list of all PAPI network events is ${_event_list}")
 
 set(_nic_perf_environment
     "${_base_environment}"
@@ -46,7 +36,7 @@ set(_nic_perf_environment
     "ROCPROFSYS_USE_ROCM=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,papi_array,network_stats"
     "ROCPROFSYS_NETWORK_INTERFACE=${_network_interface}"
-    "ROCPROFSYS_PAPI_EVENTS=net:::${_network_interface}:tx:byte net:::${_network_interface}:rx:byte net:::${_network_interface}:rx:packet net:::${_network_interface}:tx:packet"
+    "ROCPROFSYS_PAPI_EVENTS=${_event_list}"
     "ROCPROFSYS_SAMPLING_DELAY=0.05"
 )
 
@@ -56,12 +46,20 @@ set(_download_url
     "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.1/rocprofiler-systems-1.0.1-ubuntu-22.04-ROCm-60400-PAPI-OMPT-Python3.sh"
 )
 
+# The second file to download. We are downloading two files (each about 90MB), because
+# we want wget to run for at least 2s even on a fast network. This will give PAPI enough
+# time to collect network metrics.
+set(_download2_url
+    "https://github.com/ROCm/rocprofiler-systems/releases/download/rocm-6.4.3/rocprofiler-systems-1.0.2-rhel-9.4-PAPI-OMPT-Python3.sh"
+)
+
 # Run the NIC performance test
 add_test(
     NAME nic-performance
     COMMAND
         $<TARGET_FILE:rocprofiler-systems-sample> -- wget --no-check-certificate
-        ${_download_url} -O /tmp/rocprofiler-systems.test.bin
+        ${_download_url} ${_download2_url} -O
+        ${PROJECT_BINARY_DIR}/rocprofiler-systems.test.bin
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 
