@@ -47,21 +47,21 @@ project(
         "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
 
-option(BUILD_TESTS_ONLY FALSE)
-if(${BUILD_TESTS_ONLY})
-    set(PACKAGE_NAME "rocprofiler-compute-tests")
-    set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute_tests")
-else()
-    set(PACKAGE_NAME "rocprofiler-compute")
-    set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
-    set(EXECUTABLE_NAME "rocprof-compute")
-endif()
+# Append our library helper cmake path
+list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
-message(STATUS "Build only tests: ${BUILD_TESTS_ONLY}")
+# This finds the rocm-cmake project, and installs it if not found
+# rocm-cmake contains common cmake code for rocm projects to help setup and install
+include(dependencies)
+
+rocm_setup_version( VERSION ${ROCPROFCOMPUTE_VERSION} )
+
+set(PACKAGE_NAME "rocprofiler-compute")
+set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
+set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
-include(utils.cmake)
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG
@@ -162,49 +162,49 @@ endif()
 # ----------------------
 # modulefile creation
 # ----------------------
-if(NOT BUILD_TESTS_ONLY)
-    set(MOD_INSTALL_PATH
-        "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
-        CACHE STRING
-        "Install path for modulefile"
+set(MOD_INSTALL_PATH
+    "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
+    CACHE STRING
+    "Install path for modulefile"
+)
+message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
+
+set(moduleFileTemplate "rocprofcompute.lua.in")
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
+    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+    @ONLY
+)
+
+# Thera mods
+if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
+    list(APPEND CMAKE_MESSAGE_INDENT "  ")
+    message(STATUS "Using thera-specific modulefile modification")
+    file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
+    file(
+        APPEND
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${mod_additions}
     )
-    message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
-
-    set(moduleFileTemplate "rocprofcompute.lua.in")
-
-    configure_file(
-        ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-        @ONLY
-    )
-
-    # Thera mods
-    if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
-        list(APPEND CMAKE_MESSAGE_INDENT "  ")
-        message(STATUS "Using thera-specific modulefile modification")
-        file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-        file(
-            APPEND
-                ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-            ${mod_additions}
-        )
-        list(POP_BACK CMAKE_MESSAGE_INDENT)
-    endif()
+    list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
 
 # Setup testing collateral
 
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
 set(CMAKE_HIP_FLAGS_RELEASE "-O2")
-if(${ENABLE_TESTS} OR ${BUILD_TESTS_ONLY})
+if(${ENABLE_TESTS})
     enable_language("C" "HIP")
+    enable_testing()
+    rocm_package_setup_client_component(
+        tests
+        DEPENDS
+            COMMON ${PACKAGE_NAME}
+    )
     add_subdirectory(tests)
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
-message(STATUS "Build only tests: ${BUILD_TESTS_ONLY}")
-
-enable_testing()
-include(CTest)
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
@@ -523,217 +523,191 @@ add_subdirectory(src/lib)
 # ---------
 # Install
 # ---------
-if(NOT BUILD_TESTS_ONLY)
-    # top-level rocprofiler-compute utility
-    install(
-        PROGRAMS src/${EXECUTABLE_NAME}
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-    )
-    # python dependency requirements
-    install(
-        FILES requirements.txt
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-    )
-    # support files and version info
-    install(
-        FILES
-            src/argparser.py
-            src/config.py
-            src/rocprof_compute_base.py
-            src/roofline.py
-            VERSION VERSION.sha
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-    )
-    # src/rocprof_compute_analyze
-    install(
-        DIRECTORY src/rocprof_compute_analyze
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN src/rocprof_compute_analyze/tests EXCLUDE
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # src/utils
-    install(
-        DIRECTORY src/utils
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN "rooflines*" EXCLUDE
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # src/utils/rooflines
-    file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-    install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
-    # src/rocprof_compute_soc
-    install(
-        DIRECTORY src/rocprof_compute_soc
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # src/rocprof_compute_profile
-    install(
-        DIRECTORY src/rocprof_compute_profile
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # src/rocprof_compute_tui
-    install(
-        DIRECTORY src/rocprof_compute_tui
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # tools/config_management
-    install(
-        DIRECTORY tools/config_management
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        COMPONENT main
-        PATTERN "__pycache__" EXCLUDE
-    )
-    # samples
-    install(
-        DIRECTORY sample
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-        COMPONENT main
-        FILES_MATCHING
-        PATTERN "*.hip"
-        PATTERN "*.h"
-        PATTERN "*.cpp"
-        PATTERN "workloads" EXCLUDE
-    )
-    # modulefile
-    install(
-        FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
-        DESTINATION ${MOD_INSTALL_PATH}
-        COMPONENT main
-    )
+# top-level rocprofiler-compute utility
+rocm_install(
+    PROGRAMS src/${EXECUTABLE_NAME}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}
+)
+# python dependency requirements
+rocm_install(
+    FILES requirements.txt
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+)
+# support files and version info
+rocm_install(
+    FILES
+        src/argparser.py
+        src/config.py
+        src/rocprof_compute_base.py
+        src/roofline.py
+        VERSION VERSION.sha
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+)
+# src/rocprof_compute_analyze
+rocm_install(
+    DIRECTORY src/rocprof_compute_analyze
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN src/rocprof_compute_analyze/tests EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/utils
+rocm_install(
+    DIRECTORY src/utils
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN "rooflines*" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/utils/rooflines
+file(GLOB rooflinebins src/utils/rooflines/roofline-*)
+rocm_install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT devel)
+# src/rocprof_compute_soc
+rocm_install(
+    DIRECTORY src/rocprof_compute_soc
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/rocprof_compute_profile
+rocm_install(
+    DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/rocprof_compute_tui
+rocm_install(
+    DIRECTORY src/rocprof_compute_tui
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN "__pycache__" EXCLUDE
+)
+# tools/config_management
+rocm_install(
+    DIRECTORY tools/config_management
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT devel
+    PATTERN "__pycache__" EXCLUDE
+)
+# samples
+rocm_install(
+    DIRECTORY sample
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    COMPONENT devel
+    FILES_MATCHING
+    PATTERN "*.hip"
+    PATTERN "*.h"
+    PATTERN "*.cpp"
+    PATTERN "workloads" EXCLUDE
+)
+# modulefile
+rocm_install(
+    FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+    DESTINATION ${MOD_INSTALL_PATH}
+    COMPONENT devel
+)
 
-    # install librocprofiler-compute-tool.so
-    install(
-        TARGETS rocprofiler-compute-tool
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-    )
+# install librocprofiler-compute-tool.so
+install(
+    TARGETS rocprofiler-compute-tool
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT devel
+)
 
-    # top-level symlink for bin/rocprof-compute
-    install(
-        CODE
-            "execute_process(
-            COMMAND bash -c \"set -e
-            cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-            ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
-            \")"
-        COMPONENT main
-    )
+# top-level symlink for bin/rocprof-compute
+rocm_install(
+    CODE
+        "execute_process(
+        COMMAND bash -c \"set -e
+        cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
+        ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
+        \")"
+    COMPONENT devel
+)
 
-    # License header update(s)
-    add_custom_target(
-        license
-        COMMAND
-            ${PROJECT_SOURCE_DIR}/tools/update_license.py --source
-            ${PROJECT_SOURCE_DIR}/src --license ${PROJECT_SOURCE_DIR}/LICENSE.md
-            --extension '.py'
-        COMMAND
-            ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
-            --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
-            "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
-    )
+# License header update(s)
+add_custom_target(
+    license
+    COMMAND
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source
+        ${PROJECT_SOURCE_DIR}/src --license ${PROJECT_SOURCE_DIR}/LICENSE.md
+        --extension '.py'
+    COMMAND
+        ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
+        --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
+        "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
+)
 
-    # Standalone binary creation
-    add_custom_target(
-        standalonebinary
-        # Change working directory to src
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        # Install nuitka
-        COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
-        # Install patchelf
-        COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
-        # Check nuitka
-        COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
-        # Check patchelf
-        COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
-        # Create VERSION.sha file
-        COMMAND git rev-parse HEAD > VERSION.sha
-        # Build standalone binary
-        # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
-        # and fork bombs as explained in
-        # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
-        COMMAND
-            ${Python3_EXECUTABLE} -m nuitka --mode=onefile
-            --no-deployment-flag=self-execution
-            --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
-            --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
-            --include-package=dash_svg --include-package-data=dash_svg
-            --include-package=dash_bootstrap_components
-            --include-package-data=dash_bootstrap_components --include-package=plotly
-            --include-package-data=plotly --include-package=kaleido
-            --include-package-data=kaleido --include-package=rocprof_compute_analyze
-            --include-package-data=rocprof_compute_analyze
-            --include-package=rocprof_compute_profile
-            --include-package-data=rocprof_compute_profile
-            --include-package=rocprof_compute_tui
-            --include-package-data=rocprof_compute_tui
-            --include-package=rocprof_compute_soc
-            --include-package-data=rocprof_compute_soc --include-package=utils
-            --include-package-data=utils src/rocprof-compute
-        # Remove library rpath from executable
-        COMMAND patchelf --remove-rpath rocprof-compute.bin
-        # Move to build directory
-        COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
-    )
+# Standalone binary creation
+add_custom_target(
+    standalonebinary
+    # Change working directory to src
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    # Install nuitka
+    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
+    # Install patchelf
+    COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
+    # Check nuitka
+    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
+    # Check patchelf
+    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
+    # Create VERSION.sha file
+    COMMAND git rev-parse HEAD > VERSION.sha
+    # Build standalone binary
+    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
+    # and fork bombs as explained in
+    # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
+    COMMAND
+        ${Python3_EXECUTABLE} -m nuitka --mode=onefile
+        --no-deployment-flag=self-execution
+        --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
+        --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
+        --include-package=dash_svg --include-package-data=dash_svg
+        --include-package=dash_bootstrap_components
+        --include-package-data=dash_bootstrap_components --include-package=plotly
+        --include-package-data=plotly --include-package=kaleido
+        --include-package-data=kaleido --include-package=rocprof_compute_analyze
+        --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_profile
+        --include-package-data=rocprof_compute_profile
+        --include-package=rocprof_compute_tui
+        --include-package-data=rocprof_compute_tui
+        --include-package=rocprof_compute_soc
+        --include-package-data=rocprof_compute_soc --include-package=utils
+        --include-package-data=utils src/rocprof-compute
+    # Remove library rpath from executable
+    COMMAND patchelf --remove-rpath rocprof-compute.bin
+    # Move to build directory
+    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
+)
 
-    install(
-        FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
-        DESTINATION ${CMAKE_INSTALL_DOCDIR}
-        COMPONENT main
-    )
-endif()
+rocm_install(
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT main
+)
 
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
-    if(BUILD_TESTS_ONLY)
-        install(
-            DIRECTORY tests
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
-            COMPONENT tests
-            FILES_MATCHING
-            PATTERN "*.py"
-            PATTERN "__pycache__" EXCLUDE
-        )
-        install(
-            FILES requirements-test.txt
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
-            COMPONENT tests
-        )
-        install(
-            FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
-            COMPONENT tests
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}-tests
-        )
-    else()
-        install(
-            DIRECTORY tests
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-            COMPONENT tests
-            FILES_MATCHING
-            PATTERN "*.py"
-            PATTERN "__pycache__" EXCLUDE
-        )
-        install(
-            FILES requirements-test.txt
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-            COMPONENT tests
-        )
-        install(
-            FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
-            COMPONENT tests
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-        )
-    endif()
+    rocm_install(
+        DIRECTORY tests
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
+        FILES_MATCHING
+        PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE
+    )
+    rocm_install(
+        FILES requirements-test.txt
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
+    )
+    rocm_install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+        COMPONENT tests
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    )
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")
 
@@ -745,11 +719,7 @@ set(PKG_MAINTAINER_NM "rocprofiler compute support")
 set(PKG_MAINTAINER_EMAIL "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
-if(BUILD_TESTS_ONLY)
-    set(CPACK_PACKAGE_NAME "${PROJECT_NAME}-tests" CACHE STRING "")
-else()
-    set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
-endif()
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT
     "https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute"
 )
@@ -788,20 +758,17 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # Dependencies
 set(PACKAGE_REQUIRES "rocprofiler" CACHE STRING "Package dependencies")
-set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS ${PACKAGE_REQUIRES})
+rocm_package_add_dependencies(DEPENDS "${PACKAGE_REQUIRES}")
 
-if(NOT BUILD_TESTS_ONLY)
-    # Handle the project rebranding from omniperf to rocprofiler-compute
-    set(OMNIPERF_PACKAGE_NAME "omniperf")
-    set(CPACK_RPM_PACKAGE_PROVIDES ${OMNIPERF_PACKAGE_NAME})
-    set(CPACK_RPM_PACKAGE_OBSOLETES "${OMNIPERF_PACKAGE_NAME} < 3.0.0")
-    set(CPACK_RPM_PACKAGE_CONFLICTS ${OMNIPERF_PACKAGE_NAME})
+# Handle the project rebranding from omniperf to rocprofiler-compute
+set(OMNIPERF_PACKAGE_NAME "omniperf")
+set(CPACK_RPM_PACKAGE_PROVIDES ${OMNIPERF_PACKAGE_NAME})
+set(CPACK_RPM_PACKAGE_OBSOLETES "${OMNIPERF_PACKAGE_NAME} < 3.0.0")
+set(CPACK_RPM_PACKAGE_CONFLICTS ${OMNIPERF_PACKAGE_NAME})
 
-    set(CPACK_DEBIAN_PACKAGE_PROVIDES ${OMNIPERF_PACKAGE_NAME})
-    set(CPACK_DEBIAN_PACKAGE_REPLACES ${OMNIPERF_PACKAGE_NAME})
-    set(CPACK_DEBIAN_PACKAGE_BREAKS ${OMNIPERF_PACKAGE_NAME})
-endif()
+set(CPACK_DEBIAN_PACKAGE_PROVIDES ${OMNIPERF_PACKAGE_NAME})
+set(CPACK_DEBIAN_PACKAGE_REPLACES ${OMNIPERF_PACKAGE_NAME})
+set(CPACK_DEBIAN_PACKAGE_BREAKS ${OMNIPERF_PACKAGE_NAME})
 
 # Disable automatic dependency generation
 set(CPACK_RPM_PACKAGE_AUTOREQPROV OFF)
@@ -840,6 +807,12 @@ message(STATUS "  Install Tests: ${INSTALL_TESTS}")
 message(STATUS "  Package Dependencies: ${PACKAGE_REQUIRES}")
 message(STATUS "  CPack Generator: ${CPACK_GENERATOR}")
 
+rocm_create_package(
+    NAME ${PACKAGE_NAME}
+    DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}
+    MAINTAINER ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL}
+)
+
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
@@ -852,7 +825,3 @@ set(CPACK_SOURCE_IGNORE_FILES
     /tests
     /build
 )
-
-configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
-
-include(CPack)
