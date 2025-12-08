@@ -530,9 +530,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_inf
     uint8_t  no_issue_reason; ///< if wave_issue=0, reason for not issuing the instruction (see ::rocprofiler_pc_sampling_no_issue_reason_t);
                              ///< otherwise irrelevant
     uint8_t  wave_count; ///< number of concurrently running waves on CU (on GFX9) or SIMD (GFX12+) at the moment of sampling
-    uint32_t arbiter_state;  ///< arbiter state bitfield. To decode, use ::rocprofiler_pc_sampling_arbiter_state_field_id_t
-                             ///< with ::rocprofiler_pc_sampling_get_arbiter_state_field() helper function,
-                             ///< or manually extract using hardware-specific lookup tables.
+    uint32_t arbiter_state;  ///< arbiter state bitfield. To decode, extract the hardware version from the lower 6 bits of hw_id.
+                             ///< For GFX9: use ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_width_t
+                             ///< For GFX12: use ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_width_t
 } rocprofiler_pc_sampling_snapshot_information_t;
 
 /**
@@ -790,94 +790,600 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
 } rocprofiler_pc_sampling_record_v3_t;
 
 
+
+
+/**
+ * @brief (experimental) IDs of hw_id field.
+ *
+ * This enumeration contains a union of all fields available in different hardware (hw_id) versions.
+ * The offsets and widths for a specific version is encoded inside:
+ * - ::rocprofiler_pc_sampling_hw_id_gfx9_offset_t and
+ *   ::rocprofiler_pc_sampling_hw_id_gfx9_width_t for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9
+ * - ::rocprofiler_pc_sampling_hw_id_gfx12_offset_t and
+ *   ::rocprofiler_pc_sampling_hw_id_gfx12_width_t for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12
+ */
+typedef enum
+{
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WGP_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID,
+    ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_LAST
+} rocprofiler_pc_sampling_hw_id_field_id_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield offsets in hw_id field for GFX9 architectures.
+ *
+ * The hw_id field encodes information about the GPU part where wave was executing
+ * at the moment of sampling. The hw_id tells a user about the:
+ * - PC sampling hardware version (see ::rocprofiler_pc_sampling_hardware_version_t)
+ * - chiplet index
+ * - wave slot index
+ * - SIMD index
+ * - pipe index
+ * - compute unit index
+ * - shader array index
+ * - shader engine index
+ * - thread_group index
+ * - virtual memory ID
+ * - queue id
+ * - ACE (microengine) index
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx9_offset_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PCS_HW_VERSION = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WAVE_ID = 12,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SIMD_ID = 19,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PIPE_ID = 21,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CU_ID = 25,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ARRAY_ID = 29,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ENGINE_ID = 30,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WORKGROUP_ID = 35,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_VM_ID = 42,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_QUEUE_ID = 48,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_MICROENGINE_ID = 52
+} rocprofiler_pc_sampling_hw_id_gfx9_offset_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield widths in hw_id field for GFX9 architectures.
+ *
+ * @see rocprofiler_pc_sampling_hw_id_gfx9_offset_t for more information about each subfield.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx9_width_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PCS_HW_VERSION = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WAVE_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SIMD_ID = 2,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PIPE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CU_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ARRAY_ID = 1,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ENGINE_ID = 5,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WORKGROUP_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_VM_ID = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_QUEUE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_MICROENGINE_ID = 2
+} rocprofiler_pc_sampling_hw_id_gfx9_width_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield offsets in hw_id field for GFX12 architectures.
+ *
+ * The hw_id field encodes information about the GPU part where wave was executing
+ * at the moment of sampling. The hw_id tells a user about the:
+ * - PC sampling hardware version (see ::rocprofiler_pc_sampling_hardware_version_t)
+ * - chiplet index
+ * - wave slot index
+ * - SIMD index
+ * - pipe index
+ * - workgroup processor index
+ * - shader array index
+ * - shader engine index
+ * - workgroup index
+ * - virtual memory ID
+ * - queue id
+ * - ACE (microengine) index
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx12_offset_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PCS_HW_VERSION = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WAVE_ID = 12,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SIMD_ID = 19,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PIPE_ID = 21,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WGP_ID = 25,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ARRAY_ID = 29,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ENGINE_ID = 30,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WORKGROUP_ID = 35,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_VM_ID = 42,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_QUEUE_ID = 48,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_MICROENGINE_ID = 52
+} rocprofiler_pc_sampling_hw_id_gfx12_offset_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield widths in hw_id field for GFX12 architectures.
+ *
+ * @see rocprofiler_pc_sampling_hw_id_gfx12_offset_t for more information about each subfield.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_gfx12_width_t {
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PCS_HW_VERSION = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_CHIPLET = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WAVE_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SIMD_ID = 2,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PIPE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WGP_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ARRAY_ID = 1,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ENGINE_ID = 5,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WORKGROUP_ID = 7,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_VM_ID = 6,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_QUEUE_ID = 4,
+    ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_MICROENGINE_ID = 2
+} rocprofiler_pc_sampling_hw_id_gfx12_width_t;
+
 /**
  * @brief (experimental) IDs of arbiter_state field.
  *
- * TODO: Think about ordering based on commonalities among architectures.
+ * This enumeration contains a union of all fields available in different hardware versions
+ * (see ::rocprofiler_pc_sampling_hardware_version_t).
+ * The offsets and widths for a specific version are encoded inside:
+ * - ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx9_field_width_t
+ *   for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9
+ * - ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_offset_t and ::rocprofiler_pc_sampling_arbiter_state_gfx12_field_width_t
+ *   for ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12
  */
 typedef enum {
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_NONE=0,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_TEX,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP,   
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MISC,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_TEX,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MISC,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU,
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_LAST
 } rocprofiler_pc_sampling_arbiter_state_field_id_t;
 
 /**
- * @brief (experimental) Architecture-agnostic enumeration for arbiter_state field offsets
- *
- * This enum provides sequential offsets for all arbiter_state fields across all architectures.
- * The ordering follows ::rocprofiler_pc_sampling_arbiter_state_field_id_t.
- * Use with ::rocprofiler_pc_sampling_arbiter_state_field_id_t to index into architecture-specific
- * mapping tables.
+ * @brief (experimental) Enumeration for bitfield offsets in arbiter_state for GFX9 architectures
  */
-typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_field_offset_t {
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VALU = 0,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_MATRIX = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_LDS = 2,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_LDS_DIRECT = 3,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_SCALAR = 4,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VMEM_TEX = 5,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_FLAT = 6,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_EXP = 7,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_BRMSG_MISC = 8,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_VALU = 9,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_MATRIX = 10,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_LDS = 11,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_LDS_DIRECT = 12,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_SCALAR = 13,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_VMEM_TEX = 14,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_FLAT = 15,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_EXP = 16,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_BRMSG_MISC = 17,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_DUAL_ISSUE_VALU = 18
-} rocprofiler_pc_sampling_arbiter_state_field_offset_t;
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_gfx9_field_offset_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_VALU = 0,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_LDS = 2,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_SCALAR = 3,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_TEX = 4,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_FLAT = 5,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_EXP = 6,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MISC = 7,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_VALU = 8,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MATRIX = 9,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_LDS = 10,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_SCALAR = 11,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_TEX = 12,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_FLAT = 13,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_EXP = 14,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MISC = 15,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_DUAL_ISSUE_VALU = 16,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_RESERVED = 17
+} rocprofiler_pc_sampling_arbiter_state_gfx9_field_offset_t;
 
 /**
- * @brief (experimental) Architecture-agnostic enumeration for arbiter_state field widths
- *
- * This enum provides widths for all arbiter_state fields across all architectures.
- * The ordering follows ::rocprofiler_pc_sampling_arbiter_state_field_id_t.
- * All current fields are single-bit flags (width = 1).
+ * @brief (experimental) Enumeration for bitfield widths in arbiter_state for GFX9 architectures
  */
-typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_field_width_t {
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VALU = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_MATRIX = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_LDS = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_LDS_DIRECT = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_SCALAR = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VMEM_TEX = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_FLAT = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_EXP = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_BRMSG_MISC = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_VALU = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_MATRIX = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_LDS = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_LDS_DIRECT = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_SCALAR = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_VMEM_TEX = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_FLAT = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_EXP = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_BRMSG_MISC = 1,
-    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_DUAL_ISSUE_VALU = 1
-} rocprofiler_pc_sampling_arbiter_state_field_width_t;
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_gfx9_field_width_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_TEX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_FLAT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_MISC = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_TEX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_FLAT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_MISC = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_DUAL_ISSUE_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_RESERVED = 11
+} rocprofiler_pc_sampling_arbiter_state_gfx9_field_width_t;
 
+/**
+ * @brief (experimental) Enumeration for bitfield offsets in arbiter_state for GFX12 architectures
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_gfx12_field_offset_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VALU = 0,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS_DIRECT = 2,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_SCALAR = 3,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VMEM = 4,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_EXP = 5,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_BRMSG = 6,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VALU = 8,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS = 9,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS_DIRECT = 10,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_SCALAR = 11,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VMEM = 12,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_EXP = 13,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_BRMSG = 14,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_RESERVED = 17
+} rocprofiler_pc_sampling_arbiter_state_gfx12_field_offset_t;
+
+/**
+ * @brief (experimental) Enumeration for bitfield widths in arbiter_state for GFX12 architectures
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_gfx12_field_width_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_LDS_DIRECT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_VMEM = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_BRMSG = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_LDS_DIRECT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_VMEM = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_BRMSG = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_RESERVED = 11
+} rocprofiler_pc_sampling_arbiter_state_gfx12_field_width_t;
+
+// I guess our users could either do bit extraction on their own, or use the following
+// getter that will do that for them in the architecture agnostic way.
+
+/**
+ * @brief Get field value from arbiter state
+ * @param record Pointer to the PC sampling record
+ * @param field_id The field ID to extract
+ * @return The field value if successful, -1 if field is not supported for the given hardware version
+ *
+ * NOTE: Internal LLM generated this code, so it could probably be done better.
+ */
+static inline int
+rocprofiler_pc_sampling_get_arbiter_state_field(const rocprofiler_pc_sampling_record_t* record,
+                                                rocprofiler_pc_sampling_arbiter_state_field_id_t field_id) {
+    // Extract hardware version from hw_id (lower 6 bits)
+    rocprofiler_pc_sampling_hardware_version_t hw_version =
+        (rocprofiler_pc_sampling_hardware_version_t)(record->hw_id.value & 0x3F);
+
+    // arbiter_state contains all 32 bits of field data (no version bits)
+    uint32_t field_data = record->snapshot_information.arbiter_state;
+
+    int offset = -1;
+    int width = -1;
+
+    if (hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9) {
+        // Handle GFX9 fields
+        switch (field_id) {
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_VALU;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_VALU;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MATRIX;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_MATRIX;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_LDS;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_LDS;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_SCALAR;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_SCALAR;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_TEX:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_TEX;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_TEX;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_FLAT;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_FLAT;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_EXP;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_EXP;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MISC:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MISC;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_ISSUE_MISC;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_VALU;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_VALU;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MATRIX;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_MATRIX;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_LDS;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_LDS;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_SCALAR;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_SCALAR;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_TEX:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_TEX;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_TEX;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_FLAT;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_FLAT;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_EXP;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_EXP;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MISC:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MISC;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_STALL_MISC;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_DUAL_ISSUE_VALU;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_WIDTH_DUAL_ISSUE_VALU;
+                break;
+            default:
+                return -1;
+        }
+    }
+    else if (hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12)
+    {
+        // Handle GFX12 fields
+        switch (field_id) {
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VALU;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_VALU;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_LDS;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS_DIRECT;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_LDS_DIRECT;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_SCALAR;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_SCALAR;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VMEM;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_VMEM;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_EXP;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_EXP;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_BRMSG;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_ISSUE_BRMSG;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VALU;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_VALU;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_LDS;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS_DIRECT;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_LDS_DIRECT;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_SCALAR;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_SCALAR;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VMEM;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_VMEM;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_EXP;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_EXP;
+                break;
+            case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG:
+                offset = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_BRMSG;
+                width = ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_WIDTH_STALL_BRMSG;
+                break;
+            default:
+                return -1;
+        }
+    }
+
+
+    // If offset or width is -1, the field is not supported
+    if (offset == -1 || width == -1) {
+        return -1;
+    }
+
+    // Extract and return the field value
+    uint32_t mask = (1u << width) - 1;
+    return (field_data >> offset) & mask;
+}
+
+/**
+ * @brief Get field value from hw_id
+ * @param record Pointer to the PC sampling record
+ * @param field_id The field ID to extract
+ * @return The field value if successful, -1 if field is not supported in hw_id version
+ * encoded inside hw_id.
+ */
+static inline int
+rocprofiler_pc_sampling_get_hw_id_field(
+    const rocprofiler_pc_sampling_record_t*  record,
+    rocprofiler_pc_sampling_hw_id_field_id_t field_id)
+{
+    // Extract hw_id value from record
+    uint64_t hw_id = record->hw_id.value;
+
+    // Extract hardware version from lower 6 bits (bits 0-5)
+    rocprofiler_pc_sampling_hardware_version_t hw_version =
+        (rocprofiler_pc_sampling_hardware_version_t)(hw_id & 0x3F);
+
+    // Check if version is valid
+    if(hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_LAST)
+    {
+        return -1;
+    }
+
+    int offset = -1;
+    int width  = -1;
+
+    if(hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9)
+    {
+        // Handle GFX9 fields
+        switch(field_id)
+        {
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PCS_HW_VERSION;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PCS_HW_VERSION;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CHIPLET;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CHIPLET;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WAVE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WAVE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SIMD_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SIMD_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PIPE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_PIPE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CU_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CU_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_CU_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ARRAY_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ARRAY_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_SHADER_ENGINE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WORKGROUP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_WORKGROUP_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_VM_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_VM_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_QUEUE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_QUEUE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_MICROENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_WIDTH_MICROENGINE_ID;
+                break;
+            default: return -1;
+        }
+    }
+    else if(hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12)
+    {
+        // Handle GFX12 fields
+        switch(field_id)
+        {
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PCS_HW_VERSION;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PCS_HW_VERSION;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_CHIPLET;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_CHIPLET;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WAVE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WAVE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WAVE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SIMD_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SIMD_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SIMD_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PIPE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PIPE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_PIPE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WGP_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WGP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WGP_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ARRAY_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ARRAY_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ARRAY_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_SHADER_ENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_SHADER_ENGINE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_WORKGROUP_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WORKGROUP_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_WORKGROUP_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_VM_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_VM_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_VM_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_QUEUE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_QUEUE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_QUEUE_ID;
+                break;
+            case ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_MICROENGINE_ID:
+                offset = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_MICROENGINE_ID;
+                width  = ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_WIDTH_MICROENGINE_ID;
+                break;
+            default: return -1;
+        }
+    }
+
+    // If offset or width is -1, the field is not supported
+    if(offset == -1 || width == -1)
+    {
+        return -1;
+    }
+
+    // Extract and return the field value
+    uint64_t mask = (1ull << width) - 1;
+    return (hw_id >> offset) & mask;
+}
 
 /**
  * @brief (experimental) (Optional) Return the string encoding of
@@ -904,111 +1410,6 @@ ROCPROFILER_SDK_EXPERIMENTAL
 const char*
 rocprofiler_get_pc_sampling_arbiter_state_field_name(
     rocprofiler_pc_sampling_arbiter_state_field_id_t field_id) ROCPROFILER_API;
-
-/**
- * @brief (experimental) Check if a hardware version supports a specific arbiter state field
- *
- * This predicate function determines whether a given PC sampling hardware version
- * supports a particular arbiter state field. Different GPU architectures have
- * different sets of supported arbiter state fields:
- * - GFX9-specific: ISSUE_MATRIX, ISSUE_FLAT, STALL_MATRIX, STALL_FLAT, DUAL_ISSUE_VALU
- * - GFX12-specific: ISSUE_LDS_DIRECT, STALL_LDS_DIRECT
- * - Common: All other fields are supported across all architectures
- *
- * @param [in] pcs_hw_version Hardware version (e.g., GFX9, GFX12, FUTURE)
- * @param [in] field_id Arbiter state field ID to check for support
- * @return true if the field is supported on the given hardware version, false otherwise
- */
-static inline bool
-rocprofiler_pc_sampling_arbiter_field_is_supported(
-    rocprofiler_pc_sampling_hardware_version_t       pcs_hw_version,
-    rocprofiler_pc_sampling_arbiter_state_field_id_t field_id)
-{
-    // Handle invalid inputs
-    if(pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_NONE ||
-       pcs_hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_LAST ||
-       field_id == ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_NONE ||
-       field_id >= ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_LAST)
-    {
-        return false;
-    }
-
-    // GFX9-specific fields
-    switch(field_id)
-    {
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX:
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT:
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX:
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT:
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU:
-            return pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9;
-
-        // GFX12-specific fields
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT:
-        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT:
-            return pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12;
-
-        // Common fields supported across all architectures
-        default:
-            return true;
-    }
-}
-
-/**
- * @brief (experimental) Extract an arbiter state field value from PC sampling snapshot
- *
- * This function performs raw bit extraction from the packed arbiter_state bitfield
- * within the snapshot information structure.
- *
- * IMPORTANT: This function does NOT validate whether the requested field is supported
- * on the hardware architecture that generated the sample. Before calling this function,
- * you MUST use ::rocprofiler_pc_sampling_arbiter_field_is_supported to verify that
- * the field is valid for your hardware version. Extracting unsupported fields may
- * return undefined or reserved bit values.
- *
- * @param [in] snapshot Pointer to snapshot information containing the arbiter state
- * @param [in] offset Bit offset of the field (from ::rocprofiler_pc_sampling_arbiter_state_field_offset_t)
- * @param [in] width Bit width of the field (from ::rocprofiler_pc_sampling_arbiter_state_field_width_t)
- * @return The extracted field value
- *
- * Example usage:
- * @code
- * // Given a PC sampling record from the buffer callback
- * const rocprofiler_pc_sampling_record_v1_t* record = ...;
- *
- * // Extract hardware version and snapshot information from the record
- * rocprofiler_pc_sampling_hardware_version_t hw_version =
- *     (rocprofiler_pc_sampling_hardware_version_t) record->hw_id.pcs_hw_version;
- * const rocprofiler_pc_sampling_snapshot_information_t* snapshot =
- *     &record->snapshot_information;
- *
- * // Check if the ISSUE_VALU field is supported on this architecture
- * if (rocprofiler_pc_sampling_arbiter_field_is_supported(
- *         hw_version,
- *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU))
- * {
- *     // Extract the ISSUE_VALU field value
- *     uint32_t issue_valu = rocprofiler_pc_sampling_get_arbiter_state_field(
- *         snapshot,
- *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VALU,
- *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VALU
- *     );
- *
- *     if (issue_valu) {
- *         // Wave issued a VALU instruction at the moment of sampling
- *     }
- * }
- * @endcode
- */
-static inline uint32_t
-rocprofiler_pc_sampling_get_arbiter_state_field(
-    const rocprofiler_pc_sampling_snapshot_information_t* snapshot,
-    rocprofiler_pc_sampling_arbiter_state_field_offset_t  offset,
-    rocprofiler_pc_sampling_arbiter_state_field_width_t   width)
-{
-    uint32_t mask = (1u << width) - 1;
-    return (snapshot->arbiter_state >> offset) & mask;
-}
 
 /** @} */
 
