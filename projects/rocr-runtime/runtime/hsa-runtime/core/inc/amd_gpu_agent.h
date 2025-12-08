@@ -394,7 +394,7 @@ class GpuAgent : public GpuAgentInt {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -536,7 +536,7 @@ class GpuAgent : public GpuAgentInt {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -638,7 +638,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   core::Isa* isa_;
 
@@ -763,7 +763,7 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Coarse-grain deallocator on this GPU.
   std::function<void(void*)> coarsegrain_deallocator_;
 
-  void* trap_handler_tma_region_;
+  std::unique_ptr<void, std::function<void(void*)>> trap_handler_tma_region_;
 
   /* PC Sampling fields - begin */
   /* 2nd level Trap handler code is based on the offsets within this structure */

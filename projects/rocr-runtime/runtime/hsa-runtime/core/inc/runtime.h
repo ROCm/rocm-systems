@@ -438,15 +438,15 @@ class Runtime {
 
   Agent* region_gpu() { return region_gpu_; }
 
-  const std::vector<const MemoryRegion*>& system_regions_fine() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_fine() const {
     return system_regions_fine_;
   }
 
-  const std::vector<const MemoryRegion*>& system_regions_coarse() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_coarse() const {
     return system_regions_coarse_;
   }
 
-  amd::hsa::loader::Loader* loader() { return loader_; }
+  amd::hsa::loader::Loader* loader() { return loader_.get(); }
 
   amd::LoaderContext* loader_context() { return &loader_context_; }
 
@@ -808,16 +808,16 @@ class Runtime {
   std::vector<uint32_t> gpu_ids_;
 
   // List of all fine grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_fine_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_fine_;
 
   // List of all coarse grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_coarse_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_coarse_;
 
   // Matrix of IO link.
   std::vector<LinkInfo> link_matrix_;
 
   // Loader instance.
-  amd::hsa::loader::Loader* loader_;
+  std::unique_ptr<amd::hsa::loader::Loader> loader_;
 
   // Loader context.
   amd::LoaderContext loader_context_;
@@ -850,17 +850,22 @@ class Runtime {
   // Number of Numa Nodes
   size_t num_nodes_;
 
+  struct HsaEventDeleter {
+    void operator()(HsaEvent* event) { InterruptSignal::DestroyEvent(event); }
+  };
+  using unique_hsa_event_ptr = std::unique_ptr<HsaEvent, HsaEventDeleter>;
+
   // @brief AMD HSA event to monitor for virtual memory access fault.
-  HsaEvent* vm_fault_event_;
+  unique_hsa_event_ptr vm_fault_event_;
 
   // @brief HSA signal to contain the VM fault event.
-  Signal* vm_fault_signal_;
+  unique_signal_ptr vm_fault_signal_;
 
   // @brief AMD HSA event to monitor for HW exceptions.
-  HsaEvent* hw_exception_event_;
+  unique_hsa_event_ptr hw_exception_event_;
 
   // @brief HSA signal to contain the HW exceptionevent.
-  Signal* hw_exception_signal_;
+  unique_signal_ptr hw_exception_signal_;
 
   // Custom system event handlers.
   std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>

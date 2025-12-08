@@ -66,7 +66,6 @@ AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
 }
 
 AieAgent::~AieAgent() {
-  std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
 
@@ -75,8 +74,8 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
                                                             void *data),
                                    void *data) const {
   AMD::callback_t<decltype(callback)> call(callback);
-  for (const auto r : regions_) {
-    hsa_region_t region_handle(core::MemoryRegion::Convert(r));
+  for (const auto& r : regions_) {
+    hsa_region_t region_handle(core::MemoryRegion::Convert(r.get()));
     hsa_status_t err = call(region_handle, data);
     if (err != HSA_STATUS_SUCCESS) {
       return err;
@@ -321,24 +320,25 @@ void AieAgent::InitRegionList() {
   /// explicit sync operations.
   regions_.reserve(3);
   regions_.push_back(
-      new MemoryRegion(false, true, false, false, true, this, sys_mem_props));
+    std::make_shared<MemoryRegion>(false, true, false, false, true, this, sys_mem_props));
   regions_.push_back(
-      new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
-  regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
-                                      other_mem_props));
+    std::make_shared<MemoryRegion>(false, false, false, false, true, this, dev_mem_props));
+  regions_.push_back(
+    std::make_shared<MemoryRegion>(false, false, false, false, true, this, other_mem_props));
 }
 
 void AieAgent::InitAllocators() {
-  for (const auto *region : regions()) {
+  for (const auto& region : regions()) {
     const MemoryRegion *amd_mem_region(
-        static_cast<const MemoryRegion *>(region));
+        static_cast<const MemoryRegion *>(region.get()));
     if (amd_mem_region->kernarg()) {
+      const core::MemoryRegion* region_ptr = region.get();
       system_allocator_ =
-          [region](size_t size, size_t align,
+          [region_ptr](size_t size, size_t align,
                    core::MemoryRegion::AllocateFlags alloc_flags) -> void * {
         void *mem(nullptr);
         return (core::Runtime::runtime_singleton_->AllocateMemory(
-                    region, size, alloc_flags, &mem) == HSA_STATUS_SUCCESS)
+                    region_ptr, size, alloc_flags, &mem) == HSA_STATUS_SUCCESS)
                    ? mem
                    : nullptr;
       };

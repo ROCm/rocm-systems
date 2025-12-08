@@ -165,8 +165,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // Set group and private memory apertures in amd_queue_.
   auto& regions = agent->regions();
 
-  for (auto region : regions) {
-    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region);
+  for (const auto& region : regions) {
+    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region.get());
     uint64_t base = amdregion->GetBaseAddress();
 
     if (amdregion->IsLDS()) {

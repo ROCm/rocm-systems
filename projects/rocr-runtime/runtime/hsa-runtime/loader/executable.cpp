@@ -186,7 +186,6 @@ void Loader::Destroy(Loader *loader)
   _amdgpu_r_debug.r_map = nullptr;
   _amdgpu_r_debug.r_state = r_debug::RT_CONSISTENT;
   r_debug_tail() = nullptr;
-  delete loader;
 }
 
 Executable* AmdHsaCodeLoader::CreateExecutable(

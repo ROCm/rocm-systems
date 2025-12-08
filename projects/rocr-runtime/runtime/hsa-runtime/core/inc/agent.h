@@ -292,7 +292,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
                                void* value) const = 0;
 
   // @brief Returns an array of regions owned by the agent.
-  virtual const std::vector<const core::MemoryRegion*>& regions() const = 0;
+  virtual const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const = 0;
 
   // @brief Returns the ISA's supported by the agent.
   // @details The returned vector is a list of pointers to the supported ISA,
@@ -337,7 +337,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   __forceinline void Disable() { enabled_ = false; }
 
   virtual void Trim() {
-    for (auto region : regions()) region->Trim();
+    for (const auto& region : regions()) region.get()->Trim();
   }
 
   virtual void ReleaseResources() { }

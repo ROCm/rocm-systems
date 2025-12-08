@@ -283,18 +283,18 @@ const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_co
   assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
   auto agent_local_region =
       std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
-                   [&](const core::MemoryRegion* region) {
-                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region;
+                   [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region.get();
                      return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
                    });
-  return agent_local_region == amd_agent->regions().end() ? nullptr : *agent_local_region;
+  return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
 }
 
 const core::MemoryRegion* RegionMemory::System(bool is_code) {
   if (is_code)
-    return core::Runtime::runtime_singleton_->system_regions_coarse()[0];
+    return core::Runtime::runtime_singleton_->system_regions_coarse()[0].get();
   else
-    return core::Runtime::runtime_singleton_->system_regions_fine()[0];
+    return core::Runtime::runtime_singleton_->system_regions_fine()[0].get();
 }
 
 bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {

@@ -193,7 +193,7 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
     agents_by_gpuid_[0] = agent;
 
     // Add cpu regions to the system region list.
-    for (const core::MemoryRegion* region : agent->regions()) {
+    for (auto region : agent->regions()) {
       if (region->fine_grain()) {
         system_regions_fine_.push_back(region);
       } else {
@@ -217,7 +217,7 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool, size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -551,7 +551,7 @@ hsa_status_t Runtime::CopyMemory(void* dst, const void* src, size_t size) {
   // GPU-CPU
   // Must ensure that system memory is visible to the GPU during the copy.
   const AMD::MemoryRegion* system_region =
-      static_cast<const AMD::MemoryRegion*>(system_regions_fine_[0]);
+      static_cast<const AMD::MemoryRegion*>(system_regions_fine_[0].get());
 
   void* gpuPtr = nullptr;
   const auto& locked_copy = [&](void*& ptr, core::Agent* locking_agent) {
@@ -2054,33 +2054,33 @@ void Runtime::BindErrorHandlers() {
 
   // Create memory event with manual reset to avoid racing condition
   // with driver in case of multiple concurrent VM faults.
-  vm_fault_event_ = core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_MEMORY, true);
+  vm_fault_event_.reset(core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_MEMORY, true));
 
   // Create an interrupt signal object to contain the memory event.
   // This signal object will be registered with the async handler global
   // thread.
-  vm_fault_signal_ = new core::InterruptSignal(0, vm_fault_event_);
+  vm_fault_signal_.reset(new core::InterruptSignal(0, vm_fault_event_.get()));
 
   if (!vm_fault_signal_->IsValid() || vm_fault_signal_->EopEvent() == NULL) {
     assert(false && "Failed on creating VM fault signal");
     return;
   }
 
-  SetAsyncSignalHandler(core::Signal::Convert(vm_fault_signal_), HSA_SIGNAL_CONDITION_NE, 0,
-                        VMFaultHandler, reinterpret_cast<void*>(vm_fault_signal_));
+  SetAsyncSignalHandler(core::Signal::Convert(vm_fault_signal_.get()), HSA_SIGNAL_CONDITION_NE, 0,
+                        VMFaultHandler, reinterpret_cast<void*>(vm_fault_signal_.get()));
 
   // Create HW exception event which is for Non-RAS events
-  hw_exception_event_ = core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_HW_EXCEPTION, true);
+  hw_exception_event_.reset(core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_HW_EXCEPTION, true));
 
-  hw_exception_signal_ = new core::InterruptSignal(0, hw_exception_event_);
+  hw_exception_signal_.reset(new core::InterruptSignal(0, hw_exception_event_.get()));
 
   if (!hw_exception_signal_->IsValid() || hw_exception_signal_->EopEvent() == NULL) {
     assert(false && "Failed on creating HW Exception signal");
     return;
   }
 
-  SetAsyncSignalHandler(core::Signal::Convert(hw_exception_signal_), HSA_SIGNAL_CONDITION_NE, 0,
-                        HwExceptionHandler, reinterpret_cast<void*>(hw_exception_signal_));
+  SetAsyncSignalHandler(core::Signal::Convert(hw_exception_signal_.get()), HSA_SIGNAL_CONDITION_NE, 0,
+                        HwExceptionHandler, reinterpret_cast<void*>(hw_exception_signal_.get()));
 }
 
 bool Runtime::HwExceptionHandler(hsa_signal_value_t val, void* arg) {
@@ -2402,7 +2402,7 @@ hsa_status_t Runtime::Load() {
 
   BindErrorHandlers();
 
-  loader_ = amd::hsa::loader::Loader::Create(&loader_context_);
+  loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
   // Load extensions
   LoadExtensions();
@@ -2443,8 +2443,8 @@ void Runtime::Unload() {
   UnloadTools();
   UnloadExtensions();
 
-  amd::hsa::loader::Loader::Destroy(loader_);
-  loader_ = nullptr;
+  amd::hsa::loader::Loader::Destroy(loader_.get());
+  loader_.reset();
 
   for(auto nodeAgent: agents_by_node_) {
     for (auto agent: nodeAgent.second)
@@ -2456,17 +2456,17 @@ void Runtime::Unload() {
 
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_->DestroySignal();
-    vm_fault_signal_ = nullptr;
+    vm_fault_signal_.reset();
   }
-  core::InterruptSignal::DestroyEvent(vm_fault_event_);
-  vm_fault_event_ = nullptr;
+  
+  vm_fault_event_.reset();
 
   if (hw_exception_signal_ != nullptr) {
     hw_exception_signal_->DestroySignal();
-    hw_exception_signal_ = nullptr;
+    hw_exception_signal_.reset();
   }
-  core::InterruptSignal::DestroyEvent(hw_exception_event_);
-  hw_exception_event_ = nullptr;
+  
+  hw_exception_event_.reset();
 
   SharedSignalPool.clear();
 
@@ -4067,8 +4067,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
       return;
     }
 
-    for (const core::MemoryRegion* region : agent->regions()) {
-      const AMD::MemoryRegion* amd_region = reinterpret_cast<const AMD::MemoryRegion*>(region);
+    for (const auto& region : agent->regions()) {
+      const AMD::MemoryRegion* amd_region = reinterpret_cast<const AMD::MemoryRegion*>(region.get());
 
       // TODO: Verify that this works on a system with FINE_GRAINED memory.
       // System's with FINE_GRAINED will have both COARSE and FINE grain... need to get the
