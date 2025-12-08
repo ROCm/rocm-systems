@@ -77,6 +77,17 @@ struct thread_index_data
     native_tid_t pthread_value  = ::pthread_self();
     stl_tid_t    stl_value      = std::this_thread::get_id();
 
+    thread_index_data() = default;
+
+    // Special constructor for internal threads that don't consume TID counter
+    explicit thread_index_data(bool _is_internal)
+    : internal_value(_is_internal ? -1 : utility::get_thread_index())
+    , system_value(tim::threading::get_sys_tid())
+    , sequent_value(_is_internal ? -1 : tim::threading::get_id())
+    , pthread_value(::pthread_self())
+    , stl_value(std::this_thread::get_id())
+    {}
+
     std::string as_string() const;
 };
 

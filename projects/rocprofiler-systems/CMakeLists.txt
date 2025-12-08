@@ -236,10 +236,9 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-                               "Enable building sqlite3 library internally" ON
+rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
+                               "Enable building sqlite3 library internally" OFF
 )
-
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
                                "Enable building googletest library internally" ON
 )
@@ -305,36 +304,13 @@ elseif(NOT ROCPROFSYS_MAX_THREADS EQUAL _MAX_THREADS)
     )
 endif()
 
-# --------------------------------------------------------------------------------#
-# Maximum Storage Threads Configuration
-# --------------------------------------------------------------------------------#
-# Default to ROCPROFSYS_MAX_THREADS if not explicitly set
-if(NOT DEFINED ROCPROFSYS_MAX_STORAGE_THREADS)
-    set(ROCPROFSYS_MAX_STORAGE_THREADS
-        "${ROCPROFSYS_MAX_THREADS}"
-        CACHE STRING
-        "Maximum number of storage thread slots"
-    )
-endif()
-
-# Auto-adjust if set below minimum safe threshold
-if(ROCPROFSYS_MAX_STORAGE_THREADS LESS ROCPROFSYS_MAX_THREADS)
+if(ROCPROFSYS_MAX_THREADS LESS 128)
     rocprofiler_systems_message(
-      WARNING
-      "ROCPROFSYS_MAX_STORAGE_THREADS (${ROCPROFSYS_MAX_STORAGE_THREADS}) < ROCPROFSYS_MAX_THREADS (${ROCPROFSYS_MAX_THREADS}). Auto-adjusting to prevent runtime errors."
+        AUTHOR_WARNING
+        "ROCPROFSYS_MAX_THREADS (=${ROCPROFSYS_MAX_THREADS}) is less than 128 which may be too low for some applications. Setting it to at least 128."
     )
-    set(ROCPROFSYS_MAX_STORAGE_THREADS
-        "${ROCPROFSYS_MAX_THREADS}"
-        CACHE STRING
-        "Maximum number of storage thread slots"
-        FORCE
-    )
+    set(ROCPROFSYS_MAX_THREADS 128)
 endif()
-
-rocprofiler_systems_add_feature(
-  ROCPROFSYS_MAX_STORAGE_THREADS
-  "Maximum storage thread slots (defaults to ROCPROFSYS_MAX_THREADS)"
-)
 
 set(ROCPROFSYS_MAX_UNWIND_DEPTH
     "64"

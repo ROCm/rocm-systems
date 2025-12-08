@@ -331,47 +331,44 @@ Currently, most thread data is effectively stored in a static
 for release builds. During finalization,
 ROCm Systems Profiler iterates through the thread-data and transforms that data
 into something that can be passed along to Perfetto and/or Timemory.
-The downside of the current model is that if the user exceeds ``ROCPROFSYS_MAX_THREADS``,
-a segmentation fault occurs. To fix this issue,
-a new model is being adopted which has all the benefits of this model
-but permits dynamic expansion.
+In the current model, if the user exceeds ``ROCPROFSYS_MAX_THREADS`` at runtime,
+thread creation fails gracefully with a warning message, and the excess threads operate with thread-local
+fallback and profiling will be skipped  and not persisted to output files. To support truly dynamic thread limits without
+compile-time constraints, a new model is being adopted which has all the benefits of static allocation
+but permits dynamic expansion beyond ``ROCPROFSYS_MAX_THREADS``. Currently, the thread limit
+can be increased at compile-time using the ``ROCPROFSYS_MAX_THREADS`` CMake configuration option.
 
 Configuring thread limits
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-ROCm Systems Profiler provides two CMake configuration options to control thread-related memory allocation:
+ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
 
-* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported by the application (default: calculated based on CPU cores, minimum 128)
-* ``ROCPROFSYS_MAX_STORAGE_THREADS``: Maximum number of storage slots for thread-local data (default: matches ``ROCPROFSYS_MAX_THREADS``)
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default: ``max(128, 16 × CPU_cores)``, must be power of 2)
 
-These settings control two distinct aspects:
+This setting controls:
 
-* ``ROCPROFSYS_MAX_THREADS`` controls the thread ID manager capacity - the maximum number of threads the application can create
-* ``ROCPROFSYS_MAX_STORAGE_THREADS`` controls the storage array size - how many slots are allocated for thread-local data storage
+* Thread ID manager capacity (maximum thread IDs that can be tracked)
+* Storage array sizes for thread-local data across the codebase
+* Timemory's internal thread storage (``TIMEMORY_MAX_THREADS``)
 
-By default, ``ROCPROFSYS_MAX_STORAGE_THREADS`` is set equal to ``ROCPROFSYS_MAX_THREADS`` to prevent segmentation faults.
-However, for memory optimization, you can set ``ROCPROFSYS_MAX_STORAGE_THREADS`` to a higher value only when needed.
+**Build-time validation:**
 
-**Example: Building with custom thread limits**
+CMake enforces that ``ROCPROFSYS_MAX_THREADS`` must be a power of 2:
+
+.. code-block:: cmake
+
+   # Valid: 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ...
+   # Invalid: 100, 3000, 5000, 10000, ... (FATAL_ERROR)
+   # Values < 128 will be automatically set to 128 with a warning
+**Example: Building with custom thread limit**
 
 .. code-block:: shell
 
    # Build with support for 8192 threads
    cmake -B build \
          -DROCPROFSYS_MAX_THREADS=8192 \
-         -DROCPROFSYS_MAX_STORAGE_THREADS=8192 \
          ..
    cmake --build build
-
-**Important considerations**
-.. warning::
-
-   Setting ``ROCPROFSYS_MAX_STORAGE_THREADS`` below ``ROCPROFSYS_MAX_THREADS`` will cause CMake to auto-adjust ROCPROFSYS_MAX_STORAGE_THREADS to upward to prevent runtime crashes. Setting it above ``ROCPROFSYS_MAX_THREADS`` wastes memory and will generate a warning.
-
-.. note::
-
-   The conditional expansion logic ensures that storage arrays only expand beyond 2048 slots when explicitly configured,
-   helping to minimize memory overhead for typical applications while supporting high-thread-count workloads when needed.
 
 Sampling model
 ========================================
