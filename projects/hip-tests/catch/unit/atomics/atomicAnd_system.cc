@@ -35,7 +35,7 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs atomicAnd_system in multiple memory patterns:
+ *  - Performs atomicAnd_system in multiple memory patterns.
  *    -# From multiple threads on the same address;
  *    -# From multiple threads on adjacent addresses;
  *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line

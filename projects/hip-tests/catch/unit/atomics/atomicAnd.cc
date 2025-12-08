@@ -36,7 +36,7 @@ THE SOFTWARE.
 /**
  * Test Description
  * ------------------------
- *  - Performs atomicAnd in multiple memory patterns:
+ *  - Performs atomicAnd in multiple memory patterns.
  *    -# From multiple threads on the same address;
  *    -# From multiple threads on adjacent addresses;
  *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
@@ -49,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Single_Kernel", "", int, unsigned int, unsigned long,
+TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive", "", int, unsigned int, unsigned long,
                    unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -74,7 +74,7 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Single_Kernel", "", int, unsigned in
 /**
  * Test Description
  * ------------------------
- *  - Performs atomicAnd in multiple memory patterns:
+ *  - Performs atomicAnd in multiple memory patterns.
  *    -# From multiple threads on the same address;
  *    -# From multiple threads on adjacent addresses;
  *    -# From multiple threads on the scattered addresses. Addresses are spread by L1 cache line
