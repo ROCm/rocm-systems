@@ -185,6 +185,7 @@ If you are on your personal machine, I highly recommend you to install Catch2v3 
 - `make -j8`
 
 Install step, you might need to have superuser permission to be able to install globally.
+The default install location for linux is `/usr/local/`.
 
 - `make install`
 
