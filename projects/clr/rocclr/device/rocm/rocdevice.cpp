@@ -1637,10 +1637,14 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AMD_AGENT_INFO_PM4_EMULATION query failed.");
   }
 
-  if (HSA_STATUS_SUCCESS !=
+  info_.hasExpertSchedMode_ = false;
+  if (HSA_STATUS_SUCCESS ==
       Hsa::agent_get_info(bkendDevice_,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE),
                           &info_.hasExpertSchedMode_)) {
+    // Expert scheduling mode requires both HSA support and gfx12
+    info_.hasExpertSchedMode_ = info_.hasExpertSchedMode_ && (isa().versionMajor() == 12);
+  } else {
     LogWarning("HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE query failed.");
   }
 
