@@ -6454,8 +6454,10 @@ try:
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
+        encoding = 0
+        link_name = "P0"
         for processor in processor_handles:
-            xgmi_bw = amdsmi_get_cpu_current_xgmi_bw(processor)
+            xgmi_bw = amdsmi_get_cpu_current_xgmi_bw(processor, encoding, link_name)
             print(xgmi_bw)
 except AmdSmiException as e:
     print(e)
