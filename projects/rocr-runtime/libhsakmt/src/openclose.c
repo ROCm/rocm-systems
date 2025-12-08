@@ -314,6 +314,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 	HSAKMT_STATUS result = HSAKMT_STATUS_SUCCESS;
 	int kfd_fd = -1;
 	HsaKFDContext *new_ctx = NULL;
+	HsaSystemProperties sys_props;
 
 	CHECK_KFD_OPEN();
 	pthread_mutex_lock(&hsakmt_mutex);
@@ -334,6 +335,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 				goto create_process_failed;
 			}
 			hsakmt_kfdcontext_init_context(kfd_fd, new_ctx);
+			
+			/* Get the number of nodes from system properties */
+			
 			new_ctx->hsakmt_is_primary_ctx = false;
 			new_ctx->hsakmt_is_svm_api_supported = false;
 
@@ -342,6 +346,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 	}
 
 	pthread_mutex_unlock(&hsakmt_mutex);
+
+	result = hsaKmtAcquireSystemPropertiesCtx(new_ctx, &sys_props);
+	if (result == HSAKMT_STATUS_SUCCESS) {
+		pr_warn("Can not get hsaKmtAcquireSystemPropertiesCtx\n");
+	}
+
+	if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
+		pr_warn("Insufficient Memory. Debugging unavailable\n");
+
+
 	return result;
 
 create_process_failed:
