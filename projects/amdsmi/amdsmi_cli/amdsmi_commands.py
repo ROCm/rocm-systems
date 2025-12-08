@@ -85,6 +85,7 @@ class AMDSMICommands():
                         continue
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                                      amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR,
                                       amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL):
                         logging.debug("Unable to get node handle: %s", e.get_error_info())
                     else:
