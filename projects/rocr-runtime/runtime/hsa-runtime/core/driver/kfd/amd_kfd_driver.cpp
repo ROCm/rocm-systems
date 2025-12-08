@@ -414,6 +414,7 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   }
   return HSA_STATUS_SUCCESS;
 }
+
 hsa_status_t KfdDriver::GetShareableHandle(void* mem, size_t size, core::ShareableHandle* handle) {
   uint64_t mem_handle;
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetMemoryHandle(mem, size, &mem_handle));
@@ -423,6 +424,7 @@ hsa_status_t KfdDriver::GetShareableHandle(void* mem, size_t size, core::Shareab
   handle->handle = mem_handle;
   return HSA_STATUS_SUCCESS;
 }
+
 hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                                      size_t *offset) {
   int dmabuf_fd_res = -1;
