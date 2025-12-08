@@ -74,8 +74,10 @@ TEST_CASE("Unit_hipApiName_Positive_Basic") {
  *  - Platform specific (AMD)
  */
 TEST_CASE("Unit_hipApiName_Negative_ReservedIds") {
-  REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::min()), Catch::Equals(kUnknownApi));
-  REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::max()), Catch::Equals(kUnknownApi));
+  REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::min()),
+               Catch::Matchers::Equals(kUnknownApi));
+  REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::max()),
+               Catch::Matchers::Equals(kUnknownApi));
 }
 
 /**

@@ -21,14 +21,10 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
-#include "PTL/Task.hh"
-#include "PTL/TaskGroup.hh"
-#include "PTL/ThreadPool.hh"
-#include "debug.hpp"
-#include "library/runtime.hpp"
-#include <chrono>
+
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <unistd.h>
@@ -71,8 +67,6 @@ flush_worker_t::start(const pid_t& current_pid)
     m_worker_synchronization->origin_pid = current_pid;
     m_worker_synchronization->is_running = true;
 
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-
     m_flushing_thread = std::make_unique<std::thread>([&]() {
         std::mutex _shutdown_condition_mutex;
         while(m_worker_synchronization->is_running)
@@ -99,7 +93,6 @@ flush_worker_t::stop(const pid_t& current_pid)
 
     if(flushing_thread_exist && worker_is_running)
     {
-        ROCPROFSYS_DEBUG("Buffer storage shutting down..\n");
         m_worker_synchronization->is_running = false;
         m_worker_synchronization->is_running_condition.notify_all();
 
@@ -107,8 +100,6 @@ flush_worker_t::stop(const pid_t& current_pid)
             current_pid == m_worker_synchronization->origin_pid;
         if(!thread_is_created_in_this_process)
         {
-            ROCPROFSYS_DEBUG(
-                "Buffer storage is not created in same process as shutting down..\n");
             return;
         }
 
