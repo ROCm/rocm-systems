@@ -333,10 +333,10 @@ ROCm Systems Profiler iterates through the thread-data and transforms that data
 into something that can be passed along to Perfetto and/or Timemory.
 In the current model, if the user exceeds ``ROCPROFSYS_MAX_THREADS`` at runtime,
 thread creation fails gracefully with a warning message, and the excess threads operate with thread-local
-fallback and profiling will be skipped  and not persisted to output files. To support truly dynamic thread limits without
-compile-time constraints, a new model is being adopted which has all the benefits of static allocation
-but permits dynamic expansion beyond ``ROCPROFSYS_MAX_THREADS``. Currently, the thread limit
-can be increased at compile-time using the ``ROCPROFSYS_MAX_THREADS`` CMake configuration option.
+fallback and profiling will be skipped and not persisted to output files for threads beyond ROCPROFSYS_MAX_THREADS.
+To support truly dynamic thread limits without compile-time constraints, a new model is being adopted which
+has all the benefits of static allocation but permits dynamic expansion beyond ``ROCPROFSYS_MAX_THREADS``.
+Currently, the thread limit can be increased at compile-time using the ``ROCPROFSYS_MAX_THREADS`` CMake configuration option.
 
 Configuring thread limits
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
