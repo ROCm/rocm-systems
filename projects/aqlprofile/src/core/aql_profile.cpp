@@ -466,7 +466,9 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
     aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(profile);
     switch (attribute) {
       case HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE:
-        *(uint32_t*)value = 0x4000;  // a current approximation as 4K is big enough
+        // Approximation: 0x4000 (16KB) is currently enough for PMC and SQTT,
+        // including newer SQTT double-buffer PM4 sequences.
+        *(uint32_t*)value = 0x4000;
         break;
       case HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE:
         *(uint32_t*)value = 0x1800;  // a current approximation as 4K is big enough
