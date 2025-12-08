@@ -190,7 +190,7 @@ static FORMAT GetCombinedFormat(uint8_t fmt, uint8_t type) {
   return CFMT_INVALID;
 };
 //-----------------------------------------------------------------------------
-// End workaround 
+// End workaround
 //-----------------------------------------------------------------------------
 
 ImageManagerNv::ImageManagerNv() : ImageManagerKv() {}
@@ -319,7 +319,7 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
       reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&image.srd[3])->bits.TYPE =
           ImageLut().MapGeometry(image.desc.geometry);
     }
-    
+
     // Imported metadata holds the offset to metadata, add the image base address.
     uintptr_t meta = uintptr_t(((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.META_DATA_ADDRESS_HI) << 16;
     meta |= uintptr_t(((SQ_IMG_RSRC_WORD6*)(&image.srd[6]))->bits.META_DATA_ADDRESS) << 8;

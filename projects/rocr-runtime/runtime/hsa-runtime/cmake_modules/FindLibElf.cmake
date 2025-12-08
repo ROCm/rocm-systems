@@ -29,7 +29,7 @@ if (UNIX)
       /opt/local/include
       /opt/local/include/libelf
       ENV CPATH)
-  
+
   find_library (LIBELF_LIBRARIES
     NAMES
       elf
@@ -42,15 +42,15 @@ if (UNIX)
       /opt/local/lib64
       ENV LIBRARY_PATH
       ENV LD_LIBRARY_PATH)
-  
+
   include (FindPackageHandleStandardArgs)
-  
-  
+
+
   # handle the QUIETLY and REQUIRED arguments and set LIBELF_FOUND to TRUE if all listed variables are TRUE
   FIND_PACKAGE_HANDLE_STANDARD_ARGS(LibElf DEFAULT_MSG
     LIBELF_LIBRARIES
     LIBELF_INCLUDE_DIRS)
-  
+
   SET(CMAKE_REQUIRED_LIBRARIES elf)
   if (CMAKE_CXX_COMPILER_LOADED)
     INCLUDE(CheckCXXSourceCompiles)
@@ -64,9 +64,9 @@ if (UNIX)
   else()
   set ( ELF_GETSHDRSTRNDX "TRUE" )
   endif(CMAKE_CXX_COMPILER_LOADED)
-  
+
   mark_as_advanced(LIBELF_INCLUDE_DIRS LIBELF_LIBRARIES ELF_GETSHDRSTRNDX)
-  
+
   if(LIBELF_FOUND)
     add_library(elf::elf UNKNOWN IMPORTED)
     set_property(TARGET elf::elf PROPERTY IMPORTED_LOCATION ${LIBELF_LIBRARIES})
@@ -89,6 +89,6 @@ else()
   endif()
   set(USE_AMD_LIBELF "yes" CACHE FORCE "")
   set(AMD_ELFTOOLCHAIN_DIR ${ROCR_LIBELF_INCLUDE_DIR}/../..;${ROCR_LIBELF_INCLUDE_DIR}/../common/win32;${ROCR_LIBELF_INCLUDE_DIR}/../common)
-  set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR};${AMD_ELFTOOLCHAIN_DIR}) 
-  set(LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR}) 
+  set(ROCR_LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR};${AMD_ELFTOOLCHAIN_DIR})
+  set(LIBELF_INCLUDE_DIR ${ROCR_LIBELF_INCLUDE_DIR})
 endif()
