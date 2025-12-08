@@ -23,6 +23,9 @@
 #
 cmake_minimum_required(VERSION 3.15)
 
+set( COMP_TYPE "runtime" )
+set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
+set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
 set(RDC "rdc" CACHE INTERNAL "")
 set(RDC_PACKAGE ${RDC} CACHE STRING "")
 
@@ -115,6 +118,11 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
+option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+if(BUILD_ESMI)
+    add_definitions("-DENABLE_ESMI_LIB=1")
+endif()
+
 # Enable address sanitizer
 set(ADDRESS_SANITIZER_DEFAULT OFF)
 if(DEFINED ENV{ADDRESS_SANITIZER})
@@ -159,9 +167,11 @@ set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gn
 
 # configure packaging
 # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
+set(PKG_MAINTAINER_NM  "RDC Support")
+set(PKG_MAINTAINER_EMAIL  "rdc.support@amd.com")
 set(CPACK_PACKAGE_NAME ${RDC_PACKAGE} CACHE INTERNAL "")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>" CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Data Center Tools" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION
     "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}."
@@ -169,7 +179,7 @@ set(CPACK_PACKAGE_DESCRIPTION
     ""
 )
 set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Default packaging prefix.")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE INTERNAL "")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" CACHE INTERNAL "")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE INTERNAL "")
 set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
@@ -401,7 +411,7 @@ install(EXPORT rdcTargets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COM
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    RENAME LICENSE.txt
+    RENAME LICENSE.md
     COMPONENT dev
 )
 
@@ -554,6 +564,8 @@ set(CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RP
 # resulting in rdc-runtime*.deb and rdc-runtime*.rpm
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+
+configure_pkg( ${RDC} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
 
 include(CPack)
 

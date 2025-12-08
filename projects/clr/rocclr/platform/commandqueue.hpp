@@ -184,7 +184,7 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { delete virtualDevice_; }
+    void Release() const { virtualDevice_->release(); }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }
@@ -252,7 +252,10 @@ class HostQueue : public CommandQueue {
   Command* GetSubmissionBatch() const { return head_; }
 
   //! Get the current batch size
-  size_t GetSubmissionBatchSize() const { return size_; }
+  size_t GetSubmissionBatchSize() const {
+    ScopedLock sl(vdev()->execution());
+    return size_;
+  }
 
   //! Insert a command into the linked list of submitted commands
   void FormSubmissionBatch(Command* command) {
@@ -292,7 +295,10 @@ class HostQueue : public CommandQueue {
     }
   }
   //! Reset the command batch list
-  void ResetSubmissionBatch() { head_ = nullptr; size_ = 0; }
+  void ResetSubmissionBatch() {
+    head_ = nullptr;
+    size_ = 0;
+  }
 
   //! Set queue status
   void SetQueueStatus() { isActive_ = true; }
@@ -303,27 +309,23 @@ class HostQueue : public CommandQueue {
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }
 
-  uint64_t getQueueID() {
-    return thread_.vdev()->getQueueID();
-  }
+  uint64_t getQueueID() { return thread_.vdev()->getQueueID(); }
 
   //! Returns Synchronization Policy for the current stream
   amd::SyncPolicy GetSyncPolicy() const { return sync_policy_; }
   //! Set Synchronization Policy used by Queue
-  void SetSyncPolicy(amd::SyncPolicy value) {
-    sync_policy_ = value;
-  }
+  void SetSyncPolicy(amd::SyncPolicy value) { sync_policy_ = value; }
 
-private:
-  Command* head_;     //!< Head of the batch list
-  Command* tail_;     //!< Tail of the batch list
-  size_t   size_ = 0; //!< The current batch size
+ private:
+  Command* head_;    //!< Head of the batch list
+  Command* tail_;    //!< Tail of the batch list
+  size_t size_ = 0;  //!< The current batch size
 
   //! True if this command queue is active
-  bool isActive_;
+  std::atomic<bool>  isActive_;
   bool forceDestroy_ = false;  //!< Destroy the queue in the current state
 
-  amd::SyncPolicy sync_policy_;    //!< Used for controlling stream synchronization
+  amd::SyncPolicy sync_policy_;  //!< Used for controlling stream synchronization
 };
 
 class DeviceQueue : public CommandQueue {

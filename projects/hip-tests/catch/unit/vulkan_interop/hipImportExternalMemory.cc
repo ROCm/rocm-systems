@@ -78,3 +78,35 @@ TEST_CASE("Unit_hipImportExternalMemory_Vulkan_Negative_Parameters") {
   }
 #endif
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipImportExternalMemory while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/vulkan_interop/hipImportExternalMemory.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipImportExternalMemory_Vulkan_Capture") {
+  VulkanTest vkt(enable_validation);
+  using type = uint8_t;
+  constexpr uint32_t count = 2;
+
+  const auto vk_storage =
+      vkt.CreateMappedStorage<type>(count, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+  if (vk_storage.memory == nullptr) {
+    return;
+  }
+
+  const auto hip_ext_mem_desc = vkt.BuildMemoryDescriptor(vk_storage.memory, vk_storage.size);
+  hipExternalMemory_t hip_ext_memory;
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipImportExternalMemory(&hip_ext_memory, &hip_ext_mem_desc),
+                  memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+}

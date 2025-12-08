@@ -89,9 +89,11 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, uns
   HIP_CHECK(hipDeviceSynchronize());
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
-    INFO("Index: " << i);
     const auto ref_val = tex_h[i];
-    REQUIRE(out_alloc_h[i] == ref_val);
+    if (!(out_alloc_h[i] == ref_val)) {
+      INFO("Index: " << i);
+      REQUIRE(false);
+    }
   }
 }
 
@@ -136,7 +138,8 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
   tex_desc.normalizedCoords = false;
   tex_desc.addressMode[0] = hipAddressModeClamp;
 
-  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc, tex_h.size() * sizeof(vec4<float>));
+  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc,
+                                            tex_h.size() * sizeof(vec4<float>));
   TextureGuard tex(&res_desc, &tex_desc);
 
   const auto num_threads = std::min<size_t>(1024, tex_h.size());
@@ -150,13 +153,15 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
   HIP_CHECK(hipDeviceSynchronize());
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
-    INFO("Index: " << i);
     const auto ref_val = Vec4Map(tex_h[i]);
-    REQUIRE(out_alloc_h[i] == ref_val);
+    if (!(out_alloc_h[i] == ref_val)) {
+      INFO("Index: " << i);
+      REQUIRE(false);
+    }
   }
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

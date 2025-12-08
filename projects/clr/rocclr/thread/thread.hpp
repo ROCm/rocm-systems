@@ -140,14 +140,6 @@ class Thread : public HeapObject {
   size_t stackSize() const { return stackSize_; }
   //! Return this thread's stack bottom.
   address stackBottom() const { return stackBase() - stackSize(); }
-
-  //! Set this thread's affinity to the given cpu.
-  void setAffinity(uint cpu_id) const { Os::setThreadAffinity(handle_, cpu_id); }
-
-  //! Set this thread's affinity to the given cpu mask.
-  void setAffinity(const Os::ThreadAffinityMask& mask) const {
-    Os::setThreadAffinity(handle_, mask);
-  }
 };
 
 /*! @}

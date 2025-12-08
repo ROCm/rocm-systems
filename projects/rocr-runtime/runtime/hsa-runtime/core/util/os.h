@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -91,7 +91,7 @@ void* GetExportAddress(LibHandle lib, std::string export_name);
 
 /// @brief: Unloads the dynamic library.
 /// @param: lib(Input), library handle which will be unloaded.
-void CloseLib(LibHandle lib);
+bool CloseLib(LibHandle lib);
 
 /// @brief: Lists loaded tool libraries that contain
 /// symbol HSA_AMD_TOOL_PRIORITY
@@ -106,6 +106,7 @@ std::string GetLibraryName(LibHandle lib);
 /// @brief: Creates a Semaphore, will return NULL if failed.
 /// @param: void.
 /// @return: Semaphore.
+#undef CreateSemaphore
 Semaphore CreateSemaphore();
 
 /// @brief: Waits for the semaphore. This is a blocking wait.
@@ -127,6 +128,7 @@ void DestroySemaphore(Semaphore sem);
 /// @brief: Creates a mutex, will return NULL if failed.
 /// @param: void.
 /// @return: Mutex.
+#undef CreateMutex
 Mutex CreateMutex();
 
 /// @brief: Tries to acquire the mutex once, if successed, return true.
@@ -319,14 +321,47 @@ uint64_t ReadSystemClock();
 /// @brief read the system clock frequency
 uint64_t SystemClockFrequency();
 
-typedef struct cpuid_s {
+struct cpuid_t {
   char ManufacturerID[13];  // 12 char, NULL terminated
   bool mwaitx;
-} cpuid_t;
+};
 
 /// @brief parse CPUID
 /// @param: cpuinfo struct to be filled
 bool ParseCpuID(cpuid_t* cpuinfo);
+
+//! Return the default os page size.
+size_t PageSize();
+
+/// @brief CPU time in nanoseconds
+/// @param: None
+uint64_t TimeNanos();
+
+using address = char*;
+enum MemProt { MEM_PROT_NONE = 0, MEM_PROT_READ, MEM_PROT_RW, MEM_PROT_RWX };
+
+/// @brief Reserves a chunk of memory (priv | anon | noreserve)
+/// @param:
+void* ReserveMemory(void* start, size_t size, size_t alignment = 0,
+                    MemProt prot = MEM_PROT_NONE);
+
+/// Release a chunk of memory reserved with reserveMemory.
+bool ReleaseMemory(void* addr, size_t size);
+/// Commit a chunk of memory previously reserved with reserveMemory.
+bool CommitMemory(void* addr, size_t size, MemProt prot = MEM_PROT_NONE);
+/// Uncommit a chunk of memory previously committed with commitMemory.
+bool UncommitMemory(void* addr, size_t size);
+
+uint64_t HostTotalPhysicalMemory();
+
+/// Find First Set for any OS
+int Ffs(int i);
+
+/// Find the count of leading zeros
+int Ctz(uint64_t i);
+
+/// Shared library or DLL load error
+char* DlError();
 
 }   //  namespace os
 }   //  namespace rocr

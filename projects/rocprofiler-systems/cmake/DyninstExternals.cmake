@@ -11,27 +11,6 @@ foreach(dep BOOST TBB ELFUTILS LIBIBERTY)
     endif()
 endforeach()
 
-# Set BUILD_* to ON if ROCPROFSYS_BUILD_* is ON
-foreach(dep BOOST TBB ELFUTILS LIBIBERTY)
-    if(ROCPROFSYS_BUILD_${dep})
-        if(dep STREQUAL "BOOST")
-            rocprofiler_systems_add_option(BUILD_BOOST "Enable building Boost internally"
-                                           ON
-            )
-        elseif(dep STREQUAL "TBB")
-            rocprofiler_systems_add_option(BUILD_TBB "Enable building TBB internally" ON)
-        elseif(dep STREQUAL "ELFUTILS")
-            rocprofiler_systems_add_option(BUILD_ELFUTILS
-                                           "Enable building elfutils internally" ON
-            )
-        elseif(dep STREQUAL "LIBIBERTY")
-            rocprofiler_systems_add_option(BUILD_LIBIBERTY
-                                           "Enable building libiberty internally" ON
-            )
-        endif()
-    endif()
-endforeach()
-
 set(TPL_STAGING_PREFIX
     "${PROJECT_BINARY_DIR}/external"
     CACHE PATH

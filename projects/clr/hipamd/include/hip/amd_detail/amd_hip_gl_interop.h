@@ -38,10 +38,10 @@ extern "C" {
  * HIP Devices used by current OpenGL Context.
  */
 typedef enum hipGLDeviceList {
-    hipGLDeviceListAll = 1,           ///< All hip devices used by current OpenGL context.
-    hipGLDeviceListCurrentFrame = 2,  ///< Hip devices used by current OpenGL context in current
+  hipGLDeviceListAll = 1,           ///< All hip devices used by current OpenGL context.
+  hipGLDeviceListCurrentFrame = 2,  ///< Hip devices used by current OpenGL context in current
                                     ///< frame
-    hipGLDeviceListNextFrame = 3      ///< Hip devices used by current OpenGL context in next
+  hipGLDeviceListNextFrame = 3      ///< Hip devices used by current OpenGL context in next
                                     ///< frame.
 } hipGLDeviceList;
 
@@ -51,8 +51,8 @@ typedef unsigned int GLuint;
 /** GLenum as uint.*/
 typedef unsigned int GLenum;
 /**
-* @}
-*/
+ * @}
+ */
 
 /**
  * @defgroup GL OpenGL Interoperability
@@ -82,7 +82,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
  * @param [out] resource - Returns pointer of graphics resource.
  * @param [in] buffer - Buffer to be registered.
  * @param [in] flags - Register flags.
- * 
+ *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
  */
@@ -99,11 +99,11 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
  */
-hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image,
-                                      GLenum target, unsigned int flags);
+hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target,
+                                      unsigned int flags);
 /**
-* @}
-*/
+ * @}
+ */
 #if defined(__cplusplus)
 }
 #endif /* __cplusplus */

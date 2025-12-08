@@ -56,13 +56,10 @@ void KFDEventTest::TearDown() {
     ROUTINE_END
 }
 
-static void CreateDestroyEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::CreateDestroyEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
 
     ASSERT_SUCCESS_GPU(CreateQueueTypeEvent(false, false, gpuNode, &m_pHsaEvent), gpuNode);
     EXPECT_NE_GPU(0, m_pHsaEvent->EventData.HWData2, gpuNode);
@@ -72,17 +69,16 @@ static void CreateDestroyEvent(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, CreateDestroyEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateDestroyEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateDestroyEvent(gpuNode);
+    }));
 
     // Destroy event is being called in test TearDown
     TEST_END;
 }
 
 
-static void CreateMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
+void KFDEventTest::CreateMaxEvents(int gpuNode) {
 
     static const unsigned int MAX_EVENT_NUMBER = 256;
 
@@ -103,19 +99,18 @@ static void CreateMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, CreateMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateMaxEvents));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateMaxEvents(gpuNode);
+    }));
 
     TEST_END;
 }
 
-static void SignalEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
     HsaEvent *tmp_event;
@@ -146,27 +141,26 @@ static void SignalEvent(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalEvent(gpuNode);
+    }));
 
     TEST_END;
 }
 
 /* test event signaling with event age enabled wait */
-static void SignalEventExt(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalEventExt(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
     HsaEvent *tmp_event;
     uint64_t event_age;
 
-    if (pKFDEventTest->Get_Version()->KernelInterfaceMajorVersion == 1 &&
-        pKFDEventTest->Get_Version()->KernelInterfaceMinorVersion < 14) {
+    if (Get_Version()->KernelInterfaceMajorVersion == 1 &&
+        Get_Version()->KernelInterfaceMinorVersion < 14) {
         LOG() << "event age tracking isn't supported in KFD. Exiting." << std::endl;
         return;
     }
@@ -221,7 +215,9 @@ static void SignalEventExt(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalEventExt) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalEventExt));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalEventExt(gpuNode);
+    }));
 
     TEST_END;
 }
@@ -352,10 +348,7 @@ TEST_F(KFDEventTest, DISABLED_MeasureInterruptConsumption) {
     TEST_END;
 }
 
-static void SignalMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
+void KFDEventTest::SignalMaxEvents(int gpuNode) {
 
     static const unsigned int MAX_EVENT_NUMBER = 4095;
     uint64_t time, latency;
@@ -368,18 +361,17 @@ static void SignalMaxEvents(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalMaxEvents) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalMaxEvents));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalMaxEvents(gpuNode);
+    }));
 
     TEST_END;
 }
 
-static void SignalMultipleEventsWaitForAll(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalMultipleEventsWaitForAll(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     static const unsigned int EVENT_NUMBER = 64;  // 64 is the maximum for hsaKmtWaitOnMultipleEvents
     static const unsigned int WAIT_BETWEEN_SUBMISSIONS_MS = 50;
@@ -416,7 +408,9 @@ static void SignalMultipleEventsWaitForAll(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalMultipleEventsWaitForAll));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalMultipleEventsWaitForAll(gpuNode);
+    }));
 
     TEST_END;
 }
@@ -425,14 +419,11 @@ TEST_F(KFDEventTest, SignalMultipleEventsWaitForAll) {
  * gracefully and with good performance. On current GPUs and firmware it
  * should be handled on a fast path.
  */
-static void SignalInvalidEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDEventTest::SignalInvalidEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDEventTest* pKFDEventTest = (KFDEventTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDEventTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HsaEvent* m_pHsaEvent = pKFDEventTest->m_pHsaEventGPU[gpuIndex];
-    HSAuint32 m_FamilyId = pKFDEventTest->GetFamilyIdFromNodeId(gpuNode);
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HsaEvent* m_pHsaEvent = m_pHsaEventGPU[gpuIndex];
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
 
@@ -508,7 +499,9 @@ static void SignalInvalidEvent(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDEventTest, SignalInvalidEvent) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalInvalidEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalInvalidEvent(gpuNode);
+    }));
 
     TEST_END;
 }

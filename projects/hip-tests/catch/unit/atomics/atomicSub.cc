@@ -167,6 +167,6 @@ TEST_CASE("Unit_atomicSub_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

@@ -34,7 +34,7 @@ of hipMemcpy2DFromArrayAsync api when parameters are invalid
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Positive_Default") {
+TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Positive_Default", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;

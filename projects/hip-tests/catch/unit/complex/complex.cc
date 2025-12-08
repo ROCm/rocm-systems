@@ -401,8 +401,7 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloat
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex,
-                   hipDoubleComplex) {
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex, hipDoubleComplex) {
   decltype(TestType().x) input_r = GENERATE(-0.25, 0.25);
   TestType input{input_r};
 
@@ -413,6 +412,6 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex,
 }
 
 /**
-* End doxygen group ComplexTest.
-* @}
-*/
+ * End doxygen group ComplexTest.
+ * @}
+ */

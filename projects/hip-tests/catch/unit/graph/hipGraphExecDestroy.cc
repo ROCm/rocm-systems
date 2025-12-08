@@ -41,7 +41,6 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters") {
-
   SECTION("Pass hipGraphExecDestroy with nullptr") {
     HIP_CHECK_ERROR(hipGraphExecDestroy(nullptr), hipErrorInvalidValue);
   }
@@ -73,7 +72,7 @@ TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&streamForGraph));
 
-  char *devData;
+  char* devData;
   HIP_CHECK(hipMalloc(&devData, 1024));
   hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
@@ -83,20 +82,20 @@ TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = 1024;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0,
-                                  &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   REQUIRE(graphExec != nullptr);
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
 
+  HIP_CHECK(hipFree(devData));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

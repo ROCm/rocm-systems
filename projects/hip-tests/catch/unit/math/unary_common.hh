@@ -26,6 +26,8 @@ THE SOFTWARE.
 
 #include <hip/hip_cooperative_groups.h>
 
+#include <random>
+
 namespace cg = cooperative_groups;
 
 #define MATH_UNARY_KERNEL_DEF(func_name)                                                           \
@@ -34,7 +36,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       if constexpr (std::is_same_v<float, T>) {                                                    \
         ys[i] = func_name##f(xs[i]);                                                               \
       } else if constexpr (std::is_same_v<double, T>) {                                            \
@@ -47,7 +49,10 @@ template <typename T, typename RT, typename RTArg, typename ValidatorBuilder>
 void UnaryHalfPrecisionBruteForceTest(kernel_sig<T, Float16> kernel, ref_sig<RT, RTArg> ref_func,
                                       const ValidatorBuilder& validator_builder) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
-  uint64_t stop = std::numeric_limits<uint16_t>::max() + 1ul;
+  const auto reduction_factor = GetTestReductionFactor();
+  const auto inv_reduction_factor = 1 / reduction_factor;
+  const auto stop = static_cast<uint64_t>(
+      std::ceil((std::numeric_limits<uint16_t>::max() + 1ul) * reduction_factor));
   const auto max_batch_size =
       std::min(GetMaxAllowedDeviceMemoryUsage() / (sizeof(Float16) + sizeof(T)), stop);
   LinearAllocGuard<Float16> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(Float16)};
@@ -68,10 +73,11 @@ void UnaryHalfPrecisionBruteForceTest(kernel_sig<T, Float16> kernel, ref_sig<RT,
       const auto sub_batch_size = min_sub_batch_size + (i < tail);
 
       thread_pool.Post([=, &values] {
-        auto t = v;
+        auto t = v * inv_reduction_factor;
         uint16_t val;
         for (auto j = 0u; j < sub_batch_size; ++j) {
-          val = static_cast<uint16_t>(t++);
+          val = static_cast<uint16_t>(std::floor(t));
+          t += inv_reduction_factor;
           values.ptr()[base_idx + j] = *reinterpret_cast<Float16*>(&val);
         }
       });
@@ -90,7 +96,10 @@ template <typename T, typename RT, typename RTArg, typename ValidatorBuilder>
 void UnarySinglePrecisionBruteForceTest(kernel_sig<T, float> kernel, ref_sig<RT, RTArg> ref_func,
                                         const ValidatorBuilder& validator_builder) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
-  uint64_t stop = std::numeric_limits<uint32_t>::max() + 1ul;
+  const auto reduction_factor = GetTestReductionFactor();
+  const auto inv_reduction_factor = 1 / reduction_factor;
+  const auto stop = static_cast<uint64_t>(
+      std::ceil((std::numeric_limits<uint32_t>::max() + 1ul) * reduction_factor));
   const auto max_batch_size =
       std::min(GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) + sizeof(T)), stop);
   LinearAllocGuard<float> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
@@ -111,10 +120,11 @@ void UnarySinglePrecisionBruteForceTest(kernel_sig<T, float> kernel, ref_sig<RT,
       const auto sub_batch_size = min_sub_batch_size + (i < tail);
 
       thread_pool.Post([=, &values] {
-        auto t = v;
+        auto t = v * inv_reduction_factor;
         uint32_t val;
         for (auto j = 0u; j < sub_batch_size; ++j) {
-          val = static_cast<uint32_t>(t++);
+          val = static_cast<uint32_t>(std::floor(t));
+          t += inv_reduction_factor;
           values.ptr()[base_idx + j] = *reinterpret_cast<float*>(&val);
         }
       });
@@ -134,19 +144,17 @@ void UnarySinglePrecisionRangeTest(kernel_sig<T, float> kernel, ref_sig<RT, RTAr
                                    const ValidatorBuilder& validator_builder, const float a,
                                    const float b) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
+  const auto reduction_factor = GetTestReductionFactor();
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) + sizeof(T));
   LinearAllocGuard<float> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
-
+  
   MathTest math_test(kernel, max_batch_size);
 
-  size_t inserted = 0u;
-  for (float v = a; v != b; v = std::nextafter(v, b)) {
-    values.ptr()[inserted++] = v;
-    if (inserted < max_batch_size) continue;
+  const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {
+    math_test.Run(validator_builder, gs, bs, ref_func, inserted, values.ptr());
+  };
 
-    math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, values.ptr());
-    inserted = 0u;
-  }
+  SinglePrecisionReducedRun(run, values, a, b, reduction_factor, max_batch_size);
 }
 
 template <typename T, typename RT, typename RTArg, typename ValidatorBuilder>

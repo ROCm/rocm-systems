@@ -56,6 +56,6 @@ TEST_CASE("Performance_hipEventCreate") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

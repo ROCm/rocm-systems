@@ -29,6 +29,7 @@
 #include "Assemble.hpp"
 
 #define KFD_TEST_DEFAULT_TIMEOUT 60000
+#define MAX_GPU 64
 
 std::ostream& operator << (std::ostream& out, TESTPROFILE profile) {
     switch (profile) {
@@ -48,16 +49,18 @@ std::ostream& operator << (std::ostream& out, TESTPROFILE profile) {
     return out;
 }
 
-unsigned int g_TestGPUsNum ;
+unsigned int g_TestGPUsNum = 0;
 unsigned int g_TestRunProfile;
 unsigned int g_TestENVCaps;
 unsigned int g_TestTimeOut;
-int g_TestNodeId;
+int g_TestNodeId = -1;
 int g_TestDstNodeId;
 bool g_IsChildProcess;
 bool g_IsEmuMode;
 unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
+std::string g_ConcurrentNodes = "";
+std::vector<int> g_SelectedNodes;
 class KFDBaseComponentTest *g_baseTest;
 
 GTEST_API_ int main(int argc, char **argv) {
@@ -69,7 +72,6 @@ GTEST_API_ int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
 
     CommandLineArguments args;
-    memset(&args, 0, sizeof(args));
 
     bool success = GetCommandLineArguments(argc, argv, args);
 
@@ -90,10 +92,18 @@ GTEST_API_ int main(int argc, char **argv) {
             g_SleepTime = args.SleepTime;
         }
 
-        // If --node is not specified, then args.NodeId == -1
-        g_TestNodeId = args.NodeId;
         g_TestDstNodeId = args.DstNodeId;
 
+        // If --node is not specified, then args.NodeId == -1
+        if (!args.ConcurrentNodes.empty()) {
+            g_ConcurrentNodes = args.ConcurrentNodes;
+        } else if (args.TestNodeNum > 0) {
+            g_TestGPUsNum = args.TestNodeNum;
+        } else {
+            g_TestNodeId = args.NodeId;
+            g_TestGPUsNum = 1;
+        }
+        
         g_IsEmuMode = CheckEmuModeEnabled();
 
         LOG() << "Profile: " << (TESTPROFILE)g_TestRunProfile << std::endl;
@@ -106,14 +116,6 @@ GTEST_API_ int main(int argc, char **argv) {
         if (g_SleepTime > 0) {
             LOG() << "Sleep time in seconds as specified by user: " << std::dec << g_SleepTime << std::endl;
         }
-
-        char *testGPUsNum = NULL;
-        /* if HSA_TEST_GPUS_NUM is defined use it, otherwise test on 1 gpu */
-        testGPUsNum = getenv("HSA_TEST_GPUS_NUM");
-        if (testGPUsNum)
-            g_TestGPUsNum = std::max(1, atoi(testGPUsNum));
-        else
-            g_TestGPUsNum = 1;
 
         /* init LLVM one time*/
         Init_LLVM();

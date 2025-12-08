@@ -61,12 +61,25 @@ check_dim_pos(rocprofiler_counter_instance_id_t                                 
 }
 
 void
-check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_handle)
+check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_base_metric)
 {
+    using namespace rocprofiler::counters;
+
     rocprofiler_counter_id_t api_id = {.handle = 0};
     rocprofiler_query_record_counter_id(id, &api_id);
-    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, expected_handle);
-    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, api_id.handle);
+
+    auto reconstructed_id = rec_to_counter_id(id);
+
+    // After our agent encoding changes, rec_to_counter_id() returns a full agent-encoded
+    // counter ID. We need to extract the base metric ID to compare with the expected value.
+    auto reconstructed_base = get_base_metric_from_counter_id(reconstructed_id);
+    auto api_base           = get_base_metric_from_counter_id(api_id);
+
+    EXPECT_EQ(reconstructed_base, expected_base_metric);
+    EXPECT_EQ(api_base, expected_base_metric);
+
+    // Both methods should return the same counter ID (including agent encoding)
+    EXPECT_EQ(reconstructed_id.handle, api_id.handle);
 }
 }  // namespace
 
@@ -251,7 +264,7 @@ TEST(dimension, block_dim_test)
             /**
              * Compare with actual
              */
-            auto dims = getBlockDimensions(agent.name(), metric);
+            auto dims = getBlockDimensions(agent.get_rocp_agent()->id, metric);
             EXPECT_FALSE(dims.empty());
             EXPECT_EQ(dims.size(), rocp_dims.size());
             for(const auto& dim : dims)
@@ -266,7 +279,7 @@ TEST(dimension, block_dim_test)
             /**
              * Check this value exists in the dimension cache
              */
-            auto        dim_ptr   = counters::get_dimension_cache();
+            auto        dim_ptr   = counters::get_dimension_cache(agent.get_rocp_agent()->id);
             const auto* dim_cache = rocprofiler::common::get_val(dim_ptr->id_to_dim, metric.id());
             ASSERT_TRUE(dim_cache);
             EXPECT_EQ(fmt::format("{}", fmt::join(dims, "|")),
@@ -289,7 +302,10 @@ TEST(dimension, block_dim_test)
             EXPECT_EQ(instance_count, calculated_instance_count);
 
             /**
-             * Check the public API returns this value
+             * Check the public API returns this value.
+             * Counter IDs now have agent encoding, so rocprofiler_iterate_counter_dimensions()
+             * can extract the agent from the counter ID itself and return agent-specific
+             * dimensions.
              */
             rocprofiler_iterate_counter_dimensions(
                 {.handle = metric.id()},

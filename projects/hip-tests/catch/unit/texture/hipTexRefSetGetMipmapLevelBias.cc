@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 // Test for hipTexRefSetMipmapLevelBias and hipTexRefGetMipmapLevelBias, including error handling
 TEST_CASE("Unit_hipTexRefSetGetMipmapLevelBias") {
@@ -50,3 +51,4 @@ TEST_CASE("Unit_hipTexRefSetGetMipmapLevelBias") {
     REQUIRE(err == hipErrorInvalidValue);
   }
 }
+#endif

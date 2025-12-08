@@ -80,6 +80,6 @@ TEST_CASE("Performance_hipMemsetD32") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

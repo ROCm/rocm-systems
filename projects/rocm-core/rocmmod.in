@@ -1,6 +1,9 @@
-#%Module1.0######################################################################
+#%Module
+#######################################################################
 ##
 ## Rocm module
+## Copyright © Advanced Micro Devices, Inc., or its affiliates.
+## SPDX-License-Identifier: MIT
 ##
 
 module-whatis   "Adds ROCm binary paths to your environment variable"

@@ -96,7 +96,7 @@ jobs:
           --repo "${{ github.repository }}" \
           --pr "${{ github.event.pull_request.number }}" \
           --config ".github/repos-config.json" \
-          --require-auto-push
+          --require-monorepo-source
 
     - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress
