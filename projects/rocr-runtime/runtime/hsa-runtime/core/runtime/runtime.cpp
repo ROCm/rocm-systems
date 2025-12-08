@@ -2415,8 +2415,13 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
   if (renderFd < 0) return HSA_STATUS_ERROR;
 
   uint32_t gem_handle = 0;
+#ifdef HSAKMT_VIRTIO_ENABLED
+  if (vamdgpu_bo_export(reinterpret_cast<amdgpu_bo_handle>(handle.handle),
+                       amdgpu_bo_handle_type_kms, &gem_handle))
+#else
   if (DRM_CALL(amdgpu_bo_export(reinterpret_cast<amdgpu_bo_handle>(handle.handle),
                        amdgpu_bo_handle_type_kms, &gem_handle)))
+#endif
     return HSA_STATUS_ERROR;
 
   union drm_amdgpu_gem_mmap args;
@@ -2424,7 +2429,11 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
   /* Query the buffer address (args.addr_ptr).
    * The kernel driver ignores the offset and size parameters. */
   args.in.handle = gem_handle;
+#ifdef HSAKMT_VIRTIO_ENABLED
+  if (vdrmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args)))
+#else
   if (DRM_CALL(drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args))))
+#endif
     return HSA_STATUS_ERROR;
 
   *drm_fd = renderFd;
