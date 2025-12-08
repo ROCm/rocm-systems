@@ -189,6 +189,9 @@ protected:
         host_trap_data;
     std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_stochastic_v0_t>>>
         stochastic_data;
+    //! Data allocated to store unified v0 records (used when ROCPROFILER_PC_SAMPLING_USE_UNIFIED_RECORDS=1)
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v0_t>>>
+        v0_data;
     //! Dispatches not yet completed.
     // Uses only the internal correlation_id.
     std::unordered_map<uint64_t, dispatch_pkt_id_t> active_dispatches;

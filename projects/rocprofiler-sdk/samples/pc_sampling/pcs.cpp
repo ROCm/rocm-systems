@@ -376,6 +376,120 @@ print_sample(std::ostream& os, const rocprofiler_pc_sampling_record_invalid_t* /
 }
 
 void
+print_sample(std::ostream& os, const rocprofiler_pc_sampling_record_v0_t* sample)
+{
+    // Check if sample is invalid
+    if(sample->flags.value & ROCPROFILER_PC_SAMPLING_RECORD_FLAG_IS_INVALID)
+    {
+        os << "Invalid sample detected (v0 record).\n";
+        return;
+    }
+
+    // Print common fields
+    os << "(code_obj_id, offset): (" << sample->pc.code_object_id << ", 0x" << std::hex
+       << sample->pc.code_object_offset << "), "
+       << "timestamp: " << std::dec << sample->timestamp << ", "
+       << "exec: " << std::hex << std::setw(16) << sample->exec_mask << ", "
+       << "workgroup_pos_(x=" << std::dec << std::setw(5) << sample->workgroup_position.x << ", "
+       << "y=" << std::setw(5) << sample->workgroup_position.y << ", "
+       << "z=" << std::setw(5) << sample->workgroup_position.z << "), "
+       << "wave_in_group: " << std::setw(2) << static_cast<unsigned int>(sample->wave_in_group)
+       << ", ";
+
+    // Extract hardware version and chiplet using helper
+    auto hw_version = rocprofiler_pc_sampling_get_hw_id_field(
+        sample, ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_PCS_HW_VERSION);
+    auto chiplet = rocprofiler_pc_sampling_get_hw_id_field(
+        sample, ROCPROFILER_PC_SAMPLING_HW_ID_FIELD_ID_CHIPLET);
+
+    os << "chiplet: " << std::setw(2) << chiplet << ", "
+       << "dispatch_id: " << std::setw(7) << sample->dispatch_id << ", "
+       << "correlation: {internal=" << std::setw(7) << sample->correlation_id.internal << ", "
+       << "external=" << std::setw(5) << sample->correlation_id.external.value << "}, ";
+
+    // Check if snapshot information is available
+    bool has_snapshot = (sample->flags.value & ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_SNAPSHOT_INFORMATION);
+
+    if(has_snapshot)
+    {
+        auto& snap = sample->snapshot_information;
+        if(snap.wave_issued)
+        {
+            auto* inst_name = rocprofiler_get_pc_sampling_instruction_type_name(
+                static_cast<rocprofiler_pc_sampling_instruction_type_t>(snap.instruction_type));
+            utils::pcs_assert(inst_name != nullptr, "Invalid instruction type");
+            os << "wave issued " << std::string(inst_name) << " instruction, ";
+        }
+        else
+        {
+            auto* reason_name = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                    snap.no_issue_reason));
+            utils::pcs_assert(reason_name != nullptr, "Invalid not issued reason");
+            os << "wave is stalled due to: " << std::string(reason_name) << " reason, ";
+        }
+
+        os << "wave_count: " << static_cast<unsigned int>(snap.wave_count) << ", ";
+
+        // Decode arbiter state using helper functions
+        auto issue_valu = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU);
+        auto issue_matrix = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX);
+        auto issue_lds = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS);
+        auto issue_scalar = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR);
+        auto issue_tex = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_TEX);
+        auto issue_flat = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT);
+        auto issue_exp = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP);
+        auto issue_misc = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MISC);
+
+        auto stall_valu = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU);
+        auto stall_matrix = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX);
+        auto stall_lds = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS);
+        auto stall_scalar = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR);
+        auto stall_tex = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_TEX);
+        auto stall_flat = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT);
+        auto stall_exp = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP);
+        auto stall_misc = rocprofiler_pc_sampling_get_arbiter_state_field(
+            sample, ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MISC);
+
+        os << "arbiter state: {pipe issued: ("
+           << "VALU: " << issue_valu << ", "
+           << "MATRIX: " << issue_matrix << ", "
+           << "LDS: " << issue_lds << ", "
+           << "SCALAR: " << issue_scalar << ", "
+           << "TEX: " << issue_tex << ", "
+           << "FLAT: " << issue_flat << ", "
+           << "EXPORT: " << issue_exp << ", "
+           << "MISC: " << issue_misc << "), "
+           << "pipe stalled: ("
+           << "VALU: " << stall_valu << ", "
+           << "MATRIX: " << stall_matrix << ", "
+           << "LDS: " << stall_lds << ", "
+           << "SCALAR: " << stall_scalar << ", "
+           << "TEX: " << stall_tex << ", "
+           << "FLAT: " << stall_flat << ", "
+           << "EXPORT: " << stall_exp << ", "
+           << "MISC: " << stall_misc << ")}";
+    }
+
+    os << " [v0_record, hw_version=" << hw_version << "]\n";
+}
+
+void
 rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                                  rocprofiler_buffer_id_t /*buffer_id*/,
                                  rocprofiler_record_header_t** headers,
@@ -421,6 +535,13 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
             {
                 auto* pc_sample =
                     static_cast<rocprofiler_pc_sampling_record_invalid_t*>(cur_header->payload);
+
+                print_sample(ss, pc_sample);
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE)
+            {
+                auto* pc_sample =
+                    static_cast<rocprofiler_pc_sampling_record_v0_t*>(cur_header->payload);
 
                 print_sample(ss, pc_sample);
             }

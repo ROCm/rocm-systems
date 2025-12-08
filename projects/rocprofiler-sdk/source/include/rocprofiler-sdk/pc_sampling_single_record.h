@@ -870,6 +870,59 @@ const char*
 rocprofiler_get_pc_sampling_arbiter_state_field_name(
     rocprofiler_pc_sampling_arbiter_state_field_id_t field_id) ROCPROFILER_API;
 
+
+
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 8B
+    rocprofiler_pc_sampling_hw_id_record_t hw_id;
+    // 8B (only valid if ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_SNAPSHOT_INFORMATION is set)
+    rocprofiler_pc_sampling_snapshot_information_t snapshot_information;
+    // 16B (only valid if ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_MEMORY_COUNTERS is set)
+    rocprofiler_pc_sampling_memory_counters_t memory_counters;
+
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+
+    // 4B
+    rocprofiler_pc_sampling_record_flags_t flags;  ///< Flags indicating validity and available fields
+    uint8_t            wave_in_group; ///< wave position in the workgroup
+    // padding here
+
+
+
+
+
+
+    //// =========================== Below doesn't exist
+    uint8_t            reserved1;  ///< reserved for the future use, must be 0
+    uint8_t            reserved2;  ///< reserved for the future use, must be 0
+    uint8_t            reserved3;  ///< reserved for the future use, must be 0
+    uint8_t            reserved4;  ///< reserved for the future use, must be 0
+    uint8_t            reserved5;  ///< reserved for the future use, must be 0
+    uint8_t            reserved6;  ///< reserved for the future use, must be 0
+ 
+
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+    /// @var flags
+    /// @brief Flags from ::rocprofiler_pc_sampling_record_flag_bits_t indicating sample validity and available fields
+    /// @var reserved0
+    /// @brief Reserved for future use. Unused in current generation hardware (GFX9, GFX12).
+    /// @var memory_counters
+    /// @brief Memory counters (only valid if HAS_MEMORY_COUNTERS flag is set). Unused in current generation.
+} rocprofiler_pc_sampling_record_t;
+
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

@@ -24,6 +24,32 @@
 
 #include "lib/common/utility.hpp"
 
+#include <cstdlib>
+#include <cstring>
+
+namespace
+{
+/**
+ * @brief Check if unified v0 records should be used via environment variable
+ *
+ * @return true if ROCPROFILER_PC_SAMPLING_USE_UNIFIED_RECORDS=1, false otherwise
+ */
+bool use_unified_pc_sampling_records()
+{
+    static bool initialized = false;
+    static bool use_unified = false;
+
+    if (!initialized)
+    {
+        const char* env = std::getenv("ROCPROFILER_PC_SAMPLING_USE_UNIFIED_RECORDS");
+        use_unified = (env != nullptr && std::strcmp(env, "1") == 0);
+        initialized = true;
+    }
+
+    return use_unified;
+}
+}  // anonymous namespace
+
 template <>
 uint64_t
 PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
@@ -52,28 +78,55 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_stochastic_v0_t>(
     return size;
 }
 
+template <>
+uint64_t
+PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_v0_t>(
+    rocprofiler_pc_sampling_record_v0_t** buffer,
+    uint64_t                              size)
+{
+    std::unique_lock<std::shared_mutex> lock(mut);
+    assert(buffer != nullptr);
+    v0_data.emplace_back(
+        std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_v0_t>>(size));
+    *buffer = v0_data.back()->samples.data();
+    return size;
+}
+
 /**
  * @brief Get the appropriate parse function based on the GFXIP and sampling method.
  *
  * If the inappropriate sampling method is provided, it returns nullptr.
+ *
+ * When ROCPROFILER_PC_SAMPLING_USE_UNIFIED_RECORDS=1, returns the unified v0 parser
+ * regardless of sampling method. Otherwise, returns the legacy parsers based on method.
  */
 template <typename GFXIP>
 PCSamplingParserContext::parse_funct_ptr_t
 PCSamplingParserContext::_get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method)
 {
-    if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+    // Check environment variable to determine which record format to use
+    if (use_unified_pc_sampling_records())
     {
-        return &PCSamplingParserContext::_parse<GFXIP,
-                                                rocprofiler_pc_sampling_record_host_trap_v0_t>;
-    }
-    else if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
-    {
-        return &PCSamplingParserContext::_parse<GFXIP,
-                                                rocprofiler_pc_sampling_record_stochastic_v0_t>;
+        // Use unified v0 records regardless of sampling method
+        return &PCSamplingParserContext::_parse<GFXIP, rocprofiler_pc_sampling_record_v0_t>;
     }
     else
     {
-        return nullptr;
+        // Use legacy record types based on sampling method
+        if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+        {
+            return &PCSamplingParserContext::_parse<GFXIP,
+                                                    rocprofiler_pc_sampling_record_host_trap_v0_t>;
+        }
+        else if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+        {
+            return &PCSamplingParserContext::_parse<GFXIP,
+                                                    rocprofiler_pc_sampling_record_stochastic_v0_t>;
+        }
+        else
+        {
+            return nullptr;
+        }
     }
 }
 
@@ -248,4 +301,15 @@ PCSamplingParserContext::generate_upcoming_pc_record<
 {
     this->generate_upcoming_pc_record(
         agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE);
+}
+
+template <>
+void
+PCSamplingParserContext::generate_upcoming_pc_record<rocprofiler_pc_sampling_record_v0_t>(
+    uint64_t                                    agent_id_handle,
+    const rocprofiler_pc_sampling_record_v0_t*  samples,
+    size_t                                      num_samples)
+{
+    this->generate_upcoming_pc_record(
+        agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE);
 }

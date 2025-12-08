@@ -433,4 +433,383 @@ correct_pc_address<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(
     }
 }
 
+// =============================================================================
+// Direct encoding functions for unified v0 record format
+// These encode directly from hardware sample data without intermediate structures
+// =============================================================================
+
+/**
+ * @brief Encode hw_id directly from GFX9 hardware sample into compact format
+ */
+inline uint64_t
+encode_hw_id_from_gfx9_sample(uint64_t chiplet_and_wave_id, uint32_t hw_id_reg)
+{
+    uint64_t encoded = 0;
+
+    // Set hardware version (lower 6 bits)
+    encoded |= (ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9 & 0x3F);
+
+    // Extract chiplet from chiplet_and_wave_id
+    uint8_t chiplet = chiplet_and_wave_id >> 8;
+    encoded |= (static_cast<uint64_t>(chiplet) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CHIPLET);
+
+    // Extract and encode fields from hw_id_reg
+    uint8_t wave_id = EXTRACT_BITS(hw_id_reg, 3, 0);
+    encoded |= (static_cast<uint64_t>(wave_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WAVE_ID);
+
+    uint8_t simd_id = EXTRACT_BITS(hw_id_reg, 5, 4);
+    encoded |= (static_cast<uint64_t>(simd_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SIMD_ID);
+
+    uint8_t pipe_id = EXTRACT_BITS(hw_id_reg, 7, 6);
+    encoded |= (static_cast<uint64_t>(pipe_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_PIPE_ID);
+
+    uint8_t cu_id = EXTRACT_BITS(hw_id_reg, 11, 8);
+    encoded |= (static_cast<uint64_t>(cu_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_CU_ID);
+
+    uint8_t shader_array_id = EXTRACT_BITS(hw_id_reg, 12, 12);
+    encoded |= (static_cast<uint64_t>(shader_array_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ARRAY_ID);
+
+    uint8_t shader_engine_id = EXTRACT_BITS(hw_id_reg, 15, 13);
+    encoded |= (static_cast<uint64_t>(shader_engine_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_SHADER_ENGINE_ID);
+
+    uint8_t workgroup_id = EXTRACT_BITS(hw_id_reg, 19, 16);
+    encoded |= (static_cast<uint64_t>(workgroup_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_WORKGROUP_ID);
+
+    uint8_t vm_id = EXTRACT_BITS(hw_id_reg, 23, 20);
+    encoded |= (static_cast<uint64_t>(vm_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_VM_ID);
+
+    uint8_t queue_id = EXTRACT_BITS(hw_id_reg, 26, 24);
+    encoded |= (static_cast<uint64_t>(queue_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_QUEUE_ID);
+
+    uint8_t microengine_id = EXTRACT_BITS(hw_id_reg, 31, 30);
+    encoded |= (static_cast<uint64_t>(microengine_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX9_OFFSET_MICROENGINE_ID);
+
+    return encoded;
+}
+
+/**
+ * @brief Encode hw_id directly from GFX12 hardware sample into compact format
+ */
+inline uint64_t
+encode_hw_id_from_gfx12_sample(uint64_t chiplet_and_wave_id, uint32_t hw_id_reg)
+{
+    uint64_t encoded = 0;
+
+    // Set hardware version (lower 6 bits)
+    encoded |= (ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12 & 0x3F);
+
+    // Extract chiplet from chiplet_and_wave_id
+    uint8_t chiplet = chiplet_and_wave_id >> 8;
+    encoded |= (static_cast<uint64_t>(chiplet) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_CHIPLET);
+
+    // Extract and encode fields from hw_id_reg
+    uint8_t wave_id = EXTRACT_BITS(hw_id_reg, 4, 0);
+    encoded |= (static_cast<uint64_t>(wave_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WAVE_ID);
+
+    uint8_t queue_id = EXTRACT_BITS(hw_id_reg, 8, 5);
+    encoded |= (static_cast<uint64_t>(queue_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_QUEUE_ID);
+
+    uint8_t wgp_id = EXTRACT_BITS(hw_id_reg, 13, 10);
+    encoded |= (static_cast<uint64_t>(wgp_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WGP_ID);
+
+    uint8_t simd_id = EXTRACT_BITS(hw_id_reg, 15, 14);
+    encoded |= (static_cast<uint64_t>(simd_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SIMD_ID);
+
+    uint8_t shader_array_id = EXTRACT_BITS(hw_id_reg, 16, 16);
+    encoded |= (static_cast<uint64_t>(shader_array_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ARRAY_ID);
+
+    uint8_t microengine_id = EXTRACT_BITS(hw_id_reg, 17, 17);
+    encoded |= (static_cast<uint64_t>(microengine_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_MICROENGINE_ID);
+
+    uint8_t shader_engine_id = EXTRACT_BITS(hw_id_reg, 19, 18);
+    encoded |= (static_cast<uint64_t>(shader_engine_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_SHADER_ENGINE_ID);
+
+    uint8_t pipe_id = EXTRACT_BITS(hw_id_reg, 21, 20);
+    encoded |= (static_cast<uint64_t>(pipe_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_PIPE_ID);
+
+    uint8_t workgroup_id = EXTRACT_BITS(hw_id_reg, 27, 23);
+    encoded |= (static_cast<uint64_t>(workgroup_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_WORKGROUP_ID);
+
+    uint8_t vm_id = EXTRACT_BITS(hw_id_reg, 31, 28);
+    encoded |= (static_cast<uint64_t>(vm_id) << ROCPROFILER_PC_SAMPLING_HW_ID_GFX12_OFFSET_VM_ID);
+
+    return encoded;
+}
+
+/**
+ * @brief Encode arbiter_state directly from GFX9 hardware sample into compact format
+ */
+inline uint32_t
+encode_arbiter_state_from_gfx9_sample(uint32_t perf_snapshot_data)
+{
+    uint32_t encoded = 0;
+    uint16_t arb_state = EXTRACT_BITS(perf_snapshot_data, 25, 10);
+
+    // Issue bits
+    encoded |= (EXTRACT_BITS(arb_state, 7, 7) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_VALU);
+    encoded |= (EXTRACT_BITS(arb_state, 6, 6) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MATRIX);
+    encoded |= (EXTRACT_BITS(arb_state, 3, 3) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_LDS);
+    encoded |= (EXTRACT_BITS(arb_state, 5, 5) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_SCALAR);
+    encoded |= (EXTRACT_BITS(arb_state, 4, 4) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_TEX);
+    encoded |= (EXTRACT_BITS(arb_state, 2, 2) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_FLAT);
+    encoded |= (EXTRACT_BITS(arb_state, 1, 1) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_EXP);
+    encoded |= (EXTRACT_BITS(arb_state, 0, 0) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_ISSUE_MISC);
+
+    // Stall bits
+    encoded |= (EXTRACT_BITS(arb_state, 15, 15) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_VALU);
+    encoded |= (EXTRACT_BITS(arb_state, 14, 14) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MATRIX);
+    encoded |= (EXTRACT_BITS(arb_state, 11, 11) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_LDS);
+    encoded |= (EXTRACT_BITS(arb_state, 13, 13) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_SCALAR);
+    encoded |= (EXTRACT_BITS(arb_state, 12, 12) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_TEX);
+    encoded |= (EXTRACT_BITS(arb_state, 10, 10) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_FLAT);
+    encoded |= (EXTRACT_BITS(arb_state, 9, 9) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_EXP);
+    encoded |= (EXTRACT_BITS(arb_state, 8, 8) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_STALL_MISC);
+
+    // Dual issue (from different location in perf_snapshot_data)
+    uint8_t dual_issue_valu = EXTRACT_BITS(perf_snapshot_data, 2, 2);
+    encoded |= (dual_issue_valu << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX9_FIELD_OFFSET_DUAL_ISSUE_VALU);
+
+    return encoded;
+}
+
+/**
+ * @brief Encode arbiter_state directly from GFX12 hardware sample into compact format
+ */
+inline uint32_t
+encode_arbiter_state_from_gfx12_sample(uint32_t perf_snapshot_data1)
+{
+    uint32_t encoded = 0;
+    uint16_t arb_state = EXTRACT_BITS(perf_snapshot_data1, 21, 6);
+
+    // Issue bits
+    encoded |= (EXTRACT_BITS(arb_state, 6, 6) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VALU);
+    encoded |= (EXTRACT_BITS(arb_state, 3, 3) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS);
+    encoded |= (EXTRACT_BITS(arb_state, 2, 2) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_LDS_DIRECT);
+    encoded |= (EXTRACT_BITS(arb_state, 5, 5) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_SCALAR);
+    encoded |= (EXTRACT_BITS(arb_state, 4, 4) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_VMEM);
+    encoded |= (EXTRACT_BITS(arb_state, 1, 1) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_EXP);
+    encoded |= (EXTRACT_BITS(arb_state, 0, 0) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_ISSUE_BRMSG);
+
+    // Stall bits
+    encoded |= (EXTRACT_BITS(arb_state, 14, 14) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VALU);
+    encoded |= (EXTRACT_BITS(arb_state, 11, 11) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS);
+    encoded |= (EXTRACT_BITS(arb_state, 10, 10) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_LDS_DIRECT);
+    encoded |= (EXTRACT_BITS(arb_state, 13, 13) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_SCALAR);
+    encoded |= (EXTRACT_BITS(arb_state, 12, 12) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_VMEM);
+    encoded |= (EXTRACT_BITS(arb_state, 9, 9) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_EXP);
+    encoded |= (EXTRACT_BITS(arb_state, 8, 8) << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_GFX12_FIELD_OFFSET_STALL_BRMSG);
+
+    return encoded;
+}
+
+// =============================================================================
+// copySample implementations for unified v0 record format
+// These directly encode from hardware samples
+// =============================================================================
+
+/**
+ * @brief GFX9 Host Trap → Unified v0 Record
+ */
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
+
+    rocprofiler_pc_sampling_record_v0_t ret;
+    std::memset(&ret, 0, sizeof(ret));
+
+    // Set size
+    ret.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+
+    // Common fields
+    ret.exec_mask = sample_.exec_mask;
+    ret.workgroup_position.x = sample_.workgroup_id_x;
+    ret.workgroup_position.y = sample_.workgroup_id_y;
+    ret.workgroup_position.z = sample_.workgroup_id_z;
+    ret.timestamp = sample_.timestamp;
+    ret.wave_in_group = sample_.chiplet_and_wave_id & 0x3F;
+
+    // Directly encode hw_id from hardware sample
+    ret.hw_id.value = encode_hw_id_from_gfx9_sample(sample_.chiplet_and_wave_id, sample_.hw_id);
+
+    // Host trap doesn't have snapshot information, so no flags set
+    ret.flags.value = 0;
+
+    // dispatch_id and correlation_id will be filled by add_upcoming_samples
+    return ret;
+}
+
+/**
+ * @brief GFX9 Stochastic → Unified v0 Record
+ */
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    // Check validity first
+    auto perf_snapshot_data = sample_.perf_snapshot_data;
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0) &
+                                   ~EXTRACT_BITS(perf_snapshot_data, 26, 26));
+    if(!valid)
+    {
+        // Invalid sample - mark with flag
+        rocprofiler_pc_sampling_record_v0_t invalid{};
+        invalid.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+        invalid.flags.value = ROCPROFILER_PC_SAMPLING_RECORD_FLAG_IS_INVALID;
+        return invalid;
+    }
+
+    rocprofiler_pc_sampling_record_v0_t ret;
+    std::memset(&ret, 0, sizeof(ret));
+
+    // Set size
+    ret.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+
+    // Common fields
+    ret.exec_mask = sample_.exec_mask;
+    ret.workgroup_position.x = sample_.workgroup_id_x;
+    ret.workgroup_position.y = sample_.workgroup_id_y;
+    ret.workgroup_position.z = sample_.workgroup_id_z;
+    ret.timestamp = sample_.timestamp;
+    ret.wave_in_group = sample_.chiplet_and_wave_id & 0x3F;
+
+    // Directly encode hw_id from hardware sample
+    ret.hw_id.value = encode_hw_id_from_gfx9_sample(sample_.chiplet_and_wave_id, sample_.hw_id);
+
+    // Snapshot information (stochastic-specific)
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type = translate_inst<GFX9>(EXTRACT_BITS(perf_snapshot_data, 6, 3));
+    ret.snapshot_information.no_issue_reason = translate_reason<GFX9>(EXTRACT_BITS(perf_snapshot_data, 9, 7));
+    ret.snapshot_information.wave_count = EXTRACT_BITS(sample_.perf_snapshot_data1, 5, 0);
+
+    // Directly encode arbiter_state from hardware sample
+    ret.snapshot_information.arbiter_state = encode_arbiter_state_from_gfx9_sample(perf_snapshot_data);
+
+    // Set flags - has snapshot information
+    ret.flags.value = ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_SNAPSHOT_INFORMATION;
+    // No memory counters on GFX9
+
+    return ret;
+}
+
+/**
+ * @brief GFX12 Host Trap → Unified v0 Record
+ */
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
+
+    rocprofiler_pc_sampling_record_v0_t ret;
+    std::memset(&ret, 0, sizeof(ret));
+
+    // Set size
+    ret.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+
+    // Common fields
+    ret.exec_mask = sample_.exec_mask;
+    ret.workgroup_position.x = sample_.workgroup_id_x;
+    ret.workgroup_position.y = sample_.workgroup_id_y;
+    ret.workgroup_position.z = sample_.workgroup_id_z;
+    ret.timestamp = sample_.timestamp;
+    ret.wave_in_group = sample_.chiplet_and_wave_id & 0x3F;
+
+    // Directly encode hw_id from hardware sample
+    ret.hw_id.value = encode_hw_id_from_gfx12_sample(sample_.chiplet_and_wave_id, sample_.hw_id);
+
+    // Host trap doesn't have snapshot information, so no flags set
+    ret.flags.value = 0;
+
+    return ret;
+}
+
+/**
+ * @brief GFX12 Stochastic → Unified v0 Record
+ */
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    // Check validity first
+    auto perf_snapshot_data = sample_.perf_snapshot_data;
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        // Invalid sample - mark with flag
+        rocprofiler_pc_sampling_record_v0_t invalid{};
+        invalid.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+        invalid.flags.value = ROCPROFILER_PC_SAMPLING_RECORD_FLAG_IS_INVALID;
+        return invalid;
+    }
+
+    rocprofiler_pc_sampling_record_v0_t ret;
+    std::memset(&ret, 0, sizeof(ret));
+
+    // Set size
+    ret.size = sizeof(rocprofiler_pc_sampling_record_v0_t);
+
+    // Common fields
+    ret.exec_mask = sample_.exec_mask;
+    ret.workgroup_position.x = sample_.workgroup_id_x;
+    ret.workgroup_position.y = sample_.workgroup_id_y;
+    ret.workgroup_position.z = sample_.workgroup_id_z;
+    ret.timestamp = sample_.timestamp;
+    ret.wave_in_group = sample_.chiplet_and_wave_id & 0x3F;
+
+    // Directly encode hw_id from hardware sample
+    ret.hw_id.value = encode_hw_id_from_gfx12_sample(sample_.chiplet_and_wave_id, sample_.hw_id);
+
+    // Snapshot information (stochastic-specific)
+    auto perf_snapshot_data1 = sample_.perf_snapshot_data1;
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type = translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    ret.snapshot_information.no_issue_reason = translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+    ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Directly encode arbiter_state from hardware sample
+    ret.snapshot_information.arbiter_state = encode_arbiter_state_from_gfx12_sample(perf_snapshot_data1);
+
+    // Set flags - has snapshot information and memory counters
+    ret.flags.value = ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_SNAPSHOT_INFORMATION |
+                      ROCPROFILER_PC_SAMPLING_RECORD_FLAG_HAS_MEMORY_COUNTERS;
+
+    // Memory counters (GFX12 specific)
+    auto perf_snapshot_data2 = sample_.perf_snapshot_data2;
+    ret.memory_counters.gfx12.load_cnt   = EXTRACT_BITS(perf_snapshot_data2, 5, 0);
+    ret.memory_counters.gfx12.store_cnt  = EXTRACT_BITS(perf_snapshot_data2, 11, 6);
+    ret.memory_counters.gfx12.bvh_cnt    = EXTRACT_BITS(perf_snapshot_data2, 14, 12);
+    ret.memory_counters.gfx12.sample_cnt = EXTRACT_BITS(perf_snapshot_data2, 20, 15);
+    ret.memory_counters.gfx12.ds_cnt     = EXTRACT_BITS(perf_snapshot_data2, 26, 21);
+    ret.memory_counters.gfx12.km_cnt     = EXTRACT_BITS(perf_snapshot_data2, 31, 27);
+
+    return ret;
+}
+
+// GFX950 uses the same implementation as GFX9
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX950, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    // For GFX950, use GFX9 encoding
+    // Note: This assumes GFX950 uses same format as GFX9
+    // Adjust if GFX950 has different encoding
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(sample);
+}
+
+// GFX11 uses similar implementation to GFX9
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX11, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    // For GFX11, use GFX9 encoding for now
+    // TODO: Verify if GFX11 needs different encoding
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(sample);
+}
+
 #undef EXTRACT_BITS
