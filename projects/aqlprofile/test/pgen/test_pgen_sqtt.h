@@ -55,7 +55,7 @@ class TestPGenSqtt : public TestPGen {
 
     hsa_status_t status;
     hsa_agent_t agent;
-    uint32_t command_buffer_size = 0;
+    uint32_t command_buffer_size;
 
     // GPU identificator
     agent = GetAgentInfo()->dev_id;
@@ -63,58 +63,39 @@ class TestPGenSqtt : public TestPGen {
     // Initialization of the profile
     memset(&profile_, 0, sizeof(profile_));
     profile_.agent = agent;
-    profile_.type  = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE;
+    profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE;
 
+    // Profile buffers attributes
     status = api_->hsa_ven_amd_aqlprofile_get_info(
         &profile_, HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE, &command_buffer_size);
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-    std::clog << "INFO: reported command_buffer_size from get_info = "
-              << command_buffer_size << std::endl;
 
-    // Set up parameters BEFORE we call start()
-    this->parameters = {
-        {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, 1},
-        {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, 0x55555555},
-        {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(8), 0x1},
-    };
-    profile_.parameters      = parameters.data();
-    profile_.parameter_count = parameters.size();
-
-    // Application is allocating the output buffer
-    // AllocateLocal(buffer_alignment_, buffer_size_, MODE_DEV_ACC)
-    profile_.output_buffer.ptr =
-        GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), buffer_size_);
-    profile_.output_buffer.size = buffer_size_;
-
-    TEST_ASSERT(profile_.output_buffer.ptr != NULL);
-    TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.output_buffer.ptr) & buffer_bitmask) == 0);
-
-    // ------------------------------------------------------------------
-    // 1st call: query required command buffer size (dry run, no cmd buffer)
-    // ------------------------------------------------------------------
-    profile_.command_buffer.ptr  = nullptr;
-    profile_.command_buffer.size = 0;
-
-    status = api_->hsa_ven_amd_aqlprofile_start(&profile_, PrePacket());
-    TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-    TEST_ASSERT(profile_.command_buffer.size != 0);
-
-    command_buffer_size = profile_.command_buffer.size;
-    std::clog << "INFO: required command_buffer_size from start() = "
-              << command_buffer_size << std::endl;
-
-    // ------------------------------------------------------------------
-    // Allocate the command buffer with the exact required size
-    // ------------------------------------------------------------------
+    // Application is allocating the command buffer
+    // AllocateSystem(buffer_alignment_, command_buffer_size,
+    //                MODE_HOST_ACC|MODE_DEV_ACC|MODE_EXEC_DATA)
     profile_.command_buffer.ptr =
         GetRsrcFactory()->AllocateCmdMemory(GetAgentInfo(), command_buffer_size);
     TEST_ASSERT(profile_.command_buffer.ptr != NULL);
     profile_.command_buffer.size = command_buffer_size;
     TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.command_buffer.ptr) & buffer_bitmask) == 0);
 
-    // ------------------------------------------------------------------
-    // 2nd call: actually populate the AQL start packet using real cmd buffer
-    // ------------------------------------------------------------------
+    this->parameters = {
+        {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, 1},
+        {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, 0x55555555},
+        {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(8), 0x1},
+    };
+    profile_.parameters = parameters.data();
+    profile_.parameter_count = parameters.size();
+
+    // Application is allocating the output buffer
+    // AllocateLocal(buffer_alignment_, buffer_size_, MODE_DEV_ACC)
+    profile_.output_buffer.ptr = GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), buffer_size_);
+    profile_.output_buffer.size = buffer_size_;
+
+    TEST_ASSERT(profile_.output_buffer.ptr != NULL);
+    TEST_ASSERT((reinterpret_cast<uintptr_t>(profile_.output_buffer.ptr) & buffer_bitmask) == 0);
+
+    // Populating the AQL start packet
     status = api_->hsa_ven_amd_aqlprofile_start(&profile_, PrePacket());
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
     if (status != HSA_STATUS_SUCCESS) return false;
