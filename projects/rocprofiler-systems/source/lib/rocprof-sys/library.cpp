@@ -1026,6 +1026,11 @@ rocprofsys_finalize_hidden(void)
 
     tracing::copy_timemory_hash_ids();
 
+    // Flush any pending region cache entries (e.g., main entry point that wasn't
+    // explicitly stopped before finalization)
+    ROCPROFSYS_DEBUG_F("Flushing pending region cache entries...\n");
+    rocprofsys_flush_pending_region_cache_hidden();
+
     bool _perfetto_output_error = false;
     if(get_use_perfetto())
     {

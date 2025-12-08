@@ -37,6 +37,7 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 # Ensure ROCPROFSYS_ROCM_DOMAINS is defined
+# Use legacy trace mode for roctx tests to preserve depth information
 set(_roctx_environment
     "${_base_environment}"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch"
@@ -56,7 +57,8 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_roctx_environment}"
 )
 
-set(ROCTX_LABEL
+# Legacy mode preserves individual entries with their original depths
+set(ROCTX_LEGACY_LABEL
     roctxMark_GPU_workload
     roctxRangePush_run_profiling
     roctxRangeStart_GPU_Compute
@@ -70,7 +72,7 @@ set(ROCTX_LABEL
     roctxMark_Finished_GPU
 )
 
-set(ROCTX_COUNT
+set(ROCTX_LEGACY_COUNT
     1
     1
     1
@@ -84,7 +86,7 @@ set(ROCTX_COUNT
     1
 )
 
-set(ROCTX_DEPTH
+set(ROCTX_LEGACY_DEPTH
     1
     1
     2
@@ -97,6 +99,48 @@ set(ROCTX_DEPTH
     0
     1
 )
+
+# Cached mode aggregates entries by name, so counts reflect total occurrences
+set(ROCTX_CACHED_LABEL
+    roctxMark_GPU_workload
+    roctxRangePush_HIP_Kernel
+    roctxRangeStart_GPU_Compute
+    roctxGetThreadId
+    roctxMark_RoctxProfilerPause_End
+    roctxMark_Thread_Start
+    roctxMark_End
+    roctxRangePush_run_profiling
+    roctxMark_Finished_GPU
+)
+
+set(ROCTX_CACHED_COUNT
+    1
+    2
+    2
+    1
+    1
+    1
+    1
+    1
+    1
+)
+
+set(ROCTX_CACHED_DEPTH
+    1
+    1
+    1
+    1
+    1
+    2
+    1
+    1
+    1
+)
+
+# Use cached mode expectations by default (matches _base_environment)
+set(ROCTX_LABEL ${ROCTX_CACHED_LABEL})
+set(ROCTX_COUNT ${ROCTX_CACHED_COUNT})
+set(ROCTX_DEPTH ${ROCTX_CACHED_DEPTH})
 
 rocprofiler_systems_add_validation_test(
     NAME roctx-api-sampling

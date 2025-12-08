@@ -12,10 +12,21 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - How-to document for XGMI and PCIe sampling and monitoring.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
+- Documentation for `ROCPROFSYS_TRACE_CACHED` configuration option and its performance benefits
+- Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode
 
 ### Changed
 
+- `ROCPROFSYS_TRACE_CACHED` is now the default perfetto tracing mode for improved performance
+- Renamed `ROCPROFSYS_TRACE` to `ROCPROFSYS_TRACE_LEGACY` (with backward compatibility)
+- `--trace` / `-T` CLI flag now uses cached mode by default
+- Added `--trace-legacy` / `-L` CLI flag for direct tracing mode
 - Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
+
+### Deprecated
+
+- `ROCPROFSYS_TRACE` environment variable (use `ROCPROFSYS_TRACE_LEGACY` for direct mode)
+- `ROCPROFSYS_USE_PERFETTO` environment variable (use `ROCPROFSYS_TRACE_LEGACY`)
 
 ### Resolved issues
 
