@@ -93,7 +93,7 @@ namespace rocr {
   // Having a side effect prevents call site optimization that allows removal of a noinline function call
   // with no side effect.
 #if defined(__linux__)
-  __attribute__((noinline)) 
+  __attribute__((noinline))
 #else
   __declspec(noinline)
 #endif
@@ -1615,7 +1615,7 @@ uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, elf::Symbol* sym)
 {
   elf::Section* sec = sym->section();
   if(!sec) { return NULL; }
-  
+
   Segment* seg = SectionSegment(agent, sec);
   uint64_t vaddr = sec->addr() + sym->value();
   return nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(vaddr);
