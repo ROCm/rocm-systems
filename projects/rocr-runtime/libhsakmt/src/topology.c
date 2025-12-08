@@ -2225,6 +2225,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 
 	*SystemProperties = *g_system;
 
+	for (int node = 0; node < g_system->NumNodes; node++) {
+		if (hsakmt_get_gfxv_by_node_id(node) == GFX_VERSION_GFX1151 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
+		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)
+			pr_err_once("WARNING: KFD ABI 1.20+ is recommended for gfx1151. Current KFD ABI is %i.%i. This may result in faults, crashes and other application instability\n", hsakmt_kfd_version_info.KernelInterfaceMajorVersion, hsakmt_kfd_version_info.KernelInterfaceMinorVersion);
+	}
+
 	goto out;
 
 init_doorbells_failed:
