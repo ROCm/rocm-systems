@@ -488,17 +488,10 @@ def update_denominator_string(equation: str, normal_unit: str) -> str:
         return ""
 
     equation_string = str(equation)
-    if "$denom" in equation_string:
-        print(f"DEBUG: normal_unit='{normal_unit}', keys={list(SUPPORTED_DENOM.keys())}")
-    
     if normal_unit in SUPPORTED_DENOM.keys():
         equation_string = re.sub(
             r"\$denom", SUPPORTED_DENOM[normal_unit], equation_string
         )
-    else:
-        # ADD THIS WARNING
-        if "$denom" in equation_string:
-            print(f"WARNING: normal_unit '{normal_unit}' not in SUPPORTED_DENOM!")
 
     return equation_string
 
