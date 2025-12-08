@@ -10,7 +10,7 @@ subtrees:
   - caption: Install
     entries:
     - file: install/aqlprofile-install.rst
-      title: Install AQLprofile 
+      title: Install AQLprofile
 
   - caption: Examples
     entries:
@@ -22,16 +22,13 @@ subtrees:
   - caption: Reference
     entries:
     - file: reference/glossary.rst
-      title: Glossary  
+      title: Glossary
     - file: reference/supported-architectures.rst
-      title: Supported architectures and counter blocks  
+      title: Supported architectures and counter blocks
     - file: reference/api-list.rst
       title: APIs
-  
+
   - caption: About
     entries:
     - file: license.rst
       title: License
-
-
-

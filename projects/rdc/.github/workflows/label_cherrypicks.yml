@@ -39,4 +39,3 @@ jobs:
             } else {
               console.log("PR does not match criteria for automatic labeling");
             }
-

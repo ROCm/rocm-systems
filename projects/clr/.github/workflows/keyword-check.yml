@@ -63,7 +63,7 @@ jobs:
               MATCHED=1
             fi
           done
-          
+
           if [ "$MATCHED" -eq 1 ]; then
             echo "Keywords found, please see diagnostics higher"
             exit 1

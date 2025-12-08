@@ -16,7 +16,7 @@ body:
         echo "CPU: " && cat /proc/cpuinfo | grep "model name" | sort --unique;
         echo "GPU:" && /opt/rocm/bin/rocminfo | grep -E "^\s*(Name|Marketing Name)";
       ```
-        
+
       Windows:
       ```
         (Get-WmiObject Win32_OperatingSystem).Version
@@ -144,7 +144,7 @@ body:
     description: (Optional) Detailed steps to reproduce the issue.
   validations:
     required: false
-    
+
 - type: textarea
   attributes:
     label: (Optional for Linux users) Output of /opt/rocm/bin/rocminfo --support

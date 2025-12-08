@@ -29,4 +29,3 @@ body:
     label: ROCm Component
     description: (Optional) If this issue relates to a specific ROCm component, it can be mentioned here.
     placeholder: "e.g. rocBLAS"
-
