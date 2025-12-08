@@ -46,7 +46,7 @@
 namespace rocr {
 namespace image {
 
-  /* 
+  /*
    * The type table has changed for gfx11, so we need a separate instance for
    * the Property LUT
    */

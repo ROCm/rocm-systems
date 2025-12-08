@@ -831,10 +831,10 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
             for row in csv_reader:
                 if row_count == 0:
                     num_headers = len(row) - 1
-                    if num_headers == 0:
+                    if num_headers <= 0:
                         return (
                             False,
-                            "Empty or invalid header row in benchmark_results ",
+                            "Empty or invalid header row in benchmark_results",
                         )
                 else:
                     if len(row) - 1 != num_headers:

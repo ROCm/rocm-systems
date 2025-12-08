@@ -36,6 +36,7 @@ import yaml
 
 import config
 from roofline import Roofline
+from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -54,7 +55,6 @@ from utils.utils import (
     convert_metric_id_to_panel_info,
     get_panel_alias,
     is_tcc_channel_counter,
-    mibench,
     parse_sets_yaml,
 )
 
@@ -674,6 +674,7 @@ class OmniSoC_Base:
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
                 console_error(
+                    "roofline",
                     "Incomplete or missing profiling data. Skipping roofline.",
                     exit=False,
                 )
@@ -682,7 +683,16 @@ class OmniSoC_Base:
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                mibench(self.get_args(), self._mspec)
+                try:
+                    result = benchmark.run_on_devices([self.get_args().device])
+                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                except Exception as e:
+                    console_error(
+                        "roofline",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
+                        exit=False,
+                    )
+                    return
 
             # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)

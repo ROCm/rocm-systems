@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
-#define EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
+#ifndef EXT_IMAGE_IMAGE_MANAGER_NV_H_
+#define EXT_IMAGE_IMAGE_MANAGER_NV_H_
 
 #include "addrlib/inc/addrinterface.h"
 #include "image_manager_kv.h"
@@ -95,4 +95,4 @@ class ImageManagerNv : public ImageManagerKv {
 
 }  // namespace image
 }  // namespace rocr
-#endif  // EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
+#endif  // EXT_IMAGE_IMAGE_MANAGER_NV_H_

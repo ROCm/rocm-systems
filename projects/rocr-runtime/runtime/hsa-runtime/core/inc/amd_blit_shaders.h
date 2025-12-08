@@ -40,7 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef OPENSRC_HSA_RUNTIME_CORE_INC_AMD_BLIT_SHADERS_H_ 
+#ifndef OPENSRC_HSA_RUNTIME_CORE_INC_AMD_BLIT_SHADERS_H_
 #define OPENSRC_HSA_RUNTIME_CORE_INC_AMD_BLIT_SHADERS_H_
 
 namespace rocr {

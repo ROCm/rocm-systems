@@ -60,6 +60,8 @@ if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
     if(_transfer_output MATCHES "Error: No valid transfers created")
         set(skip_validation TRUE)
     endif()
+else()
+    set(skip_validation TRUE)
 endif()
 
 rocprofiler_systems_add_test(
