@@ -95,6 +95,35 @@ TEST_F(KFDTopologyTest, GetNodePropertiesInvalidNodeNum) {
     TEST_END
 }
 
+// Test that HasExpertSchedMode is set correctly based on KFD version
+TEST_F(KFDTopologyTest, HasExpertSchedModeProperty) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    const HsaNodeProperties *pNodeProperties;
+    HsaVersionInfo *versionInfo = Get_Version();
+
+    // HasExpertSchedMode should be 1 if KFD version >= 1.20, 0 otherwise
+    bool expectedValue = (versionInfo->KernelInterfaceMajorVersion >= 1 &&
+                          versionInfo->KernelInterfaceMinorVersion > 19);
+
+    LOG() << "KFD Version: " << versionInfo->KernelInterfaceMajorVersion << "."
+          << versionInfo->KernelInterfaceMinorVersion
+          << ", Expected HasExpertSchedMode: " << expectedValue << std::endl;
+
+    for (unsigned node = 0; node < m_SystemProperties.NumNodes; node++) {
+        pNodeProperties = m_NodeInfo.GetNodeProperties(node);
+        if (pNodeProperties != NULL && pNodeProperties->NumFComputeCores > 0) {
+            // GPU nodes should have HasExpertSchedMode set based on KFD version
+            EXPECT_EQ(pNodeProperties->HasExpertSchedMode, expectedValue ? 1 : 0)
+                << "Node " << node << " HasExpertSchedMode mismatch";
+            LOG() << "Node " << node << " HasExpertSchedMode: "
+                  << (int)pNodeProperties->HasExpertSchedMode << std::endl;
+        }
+    }
+
+    TEST_END
+}
+
 // Test that we can get memory properties successfully per node
 // TODO: Check validity of values returned
 TEST_F(KFDTopologyTest, GetNodeMemoryProperties) {
