@@ -228,14 +228,15 @@ write_perfetto(
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
     auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
 
-    auto read_events = [&conn, &process](uint64_t event_id) {
+    auto read_event = [&conn, &process](uint64_t event_id) {
         return rocpd::read_sql_query<types::event>(
             conn,
             fmt::format(
-                "SELECT * FROM rocpd_event WHERE guid='{}' AND id={}", process.guid, event_id));
+                "SELECT * FROM rocpd_event WHERE guid='{}' AND id={}", process.guid, event_id))[0];
     };
 
-    auto read_pmc_events = [&conn, &process](uint64_t event_id) {
+    auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
+        if(!ocfg.annotate_pmc) return std::vector<types::pmc_event>{};
         return rocpd::read_sql_query<types::pmc_event>(
             conn,
             fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
@@ -432,7 +433,7 @@ write_perfetto(
                 }
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
-                auto _event      = read_events(itr.event_id)[0];
+                auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(_category,
