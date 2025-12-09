@@ -3067,7 +3067,7 @@ def amdsmi_get_power_info(
     }
 
     for key, value in power_info_dict.items():
-        if value == 0xFFFF:
+        if value in (MaxUIntegerTypes.UINT8_T, MaxUIntegerTypes.UINT16_T, MaxUIntegerTypes.UINT32_T, MaxUIntegerTypes.UINT64_T):
             power_info_dict[key] = "N/A"
 
     return power_info_dict
