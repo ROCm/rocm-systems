@@ -201,9 +201,9 @@ Addition:
     metric_descriptions:
       Dual-issue VALU Utilization:
           plain: |
-            Indicates what percent of the kernel's duration the VALU was busy executing instructions with dual-issue. Computed as the ratio of the total number of cycles spent by the scheduler issuing VALU instructions with dual-issue over the total CU cycles.
+            Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
           rst: |
-            Indicates what percent of the kernel's duration the VALU was busy executing instructions with dual-issue. Computed as the ratio of the total number of cycles spent by the scheduler issuing VALU instructions with dual-issue over the total CU cycles.
+            Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
   - Panel Config:
       id: 1200
       title: Local Data Share (LDS)

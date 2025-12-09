@@ -1582,8 +1582,8 @@ System Speed-of-Light:
     unit: Percent
   Dual-issue VALU Utilization:
     rst: Indicates what percent of the kernel's duration the :ref:`VALU <desc-valu>`
-      was busy executing instructions with dual-issue. Computed as the ratio of the total number of
-      cycles spent by the scheduler issuing VALU instructions with dual-issue over the total
+      was busy executing dual-issued instructions. Computed as the ratio of the total number of
+      cycles spent by the scheduler co-issuing VALU instructions over the total
       CU cycles.
     unit: Percent
   VMEM Utilization:

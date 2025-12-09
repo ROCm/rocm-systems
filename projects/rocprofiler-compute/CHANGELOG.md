@@ -82,7 +82,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
-#### Negative Values in rocprof-compute Analyze Mode
+#### Negative Values in Analyze Mode
 
 Negative counter values occur due to timing mismatches in asynchronous hardware performance counters during multi-pass profiling, which is required due to hardware limitations (e.g., perfmon_config constraints).
 

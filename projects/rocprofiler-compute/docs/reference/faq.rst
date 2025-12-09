@@ -40,8 +40,8 @@ In specific circumstances, GPU can co-issue two VALU instructions at the same cl
 
 This dual-issue capability can be further investigated via:
 
-* **ROCm Compute Viewer**: You could see when VALU issues two instructions at the same cycle.
-* **On MI350 and newer platforms**: A new ``Dual-issue VALU Utilization`` metric is added which shows % of time when VALU is dual-issuing.
+* **ROCm Compute Viewer**: The Instructions view shows when two instructions are issued to the VALU in the same cycle.
+* Starting in ROCm 7.2.0, the ``Dual-issue VALU Utilization`` metric shows the % of time when VALU is executing dual-issued instructions.
 
 When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays a warning message indicating this behavior.
 

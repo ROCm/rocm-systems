@@ -1024,7 +1024,7 @@ def validate_dual_issue_metrics(
     raw_pmc_df: Union[pd.DataFrame, dict],
 ) -> None:
     """
-    Check if VALU Utilization or FP64 metrics exceed theoretical peak.
+    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
     Warns about dual-issue behavior.
     For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
     """
@@ -1032,7 +1032,7 @@ def validate_dual_issue_metrics(
 
     # Metrics to check for dual-issue warnings
     valu_utilization_metrics = ["VALU Utilization"]
-    fp64_metrics = ["VALU FLOPs (F64)", "MFMA FLOPs (F64)"]
+    valu_flops_metrics = ["VALU FLOPs (F64)"]
 
     for df_id, df in dfs.items():
         if dfs_type[df_id] != "metric_table":
@@ -1049,7 +1049,7 @@ def validate_dual_issue_metrics(
         for _, row in df.iterrows():
             metric_name = row.get("Metric", "")
 
-            if metric_name not in valu_utilization_metrics + fp64_metrics:
+            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
                 continue
 
             try:
@@ -1081,9 +1081,9 @@ def validate_dual_issue_metrics(
                             "because CU can dual-issue instructions. "
                             f"See {faq_url} for more information."
                         )
-                    else:  # FP64 metrics
+                    else:  # VALU FLOPs metrics
                         warning_msg = (
-                            "FP64 VALU FLOPs can exceed the peak value "
+                            "VALU FLOPs can exceed the peak value "
                             "because these instructions can be "
                             "dual-issued in specific circumstances. "
                             f"See {faq_url} for more information."

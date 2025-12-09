@@ -582,9 +582,9 @@ Addition:
             Indicates what percent of the kernel's duration the branch unit was busy executing instructions. Computed as the ratio of the total number of cycles spent by the scheduler issuing branch instructions over the total CU cycles.
       Dual-issue VALU Utilization:
           plain: |
-            Indicates what percent of the kernel's duration the VALU was busy executing instructions with dual-issue. Computed as the ratio of the total number of cycles spent by the scheduler issuing VALU instructions with dual-issue over the total CU cycles.
+            Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
           rst: |
-            Indicates what percent of the kernel's duration the VALU was busy executing instructions with dual-issue. Computed as the ratio of the total number of cycles spent by the scheduler issuing VALU instructions with dual-issue over the total CU cycles.
+            Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
       F16 OPs:
           plain: |
             The total number of 16-bit floating-point operations executed on either the VALU or MFMA units, per normalization unit.
