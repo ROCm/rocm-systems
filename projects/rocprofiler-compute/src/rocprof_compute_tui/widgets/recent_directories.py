@@ -41,8 +41,6 @@ class ClickableListItem(ListItem):
         parent = self.parent
         list_view = None
         while parent is not None:
-            from textual.widgets import ListView
-
             if isinstance(parent, ListView):
                 list_view = parent
                 break
