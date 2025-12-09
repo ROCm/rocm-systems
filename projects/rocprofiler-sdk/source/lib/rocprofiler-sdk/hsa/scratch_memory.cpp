@@ -663,55 +663,6 @@ update_table(hsa_amd_tool_table_t* _orig, uint64_t _tbl_instance)
     }
 }
 
-namespace
-{
-template <size_t TableIdx, size_t OpIdx>
-void
-restore_table_entry(hsa_amd_tool_table_t* _table)
-{
-    using table_type = typename hsa_table_lookup<TableIdx>::type;
-    static_assert(std::is_same<hsa_amd_tool_table_t, table_type>::value);
-
-    if constexpr(OpIdx > hsa_amd_tool_id_none)
-    {
-        auto _info = hsa_api_meta<TableIdx, OpIdx>{};
-
-        // Make sure we don't access a field that doesn't exist in input table
-        if(_info.offset() >= _table->version.minor_id) return;
-
-        // Get runtime table function pointer
-        auto& _runtime_table = _info.get_table(_table);
-        auto& _runtime_func  = _info.get_table_func(_runtime_table);
-
-        // Get saved original function pointer from internal_table
-        auto& _saved_table = _info.get_table(hsa_table_lookup<TableIdx>{}(internal_table{}));
-        auto& _saved_func  = _info.get_table_func(_saved_table);
-
-        // Restore the original function pointer
-        std::atomic_thread_fence(std::memory_order_release);
-        _runtime_func = _saved_func;
-        std::atomic_thread_fence(std::memory_order_release);
-
-        ROCP_TRACE << "Restored table entry for " << _info.name;
-    }
-}
-
-template <size_t TableIdx, size_t... OpIdx>
-void
-restore_table_impl(hsa_amd_tool_table_t* _table, std::index_sequence<OpIdx...>)
-{
-    (restore_table_entry<TableIdx, OpIdx>(_table), ...);
-}
-}  // namespace
-
-void
-restore_table(hsa_amd_tool_table_t* _table)
-{
-    if(_table)
-        restore_table_impl<ROCPROFILER_HSA_TABLE_ID_AmdTool>(
-            _table, std::make_index_sequence<hsa_amd_tool_id_scratch_event_last>{});
-}
-
 const char*
 name_by_id(uint32_t id)
 {

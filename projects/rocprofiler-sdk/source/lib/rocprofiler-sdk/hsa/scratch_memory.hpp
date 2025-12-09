@@ -52,9 +52,6 @@ copy_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);
 
 void
 update_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);
-
-void
-restore_table(hsa_amd_tool_table_t* _table);
 }  // namespace scratch_memory
 }  // namespace hsa
 }  // namespace rocprofiler
