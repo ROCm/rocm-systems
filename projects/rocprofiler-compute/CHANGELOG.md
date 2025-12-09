@@ -36,6 +36,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+### Removed
+
+* Removed "VL1 Lat" metric for MI 300 series which uses unsupported counter TCP_TCP_LATENCY for MI 300 series.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
