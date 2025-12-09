@@ -44,9 +44,6 @@ matrix:
   - os-distro: "opensuse"
     os-version: "15.6"
     rocm-version: "6.4"
-  - os-distro: "opensuse"
-    os-version: "15.6"
-    rocm-version: "7.0"
   # RHEL 8.10
   - os-distro: "rhel"
     os-version: "8.10"
@@ -83,6 +80,7 @@ matrix:
   - os-distro: "rhel"
     os-version: "9.5"
     rocm-version: "6.4"
+  # RHEL 9.6
   - os-distro: "rhel"
-    os-version: "9.5"
+    os-version: "9.6"
     rocm-version: "7.0"

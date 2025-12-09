@@ -82,13 +82,11 @@ class AMDSMICommands():
                     nh = amdsmi_interface.amdsmi_get_node_handle(dev)
                     if nh is not None:
                         self.node_handle = nh
-                        continue
+                        # Only need one handle, break after first success
+                        break
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
-                                      amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL):
-                        logging.debug("Unable to get node handle: %s", e.get_error_info())
-                    else:
-                        raise e
+                    logging.debug("Unable to get node handle: %s", e.get_error_info())
+                    # Node handle functionality is optional, so don't raise an error
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -1949,7 +1947,7 @@ class AMDSMICommands():
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         voltage_unit)
-                        elif key == "socket_power":
+                        elif 'power' in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         power_unit)
@@ -4983,50 +4981,23 @@ class AMDSMICommands():
         # Universal args
         if isinstance(args.power_cap, tuple):
             pwr_type = args.power_cap.pwr_type
-            pwr_type_as_int = (0 if pwr_type == "ppt0" else 1 if pwr_type == "ppt1" else None)
-            pwr_type = pwr_type.upper()
             requested_power_cap = args.power_cap.watts
-            try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, pwr_type_as_int)
-                logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                min_power_cap = power_cap_info["min_power_cap"]
-                min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                max_power_cap = power_cap_info["max_power_cap"]
-                max_power_cap = self.helpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                current_power_cap = power_cap_info["power_cap"]
-                current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                min_power_cap = "N/A"
-                max_power_cap = "N/A"
-                current_power_cap = "N/A"
-                self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
-                self.logger.print_output()
-                self.logger.clear_multiple_devices_output()
-                return
 
-            if requested_power_cap == current_power_cap:
-                self.logger.store_output(args.gpu, 'powercap', f"{pwr_type} power cap is already set to {requested_power_cap}W")
-            elif current_power_cap == 0:
-                self.logger.store_output(args.gpu, 'powercap', f"Unable to set {pwr_type} power cap to {requested_power_cap}W, current value is {current_power_cap}W")
-            elif requested_power_cap >= min_power_cap and requested_power_cap <= max_power_cap and requested_power_cap > 0:
-                try:
-                    new_power_cap = self.helpers.convert_SI_unit(requested_power_cap, AMDSMIHelpers.SI_Unit.BASE,
-                                                                    AMDSMIHelpers.SI_Unit.MICRO)
-                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, pwr_type_as_int, new_power_cap)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        raise PermissionError('Command requires elevation') from e
-                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
-
-                self.logger.store_output(args.gpu, 'powercap', f"Successfully set {pwr_type} power cap to {requested_power_cap}W")
+            # If pwr_type is None, default to ppt0 (legacy behavior)
+            if pwr_type is None:
+                pwr_type = "ppt0"
+                pwr_type_as_int = 0
             else:
-                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
-                if min_power_cap == 0:
-                    min_power_cap = 1
-                self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap}W and {max_power_cap}W")
+                pwr_type_as_int = 0 if pwr_type == "ppt0" else 1
+
+            # Set the power cap for the specified sensor
+            pwr_type_upper = pwr_type.upper()
+            result = self.helpers.validate_and_set_power_cap(
+                args.gpu, pwr_type_as_int, pwr_type_upper, requested_power_cap, self.logger)
+            self.logger.store_output(args.gpu, 'powercap', result)
+            if multiple_devices:
+                self.logger.store_multiple_device_output()
+                return  # Skip printing when there are multiple devices
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
@@ -5576,9 +5547,11 @@ class AMDSMICommands():
                         raise PermissionError('Command requires elevation') from e
                     final_output[f"ppt{current_sensor_num}"] = f"[{e.get_error_info(detailed=False)}] Unable to reset cap to default power cap"
                 self.logger.store_output(args.gpu, 'powercap', final_output)
+                if multiple_devices:
+                    self.logger.store_multiple_device_output()
+                    return
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
-                return
 
         #######################
         # BM commands - END   #
@@ -7519,7 +7492,13 @@ class AMDSMICommands():
                     current_power = gpu_metrics['current_socket_power']
                 else:
                     current_power = gpu_metrics['average_socket_power']
-                temperature = gpu_metrics['temperature_hotspot']
+                # If the hotspot temperature is not available use the edge temp (applicable to APUs)
+                if gpu_metrics['temperature_hotspot'] != "N/A":
+                    temperature = gpu_metrics['temperature_hotspot']
+                elif gpu_metrics['temperature_edge'] != "N/A":
+                    temperature = gpu_metrics['temperature_edge']
+                else:
+                    temperature = "N/A"
             else:
                 mem_util = "N/A"
                 gfx_util = "N/A"

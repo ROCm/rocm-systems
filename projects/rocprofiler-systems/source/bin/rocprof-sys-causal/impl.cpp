@@ -24,7 +24,6 @@
 
 #include "common/defines.h"
 #include "common/environment.hpp"
-#include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
@@ -37,6 +36,7 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -58,6 +58,7 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
 using namespace ::timemory::join;
+using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
 using ::tim::log::monochrome;
@@ -301,61 +302,28 @@ void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append, std::string_view _join_delim)
 {
-    updated_envs.emplace(_env_var);
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_env_var == "LD_PRELOAD")
-                    {
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                    }
-                    else
-                    {
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                    }
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
+    auto _mode = _append ? update_mode::APPEND : update_mode::REPLACE;
+    rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val), _mode,
+                                   _join_delim, updated_envs, original_envs);
 }
 
 template <typename Tp>
 void
 add_default_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val)
 {
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0) return;
-    }
+    // Check if already exists
+    auto       _key = join("", _env_var, "=");
+    const auto exists =
+        std::any_of(_environ.begin(), _environ.end(), [&_key](const char* itr) {
+            return itr && std::string_view{ itr }.find(_key) == 0;
+        });
 
-    updated_envs.emplace(_env_var);
-    _environ.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
+    if(exists) return;
+
+    // If not exists, use common::update_env
+    rocprofsys::common::update_env(_environ, _env_var, std::forward<Tp>(_env_val),
+                                   update_mode::REPLACE, ":", updated_envs,
+                                   original_envs);
 }
 
 std::vector<char*>

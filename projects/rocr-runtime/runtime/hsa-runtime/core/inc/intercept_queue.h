@@ -241,6 +241,9 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   // Proxy packet buffer
   SharedArray<AqlPacket, 4096> buffer_;
 
+  // Pre-allocated staging buffer for wrap-around cases
+  std::vector<AqlPacket> staging_buffer_;
+
   // Packet transform callbacks
   std::vector<std::pair<AMD::callback_t<hsa_amd_queue_intercept_handler>, void*>> interceptors;
 

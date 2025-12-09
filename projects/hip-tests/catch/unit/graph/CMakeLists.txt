@@ -139,7 +139,7 @@ set(TEST_SRC
   hipGraphDestroy.cc
   hipStreamUpdateCaptureDependencies.cc
   hipThreadExchangeStreamCaptureMode.cc
-  hipLaunchHostFunc.cc
+  hipLaunchHostFuncWithGraph.cc
   hipStreamGetCaptureInfo_v2_old.cc
   hipUserObjectCreate.cc
   hipUserObjectRelease.cc
@@ -181,7 +181,11 @@ if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
-add_custom_target(add_Kernel.code COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code -I${HIP_PATH}/include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
+  --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+  -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
+  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
@@ -190,7 +194,13 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_TARGET_NAME build_tests)
 
 if(HIP_PLATFORM MATCHES "amd")
-  add_custom_target(hipMatMul COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/ -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --hip-path=${HIP_PATH})
+  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER}
+    --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
+    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
+    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   add_dependencies(build_tests hipMatMul)
   set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)

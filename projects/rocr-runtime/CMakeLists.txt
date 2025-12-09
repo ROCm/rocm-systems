@@ -352,5 +352,5 @@ cpack_add_component(asan
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for rocr-runtime")
 
-# Debian specific packaging configuration install lintian files 
+# Debian specific packaging configuration install lintian files
 configure_pkg( ${CORE_TARGET} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
