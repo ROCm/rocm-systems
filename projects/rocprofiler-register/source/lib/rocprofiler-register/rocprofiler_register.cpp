@@ -34,14 +34,20 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cerrno>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include <dlfcn.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace
@@ -77,6 +83,14 @@ typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t final
                                              void*                         tool_data);
 
 typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
+
+
+rocprofiler_register_error_code_t
+rocprofiler_register_attach(const char* environment_buffer,
+                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+
+rocprofiler_register_error_code_t
+rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 
 typedef struct rocprofiler_tool_configure_result_t
 {
@@ -159,6 +173,407 @@ constexpr auto rocprofiler_lib_detach_entrypoint = "rocprofiler_detach";
 
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
+
+// ======================================================================================
+// Socket communication types and utilities for attach/detach operations
+// ======================================================================================
+
+/// Socket path constants for Unix domain socket communication
+constexpr auto socket_path_prefix = std::string_view{ "/tmp/rocprofiler." };
+constexpr auto socket_path_suffix = std::string_view{ ".sock" };
+
+/// Operation codes for attach/detach socket protocol
+enum class attach_op : uint32_t
+{
+    attach   = 0,  ///< Request to attach profiler
+    detach   = 1,  ///< Request to detach profiler
+    response = 2,  ///< Response message from server
+};
+
+/// Status codes for attach/detach response
+enum class attach_status : uint32_t
+{
+    success = 0,  ///< Operation completed successfully
+    error   = 1,  ///< Operation failed with error
+};
+
+/// Message header for socket communication protocol
+struct attach_message_header
+{
+    uint32_t op                = 0;  ///< Operation type (see attach_op)
+    uint32_t tool_lib_path_len = 0;  ///< Length of tool library path string
+    uint32_t env_buffer_len    = 0;  ///< Length of environment buffer
+};
+
+/// Response message sent back to client
+struct attach_response_message
+{
+    uint32_t op     = 0;  ///< Should be attach_op::response
+    uint32_t status = 0;  ///< Status code (see attach_status)
+};
+
+/// RAII wrapper for socket file descriptor management
+class socket_fd_guard
+{
+public:
+    explicit socket_fd_guard(int fd) noexcept
+    : m_fd{ fd }
+    {}
+
+    ~socket_fd_guard() noexcept
+    {
+        if(m_fd >= 0) ::close(m_fd);
+    }
+
+    socket_fd_guard(const socket_fd_guard&)            = delete;
+    socket_fd_guard& operator=(const socket_fd_guard&) = delete;
+    socket_fd_guard(socket_fd_guard&& other) noexcept
+    : m_fd{ std::exchange(other.m_fd, -1) }
+    {}
+    socket_fd_guard& operator=(socket_fd_guard&& other) noexcept
+    {
+        if(this != &other)
+        {
+            if(m_fd >= 0) ::close(m_fd);
+            m_fd = std::exchange(other.m_fd, -1);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] int    get() const noexcept { return m_fd; }
+    [[nodiscard]] int    release() noexcept { return std::exchange(m_fd, -1); }
+    [[nodiscard]] bool   valid() const noexcept { return m_fd >= 0; }
+    [[nodiscard]]        operator bool() const noexcept { return valid(); }
+
+private:
+    int m_fd = -1;
+};
+
+/// Global state for socket monitoring thread
+struct socket_monitor_state
+{
+    std::unique_ptr<std::thread> thread        = nullptr;
+    std::atomic<bool>            running       = { false };
+    std::string                  socket_path   = {};
+};
+
+auto g_socket_state = socket_monitor_state{};
+
+/// Generates the socket path for current process using PID
+[[nodiscard]] std::string
+get_socket_path_for_current_process()
+{
+    return fmt::format("{}{}{}", socket_path_prefix, ::getpid(), socket_path_suffix);
+}
+
+/// Sends a response message to client
+[[nodiscard]] bool
+send_response(int _client_fd, attach_status _status)
+{
+    auto _response = attach_response_message{
+        .op     = static_cast<uint32_t>(attach_op::response),
+        .status = static_cast<uint32_t>(_status)
+    };
+
+    auto _bytes_sent = ::send(_client_fd, &_response, sizeof(_response), 0);
+    return _bytes_sent == static_cast<ssize_t>(sizeof(_response));
+}
+
+/// Sends a response message with raw status code (for error codes)
+[[nodiscard]] bool
+send_response(int _client_fd, uint32_t _status_code)
+{
+    auto _response = attach_response_message{
+        .op     = static_cast<uint32_t>(attach_op::response),
+        .status = _status_code
+    };
+
+    auto _bytes_sent = ::send(_client_fd, &_response, sizeof(_response), 0);
+    return _bytes_sent == static_cast<ssize_t>(sizeof(_response));
+}
+
+/// Receives exactly the specified number of bytes from socket
+[[nodiscard]] bool
+recv_all(int _fd, void* _buffer, size_t _size)
+{
+    auto* _buf        = static_cast<uint8_t*>(_buffer);
+    auto  _total_read = size_t{ 0 };
+
+    while(_total_read < _size)
+    {
+        auto _bytes_read = ::recv(_fd, _buf + _total_read, _size - _total_read, 0);
+
+        if(_bytes_read <= 0)
+        {
+            if(_bytes_read == 0)
+            {
+                LOG(ERROR) << "Connection closed by client";
+            }
+            else if(errno != EINTR)
+            {
+                LOG(ERROR) << "Failed to read from client: " << std::strerror(errno);
+            }
+            return false;
+        }
+        _total_read += static_cast<size_t>(_bytes_read);
+    }
+    return true;
+}
+
+/// Handles the ATTACH operation from client
+void
+handle_attach_op(int                         _client_fd,
+                 std::string_view            _tool_lib_path,
+                 const std::vector<uint8_t>& _env_buffer)
+{
+    LOG(INFO) << "Received ATTACH operation";
+    LOG(INFO) << "Tool library path: " << _tool_lib_path;
+
+    // Parse and log environment buffer contents
+    if(!_env_buffer.empty() && _env_buffer.size() >= sizeof(uint32_t))
+    {
+        auto        _var_count = *reinterpret_cast<const uint32_t*>(_env_buffer.data());
+        const auto* _position =
+            reinterpret_cast<const char*>(_env_buffer.data() + sizeof(uint32_t));
+        const auto* _end =
+            reinterpret_cast<const char*>(_env_buffer.data() + _env_buffer.size());
+
+        LOG(INFO) << "Environment variables (" << _var_count << " pairs):";
+
+        for(uint32_t _i = 0; _i < _var_count && _position < _end; ++_i)
+        {
+            const auto* _name = _position;
+            _position += std::strlen(_name) + 1;
+            if(_position >= _end) break;
+
+            const auto* _value = _position;
+            _position += std::strlen(_value) + 1;
+
+            LOG(INFO) << "  " << _name << "=" << _value;
+        }
+    }
+
+    // Store tool_lib_path and environment buffer for attach operation
+    auto _stored_tool_lib_path = std::string{ _tool_lib_path };
+    LOG(INFO) << "Stored tool_lib_path: " << _stored_tool_lib_path;
+
+    auto _stored_env_buffer =
+        std::string{ reinterpret_cast<const char*>(_env_buffer.data()), _env_buffer.size() };
+    LOG(INFO) << "Stored environment buffer (" << _stored_env_buffer.size() << " bytes)";
+
+    auto _attach_result =
+        rocprofiler_register_attach(_stored_env_buffer.c_str(), _stored_tool_lib_path.c_str());
+
+    // Send response with the actual error code
+    if(_attach_result != ROCP_REG_SUCCESS)
+    {
+        LOG(ERROR) << "rocprofiler_register_attach failed with error: " << _attach_result
+                   << " (" << rocprofiler_register_error_string(_attach_result) << ")";
+
+        if(send_response(_client_fd, static_cast<uint32_t>(_attach_result)))
+        {
+            LOG(INFO) << "Sent ATTACH error response with code: " << _attach_result;
+        }
+        else
+        {
+            LOG(ERROR) << "Failed to send error response";
+        }
+    }
+    else
+    {
+        if(send_response(_client_fd, attach_status::success))
+        {
+            LOG(INFO) << "Sent ATTACH success response";
+        }
+        else
+        {
+            LOG(ERROR) << "Failed to send response";
+        }
+    }
+}
+
+/// Handles the DETACH operation from client
+void
+handle_detach_op(int _client_fd)
+{
+    LOG(INFO) << "Received DETACH operation";
+
+    auto _detach_result = rocprofiler_register_detach();
+
+    // Send response with the actual error code
+    if(_detach_result != ROCP_REG_SUCCESS)
+    {
+        LOG(ERROR) << "rocprofiler_register_detach failed with error: " << _detach_result
+                   << " (" << rocprofiler_register_error_string(_detach_result) << ")";
+
+        if(send_response(_client_fd, static_cast<uint32_t>(_detach_result)))
+        {
+            LOG(INFO) << "Sent DETACH error response with code: " << _detach_result;
+        }
+        else
+        {
+            LOG(ERROR) << "Failed to send error response";
+        }
+    }
+    else
+    {
+        if(send_response(_client_fd, attach_status::success))
+        {
+            LOG(INFO) << "Sent DETACH success response";
+        }
+        else
+        {
+            LOG(ERROR) << "Failed to send response";
+        }
+    }
+}
+
+/// Main function for socket monitoring thread
+void
+socket_monitor_thread()
+{
+    // Generate socket path with current process PID
+    g_socket_state.socket_path = get_socket_path_for_current_process();
+    const auto* _socket_path   = g_socket_state.socket_path.c_str();
+
+    // Create Unix domain socket
+    auto _server_fd = socket_fd_guard{ ::socket(AF_UNIX, SOCK_STREAM, 0) };
+    if(!_server_fd)
+    {
+        LOG(ERROR) << "Failed to create socket: " << std::strerror(errno);
+        return;
+    }
+
+    // Remove existing socket file if it exists
+    ::unlink(_socket_path);
+
+    // Set up server address
+    auto _server_addr         = sockaddr_un{};
+    _server_addr.sun_family   = AF_UNIX;
+    std::strncpy(_server_addr.sun_path, _socket_path, sizeof(_server_addr.sun_path) - 1);
+
+    // Bind socket to the path
+    if(::bind(_server_fd.get(),
+              reinterpret_cast<sockaddr*>(&_server_addr),
+              sizeof(_server_addr)) == -1)
+    {
+        LOG(ERROR) << "Failed to bind socket: " << std::strerror(errno);
+        return;
+    }
+
+    // Listen for connections
+    constexpr auto max_pending_connections = 5;
+    if(::listen(_server_fd.get(), max_pending_connections) == -1)
+    {
+        LOG(ERROR) << "Failed to listen on socket: " << std::strerror(errno);
+        ::unlink(_socket_path);
+        return;
+    }
+
+    LOG(INFO) << "Socket thread started, listening on " << _socket_path;
+
+    g_socket_state.running = true;
+
+    while(g_socket_state.running)
+    {
+        auto      _client_addr = sockaddr_un{};
+        socklen_t _client_len  = sizeof(_client_addr);
+
+        // Accept client connection
+        auto _client_fd = socket_fd_guard{
+            ::accept(_server_fd.get(), reinterpret_cast<sockaddr*>(&_client_addr), &_client_len)
+        };
+
+        if(!_client_fd)
+        {
+            if(errno != EINTR && g_socket_state.running)
+            {
+                LOG(ERROR) << "Failed to accept connection: " << std::strerror(errno);
+            }
+            continue;
+        }
+
+        LOG(INFO) << "Client connected";
+
+        // Read message header
+        auto _header = attach_message_header{};
+        if(!recv_all(_client_fd.get(), &_header, sizeof(_header)))
+        {
+            LOG(ERROR) << "Failed to read message header";
+            continue;
+        }
+
+        LOG(INFO) << "Received header: op=" << _header.op
+                  << ", tool_lib_path_len=" << _header.tool_lib_path_len
+                  << ", env_buffer_len=" << _header.env_buffer_len;
+
+        // Read tool library path
+        auto _tool_lib_path = std::string{};
+        if(_header.tool_lib_path_len > 0)
+        {
+            auto _path_buffer = std::vector<char>(_header.tool_lib_path_len);
+            if(!recv_all(_client_fd.get(), _path_buffer.data(), _header.tool_lib_path_len))
+            {
+                LOG(ERROR) << "Failed to read tool library path";
+                continue;
+            }
+            _tool_lib_path = std::string{ _path_buffer.data() };
+        }
+
+        // Read environment buffer
+        auto _env_buffer = std::vector<uint8_t>{};
+        if(_header.env_buffer_len > 0)
+        {
+            _env_buffer.resize(_header.env_buffer_len);
+            if(!recv_all(_client_fd.get(), _env_buffer.data(), _header.env_buffer_len))
+            {
+                LOG(ERROR) << "Failed to read environment buffer";
+                continue;
+            }
+        }
+
+        // Handle the operation based on op code
+        auto _should_exit = false;
+        switch(static_cast<attach_op>(_header.op))
+        {
+            case attach_op::attach:
+            {
+                handle_attach_op(_client_fd.get(), _tool_lib_path, _env_buffer);
+                break;
+            }
+            case attach_op::detach:
+            {
+                LOG(INFO) << "Detaching profiler and exiting socket thread...";
+                handle_detach_op(_client_fd.get());
+                _should_exit = true;
+                break;
+            }
+            default:
+            {
+                LOG(ERROR) << "Unknown operation: " << _header.op;
+                send_response(_client_fd.get(), attach_status::error);
+                break;
+            }
+        }
+
+        LOG(INFO) << "Client disconnected";
+
+        // Exit the loop if DETACH was received
+        if(_should_exit)
+        {
+            LOG(INFO) << "DETACH received, stopping socket monitor thread";
+            g_socket_state.running = false;
+            break;
+        }
+    }
+
+    ::unlink(_socket_path);
+    LOG(INFO) << "Socket thread terminated";
+}
+
+// ======================================================================================
+// End of socket communication utilities
+// ======================================================================================
 
 enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
 {
@@ -945,11 +1360,35 @@ rocprofiler_register_invoke_all_registrations()
 }
 
 rocprofiler_register_error_code_t
-rocprofiler_register_attach(const char* environment_buffer,
-                            const char* tool_lib_path) ROCPROFILER_REGISTER_PUBLIC_API;
+rocprofiler_register_thread_init() ROCPROFILER_REGISTER_PUBLIC_API;
 
 rocprofiler_register_error_code_t
-rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
+rocprofiler_register_thread_init()
+{
+    // check if thread is already running
+    if(g_socket_state.thread && g_socket_state.running.load())
+    {
+        LOG(INFO) << "Socket monitoring thread is already running";
+        return ROCP_REG_SUCCESS;
+    }
+
+    try
+    {
+        // create and start the socket monitoring thread
+        g_socket_state.thread = std::make_unique<std::thread>(socket_monitor_thread);
+
+        // detach the thread so it can run independently
+        g_socket_state.thread->detach();
+
+        LOG(INFO) << "Socket monitoring thread started successfully";
+        return ROCP_REG_SUCCESS;
+    }
+    catch(const std::exception& _e)
+    {
+        LOG(ERROR) << "Failed to start socket monitoring thread: " << _e.what();
+        return ROCP_REG_ROCPROFILER_ERROR;
+    }
+}
 
 //
 //  This function can be invoked by ptrace
