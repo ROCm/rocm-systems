@@ -878,20 +878,6 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_
     ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_DUAL_ISSUE_VALU = 1
 } rocprofiler_pc_sampling_arbiter_state_field_width_t;
 
-
-/**
- * @brief (experimental) (Optional) Return the string encoding of
- * ::rocprofiler_pc_sampling_hw_id_field_id_t value
- *
- * @param [in] field_id HW ID field enum value
- * @return Will return a nullptr if invalid/unsupported
- * ::rocprofiler_pc_sampling_hw_id_field_id_t value is provided.
- */
-ROCPROFILER_SDK_EXPERIMENTAL
-const char*
-rocprofiler_get_pc_sampling_hw_id_field_name(
-    rocprofiler_pc_sampling_hw_id_field_id_t field_id) ROCPROFILER_API;
-
 /**
  * @brief (experimental) (Optional) Return the string encoding of
  * ::rocprofiler_pc_sampling_arbiter_state_field_id_t value
