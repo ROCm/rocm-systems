@@ -20,7 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_library(lib-common-tests OBJECT test_update_env.cpp)
+add_library(
+    lib-common-tests
+    OBJECT
+    test_discover_llvm_libdir.cpp
+    test_path.cpp
+    test_remove_env.cpp
+    test_update_env.cpp
+)
 
 target_link_libraries(
     lib-common-tests
