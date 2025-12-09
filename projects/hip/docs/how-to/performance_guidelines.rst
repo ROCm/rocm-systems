@@ -119,9 +119,10 @@ Data transfer optimization
 
 **Batch small transfers**
 
-Each memory transfer incurs fixed overhead from driver calls and PCIe transaction 
-setup. Consolidating many small transfers into a single large transfer amortizes 
-this overhead across more data, achieving much higher effective bandwidth.
+Each memory transfer incurs a fixed overhead from driver calls and PCIe
+transaction setup. Consolidating many small transfers into a single large
+transfer amortizes this overhead across more data, resulting in much higher
+effective bandwidth.
 
 .. code-block:: cuda
 
@@ -187,7 +188,8 @@ transaction, maximizing bandwidth and avoiding split transactions.
 
 Padding 2D arrays to multiples of the wavefront size ensures each row starts 
 at an aligned memory boundary. This allows consecutive threads accessing the 
-same row to generate coalesced memory transactions, maximizing bandwidth.
+same row to generate coalesced memory transactions, thereby maximizing
+bandwidth.
 
 .. code-block:: cuda
 
@@ -220,7 +222,8 @@ For understanding memory coalescing theory, see :ref:`memory_hierarchy_theory`.
 
 Shared memory (LDS) provides low-latency on-chip storage shared across threads 
 in a block. Loading data into shared memory once and reusing it many times 
-reduces global memory traffic, particularly effective for tiled algorithms like matrix multiplication.
+reduces global memory traffic, particularly effective for tiled algorithms such
+as matrix multiplication.
 
 .. code-block:: cuda
 
@@ -243,10 +246,10 @@ reduces global memory traffic, particularly effective for tiled algorithms like 
 
 **Avoid bank conflicts in shared memory**
 
-Shared memory is organized into banks that can service one request per cycle. 
-When multiple threads in a warp access the same bank simultaneously, they 
-serialize, reducing throughput. Padding arrays by one element shifts addresses 
-to avoid systematic conflicts.
+Shared memory is organized into banks, each capable of servicing one request per
+cycle. When multiple threads in a warp access the same bank simultaneously, the
+requests are serialized, reducing throughput. Padding arrays by one element
+shifts addresses to avoid systematic conflicts.
 
 .. code-block:: cuda
 
@@ -317,9 +320,10 @@ functions can deliver substantial performance gains when FP64 accuracy is not re
 
 **Leverage fast math intrinsics**
 
-Hardware-specific intrinsics bypass some accuracy checks and use lookup tables 
-or polynomial approximations, trading slight precision loss for significantly 
-higher throughput. Use these when the application can tolerate reduced precision.
+Hardware-specific intrinsics bypass certain accuracy checks and use lookup
+tables or polynomial approximations, trading slight precision loss for
+significantly higher throughput. These should be used when the application can
+tolerate reduced precision.
 
 .. code-block:: cuda
 

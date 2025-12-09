@@ -273,9 +273,9 @@ depicted in the following figure.
 Warp (or Wavefront)
   The innermost grouping of threads is called a warp (NVIDIA terminology) or 
   wavefront (AMD terminology). A wavefront is the most tightly coupled group of 
-  threads, both physically and logically. Threads inside a wavefront are executed 
-  in lockstep, with each thread executing the same instruction simultaneously on 
-  different data elements.
+  threads, both physically and logically. Threads within a wavefront are
+  executed in lockstep, with each thread executing the same instruction
+  simultaneously on different data elements.
   
   A wavefront represents the fundamental execution unit of AMD GPUs. Each wavefront 
   consists of multiple parallel threads that execute the same instruction 

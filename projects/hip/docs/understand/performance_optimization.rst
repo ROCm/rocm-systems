@@ -153,7 +153,7 @@ How latency hiding works:
 * **Instruction-level parallelism**: Multiple independent instructions in flight
 
 The hardware can completely hide memory latency if there are enough active 
-wavefronts with independent work. The number of instructions needed from other 
+wavefronts with independent work. The number of instructions required from other 
 wavefronts to hide latency depends on the specific memory latency and instruction 
 throughput characteristics of the GPU.
 
