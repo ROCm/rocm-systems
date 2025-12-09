@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
+TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);

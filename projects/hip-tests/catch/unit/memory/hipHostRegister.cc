@@ -107,8 +107,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
-                   "[multigpu]", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_ReferenceFromKernelandhipMemset, int, float, double) {
   size_t sizeBytes{LEN * sizeof(TestType)};
   TestType *A, **Ad;
   int num_devices = 0;
@@ -174,7 +173,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_DirectReferenceFromKernel, int, float, double) {
   auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
@@ -215,7 +214,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, fl
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_DirectReferenceMultGpu,
                    int, float, double) {
   // 1 refers to doing hipHostRegister once for all devices
   // 0 refers to doing hipHostRegister for each device
@@ -275,7 +274,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
+TEST_CASE(Unit_hipHostRegister_SameChunkRepeat) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -315,7 +314,7 @@ TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
+TEST_CASE(Unit_hipHostRegister_Chunks_SingleAttempt) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -363,7 +362,7 @@ TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
+TEST_CASE(Unit_hipHostRegister_Chunks_RoundRobin) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -402,7 +401,7 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
+TEST_CASE(Unit_hipHostRegister_Perform_hipMemset) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -439,7 +438,7 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
+TEST_CASE(Unit_hipHostRegister_Perform_hipMemcpy) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -483,7 +482,7 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Oversubscription") {
+TEST_CASE(Unit_hipHostRegister_Oversubscription) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -541,7 +540,7 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_AsyncApis") {
+TEST_CASE(Unit_hipHostRegister_AsyncApis) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -601,7 +600,7 @@ TEST_CASE("Unit_hipHostRegister_AsyncApis") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Graphs") {
+TEST_CASE(Unit_hipHostRegister_Graphs) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -685,7 +684,7 @@ TEST_CASE("Unit_hipHostRegister_Graphs") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_SameChunk") {
+TEST_CASE(Unit_hipHostRegister_RegUnreg_Perf_SameChunk) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   hipDevice_t device;
@@ -718,7 +717,7 @@ TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_SameChunk") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_DiffChunk") {
+TEST_CASE(Unit_hipHostRegister_RegUnreg_Perf_DiffChunk) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   hipDevice_t device;
@@ -751,7 +750,7 @@ TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_DiffChunk") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_SameChunk_MGPU") {
+TEST_CASE(Unit_hipHostRegister_RegUnreg_Perf_SameChunk_MGPU) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   hipDevice_t device;
@@ -790,7 +789,7 @@ TEST_CASE("Unit_hipHostRegister_RegUnreg_Perf_SameChunk_MGPU") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
+TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -861,7 +860,7 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Memcpy", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_Memcpy, int, float, double) {
   // 1 refers to hipHostRegister
   // 0 refers to malloc
   auto mem_type = GENERATE(0, 1);
@@ -910,7 +909,7 @@ template <typename T> __global__ void fill_kernel(T* dataPtr, T value) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_Flags, int, float, double) {
   size_t sizeBytes = 1 * sizeof(TestType);
   TestType* hostPtr = reinterpret_cast<TestType*>(malloc(sizeBytes));
 
@@ -960,7 +959,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipHostRegister_Negative, int, float, double) {
   TestType* hostPtr = nullptr;
 
   size_t sizeBytes = 1 * sizeof(TestType);
@@ -993,7 +992,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   }
 }
 
-TEST_CASE("Unit_hipHostRegister_Capture") {
+TEST_CASE(Unit_hipHostRegister_Capture) {
   constexpr size_t kBufferSize = 1024;
   auto buffer = std::make_unique<int[]>(kBufferSize);
   hipError_t capture_error = hipSuccess;

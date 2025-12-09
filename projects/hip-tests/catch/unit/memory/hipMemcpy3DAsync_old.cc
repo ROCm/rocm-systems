@@ -635,7 +635,7 @@ template <typename T> void Memcpy3DAsync<T>::simple_Memcpy3DAsync() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]", int, unsigned int, float) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy3DAsync_Basic, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -673,7 +673,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]", int, uns
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_ExtentValidation") {
+TEST_CASE(Unit_hipMemcpy3DAsync_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
   Memcpy3DAsync<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
   memcpy3d.Extent_Validation();
@@ -691,7 +691,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-Negative") {
+TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -715,7 +715,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-Negative") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-D2D", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_D2D) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -747,7 +747,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-D2D", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-DiffStream", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -772,7 +772,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice-DiffStream", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Basic_Size_Test") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128;
   int numDevices = 0;

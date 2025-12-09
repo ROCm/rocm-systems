@@ -218,7 +218,7 @@ TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
  *  - HIP_VERSION >= 6.1
  */
 
-static void Unit_hipDeviceGetGraphMemAttribute_Functional(unsigned deviceId = 0) {
+static void hipDeviceGetGraphMemAttribute_Functional(unsigned deviceId = 0) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -306,7 +306,7 @@ static void Unit_hipDeviceGetGraphMemAttribute_Functional(unsigned deviceId = 0)
 }
 
 TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional) {
-  Unit_hipDeviceGetGraphMemAttribute_Functional();
+  hipDeviceGetGraphMemAttribute_Functional();
 }
 
 TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
@@ -315,7 +315,7 @@ TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
 
   if (numDevices > 0) {
     for (int i = 0; i < numDevices; ++i) {
-      Unit_hipDeviceGetGraphMemAttribute_Functional(i);
+      hipDeviceGetGraphMemAttribute_Functional(i);
     }
   } else {
     HipTest::HIP_SKIP_TEST("Skipped test as there is no device to test.");

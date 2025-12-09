@@ -71,7 +71,7 @@ static void __global__ vector_square(int* A_d) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE(Unit_hipGraphAddNodeTypeMemset_Positive_Basic, "", uint8_t, uint16_t,
+TEMPLATE_TEST_CASE(Unit_hipGraphAddNodeTypeMemset_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;

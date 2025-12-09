@@ -57,7 +57,7 @@ __global__ void ptrdiff_Kernel(unsigned int *res, int platformVar) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
+TEST_CASE(Unit_hipRTC_Ptrdiff_t_Check) {
   std::string kernel_name = "ptrdiff_Kernel";
   const char* kername = kernel_name.c_str();
   unsigned int* result_h;
@@ -134,7 +134,7 @@ TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess") {
+TEST_CASE(Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess) {
   // Spawn a process
   hip::SpawnProc proc("ChkPtrdiff_t_Exe", true);
   if ((proc.run("HIPRTC_PTRDIFF_T_IS_LONG_LONG 1") == 1) &&

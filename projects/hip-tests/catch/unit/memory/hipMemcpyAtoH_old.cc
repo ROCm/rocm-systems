@@ -43,7 +43,7 @@ Output:"B_h" host variable output of hipMemcpyAtoH API
 The same scenario is then verified with pinned host memory
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_Basic", "[hipMemcpyAtoH]", char, int, float) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_Basic, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -90,8 +90,7 @@ Output:"B_h" host variable output of hipMemcpyAtoH API
         is then validated with "hData"
 */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_multiDevice-PeerDeviceContext",
-                   "[hipMemcpyAtoH][multigpu]", char, int, float) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -136,7 +135,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_multiDevice-PeerDeviceContext",
 /*
 This testcase verifies the negative scenarios of hipMemcpyAtoH API
 */
-TEST_CASE("Unit_hipMemcpyAtoH_Negative") {
+TEST_CASE(Unit_hipMemcpyAtoH_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -175,7 +174,7 @@ Excluded the testcase for amd,as there is already a bug raised
 SWDEV-274683
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipMemcpyAtoH_SizeCheck") {
+TEST_CASE(Unit_hipMemcpyAtoH_SizeCheck) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

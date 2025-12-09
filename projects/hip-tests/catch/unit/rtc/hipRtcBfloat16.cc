@@ -52,7 +52,7 @@ void test_hip_bfloat16(float* f, bool* result)
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_test_hip_bfloat16") {
+TEST_CASE(Unit_hiprtc_test_hip_bfloat16) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, "code.cu", 0, nullptr, nullptr));

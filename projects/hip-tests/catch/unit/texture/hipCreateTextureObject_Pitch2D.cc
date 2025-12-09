@@ -62,7 +62,7 @@ THE SOFTWARE.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
+TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
   CHECK_IMAGE_SUPPORT
 
   hipError_t ret;

@@ -56,7 +56,7 @@ static char memSetVal = 'a';
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Positive_Basic, "", uint8_t, uint16_t,
+TEMPLATE_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
