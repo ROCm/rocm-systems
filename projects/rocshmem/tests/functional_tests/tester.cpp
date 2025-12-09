@@ -130,19 +130,14 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
         max_msg_size = args.max_msg_size / args.num_wgs;
-        break;
       case TeamBroadcastTestType:
       case TeamReductionTestType:
-        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs;
-        break;
       case TeamFCollectTestType:
       case CollectTestType:
-        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs / 2;
-        break;
       case TeamAllToAllTestType:
       case AllToAllsTestType:
       case TeamAlltoallmemOnStreamTestType:
-        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs / args.numprocs;
+        max_msg_size = args.max_msg_size / args.num_wgs / args.numprocs;
         break;
       default:
         break;
