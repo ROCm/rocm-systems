@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/cache_type_traits.hpp"
+#include "core/trace_cache/cacheable.hpp"
 
 #include <array>
 #include <cstddef>
@@ -307,7 +307,7 @@ TEST_F(cacheable_test, get_size_helper_byte_array)
 
 TEST_F(cacheable_test, store_value_span_uint8)
 {
-    std::vector<uint8_t> data = { 1, 2, 3, 4, 5 };
+    std::vector<uint8_t>      data = { 1, 2, 3, 4, 5 };
     rocprofsys::span<uint8_t> span_val(data);
     rocprofsys::trace_cache::utility::store_value(span_val, buffer.data(), position);
 
@@ -326,11 +326,11 @@ TEST_F(cacheable_test, store_value_span_uint8)
 
 TEST_F(cacheable_test, store_value_span_uint32)
 {
-    std::vector<uint32_t> data = { 100, 200, 300, 400, 500 };
+    std::vector<uint32_t>      data = { 100, 200, 300, 400, 500 };
     rocprofsys::span<uint32_t> span_val(data);
     rocprofsys::trace_cache::utility::store_value(span_val, buffer.data(), position);
 
-    size_t expected_data_size = data.size() * sizeof(uint32_t);
+    size_t expected_data_size  = data.size() * sizeof(uint32_t);
     size_t expected_total_size = expected_data_size + sizeof(size_t);
     EXPECT_EQ(position, expected_total_size);
 
@@ -356,7 +356,7 @@ TEST_F(cacheable_test, store_value_empty_span)
 
 TEST_F(cacheable_test, span_store_vector_parse_roundtrip)
 {
-    std::vector<uint8_t> original_data = { 10, 20, 30, 40, 50 };
+    std::vector<uint8_t>      original_data = { 10, 20, 30, 40, 50 };
     rocprofsys::span<uint8_t> span_val(original_data);
     rocprofsys::trace_cache::utility::store_value(span_val, buffer.data(), position);
 
@@ -370,7 +370,7 @@ TEST_F(cacheable_test, span_store_vector_parse_roundtrip)
 
 TEST_F(cacheable_test, span_uint32_store_vector_parse_roundtrip)
 {
-    std::vector<uint32_t> original_data = { 0xDEADBEEF, 0xCAFEBABE, 0x12345678 };
+    std::vector<uint32_t>      original_data = { 0xDEADBEEF, 0xCAFEBABE, 0x12345678 };
     rocprofsys::span<uint32_t> span_val(original_data);
     rocprofsys::trace_cache::utility::store_value(span_val, buffer.data(), position);
 
@@ -384,15 +384,15 @@ TEST_F(cacheable_test, span_uint32_store_vector_parse_roundtrip)
 
 TEST_F(cacheable_test, get_size_span_uint8)
 {
-    std::vector<uint8_t> data = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    std::vector<uint8_t>      data = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
     rocprofsys::span<uint8_t> span_val(data);
-    size_t size = rocprofsys::trace_cache::utility::get_size(span_val);
+    size_t                    size = rocprofsys::trace_cache::utility::get_size(span_val);
     EXPECT_EQ(size, data.size() * sizeof(uint8_t) + sizeof(size_t));
 }
 
 TEST_F(cacheable_test, get_size_span_uint32)
 {
-    std::vector<uint32_t> data = { 100, 200, 300, 400, 500 };
+    std::vector<uint32_t>      data = { 100, 200, 300, 400, 500 };
     rocprofsys::span<uint32_t> span_val(data);
     size_t size = rocprofsys::trace_cache::utility::get_size(span_val);
     EXPECT_EQ(size, data.size() * sizeof(uint32_t) + sizeof(size_t));
@@ -404,7 +404,7 @@ TEST_F(cacheable_test, store_value_int_vector)
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
     size_t expected_data_size = value.size() * sizeof(int);
-    size_t expected_total = expected_data_size + sizeof(size_t);
+    size_t expected_total     = expected_data_size + sizeof(size_t);
     EXPECT_EQ(position, expected_total);
 
     size_t stored_size = *reinterpret_cast<size_t*>(buffer.data());
@@ -420,7 +420,8 @@ TEST_F(cacheable_test, store_value_int_vector)
 TEST_F(cacheable_test, parse_value_int_vector)
 {
     std::vector<int> original_value = { -100, 0, 100, 200, -200 };
-    rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(), position);
+    rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
+                                                  position);
 
     uint8_t*         data_pos = buffer.data();
     std::vector<int> parsed_value;
@@ -438,7 +439,7 @@ TEST_F(cacheable_test, store_value_uint64_vector)
     rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
 
     size_t expected_data_size = value.size() * sizeof(uint64_t);
-    size_t expected_total = expected_data_size + sizeof(size_t);
+    size_t expected_total     = expected_data_size + sizeof(size_t);
     EXPECT_EQ(position, expected_total);
 
     size_t stored_size = *reinterpret_cast<size_t*>(buffer.data());
@@ -447,8 +448,10 @@ TEST_F(cacheable_test, store_value_uint64_vector)
 
 TEST_F(cacheable_test, parse_value_uint64_vector)
 {
-    std::vector<uint64_t> original_value = { 0xFFFFFFFFFFFFFFFF, 0x0, 0x123456789ABCDEF0 };
-    rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(), position);
+    std::vector<uint64_t> original_value = { 0xFFFFFFFFFFFFFFFF, 0x0,
+                                             0x123456789ABCDEF0 };
+    rocprofsys::trace_cache::utility::store_value(original_value, buffer.data(),
+                                                  position);
 
     uint8_t*              data_pos = buffer.data();
     std::vector<uint64_t> parsed_value;
@@ -475,8 +478,10 @@ TEST_F(cacheable_test, get_size_uint64_vector)
 TEST(type_traits_test, is_span_v)
 {
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<int>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<uint8_t>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<double>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<uint8_t>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_span_v<rocprofsys::span<double>>);
 
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_span_v<int>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_span_v<std::vector<int>>);
@@ -490,7 +495,8 @@ TEST(type_traits_test, is_vector_v)
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_vector_v<std::vector<double>>);
 
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<int>);
-    EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<rocprofsys::span<int>>);
+    EXPECT_FALSE(
+        rocprofsys::trace_cache::type_traits::is_vector_v<rocprofsys::span<int>>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_vector_v<std::string_view>);
 }
 
@@ -500,13 +506,19 @@ TEST(type_traits_test, is_supported_type_v)
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<uint64_t>);
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<double>);
     EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<float>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string_view>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<int>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<uint8_t>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<rocprofsys::span<int>>);
-    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<rocprofsys::span<uint8_t>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string_view>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<int>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_supported_type_v<std::vector<uint8_t>>);
+    EXPECT_TRUE(
+        rocprofsys::trace_cache::type_traits::is_supported_type_v<rocprofsys::span<int>>);
+    EXPECT_TRUE(rocprofsys::trace_cache::type_traits::is_supported_type_v<
+                rocprofsys::span<uint8_t>>);
 
-    struct custom_type {};
+    struct custom_type
+    {};
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<custom_type>);
     EXPECT_FALSE(rocprofsys::trace_cache::type_traits::is_supported_type_v<std::string>);
 }
