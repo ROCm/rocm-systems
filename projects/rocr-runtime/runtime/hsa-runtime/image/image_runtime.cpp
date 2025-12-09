@@ -421,7 +421,7 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
 
   if(image_layout->version!=1)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
-  
+
   uint32_t id;
   HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
 
