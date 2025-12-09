@@ -634,15 +634,15 @@ private:
 
   ProgramSymbolMap program_symbols_;
   AgentSymbolMap agent_symbols_;
-  std::vector<ExecutableObject*> objects;
-  Segment *program_allocation_segment;
-  std::vector<LoadedCodeObjectImpl*> loaded_code_objects;
+  std::vector<std::shared_ptr<ExecutableObject>> objects;
+  std::shared_ptr<Segment> program_allocation_segment;
+  std::vector<std::shared_ptr<LoadedCodeObjectImpl>> loaded_code_objects;
 };
 
 class AmdHsaCodeLoader : public Loader {
 private:
   Context* context;
-  std::vector<Executable*> executables;
+  std::vector<std::shared_ptr<Executable>> executables;
   amd::hsa::common::ReaderWriterLock rw_lock_;
 
 public:

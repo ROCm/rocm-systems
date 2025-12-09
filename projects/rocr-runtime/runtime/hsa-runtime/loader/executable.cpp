@@ -193,8 +193,8 @@ Executable* AmdHsaCodeLoader::CreateExecutable(
 {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
 
-  executables.push_back(new ExecutableImpl(profile, context, executables.size(), default_float_rounding_mode));
-  return executables.back();
+  executables.push_back(std::make_shared<ExecutableImpl>(profile, context, executables.size(), default_float_rounding_mode));
+  return executables.back().get();
 }
 
 Executable* AmdHsaCodeLoader::CreateExecutable(
@@ -205,8 +205,8 @@ Executable* AmdHsaCodeLoader::CreateExecutable(
 {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
 
-  executables.push_back(new ExecutableImpl(profile, std::move(isolated_context), executables.size(), default_float_rounding_mode));
-  return executables.back();
+  executables.push_back(std::make_shared<ExecutableImpl>(profile, std::move(isolated_context), executables.size(), default_float_rounding_mode));
+  return executables.back().get();
 }
 
 static void AddCodeObjectInfoIntoDebugMap(link_map* map) {
@@ -253,7 +253,7 @@ hsa_status_t AmdHsaCodeLoader::FreezeExecutable(Executable *executable, const ch
   atomic::Fence(std::memory_order_acq_rel);
   _loader_debug_state();
   atomic::Fence(std::memory_order_acq_rel);
-  for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
+  for (const auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     AddCodeObjectInfoIntoDebugMap(&(lco->r_debug_info));
   }
   atomic::Store(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT, std::memory_order_release);
@@ -269,14 +269,13 @@ void AmdHsaCodeLoader::DestroyExecutable(Executable *executable) {
   atomic::Fence(std::memory_order_acq_rel);
   _loader_debug_state();
   atomic::Fence(std::memory_order_acq_rel);
-  for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
+  for (const auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     RemoveCodeObjectInfoFromDebugMap(&(lco->r_debug_info));
   }
   atomic::Store(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT, std::memory_order_release);
   _loader_debug_state();
 
-  executables[((ExecutableImpl*)executable)->id()] = nullptr;
-  delete executable;
+  executables[static_cast<ExecutableImpl*>(executable)->id()].reset();
 }
 
 hsa_status_t AmdHsaCodeLoader::IterateExecutables(
@@ -288,9 +287,9 @@ hsa_status_t AmdHsaCodeLoader::IterateExecutables(
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
   assert(callback);
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if(exec != nullptr){
-      hsa_status_t status = callback(Executable::Handle(exec), data);
+      hsa_status_t status = callback(Executable::Handle(exec.get()), data);
       if (status != HSA_STATUS_SUCCESS) {
         return status;
       }
@@ -317,7 +316,7 @@ hsa_status_t AmdHsaCodeLoader::QuerySegmentDescriptors(
   this->EnableReadOnlyMode();
 
   size_t actual_num_segment_descriptors = 0;
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
       actual_num_segment_descriptors += executable->GetNumSegmentDescriptors();
     }
@@ -334,7 +333,7 @@ hsa_status_t AmdHsaCodeLoader::QuerySegmentDescriptors(
   }
 
   size_t i = 0;
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
       i += executable->QuerySegmentDescriptors(segment_descriptors, actual_num_segment_descriptors, i);
     }
@@ -351,7 +350,7 @@ uint64_t AmdHsaCodeLoader::FindHostAddress(uint64_t device_address)
     return 0;
   }
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if (exec != nullptr) {
       uint64_t host_address = exec->FindHostAddress(device_address);
       if (host_address != 0) {
@@ -370,9 +369,9 @@ void AmdHsaCodeLoader::PrintHelp(std::ostream& out)
 void AmdHsaCodeLoader::EnableReadOnlyMode()
 {
   rw_lock_.ReaderLock();
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
-      ((ExecutableImpl*)executable)->EnableReadOnlyMode();
+      ((ExecutableImpl*)executable.get())->EnableReadOnlyMode();
     }
   }
 }
@@ -380,9 +379,9 @@ void AmdHsaCodeLoader::EnableReadOnlyMode()
 void AmdHsaCodeLoader::DisableReadOnlyMode()
 {
   rw_lock_.ReaderUnlock();
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
-      ((ExecutableImpl*)executable)->DisableReadOnlyMode();
+      ((ExecutableImpl*)executable.get())->DisableReadOnlyMode();
     }
   }
 }
@@ -780,9 +779,8 @@ ExecutableImpl::ExecutableImpl(
 }
 
 ExecutableImpl::~ExecutableImpl() {
-  for (ExecutableObject* o : objects) {
+  for (const auto& o : objects) {
     o->Destroy();
-    delete o;
   }
   objects.clear();
 }
@@ -979,10 +977,10 @@ hsa_status_t ExecutableImpl::IterateLoadedCodeObjects(
   ReaderLockGuard<ReaderWriterLock> reader_lock(rw_lock_);
   assert(callback);
 
-  for (auto &loaded_code_object : loaded_code_objects) {
+  for (const auto& loaded_code_object : loaded_code_objects) {
     hsa_status_t status = callback(
         Executable::Handle(this),
-        LoadedCodeObject::Handle(loaded_code_object),
+        LoadedCodeObject::Handle(loaded_code_object.get()),
         data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
@@ -996,7 +994,7 @@ size_t ExecutableImpl::GetNumSegmentDescriptors()
 {
   // assuming we are in readonly mode.
   size_t actual_num_segment_descriptors = 0;
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     actual_num_segment_descriptors += obj->LoadedSegments().size();
   }
   return actual_num_segment_descriptors;
@@ -1012,7 +1010,7 @@ size_t ExecutableImpl::QuerySegmentDescriptors(
   assert(first_empty_segment_descriptor < total_num_segment_descriptors);
 
   size_t i = first_empty_segment_descriptor;
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     assert(i < total_num_segment_descriptors);
     for (auto &seg : obj->LoadedSegments()) {
       segment_descriptors[i].agent = seg->Agent();
@@ -1076,11 +1074,11 @@ hsa_executable_t AmdHsaCodeLoader::FindExecutable(uint64_t device_address)
     return execHandle;
   }
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if (exec != nullptr) {
       uint64_t host_address = exec->FindHostAddress(device_address);
       if (host_address != 0) {
-        return Executable::Handle(exec);
+        return Executable::Handle(exec.get());
       }
     }
   }
@@ -1090,7 +1088,7 @@ hsa_executable_t AmdHsaCodeLoader::FindExecutable(uint64_t device_address)
 uint64_t ExecutableImpl::FindHostAddress(uint64_t device_address)
 {
   ReaderLockGuard<ReaderWriterLock> reader_lock(rw_lock_);
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     assert(obj);
     for (auto &seg : obj->LoadedSegments()) {
       assert(seg);
@@ -1298,8 +1296,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   hsa_status_t status;
 
-  objects.push_back(new LoadedCodeObjectImpl(this, agent, code->ElfData(), code->ElfSize()));
-  loaded_code_objects.push_back((LoadedCodeObjectImpl*)objects.back());
+  objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
+  loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
   status = LoadSegments(agent, code.get(), majorVersion);
   if (status != HSA_STATUS_SUCCESS) return status;
@@ -1330,7 +1328,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   loaded_code_objects.back()->r_debug_info.l_prev = nullptr;
   loaded_code_objects.back()->r_debug_info.l_next = nullptr;
 
-  if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back()); }
+  if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back().get()); }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1368,18 +1366,18 @@ hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
       AMD_ISA_ALIGN_BYTES, true);
   if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  Segment *load_segment = new Segment(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
+  std::shared_ptr<Segment> load_segment = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
       ptr, size, vaddr, c->DataSegment(0)->offset());
   if (!load_segment) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   hsa_status_t status = HSA_STATUS_SUCCESS;
   for (size_t i = 0; i < c->DataSegmentCount(); ++i) {
-    status = LoadSegmentV2(c->DataSegment(i), load_segment);
+    status = LoadSegmentV2(c->DataSegment(i), load_segment.get());
     if (status != HSA_STATUS_SUCCESS) return status;
   }
 
   objects.push_back(load_segment);
-  loaded_code_objects.back()->LoadedSegments().push_back(load_segment);
+  loaded_code_objects.back()->LoadedSegments().push_back(load_segment.get());
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1390,7 +1388,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
   if (s->memSize() == 0)
     return HSA_STATUS_SUCCESS;
   amdgpu_hsa_elf_segment_t segment = (amdgpu_hsa_elf_segment_t)(s->type() - PT_LOOS);
-  Segment *new_seg = nullptr;
+  std::shared_ptr<Segment> new_seg;
   bool need_alloc = true;
   if (segment == AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM && nullptr != program_allocation_segment) {
     new_seg = program_allocation_segment;
@@ -1399,7 +1397,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
   if (need_alloc) {
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
-    new_seg = new Segment(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
+    new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
     new_seg->Copy(s->vaddr(), s->data(), s->imageSize());
     objects.push_back(new_seg);
 
@@ -1408,7 +1406,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     }
   }
   assert(new_seg);
-  loaded_code_objects.back()->LoadedSegments().push_back(new_seg);
+  loaded_code_objects.back()->LoadedSegments().push_back(new_seg.get());
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1962,7 +1960,7 @@ void ExecutableImpl::Print(std::ostream& out)
       << std::endl << std::endl;
   out << "Loaded Objects (total " << objects.size() << ")" << std::endl;
   size_t i = 0;
-  for (ExecutableObject* o : objects) {
+  for (const auto& o : objects) {
     out << "Loaded Object " << i++ << ": ";
     o->Print(out);
     out << std::endl;
