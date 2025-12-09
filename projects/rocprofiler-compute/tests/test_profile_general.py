@@ -1033,24 +1033,29 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
 
 @pytest.mark.roofline_2
 @pytest.mark.parametrize(
-    "options,expected_files",
+    "options,expected_files,test_id",
     [
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
             ["empirRoof_gpu-0_FP32.pdf"],
+            "FP32_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
             ["empirRoof_gpu-0_FP16.pdf"],
+            "FP16_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
             ["EXPECTED_FILE_PLACEHOLDER"],
+            "kernel_filter",
         ),
     ],
     ids=["FP32_datatype", "FP16_datatype", "kernel_filter"],
 )
-def test_roof_plot_modes(binary_handler_profile_rocprof_compute, options, expected_files):
+def test_roof_plot_modes(
+    binary_handler_profile_rocprof_compute, options, expected_files, test_id
+):
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
         return
@@ -1067,7 +1072,7 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute, options, expect
         for f in expected_files
     ]
 
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id=test_id)
 
     returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=False, roof=True
