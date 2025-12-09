@@ -22,13 +22,13 @@ THE SOFTWARE.
 
 namespace hipStreamDestroyTests {
 
-TEST_CASE("Unit_hipStreamDestroy_Default") {
+TEST_CASE(Unit_hipStreamDestroy_Default) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipStreamDestroy_Negative_NullStream") {
+TEST_CASE(Unit_hipStreamDestroy_Negative_NullStream) {
   HIP_CHECK_ERROR(hipStreamDestroy(nullptr), hipErrorInvalidResourceHandle);
 }
 
@@ -47,7 +47,7 @@ __global__ void setToOne(int* x, size_t size) {
   }
 }
 
-TEST_CASE("Unit_hipStreamDestroy_WithFinishedWork") {
+TEST_CASE(Unit_hipStreamDestroy_WithFinishedWork) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -65,7 +65,7 @@ TEST_CASE("Unit_hipStreamDestroy_WithFinishedWork") {
 // hipStreamDestroy should return immediately then clean up the resources when the stream is empty
 // of work
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
-TEST_CASE("Unit_hipStreamDestroy_WithPendingWork") {
+TEST_CASE(Unit_hipStreamDestroy_WithPendingWork) {
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr int numDataPoints = 10;
