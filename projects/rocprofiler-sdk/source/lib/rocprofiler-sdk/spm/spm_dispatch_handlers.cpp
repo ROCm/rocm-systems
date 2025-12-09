@@ -35,11 +35,83 @@ namespace rocprofiler
 {
 namespace SPM
 {
+
+struct SPMTracker
+{
+    std::atomic<int32_t> active_dispatches{0};
+    std::atomic<bool>    spm_started{false};
+    bool                 dispatch_mode_disabled{false};
+    hsa::SPMPacket*     global_packet{nullptr}; // Store packet for final cleanup
+
+    static SPMTracker& get_instance()
+    {
+        static auto* instance = new SPMTracker();
+        return *instance;
+    }
+
+    SPMTracker()
+    {
+        const char* env_val = std::getenv("ROCP_SDK_SPM_KFD_START_STOP_DISABLED");
+        dispatch_mode_disabled = (env_val && std::string(env_val) == "1");
+        std::cerr << "SPMTracker constructor: env_val=" << (env_val ? env_val : "NULL") 
+                  << ", dispatch_mode_disabled=" << (dispatch_mode_disabled ? "true" : "false") 
+                  << ", this=" << this << std::endl;
+        
+        // Register cleanup function for global mode
+        if(dispatch_mode_disabled)
+        {
+            std::atexit(cleanup_global_kfd);
+        }
+    }
+
+    static void cleanup_global_kfd()
+    {
+        auto& tracker = get_instance();
+        if(tracker.dispatch_mode_disabled && tracker.spm_started.load() && tracker.global_packet)
+        {
+            std::cerr << "GLOBAL MODE: Final cleanup - Stopping KFD" << std::endl;
+            tracker.global_packet->kfd_stop();
+            tracker.spm_started = false;
+        }
+    }
+};
+
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     auto* packet = CHECK_NOTNULL(static_cast<hsa::SPMPacket*>(data));
-    packet->kfd_start();
+    auto& tracker = SPMTracker::get_instance();
+
+    // Increment counter and start SPM only on first dispatch
+    int32_t prev_count = tracker.active_dispatches.fetch_add(1);
+
+    // Debug: Print current state
+    // std::cerr << "AsyncSignalHandler: dispatch_count=" << prev_count 
+    //           << ", active_dispatches_after_increment=" << tracker.active_dispatches.load()
+    //           << ", dispatch_mode_disabled=" << (tracker.dispatch_mode_disabled ? "true" : "false")
+    //           << ", spm_started=" << tracker.spm_started.load() 
+    //           << ", tracker_addr=" << &tracker << std::endl;
+
+    if(tracker.dispatch_mode_disabled)
+    {
+        // Global mode: start only on first dispatch ever (never reset spm_started)
+        bool expected = false;
+        if(tracker.spm_started.compare_exchange_strong(expected, true))
+        {
+            std::cerr << "GLOBAL MODE: Starting KFD (first time only)" << std::endl;
+            tracker.global_packet = packet; // Store packet for final cleanup
+            packet->kfd_start();
+        }
+        else
+        {
+            // std::cerr << "GLOBAL MODE: Skipping KFD start (already started)" << std::endl;
+        }
+    }
+    else
+    {
+        // std::cerr << "PER-DISPATCH MODE: Starting KFD" << std::endl;
+        packet->kfd_start();
+    }
 
     CHECK_NOTNULL(hsa::get_queue_controller())
         ->get_core_table()
@@ -188,7 +260,26 @@ post_kernel_call(const context::context*                           ctx,
                 CHECK_NOTNULL(hsa::get_queue_controller())
                     ->get_core_table()
                     .hsa_signal_destroy_fn(pkt->before_krn_barrier_pkt.at(1).dep_signal[0]);
-                pkt->kfd_stop();
+                
+                auto& tracker = SPMTracker::get_instance();
+                int32_t remaining = tracker.active_dispatches.fetch_sub(1) - 1;
+
+                // std::cerr << "post_kernel_call: remaining=" << remaining
+                //           << ", dispatch_mode_disabled=" << (tracker.dispatch_mode_disabled ? "true" : "false")
+                //           << ", spm_started=" << tracker.spm_started.load()
+                //           << ", tracker_addr=" << &tracker << std::endl;
+
+                if(tracker.dispatch_mode_disabled)
+                {
+                    // Global mode: NEVER stop KFD - let it run for the entire session
+                    // std::cerr << "GLOBAL MODE: Keeping KFD running (not stopping)" << std::endl;
+                }
+                else
+                {
+                    // Per-dispatch mode: stop for every dispatch
+                    // std::cerr << "PER-DISPATCH MODE: Stopping KFD" << std::endl;
+                    pkt->kfd_stop();
+                }
                 auto rel_pkt = std::move(aql_pkt);
                 return;
             }
