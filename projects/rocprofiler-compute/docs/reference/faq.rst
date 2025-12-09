@@ -36,7 +36,7 @@ locale settings.
 Why does VALU utilization exceed the theoretical peak?
 ======================================================
 
-In specific circumstances, GPU can co-issue two VALU instructions at the same clock. This may result in an observed VALU Utilization and FP64 VALU FLOP values above the theoretical peak. This is expected hardware behavior and not a measurement error.
+In specific circumstances, the GPU can co-issue two VALU instructions in the same clock cycle. This may result in an observed VALU Utilization and FP64 VALU FLOP values above the theoretical peak. This is expected hardware behavior and not a measurement error.
 
 This dual-issue capability can be further investigated via:
 
