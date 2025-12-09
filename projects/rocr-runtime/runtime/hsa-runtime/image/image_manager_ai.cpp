@@ -196,7 +196,7 @@ hsa_status_t ImageManagerAi::PopulateImageSrd(Image& image, const metadata_amd_t
       ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.TYPE =
           ImageLut().MapGeometry(image.desc.geometry);
     }
-    
+
     // Imported metadata holds the offset to metadata, add the image base address.
     uintptr_t meta = uintptr_t(((SQ_IMG_RSRC_WORD5*)(&image.srd[5]))->bits.META_DATA_ADDRESS_HI) << 40;
     meta |= uintptr_t(((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.META_DATA_ADDRESS) << 8;
@@ -583,7 +583,7 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
   prefSettingsInput.resourceType    = in.resourceType;
 
   // Disallow all swizzles but linear.
-  if (tileMode == Image::TileMode::LINEAR) 
+  if (tileMode == Image::TileMode::LINEAR)
   {
       prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
       prefSettingsInput.forbiddenBlock.macroThick4KB = 1;

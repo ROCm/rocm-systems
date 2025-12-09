@@ -318,7 +318,7 @@ __global__ void __float22half2_rn_kernel(__half2* const ys, const size_t num_xs,
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     ys[i] = __float22half2_rn(make_float2(xs[i], -xs[i]));
   }
 }

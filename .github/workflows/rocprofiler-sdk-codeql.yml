@@ -26,6 +26,7 @@ env:
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
+  ENABLE_HIP_CLR_BUILD: "true"
 
 jobs:
   analyze:
@@ -66,17 +67,17 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo apt update
-        sudo apt install -y software-properties-common
+        sudo apt update -y
+        sudo apt upgrade -y
+        sudo apt install -y software-properties-common wget rocm-llvm-dev
         sudo apt-add-repository ppa:git-core/ppa
-        sudo apt update
-        sudo apt install wget
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        tee /etc/apt/sources.list.d/rocm.list << EOF
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0.2 jammy main
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.0.2/ubuntu jammy main
+        sudo tee /etc/apt/sources.list.d/rocm.list << EOF
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 jammy main
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.1/ubuntu jammy main
         EOF
-        sudo apt update
+        sudo apt update -y
+        sudo apt upgrade -y
         sudo apt install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev libva-amdgpu-dev rocdecode-dev rocjpeg-dev
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
@@ -86,6 +87,8 @@ jobs:
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk
+          projects/clr
+          projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml
           .github/workflows/rocprofiler-sdk-formatting.yml
         submodules: 'true'
@@ -97,6 +100,34 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended
+
+    - name: Build and Install HIP
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
+      shell: bash
+      working-directory: projects
+      run: |
+        export HIP_DIR=$PWD/hip
+        export CLR_DIR=$PWD/clr
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        echo "Install HIP..."
+        cd $CLR_DIR
+        pip install CppHeaderParser
+        cmake \
+          -DHIP_COMMON_DIR=$HIP_DIR \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DHIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+          -DHIP_LLVM_ROOT=${{ env.ROCM_PATH }}/lib/llvm \
+          -DHIP_CATCH_TEST=0 \
+          -DCLR_BUILD_HIP=ON \
+          -DCLR_BUILD_OCL=ON \
+          -S $CLR_DIR \
+          -B build
+        cmake --build build --target all --parallel 8
+        cmake --build build --target install
+        echo "✅ HIP Installation complete!"
 
     - name: Configure and Build
       timeout-minutes: 30

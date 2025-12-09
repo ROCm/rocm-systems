@@ -378,7 +378,14 @@ using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 std::vector<hsa::code_object_unload>
 shutdown(hsa_executable_t executable);
 
-bool is_shutdown = false;
+std::atomic<bool> is_shutdown{false};
+
+auto&
+get_destroy_mutex()
+{
+    static auto _v = std::mutex{};
+    return _v;
+}
 
 auto*
 get_executables()
@@ -733,7 +740,8 @@ get_unloaded_code_objects(hsa_executable_t executable)
 {
     auto _unloaded = std::vector<hsa::code_object_unload>{};
 
-    if(!is_shutdown && get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects)
+    if(!is_shutdown.load(std::memory_order_acquire) &&
+       get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects)
         get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
             executable, code_object_unload_callback, &_unloaded);
 
@@ -837,7 +845,7 @@ executable_freeze_internal(hsa_executable_t executable)
 
     if(!ctxs.empty())
     {
-        code_obj_vec->rlock([](const code_object_array_t& data) {
+        code_obj_vec->wlock([](code_object_array_t& data) {
             auto tidx = common::get_tid();
             // set the contexts for each code object
             for(const auto& ditr : data)
@@ -864,8 +872,10 @@ executable_freeze_internal(hsa_executable_t executable)
                             // invoke callback
                             auto& cb_data =
                                 citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                            auto& user_data = ditr->user_data[citr];
-                            cb_data.callback(record, &user_data, cb_data.data);
+                            ditr->user_data.wlock([&](auto& user_data_map) {
+                                auto& user_data = user_data_map[citr];
+                                cb_data.callback(record, &user_data, cb_data.data);
+                            });
                         }
                     }
 
@@ -889,52 +899,57 @@ executable_freeze_internal(hsa_executable_t executable)
                                 // invoke callback
                                 auto& cb_data =
                                     citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                                auto& user_data = sitr->user_data[citr];
-                                cb_data.callback(record, &user_data, cb_data.data);
+                                sitr->user_data.wlock([&](auto& user_data_map) {
+                                    auto& user_data = user_data_map[citr];
+                                    cb_data.callback(record, &user_data, cb_data.data);
 
-                                std::string device_name =
-                                    CHECK_NOTNULL(get_hip_register_data())
-                                        ->rlock([sym_data](
+                                    std::string device_name =
+                                        CHECK_NOTNULL(get_hip_register_data())
+                                            ->rlock(
+                                                [sym_data](
                                                     const hip::hip_register_data& register_data) {
-                                            const auto& sym_map =
-                                                register_data.kernel_symbol_device_map;
-                                            const auto it = sym_map.find(*CHECK_NOTNULL(
-                                                common::get_string_entry(sym_data.kernel_name)));
-                                            if(it != sym_map.end()) return it->second;
-                                            return std::string();
-                                        });
-                                // Does not have a host function, skip
-                                if(device_name.empty()) continue;
-                                auto host_data =
-                                    CHECK_NOTNULL(get_hip_register_data())
-                                        ->rlock([device_name](
-                                                    const hip::hip_register_data& register_data) {
-                                            // Add check for out of range here
-                                            const auto it =
-                                                register_data.host_function_map.find(device_name);
-                                            if(it == register_data.host_function_map.end())
-                                            {
-                                                return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
-                                            }
-                                            return it->second;
-                                        });
-                                // when kernel_symbol_device_map kernels are not present in
-                                // host_function_map, skip.
-                                if(host_data.device_function == nullptr) continue;
-                                host_data.code_object_id   = sym_data.code_object_id;
-                                host_data.kernel_id        = sym_data.kernel_id;
-                                host_data.host_function_id = ++get_host_function_id();
-                                auto hip_record            = rocprofiler_callback_tracing_record_t{
-                                    .context_id     = rocprofiler_context_id_t{citr->context_idx},
-                                    .thread_id      = tidx,
-                                    .correlation_id = rocprofiler_correlation_id_t{},
-                                    .kind           = CODE_OBJECT_KIND,
-                                    .operation      = CODE_OBJECT_HOST_SYMBOL,
-                                    .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                    .payload        = static_cast<void*>(&host_data)};
+                                                    const auto& sym_map =
+                                                        register_data.kernel_symbol_device_map;
+                                                    const auto it = sym_map.find(
+                                                        *CHECK_NOTNULL(common::get_string_entry(
+                                                            sym_data.kernel_name)));
+                                                    if(it != sym_map.end()) return it->second;
+                                                    return std::string();
+                                                });
+                                    // Does not have a host function, skip
+                                    if(device_name.empty()) return;
+                                    auto host_data =
+                                        CHECK_NOTNULL(get_hip_register_data())
+                                            ->rlock([device_name](const hip::hip_register_data&
+                                                                      register_data) {
+                                                // Add check for out of range here
+                                                const auto it =
+                                                    register_data.host_function_map.find(
+                                                        device_name);
+                                                if(it == register_data.host_function_map.end())
+                                                {
+                                                    return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
+                                                }
+                                                return it->second;
+                                            });
+                                    // when kernel_symbol_device_map kernels are not present in
+                                    // host_function_map, skip.
+                                    if(host_data.device_function == nullptr) return;
+                                    host_data.code_object_id   = sym_data.code_object_id;
+                                    host_data.kernel_id        = sym_data.kernel_id;
+                                    host_data.host_function_id = ++get_host_function_id();
+                                    auto hip_record = rocprofiler_callback_tracing_record_t{
+                                        .context_id = rocprofiler_context_id_t{citr->context_idx},
+                                        .thread_id  = tidx,
+                                        .correlation_id = rocprofiler_correlation_id_t{},
+                                        .kind           = CODE_OBJECT_KIND,
+                                        .operation      = CODE_OBJECT_HOST_SYMBOL,
+                                        .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                        .payload        = static_cast<void*>(&host_data)};
 
-                                // invoke callback
-                                cb_data.callback(hip_record, &user_data, cb_data.data);
+                                    // invoke callback
+                                    cb_data.callback(hip_record, &user_data, cb_data.data);
+                                });
                             }
                         }
                     }
@@ -964,7 +979,13 @@ executable_freeze(hsa_executable_t executable, const char* options)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
-    if(is_shutdown) return HSA_STATUS_SUCCESS;
+    // Serialize all executable_destroy calls to prevent:
+    // 1. Concurrent access to code objects in shutdown()
+    // 2. Use-after-free when multiple threads destroy same executable
+    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
+    if(is_shutdown.load(std::memory_order_acquire)) return HSA_STATUS_SUCCESS;
 
     auto _unloaded = shutdown(executable);
 
@@ -1098,9 +1119,11 @@ shutdown(hsa_executable_t executable)
                         .payload        = static_cast<void*>(&itr.object->rocp_data)};
 
                     // invoke callback
-                    auto& cb_data   = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                    auto& user_data = itr.object->user_data.at(citr);
-                    cb_data.callback(record, &user_data, cb_data.data);
+                    auto& cb_data = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                    itr.object->user_data.wlock([&](auto& user_data_map) {
+                        auto& user_data = user_data_map.at(citr);
+                        cb_data.callback(record, &user_data, cb_data.data);
+                    });
                 }
             }
 
@@ -1123,9 +1146,11 @@ shutdown(hsa_executable_t executable)
                             .payload        = static_cast<void*>(&sitr->rocp_data)};
 
                         // invoke callback
-                        auto& cb_data   = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                        auto& user_data = sitr->user_data.at(citr);
-                        cb_data.callback(record, &user_data, cb_data.data);
+                        auto& cb_data = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                        sitr->user_data.wlock([&](auto& user_data_map) {
+                            auto& user_data = user_data_map.at(citr);
+                            cb_data.callback(record, &user_data, cb_data.data);
+                        });
                     }
                 }
             }
@@ -1226,7 +1251,8 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
-    if(is_shutdown || !get_executables() || !get_code_objects()) return;
+    if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
+        return;
 
     CHECK_NOTNULL(get_executables())->rlock([](const executable_array_t& edata) {
         auto tmp = edata;
@@ -1237,13 +1263,14 @@ finalize()
 
     CHECK_NOTNULL(get_code_objects())->wlock([](code_object_array_t& data) { data.clear(); });
 
-    is_shutdown = true;
+    is_shutdown.store(true, std::memory_order_release);
 }
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func)
 {
-    if(is_shutdown || !get_executables() || !get_code_objects()) return;
+    if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
+        return;
     CHECK_NOTNULL(get_code_objects())
         ->rlock(
             [](const code_object_array_t& data, code_object_iterator_t&& func_v) {

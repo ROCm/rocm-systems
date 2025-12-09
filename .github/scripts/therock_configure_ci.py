@@ -30,7 +30,7 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-        
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -111,7 +111,7 @@ def retrieve_projects(args):
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made. 
+    # Currently as we have no tests, we just build all packages available if an applicable change is made.
     # As we start to get an idea of test times, we can divide test jobs.
     if projects:
         for project in ["all"]:

@@ -55,12 +55,55 @@ Result HashMap<Key, Value, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>
     PAL_ASSERT(pExisted != nullptr);
     PAL_ASSERT(ppValue != nullptr);
 
-    Entry* pEntry = nullptr;
-    Result result = Base::FindAllocateEntry(key, pExisted, &pEntry);
-    if (result == Result::Success)
+    Result result = Result::ErrorOutOfMemory;
+
+    // Get the bucket base address....
+    Entry* pGroup = this->InitAndFindBucket(key);
+
+    *pExisted = false;
+    *ppValue  = nullptr;
+
+    Entry* pMatchingEntry = nullptr;
+
+    while (pGroup != nullptr)
     {
-        *ppValue = &pEntry->value;
+        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
+
+        // Search this entry group.
+        uint32 i = 0;
+        for (; i < numEntries; i++)
+        {
+            if (this->m_equalFunc(pGroup[i].key, key))
+            {
+                // We've found the entry.
+                pMatchingEntry = &(pGroup[i]);
+                *pExisted = true;
+                break;
+            }
+        }
+
+        // We've reached the end of the allocated buckets and the entry was not found.
+        // Allocate this entry for the key.
+        if ((pMatchingEntry == nullptr) && (i < Base::EntriesInGroup))
+        {
+            pGroup[i].key = key;
+            pMatchingEntry = &(pGroup[i]);
+            this->m_numEntries++;
+            this->SetGroupFooterNumEntries(pGroup, numEntries + 1);
+        }
+
+        if (pMatchingEntry != nullptr)
+        {
+            *ppValue = &(pMatchingEntry->value);
+            result = Result::Success;
+            break;
+        }
+
+        // Chain to the next entry group.
+        pGroup = this->AllocateNextGroup(pGroup);
     }
+
+    PAL_ASSERT(result == Result::Success);
 
     return result;
 }
@@ -78,8 +121,36 @@ Value* HashMap<Key, Value, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>
     const Key& key
     ) const
 {
-    Entry* pEntry = Base::FindEntry(key);
-    return (pEntry != nullptr) ? &pEntry->value : nullptr;
+    // Get the bucket base address.
+    Entry* pGroup = this->FindBucket(key);
+    Entry* pMatchingEntry = nullptr;
+
+    while (pGroup != nullptr)
+    {
+        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
+
+        // Search this entry group
+        uint32 i = 0;
+        for (; i < numEntries; i++)
+        {
+            if (this->m_equalFunc(pGroup[i].key, key))
+            {
+                // We've found the entry.
+                pMatchingEntry = &(pGroup[i]);
+                break;
+            }
+        }
+
+        if ((pMatchingEntry != nullptr) || (i < Base::EntriesInGroup))
+        {
+            break;
+        }
+
+        // Chain to the next entry group.
+        pGroup = this->GetNextGroup(pGroup);
+    }
+
+    return (pMatchingEntry != nullptr) ? &(pMatchingEntry->value) : nullptr;
 }
 
 // =====================================================================================================================
@@ -96,19 +167,84 @@ Result HashMap<Key, Value, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>
     const Value& value)
 {
     bool   existed = true;
-    Entry* pEntry  = nullptr;
+    Value* pValue  = nullptr;
 
-    Result result = Base::FindAllocateEntry(key, &existed, &pEntry);
+    Result result = FindAllocate(key, &existed, &pValue);
 
     // Add the new value if it did not exist already. If FindAllocate returns Success, pValue != nullptr.
     if ((result == Result::Success) && (existed == false))
     {
-        pEntry->value = value;
+        *pValue = value;
     }
 
     PAL_ASSERT(result == Result::Success);
 
     return result;
+}
+
+// =====================================================================================================================
+// Removes an entry with the specified key.
+template<typename Key,
+         typename Value,
+         typename Allocator,
+         template<typename> class HashFunc,
+         template<typename> class EqualFunc,
+         typename AllocFunc,
+         size_t GroupSize>
+bool HashMap<Key, Value, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>::Erase(
+    const Key& key)
+{
+    // Get the bucket base address.
+    Entry* pGroup = this->FindBucket(key);
+
+    Entry* pFoundEntry = nullptr;
+    Entry* pLastEntry = nullptr;
+    Entry* pLastEntryGroup = nullptr;
+
+    // Find the entry to delete
+    while (pGroup != nullptr)
+    {
+        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
+
+        // Search each group
+        uint32 i = 0;
+        for (; i < numEntries; i++)
+        {
+            if (this->m_equalFunc(pGroup[i].key, key) == true)
+            {
+                // We shouldn't find the same key twice.
+                PAL_ASSERT(pFoundEntry == nullptr);
+
+                pFoundEntry = &(pGroup[i]);
+            }
+
+            // keep track of last entry of all groups in bucket
+            pLastEntry = &(pGroup[i]);
+            pLastEntryGroup = pGroup;
+        }
+
+        // Chain to the next entry group.
+        pGroup = this->GetNextGroup(pGroup);
+    }
+
+    // Copy the last entry's data into the entry that we are removing and invalidate the last entry as it now appears
+    // earlier in the list.  This also handles the case where the entry to be removed is the last entry.
+    if (pFoundEntry != nullptr)
+    {
+        PAL_ASSERT(pLastEntry != nullptr);
+
+        pFoundEntry->key   = pLastEntry->key;
+        pFoundEntry->value = pLastEntry->value;
+
+        memset(pLastEntry, 0, sizeof(Entry));
+
+        PAL_ASSERT(this->m_numEntries > 0);
+        this->m_numEntries--;
+        const uint32 numEntries = this->GetGroupFooterNumEntries(pLastEntryGroup);
+        this->SetGroupFooterNumEntries(pLastEntryGroup, numEntries - 1);
+    }
+
+    return (pFoundEntry != nullptr);
 }
 
 } // Util

@@ -682,10 +682,10 @@ class Runtime {
   };
 
   struct AsyncEventsInfo {
+    bool monitor_exceptions;
     AsyncEventsControl control;
     AsyncEvents events;
     ConcurrentAsyncEvents new_events;
-    bool monitor_exceptions;
 
     AsyncEventsInfo(bool exceptions);
     ~AsyncEventsInfo();
@@ -894,7 +894,7 @@ class Runtime {
 
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
-  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::map<uint64_t, size_t> ipc_sock_server_conns_;
   KernelMutex ipc_sock_server_lock_;
 
  private:

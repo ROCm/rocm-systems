@@ -16,6 +16,11 @@ SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
 ARG ROCM_VERSION="0.0"
+ARG ROCM_MAJOR=0
+ARG ROCM_MINOR=0
+ARG ROCM_PATCH=0
+ARG ROCM_VERSION_URL=0.0
+ARG ROCM_VERSN=0
 ENV PATH=${HOME}/.local/bin:${PATH}
 
 RUN apt-get update && \
@@ -33,19 +38,11 @@ RUN apt-get update && \
         python3 -m pip install --break-system-packages 'cmake==3.21' perfetto; \
     fi
 
-RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}') && \
-    ROCM_MINOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $2}') && \
-    if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
+RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
         OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
         OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
-        ROCM_PATCH=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $3}') && \
-        if [ -z "${ROCM_PATCH}" ] || [ "${ROCM_PATCH}" = "0" ]; then \
-            ROCM_PATCH=0 && \
-            ROCM_VERSION=$(echo "${ROCM_VERSION}" | sed 's/\.0$//') \
-        ; fi && \
-        ROCM_VERSN=$(( ("${ROCM_MAJOR}"*10000)+("${ROCM_MINOR}"*100) + ("${ROCM_PATCH}"))) && \
         AMDGPU_DEB="amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb" && \
-        wget https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${OS_CODENAME}/${AMDGPU_DEB} && \
+        wget https://repo.radeon.com/amdgpu-install/${ROCM_VERSION_URL}/ubuntu/${OS_CODENAME}/${AMDGPU_DEB} && \
         apt-get install -y ./${AMDGPU_DEB} && \
         apt-get update && \
         apt-get install -y rocm-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \

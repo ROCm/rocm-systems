@@ -90,6 +90,8 @@ target_sources(spm-builder-test PRIVATE ${AQLPROFILE_SPM_BUILDER_SOURCES})
 target_include_directories(spm-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     spm-builder-test
+    PUBLIC
+            aqlprofile::headers
     PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest

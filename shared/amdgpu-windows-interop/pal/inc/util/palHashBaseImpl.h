@@ -37,9 +37,9 @@ namespace Util
 {
 
 // =====================================================================================================================
-// Hash function for pointers.  Simply shift the key to the right and use the resulting bits as the hash.
+// Default hash function implementation.  Simply shift the key to the right and use the resulting bits as the hash.
 template<typename Key>
-uint32 PointerHashFunc<Key>::operator()(
+uint32 DefaultHashFunc<Key>::operator()(
     const void* pVoidKey,
     uint32      keyLen
     ) const
@@ -461,84 +461,6 @@ void HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>:
 }
 
 // =====================================================================================================================
-// Removes an entry with the specified key.
-template<typename Key,
-         typename Entry,
-         typename Allocator,
-         typename HashFunc,
-         typename EqualFunc,
-         typename AllocFunc,
-         size_t GroupSize>
-bool HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>::Erase(
-    const Key& key)
-{
-    // Get the bucket base address.
-    Entry* pGroup = this->FindBucket(key);
-
-    Entry* pFoundEntry = nullptr;
-    Entry* pLastEntry = nullptr;
-    Entry* pLastEntryGroup = nullptr;
-
-    // Find the entry to delete
-    while (pGroup != nullptr)
-    {
-        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
-
-        // Search each group
-        uint32 i = 0;
-        for (; i < numEntries; i++)
-        {
-            if (this->m_equalFunc(pGroup[i].key, key) == true)
-            {
-                // We shouldn't find the same key twice.
-                PAL_ASSERT(pFoundEntry == nullptr);
-
-                pFoundEntry = &(pGroup[i]);
-            }
-
-            // keep track of last entry of all groups in bucket
-            pLastEntry = &(pGroup[i]);
-            pLastEntryGroup = pGroup;
-        }
-
-        // Chain to the next entry group.
-        pGroup = this->GetNextGroup(pGroup);
-    }
-
-    // Copy the last entry's data into the entry that we are removing and invalidate the last entry as it now appears
-    // earlier in the list.  This also handles the case where the entry to be removed is the last entry.
-    if (pFoundEntry != nullptr)
-    {
-        PAL_ASSERT(pLastEntry != nullptr);
-
-        *pFoundEntry = std::move(*pLastEntry);
-        memset(pLastEntry, 0, sizeof(Entry));
-
-        PAL_ASSERT(this->m_numEntries > 0);
-        this->m_numEntries--;
-        const uint32 numEntries = this->GetGroupFooterNumEntries(pLastEntryGroup);
-        this->SetGroupFooterNumEntries(pLastEntryGroup, numEntries - 1);
-    }
-
-    return (pFoundEntry != nullptr);
-}
-
-// =====================================================================================================================
-// Check if the given hashtable contains the given key.
-template<typename Key,
-         typename Entry,
-         typename Allocator,
-         typename HashFunc,
-         typename EqualFunc,
-         typename AllocFunc,
-         size_t GroupSize>
-bool HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>::Contains(
-    const Key& key) const
-{
-    return FindEntry(key) != nullptr;
-}
-
-// =====================================================================================================================
 // Ensures that the hash table has been allocated, then returns pointer to start group of the bucket
 // corresponding to the specified key. A return of nullptr means out of memory.
 template<
@@ -576,122 +498,6 @@ Entry* HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize
 {
     const uint32 bucket = m_hashFunc(&key, sizeof(key)) & (m_numBuckets - 1);
     return (m_pMemory != nullptr) ? static_cast<Entry*>(VoidPtrInc(m_pMemory, bucket * GroupSize)) : nullptr;
-}
-
-// =====================================================================================================================
-// Gets a pointer to the entry that matches the key.  Returns null if no entry is present matching the specified key.
-template<typename Key,
-         typename Entry,
-         typename Allocator,
-         typename HashFunc,
-         typename EqualFunc,
-         typename AllocFunc,
-         size_t GroupSize>
-Entry* HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>::FindEntry(
-    const Key& key
-    ) const
-{
-    // Get the bucket base address.
-    Entry* pGroup = this->FindBucket(key);
-    Entry* pMatchingEntry = nullptr;
-
-    while (pGroup != nullptr)
-    {
-        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
-
-        // Search this entry group
-        uint32 i = 0;
-        for (; i < numEntries; i++)
-        {
-            if (this->m_equalFunc(pGroup[i].key, key))
-            {
-                // We've found the entry.
-                pMatchingEntry = &(pGroup[i]);
-                break;
-            }
-        }
-
-        if ((pMatchingEntry != nullptr) || (i < EntriesInGroup))
-        {
-            break;
-        }
-
-        // Chain to the next entry group.
-        pGroup = this->GetNextGroup(pGroup);
-    }
-
-    return pMatchingEntry;
-}
-
-// =====================================================================================================================
-// Gets a pointer to the entry that matches the key.  If the key is not present, a pointer to empty space for the value
-// is returned.
-template<typename Key,
-         typename Entry,
-         typename Allocator,
-         typename HashFunc,
-         typename EqualFunc,
-         typename AllocFunc,
-         size_t GroupSize>
-Result HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize>::FindAllocateEntry(
-    const Key& key,       // Key to search for.
-    bool*      pExisted,  // [out] True if a matching key was found.
-    Entry**    ppEntry)   // [out] Pointer to the value entry of the hash map's entry for the specified key.
-{
-    PAL_ASSERT(pExisted != nullptr);
-    PAL_ASSERT(ppEntry != nullptr);
-
-    Result result = Result::ErrorOutOfMemory;
-
-    // Get the bucket base address....
-    Entry* pGroup = this->InitAndFindBucket(key);
-
-    *pExisted = false;
-    *ppEntry  = nullptr;
-
-    Entry* pMatchingEntry = nullptr;
-
-    while (pGroup != nullptr)
-    {
-        const uint32 numEntries = this->GetGroupFooterNumEntries(pGroup);
-
-        // Search this entry group.
-        uint32 i = 0;
-        for (; i < numEntries; i++)
-        {
-            if (this->m_equalFunc(pGroup[i].key, key))
-            {
-                // We've found the entry.
-                pMatchingEntry = &(pGroup[i]);
-                *pExisted = true;
-                break;
-            }
-        }
-
-        // We've reached the end of the allocated buckets and the entry was not found.
-        // Allocate this entry for the key.
-        if ((pMatchingEntry == nullptr) && (i < EntriesInGroup))
-        {
-            pGroup[i].key = key;
-            pMatchingEntry = &(pGroup[i]);
-            this->m_numEntries++;
-            this->SetGroupFooterNumEntries(pGroup, numEntries + 1);
-        }
-
-        if (pMatchingEntry != nullptr)
-        {
-            *ppEntry= pMatchingEntry;
-            result = Result::Success;
-            break;
-        }
-
-        // Chain to the next entry group.
-        pGroup = this->AllocateNextGroup(pGroup);
-    }
-
-    PAL_ASSERT(result == Result::Success);
-
-    return result;
 }
 
 // =====================================================================================================================
