@@ -319,6 +319,5 @@ from .amdsmi_exception import AmdSmiLibraryException
 from .amdsmi_exception import AmdSmiRetryException
 from .amdsmi_exception import AmdSmiParameterException
 from .amdsmi_exception import AmdSmiKeyException
-from .amdsmi_exception import AmdSmiBdfFormatException
 from .amdsmi_exception import AmdSmiTimeoutException
 from .amdsmi_exception import AmdSmiException

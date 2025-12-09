@@ -82,13 +82,11 @@ class AMDSMICommands():
                     nh = amdsmi_interface.amdsmi_get_node_handle(dev)
                     if nh is not None:
                         self.node_handle = nh
-                        continue
+                        # Only need one handle, break after first success
+                        break
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
-                                      amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL):
-                        logging.debug("Unable to get node handle: %s", e.get_error_info())
-                    else:
-                        raise e
+                    logging.debug("Unable to get node handle: %s", e.get_error_info())
+                    # Node handle functionality is optional, so don't raise an error
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -1949,7 +1947,7 @@ class AMDSMICommands():
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         voltage_unit)
-                        elif key == "socket_power":
+                        elif 'power' in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         power_unit)
@@ -7494,7 +7492,13 @@ class AMDSMICommands():
                     current_power = gpu_metrics['current_socket_power']
                 else:
                     current_power = gpu_metrics['average_socket_power']
-                temperature = gpu_metrics['temperature_hotspot']
+                # If the hotspot temperature is not available use the edge temp (applicable to APUs)
+                if gpu_metrics['temperature_hotspot'] != "N/A":
+                    temperature = gpu_metrics['temperature_hotspot']
+                elif gpu_metrics['temperature_edge'] != "N/A":
+                    temperature = gpu_metrics['temperature_edge']
+                else:
+                    temperature = "N/A"
             else:
                 mem_util = "N/A"
                 gfx_util = "N/A"

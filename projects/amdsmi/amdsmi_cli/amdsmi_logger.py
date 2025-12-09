@@ -1080,7 +1080,12 @@ class AMDSMILogger():
 
             power_usage = gpu_info['power_usage']
             if power_usage != "N/A":
-                power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
+                power_limit = gpu_info['power_usage']['power_limit']
+                if power_limit != 0:
+                    power_limit = f"/{power_limit}"
+                else:
+                    power_limit = ""
+                power_usage = f"{gpu_info['power_usage']['current_power']}{power_limit} W"
             power_usage = str(power_usage).rjust(13)
 
             gpu_id = str(gpu_info['gpu_id']).rjust(3)

@@ -118,6 +118,11 @@ class Timestamp : public amd::ReferenceCountedObject {
   bool hasHwProfiling_ = false;   //!< If TRUE then HwProfiling is enabled for the command
   bool blocking_ = true;          //!< If TRUE callback is blocking
 
+  //! Extract timing from a single signal and update accumulators
+  void ExtractSignalTiming(ProfilingSignal* signal,
+                           uint64_t& start, uint64_t& end,
+                           uint64_t& sdmaStart, uint64_t& sdmaEnd);
+
   Timestamp(const Timestamp&) = delete;
   Timestamp& operator=(const Timestamp&) = delete;
 
@@ -149,7 +154,9 @@ class Timestamp : public amd::ReferenceCountedObject {
   const bool HwProfiling() const { return hasHwProfiling_; }
 
   //! Finds execution ticks on GPU
-  void checkGpuTime();
+  //! If single_signal is nullptr, processes all signals and clears the list
+  //! If single_signal is provided, processes only that signal with merge enabled
+  void checkGpuTime(ProfilingSignal* single_signal = nullptr);
 
   // Start a timestamp (get timestamp from OS)
   void start() { start_ = amd::Os::timeNanos(); }
@@ -272,10 +279,7 @@ class VirtualGPU : public device::VirtualDevice {
                               Timestamp* ts = nullptr, bool attach_signal = true);
 
     //! Wait for the curent active signal. Can idle the queue
-    bool WaitCurrent() {
-      ProfilingSignal* signal = signal_list_[current_id_];
-      return CpuWaitForSignal(signal);
-    }
+    bool WaitCurrent();
 
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
@@ -311,11 +315,7 @@ class VirtualGPU : public device::VirtualDevice {
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
 
     //! Wait for the next active signal
-    void WaitNext() {
-      size_t next = (current_id_ + 1) % signal_list_.size();
-      ProfilingSignal* signal = signal_list_[next];
-      CpuWaitForSignal(signal);
-    }
+    void WaitNext();
 
     //! Wait for the provided signal
     bool CpuWaitForSignal(ProfilingSignal* signal);
