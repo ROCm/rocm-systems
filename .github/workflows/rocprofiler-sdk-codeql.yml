@@ -26,7 +26,7 @@ env:
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
-  ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "false"
 
 jobs:
   analyze:
