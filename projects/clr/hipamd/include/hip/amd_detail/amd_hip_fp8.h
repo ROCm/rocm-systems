@@ -1125,7 +1125,6 @@ struct __hip_fp8_e8m0 {
 
   __hip_fp8_e8m0() = default;
   __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const __half f) {
-    float intermediate_float = static_cast<float>(f);
     __x = __hip_cvt_float_to_e8m0(f, __default_saturation, __default_interpret);
   }
   __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const __hip_bfloat16 f) {

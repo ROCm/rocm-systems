@@ -529,8 +529,8 @@ TEMPLATE_TEST_CASE("Unit_e8m0_float_conversions", , half, __hip_bfloat16, float,
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_e8m0_int_conversions", , char, double, float, int, long int, long long int,
-                   short int, signed char, unsigned char, unsigned int, unsigned long int,
+TEMPLATE_TEST_CASE("Unit_e8m0_int_conversions", , char, int, long int, long long int, short int,
+                   signed char, unsigned char, unsigned int, unsigned long int,
                    unsigned long long int, unsigned short int) {
   bool run_on_host = GENERATE(true, false);
 
