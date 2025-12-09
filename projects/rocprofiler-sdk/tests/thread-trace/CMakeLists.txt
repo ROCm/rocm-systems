@@ -52,22 +52,13 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::tests-common-library)
 
-add_test(NAME thread-trace-api-single-test
-         COMMAND $<TARGET_FILE:thread-trace-api-single-test>)
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     thread-trace-api-single-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
-
+    COMMAND $<TARGET_FILE:thread-trace-api-single-test>
+    DEPENDS thread-trace-api-single-test
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 # Multi dispatch test
 add_executable(thread-trace-api-multi-test)
 target_sources(
@@ -78,21 +69,13 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::tests-common-library)
 
-add_test(NAME thread-trace-api-multi-test
-         COMMAND $<TARGET_FILE:thread-trace-api-multi-test>)
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     thread-trace-api-multi-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    COMMAND $<TARGET_FILE:thread-trace-api-multi-test>
+    DEPENDS thread-trace-api-multi-test
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Agent profiling test
 add_executable(thread-trace-api-agent-test)
@@ -103,52 +86,43 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
             rocprofiler-sdk::tests-common-library)
 
-add_test(NAME thread-trace-api-agent-test
-         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
+    DEPENDS thread-trace-api-agent-test
+    TIMEOUT 10
+    LABELS "integration-tests"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+
+# Feature introduced in ROCm 7.1, however some pre-release CI builds for 7.1 dont have
+# this feature in aqlprofile. Disable the next tests for ROCm < 7.2.
+set(IS_DISABLED True)
+find_package(hip CONFIG REQUIRED)
+if(hip_FOUND)
+    if(${hip_VERSION_MAJOR} EQUAL 7 AND ${hip_VERSION_MINOR} GREATER 1)
+        set(IS_DISABLED False)
+    elseif(${hip_VERSION_MAJOR} GREATER 7)
+        set(IS_DISABLED False)
+    endif()
+endif()
 
 # Test large buffer sizes. 5120 == 5GB
-add_test(NAME thread-trace-api-large-buffer-test
-         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     thread-trace-api-large-buffer-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV};ATT_BUFFER_SIZE_MB=5120"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
+    DEPENDS thread-trace-api-agent-test
+    TIMEOUT 30
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
+    DISABLED ${IS_DISABLED})
 
 # Test occupancy mode
-add_test(NAME thread-trace-api-extra-args
-         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
-
-set_tests_properties(
+rocprofiler_add_integration_execute_test(
     thread-trace-api-extra-args
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV};ATT_NODETAIL=1"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    COMMAND $<TARGET_FILE:thread-trace-api-agent-test>
+    DEPENDS thread-trace-api-agent-test
+    TIMEOUT 10
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ATT_NODETAIL=1"
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})

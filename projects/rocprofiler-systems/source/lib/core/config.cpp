@@ -271,6 +271,12 @@ configure_settings(bool _init)
                               "for continuous integration)",
                               false, "debugging", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK",
+        "Skip CI validation check for push/pop trace count mismatch "
+        "(used only for tests with known imbalances)",
+        false, "debugging", "advanced");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MONOCHROME", "Disable colorized logging",
                               false, "debugging", "advanced");
 
@@ -314,6 +320,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
+                              "Enable perfetto with trace cache", false, "backend",
+                              "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
@@ -623,11 +633,12 @@ configure_settings(bool _init)
         "the same signal (SIGRTMIN + 1)",
         SIGRTMIN + 1, "sampling", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT",
-                              "Metric for overflow sampling",
-                              std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" },
-                              "sampling", "hardware_counters")
-        ->set_choices(perf::get_config_choices());
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT",
+        "Metric for overflow sampling. Defaults to perf::PERF_COUNT_HW_CACHE_REFERENCES. "
+        "For full list of events see: rocprof-sys-avail -H -c CPU -r overflow",
+        std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
+        "hardware_counters");
 
     rocprofiler_sdk::config_settings(_config);
     amd_smi::config_settings(_config);
@@ -703,6 +714,11 @@ configure_settings(bool _init)
         "of rocprof-sys, e.g. call-stack samples will be periodically "
         "written to a file and re-loaded during finalization",
         true, "io", "data", "advanced");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MERGE_PERFETTO_FILES",
+                              "Merge Perfetto traces. If not explicitly set, it will "
+                              "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
+                              false, "perfetto", "data", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_TMPDIR", "Base directory for temporary files",
@@ -942,12 +958,18 @@ configure_settings(bool _init)
     {
         auto _papi_events = _config->find("ROCPROFSYS_PAPI_EVENTS");
         _add_rocprofsys_category(_papi_events);
-        std::vector<std::string> _papi_choices = {};
-        for(auto itr : tim::papi::available_events_info())
+        // Only enumerate PAPI events if the user has specified them
+        if(_papi_events->second->get_config_updated() ||
+           !_config->get_papi_events().empty())
         {
-            if(itr.available()) _papi_choices.emplace_back(itr.symbol());
+            std::vector<std::string> _papi_choices = {};
+            for(const auto& itr :
+                tim::papi::available_events_info({ "perf_event_uncore" }))
+            {
+                if(itr.available()) _papi_choices.emplace_back(itr.symbol());
+            }
+            _papi_events->second->set_choices(_papi_choices);
         }
-        _papi_events->second->set_choices(_papi_choices);
     }
 #else
     _config->find("ROCPROFSYS_PAPI_EVENTS")->second->set_hidden(true);
@@ -2357,6 +2379,13 @@ get_use_tmp_files()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+bool
+get_merge_perfetto_files()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_MERGE_PERFETTO_FILES");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
 std::string
 get_tmpdir()
 {
@@ -2391,10 +2420,62 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     return _val;
 }
 
+std::string
+get_perfetto_output_filename_with_suffix(std::string_view suffix)
+{
+    static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
+    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+
+    // If absolute path is provided, return it as-is
+    if(!_val.empty() && _val.at(0) == '/') return _val;
+
+    auto _pos_dir = _val.find_last_of('/');
+    auto _dir     = std::string{};
+    auto _ext     = std::string{ "proto" };
+
+    if(_pos_dir != std::string::npos)
+    {
+        _dir = _val.substr(0, _pos_dir + 1);
+        _val = _val.substr(_pos_dir + 1);
+    }
+
+    auto _pos_ext = _val.find_last_of('.');
+    if(_pos_ext + 1 < _val.length())
+    {
+        _ext = _val.substr(_pos_ext + 1);
+        _val = _val.substr(0, _pos_ext);
+    }
+
+    // Check if explicitly set via environment OR config file
+    // If explicitly set, don't add suffix; otherwise use provided suffix
+    bool _explicitly_set =
+        (_v->second->get_environ_updated() || _v->second->get_config_updated());
+
+    auto _cfg = settings::compose_filename_config{
+        !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
+        suffix,                               // suffix value
+        true,                                 // make_dir
+        _dir                                  // explicit_path
+    };
+
+    _val = settings::compose_output_filename(_val, _ext, _cfg);
+    if(!_val.empty() && _val.at(0) != '/')
+        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+
+    return _val;
+}
+
 bool&
 get_use_rocpd()
 {
     static auto _v = get_config()->at("ROCPROFSYS_USE_ROCPD");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+bool&
+get_caching_perfetto()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE_CACHED");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 

@@ -269,6 +269,7 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
 
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
+
 static rsmi_status_t read_dev_port_map_file(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::string *val_str) {
     assert(val_str != nullptr);
     if (val_str == nullptr) {
@@ -314,6 +315,14 @@ static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
 
 static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
                                               uint32_t dv_ind, uint64_t val) {
+  GET_DEV_FROM_INDX
+
+  int ret = dev->writeDevInfo(type, val);
+  return amd::smi::ErrnoToRsmiStatus(ret);
+}
+
+static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
+                                              uint32_t dv_ind, const char* val) {
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(type, val);
@@ -7885,6 +7894,140 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
   LOG_INFO(ostrstream);
 
   return status_code;
+  CATCH
+}
+
+// Internal only helper
+rsmi_status_t
+rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, size_t length){
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+     << " | dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (supported == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string line;
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevPtlSupported, dv_ind, &line);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (line.size() + 1 > length) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  std::strncpy(supported, line.c_str(), length);
+  supported[length - 1] = '\0';
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_get_gpu_ptl_state(uint32_t dv_ind, bool *enabled)
+{
+  TRY
+  std::string val_str;
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  DEVICE_MUTEX
+  if (!enabled) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevPtlStatus, dv_ind,
+                                                                 &val_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (val_str == "enabled")      { *enabled = true;  return RSMI_STATUS_SUCCESS; }
+  if (val_str == "disabled")     { *enabled = false; return RSMI_STATUS_SUCCESS; }
+
+  // unexpected value
+  return RSMI_STATUS_UNEXPECTED_DATA;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_set_gpu_ptl_state(uint32_t dv_ind, bool enable) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+     << " | dv_ind=" << dv_ind
+     << " | enable=" << enable;
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+
+  DEVICE_MUTEX
+  return set_dev_value(amd::smi::kDevPtlStatus, dv_ind, enable);
+  CATCH
+}
+
+rsmi_status_t
+rsmi_get_gpu_ptl_formats(uint32_t dv_ind, char* format, size_t length)
+{
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+     << " | dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (format == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string line;
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevPtlFormat, dv_ind, &line);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (line.size() + 1 > length) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  std::strncpy(format, line.c_str(), length);
+  format[length - 1] = '\0';
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_set_gpu_ptl_formats(uint32_t dv_ind, const char* format)
+{
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+     << " | dv_ind=" << dv_ind
+     << " | format=" << format;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  rsmi_status_t ret = set_dev_value(amd::smi::kDevPtlFormat, dv_ind, format);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | Failed to write PTL format to sysfs"
+       << " | format='" << format << "'"
+       << " | ret=" << getRSMIStatusString(ret);
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  ss << __PRETTY_FUNCTION__
+     << " | PTL set formats success"
+     << " | format='" << format << "'";
+  LOG_DEBUG(ss);
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

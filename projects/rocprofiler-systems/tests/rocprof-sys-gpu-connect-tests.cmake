@@ -31,7 +31,7 @@ set(_gpu_connect_environment
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,xgmi,pcie"
     "ROCPROFSYS_SAMPLING_CPUS=none"
     "ROCPROFSYS_USE_SAMPLING=OFF"
-    "ROCPROFSYS_PROCESS_SAMPLING_FREQ=10"
+    "ROCPROFSYS_PROCESS_SAMPLING_FREQ=50"
     "ROCPROFSYS_CPU_FREQ_ENABLED=OFF"
 )
 
@@ -60,6 +60,8 @@ if(EXISTS "${PROJECT_BINARY_DIR}/transferBench")
     if(_transfer_output MATCHES "Error: No valid transfers created")
         set(skip_validation TRUE)
     endif()
+else()
+    set(skip_validation TRUE)
 endif()
 
 rocprofiler_systems_add_test(

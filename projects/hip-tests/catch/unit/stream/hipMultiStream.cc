@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
   HIP_CHECK(hipMemcpy(&y, yd, sizeof(float), hipMemcpyDeviceToHost));
   HIP_CHECK(hipFree(xd));
   HIP_CHECK(hipFree(yd));
-  REQUIRE(x == Approx(y));
+  REQUIRE(x == Catch::Approx(y));
 }
 
 TEST_CASE("Unit_hipMultiStream_multimeDevice") {

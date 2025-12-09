@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "argparse.hpp"
-#include "common/join.hpp"
+#include "common/environment.hpp"
+#include "common/path.hpp"
 #include "config.hpp"
-#include "defines.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
@@ -39,8 +39,9 @@ namespace argparse
 namespace
 {
 namespace filepath   = ::tim::filepath;
+namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
-using ::tim::get_env;
+using rocprofsys::common::remove_env;
 using ::timemory::join::join;
 
 auto
@@ -79,125 +80,15 @@ get_clock_id_choices()
     return std::make_pair(_choices, _aliases);
 }
 
-auto
-get_realpath(const std::string& _path)
-{
-    return filepath::realpath(_path, nullptr, false);
-}
-
-enum update_mode : int
-{
-    UPD_REPLACE = 0,       // no PREPEND/APPEND bits set
-    UPD_PREPEND = 1 << 0,  // 0x01
-    UPD_APPEND  = 1 << 1,  // 0x02
-    UPD_WEAK    = 1 << 2,  // 0x04
-};
+using rocprofsys::common::update_mode;
 
 template <typename Tp>
 void
 update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
-           update_mode&& _mode = UPD_REPLACE, std::string_view _join_delim = ":")
+           update_mode _mode = update_mode::REPLACE, std::string_view _join_delim = ":")
 {
-    _data.updated.emplace(_env_var);
-
-    auto _prepend  = (_mode & UPD_PREPEND) != 0;
-    auto _append   = (_mode & UPD_APPEND) != 0;
-    auto _weak_upd = (_mode & UPD_WEAK) != 0;
-
-    // if both flags are set, prefer append
-    if(_prepend && _append)
-    {
-        _prepend = false;
-    }
-
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _data.current)
-    {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) == 0)
-        {
-            if(_weak_upd)
-            {
-                // if the value has changed, do not update but allow overridding the value
-                // inherited from the initial env
-                if(_data.initial.find(std::string{ itr }) == _data.initial.end()) return;
-            }
-
-            if(_prepend || _append)
-            {
-                if(std::string_view{ itr }.find(join("", _env_val)) ==
-                   std::string_view::npos)
-                {
-                    auto _val = std::string{ itr }.substr(_key.length());
-                    free(itr);
-                    if(_prepend)
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
-                                       .c_str());
-                    else
-                        itr =
-                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
-                                       .c_str());
-                }
-            }
-            else
-            {
-                free(itr);
-                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
-            }
-            return;
-        }
-    }
-    _data.current.emplace_back(
-        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
-}
-
-void
-remove_env(parser_data& _data, std::string_view _env_var)
-{
-    auto _key   = join("", _env_var, "=");
-    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
-
-    auto& _environ = _data.current;
-    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
-                   _environ.end());
-
-    auto& _initial = _data.initial;
-    for(const auto& itr : _initial)
-    {
-        if(std::string_view{ itr }.find(_key) == 0)
-            _environ.emplace_back(strdup(itr.c_str()));
-    }
-}
-
-std::string
-get_rocprofsys_root(void)
-{
-    char*       _tmp = realpath("/proc/self/exe", nullptr);
-    std::string _exe = (_tmp) ? std::string{ _tmp } : std::string{};
-
-    if(_tmp) free(_tmp);
-
-    auto _pos = _exe.find_last_of('/');
-    auto _dir = std::string{ "./" };
-
-    if(_pos != std::string::npos) _dir = _exe.substr(0, _pos);
-
-    return rocprofsys::common::join("/", _dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "lib", _lib);
-}
-
-std::string
-get_internal_script_path(void)
-{
-    auto _root = get_rocprofsys_root();
-    return rocprofsys::common::join("/", _root, "libexec", "rocprofiler-systems");
+    rocprofsys::common::update_env(_data.current, _env_var, std::forward<Tp>(_env_val),
+                                   _mode, _join_delim, _data.updated, _data.initial);
 }
 
 }  // namespace
@@ -245,14 +136,16 @@ init_parser(parser_data& _data)
         }
     }
 
-    _data.dl_libpath = get_realpath(get_internal_libpath("librocprof-sys-dl.so").c_str());
-    _data.omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so").c_str());
+    _data.dl_libpath =
+        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+    _data.omni_libpath =
+        path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
 
-    auto _libexecpath = get_realpath(get_internal_script_path());
-    update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
+    auto _libexecpath = path::realpath(path::get_internal_script_path());
+    update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, update_mode::REPLACE);
 
-    auto _rootpath = get_realpath(get_rocprofsys_root());
-    update_env(_data, "ROCPROFSYS_ROOT", _rootpath, UPD_REPLACE);
+    auto _rootpath = path::realpath(path::get_rocprofsys_root());
+    update_env(_data, "ROCPROFSYS_ROOT", _rootpath, update_mode::REPLACE);
 
     return _data;
 }
@@ -260,7 +153,7 @@ init_parser(parser_data& _data)
 parser_data&
 add_ld_preload(parser_data& _data)
 {
-    update_env(_data, "LD_PRELOAD", _data.dl_libpath, UPD_APPEND);
+    update_env(_data, "LD_PRELOAD", _data.dl_libpath, update_mode::APPEND);
     return _data;
 }
 
@@ -269,7 +162,7 @@ add_ld_library_path(parser_data& _data)
 {
     auto _libdir = filepath::dirname(_data.dl_libpath);
     if(filepath::exists(_libdir))
-        update_env(_data, "LD_LIBRARY_PATH", _libdir, UPD_APPEND);
+        update_env(_data, "LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
     return _data;
 }
 
@@ -463,9 +356,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 if(!_modes.empty())
                 {
                     update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME",
-                               _modes.count("cputime") > 0, UPD_WEAK);
+                               _modes.count("cputime") > 0, update_mode::WEAK);
                     update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME",
-                               _modes.count("realtime") > 0, UPD_WEAK);
+                               _modes.count("realtime") > 0, update_mode::WEAK);
                 }
             });
 
@@ -522,11 +415,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_TRACE_DELAY", p.get<double>("wait"),
-                           UPD_WEAK);
+                           update_mode::WEAK);
                 update_env(_data, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("wait"),
-                           UPD_WEAK);
+                           update_mode::WEAK);
                 update_env(_data, "ROCPROFSYS_CAUSAL_DELAY", p.get<double>("wait"),
-                           UPD_WEAK);
+                           update_mode::WEAK);
             });
 
         _data.processed_environs.emplace("wait");
@@ -543,11 +436,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("seconds")
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"),
-                           UPD_WEAK);
+                           update_mode::WEAK);
                 update_env(_data, "ROCPROFSYS_SAMPLING_DURATION",
-                           p.get<double>("duration"), UPD_WEAK);
+                           p.get<double>("duration"), update_mode::WEAK);
                 update_env(_data, "ROCPROFSYS_CAUSAL_DURATION", p.get<double>("duration"),
-                           UPD_WEAK);
+                           update_mode::WEAK);
             });
 
         _data.processed_environs.emplace("duration");
@@ -566,7 +459,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 update_env(
                     _data, "ROCPROFSYS_TRACE_PERIODS",
                     join(array_config_t{ " ", "", "" }, p.get<strvec_t>("periods")),
-                    UPD_WEAK);
+                    update_mode::WEAK);
             });
 
         _data.processed_environs.emplace("periods");
@@ -634,7 +527,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.omni_libpath,
-                               UPD_PREPEND);
+                               update_mode::PREPEND);
             });
 
         _data.processed_environs.emplace("include");
@@ -663,7 +556,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    remove_env(_data, "KOKKOS_TOOLS_LIBS");
+                    remove_env(_data.current, "KOKKOS_TOOLS_LIBS", _data.initial);
             });
 
         _data.processed_environs.emplace("exclude");
