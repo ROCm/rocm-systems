@@ -24,8 +24,8 @@ RUN set-euo pipefail; \
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common git cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
         add-apt-repository ppa:git-core/ppa && \
         mkdir -p /etc/apt/keyrings && \
-        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb && \
-        apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb && \
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/latest/ubuntu/jammy/amdgpu-install_7.1.70100-1_all.deb && \
+        apt-get install -y /tmp/amdgpu-install_7.1.70100-1_all.deb && \
         apt-get update && \
         apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
         python3 -m pip install -U awscli pipx && \
@@ -48,13 +48,13 @@ RUN set -euo pipefail; \
             make prefix=/usr all -j 32; \
             make prefix=/usr install; \
             cd ..; rm -rf git-2.51.0*; \
-            echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el8/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+            echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/el8/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
             echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         else \
             rm -rf /etc/yum.repos.d/RHEL-partners.repo; \
             dnf clean all; \
-            echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/el9/7.0/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
-            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
+            echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/el9/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+            echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/9.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         fi; \
         dnf clean all; \
         dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
@@ -69,8 +69,8 @@ RUN set -euo pipefail; \
 # SLES
 RUN set -euo pipefail; \
     if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
-        echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
-        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/sle/15.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
+        echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/zyp/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/rocm.repo; \
+        echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/sle/15.7/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
         zypper --gpg-auto-import-keys refresh; \
         zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
         python3 -m venv rocprofiler-sdk; \

@@ -122,68 +122,143 @@ static unsigned extractAqlBits(unsigned v, unsigned pos, unsigned width) {
 };
 
 // ================================================================================================
-void Timestamp::checkGpuTime() {
+void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
+  // Lock needed as async handler thread can also touch this structure
+  amd::ScopedLock lock(lock_);
+
+  // Return if timing is already cached
+  if (cached_timing_.valid_) {
+    return;
+  }
+
+  // Wait for this signal to complete if not already done
+  if (Hsa::signal_load_relaxed(signal_) > 0) {
+    WaitForSignal(signal_);
+  }
+
+  // Extract timing and cache it
+  if (IsSdmaEngine(engine_)) {
+    hsa_amd_profiling_async_copy_time_t time = {};
+    Hsa::profiling_get_async_copy_time(signal_, &time);
+    cached_timing_.start_ = time.start;
+    cached_timing_.end_ = time.end;
+  } else {
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
+    cached_timing_.start_ = time.start;
+    cached_timing_.end_ = time.end;
+  }
+  cached_timing_.valid_ = true;
+}
+
+// ================================================================================================
+// Process GPU timing for signals
+// If single_signal is nullptr, processes all signals and clears the list
+// If single_signal is provided, processes only that signal with merge enabled
+void Timestamp::checkGpuTime(ProfilingSignal* single_signal) {
   amd::ScopedLock s(lock_);
+
+  // For single signal mode, validate it exists in the list
+  if (single_signal != nullptr) {
+    auto it = std::find(signals_.begin(), signals_.end(), single_signal);
+    if (it == signals_.end()) {
+      return;
+    }
+  }
+
   if (HwProfiling()) {
     uint64_t start = std::numeric_limits<uint64_t>::max();
     uint64_t end = 0;
     uint64_t sdmaStart = std::numeric_limits<uint64_t>::max();
     uint64_t sdmaEnd = 0;
 
+    // Process either single signal or all signals
+    auto process_signal = [&](ProfilingSignal* sig) {
+      // Skip signals already processed
+      if (sig->flags_.done_) {
+        return;
+      }
 
-    for (auto it : signals_) {
-      amd::ScopedLock lock(it->LockSignalOps());
       // Ignore the wait if runtime processes API callback, because the signal value is bigger
       // than expected and the value reset will occur after API callback is done
       if (GetCallbackSignal().handle == 0 || GetBlocking() == false) {
-        WaitForSignal(it->signal_);
+        ExtractSignalTiming(sig, start, end, sdmaStart, sdmaEnd);
       }
-      // Avoid profiling data for the sync barrier, in tiny performance tests the first call
-      // to ROCr is very slow and that also affects the overall performance of the callback thread
+
       if (command().GetBatchHead() == nullptr || command().profilingInfo().marker_ts_ ||
           command().type() == CL_COMMAND_TASK) {
-        hsa_amd_profiling_dispatch_time_t time = {};
-        hsa_amd_profiling_async_copy_time_t timeSdma = {};
-        amd_signal_t* amdSignal = reinterpret_cast<amd_signal_t*>(it->signal_.handle);
-
-        if (it->engine_ == HwQueueEngine::SdmaInter || it->engine_ == HwQueueEngine::SdmaRead ||
-            it->engine_ == HwQueueEngine::SdmaWrite || it->engine_ == HwQueueEngine::SdmaIntra) {
-          Hsa::profiling_get_async_copy_time(it->signal_, &timeSdma);
-          sdmaStart = std::min(timeSdma.start, sdmaStart);
-          sdmaEnd = std::max(timeSdma.end, sdmaEnd);
-          // set dispatch time to be used in logging.
-          time.start = timeSdma.start;
-          time.end = timeSdma.end;
-        } else {
-          Hsa::profiling_get_dispatch_time(gpu()->gpu_device(), it->signal_, &time);
-          start = std::min(time.start, start);
-          end = std::max(time.end, end);
-        }
-
-        if ((command().type() == CL_COMMAND_TASK) && (it->flags_.isPacketDispatch_ == true)) {
-          static_cast<amd::AccumulateCommand&>(command()).addTimestamps(time.start, time.end);
-        }
+        uint64_t sig_start, sig_end;
+        sig->GetCachedTiming(sig_start, sig_end);
+        amd_signal_t* amdSignal = reinterpret_cast<amd_signal_t*>(sig->signal_.handle);
 
         ClPrint(amd::LOG_INFO, amd::LOG_TS,
                 "Signal = (0x%lx), Translated start/end = %ld / %ld, Elapsed = %ld ns, "
                 "ticks start/end = %ld / %ld, Ticks elapsed = %ld, Engine = %u",
-                it->signal_.handle, time.start, time.end, time.end - time.start,
+                sig->signal_.handle, sig_start, sig_end, sig_end - sig_start,
                 amdSignal->start_ts, amdSignal->end_ts, amdSignal->end_ts - amdSignal->start_ts,
-                it->engine_);
+                sig->engine_);
       }
-      it->flags_.done_ = true;
+    };
+
+    if (single_signal != nullptr) {
+      process_signal(single_signal);
+    } else {
+      for (auto it : signals_) {
+        process_signal(it);
+      }
+      signals_.clear();
     }
-    signals_.clear();
+
+    // Update member timing variables from local accumulators
+    // When processing single signal, merge with existing timing
+    // When processing all signals, replace timing
     if (end != 0 || sdmaEnd != 0) {
-      // Check if it's the first execution and update start time
+      const bool merge_with_existing = (single_signal != nullptr);
+      uint64_t final_start = ((sdmaEnd != 0) ? sdmaStart : start) * ticksToTime_;
+      uint64_t final_end = ((sdmaEnd != 0) ? sdmaEnd : end) * ticksToTime_;
       if (!accum_ena_) {
-        start_ = ((sdmaEnd != 0) ? sdmaStart : start) * ticksToTime_;
+        start_ = final_start;
         accum_ena_ = true;
+      } else if (merge_with_existing) {
+        start_ = std::min(start_, final_start);
       }
-      // Progress the end time always
-      end_ = ((sdmaEnd != 0) ? sdmaEnd : end) * ticksToTime_;
+      end_ = merge_with_existing ? std::max(end_, final_end) : final_end;
     }
   }
+}
+
+// ================================================================================================
+// Extract timing from a single signal
+void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
+                                    uint64_t& start, uint64_t& end,
+                                    uint64_t& sdmaStart, uint64_t& sdmaEnd) {
+  // Ensure timing data is cached
+  if (!signal->IsTimingCached()) {
+    signal->CacheTimingData(gpu()->gpu_device());
+  }
+
+  // Get cached timing
+  uint64_t sig_start, sig_end;
+  signal->GetCachedTiming(sig_start, sig_end);
+
+  // Lock signal for accessing engine_ and flags_
+  amd::ScopedLock sig_lock(signal->LockSignalOps());
+
+  // Update appropriate accumulators based on engine type
+  if (IsSdmaEngine(signal->engine_)) {
+    sdmaStart = std::min(sig_start, sdmaStart);
+    sdmaEnd = std::max(sig_end, sdmaEnd);
+  } else {
+    start = std::min(sig_start, start);
+    end = std::max(sig_end, end);
+  }
+
+  // Handle AccumulateCommand timestamps
+  if ((command().type() == CL_COMMAND_TASK) && (signal->flags_.isPacketDispatch_ == true)) {
+    static_cast<amd::AccumulateCommand&>(command()).addTimestamps(sig_start, sig_end);
+  }
+
+  signal->flags_.done_ = true;
 }
 
 // ================================================================================================
@@ -514,7 +589,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->flags_.done_ = false;
   prof_signal->engine_ = engine_;
   prof_signal->flags_.isPacketDispatch_ = false;
-
+  prof_signal->ResetCachedTiming();
 
   if (nullptr != cmd) {
     // Release any existing HwEvent before setting new one for the same command
@@ -628,24 +703,44 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
-  // Wait for the current signal
-  if (signal->ts_ != nullptr) {
-    // Update timestamp values if requested
-    auto ts = signal->ts_;
-    ts->checkGpuTime();
-    ts->release();
-    signal->ts_ = nullptr;
-  } else if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
-    amd::ScopedLock lock(signal->LockSignalOps());
+  // Wait for the current signal to complete
+  if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Host wait on completion_signal=0x%zx",
             signal->signal_.handle);
     if (!WaitForSignal(signal->signal_, gpu_.ActiveWait())) {
       LogPrintfError("Failed signal [0x%lx] wait", signal->signal_);
       return false;
     }
+  }
+
+  // Process this signal's timing before signal reuse
+  // This copies timing to the Timestamp
+  if (signal->ts_ != nullptr) {
+    signal->ts_->checkGpuTime(signal);
+    signal->ts_->release();
+    signal->ts_ = nullptr;
+  } else {
+    // No timestamp - just mark signal as done
+    amd::ScopedLock lock(signal->LockSignalOps());
     signal->flags_.done_ = true;
   }
+
   return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::HwQueueTracker::WaitCurrent() {
+  ProfilingSignal* signal = signal_list_[current_id_];
+  return CpuWaitForSignal(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::WaitNext() {
+  size_t next = (current_id_ + 1) % signal_list_.size();
+  ProfilingSignal* signal = signal_list_[next];
+  // Only wait, there is no need to save timestamp for the next signal
+  // It will be saved when the signal is actually used
+  WaitForSignal(signal->signal_, gpu_.ActiveWait());
 }
 
 // ================================================================================================

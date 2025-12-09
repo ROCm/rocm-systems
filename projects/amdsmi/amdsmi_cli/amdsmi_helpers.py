@@ -1460,15 +1460,34 @@ class AMDSMIHelpers():
             return "unknown"
         return "UNKNOWN"
 
-    def display_cper_files_generated(self, entries, device_handle, folder):
-        # One‐time initialization: print warning & header only once
+    def display_cper_files_generated(self, entries, device_handle, folder, logger=None):
+        """
+        Display CPER summary lines. If a logger is provided and its destination is
+        not stdout, append the output to that file instead of printing to stdout.
+        """
+        use_file = (
+            logger is not None
+            and logger.is_human_readable_format()
+            and logger.destination != 'stdout'
+        )
+
+        # One‐time initialization: warning & header only once
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               print(f"WARNING: No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
-               self._cper_warning_printed = True
+                warning = (
+                    "WARNING: No CPER files will be dumped unless "
+                    "--folder=<folder_name> is specified and cper entries exist."
+                )
+                if use_file:
+                    with logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(warning + '\n')
+                else:
+                    print(warning)
+                self._cper_warning_printed = True
 
-            self._print_header(folder)
+            # Print or log the header
+            self._print_header(folder, logger if use_file else None)
             self._cper_display_initialized = True
 
         # Loop through all entries in the dictionary.
@@ -1476,27 +1495,48 @@ class AMDSMIHelpers():
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
-                                              entry.get("notify_type", "Unknown"),
-                                              False)
+            prefix = self._severity_as_string(
+                entry.get("error_severity", "Unknown"),
+                entry.get("notify_type", "Unknown"),
+                False
+            )
             output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
+
             if folder:
-                prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
-                                                entry.get("notify_type", "Unknown"),
-                                                True)
-                cper_data_file = f"{prefix}_{self.get_cper_count() + 1}.cper"
+                prefix_for_filename = self._severity_as_string(
+                    entry.get("error_severity", "Unknown"),
+                    entry.get("notify_type", "Unknown"),
+                    True
+                )
+                cper_data_file = f"{prefix_for_filename}_{self.get_cper_count() + 1}.cper"
                 afids = self.pvtDumpAfids(cper_data_file)
                 afids_str = ' '.join(map(str, afids))
                 output += f" {cper_data_file:<17} {afids_str}"
 
-            print(output)
+            if use_file:
+                with logger.destination.open('a', encoding="utf-8") as output_file:
+                    output_file.write(output + '\n')
+            else:
+                print(output)
+
             self.increment_cper_count()
 
-    def _print_header(self, folder):
-        print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}", end="")
+    def _print_header(self, folder, logger=None):
+        header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
         if folder:
-            print(f" {'file_name':<17} {'list of afids'}", end="")
-        print("")
+            header += f" {'file_name':<17} {'list of afids'}"
+
+        use_file = (
+            logger is not None
+            and logger.is_human_readable_format()
+            and logger.destination != 'stdout'
+        )
+
+        if use_file:
+            with logger.destination.open('a', encoding="utf-8") as output_file:
+                output_file.write(header + '\n')
+        else:
+            print(header)
 
     def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
         """
@@ -1747,6 +1787,15 @@ class AMDSMIHelpers():
 
         buffer_size = 1048576
 
+        # Decide where to send human-readable output
+        dest = getattr(logger, "destination", "stdout") if logger is not None else "stdout"
+        log_to_file = dest != 'stdout'
+        if log_to_file:
+            # destination is usually a Path; fall back to Path(string) if needed
+            log_path = dest if isinstance(dest, Path) else Path(dest)
+        else:
+            log_path = None
+
         gpu_id = self.get_gpu_id_from_device_handle(device_handle)
         if args.follow and not getattr(self, "_cper_follow_prompted", False):
             print("Press CTRL + C to stop.")
@@ -1780,18 +1829,75 @@ class AMDSMIHelpers():
                 else:
                     logging.debug(f"Cannot retrieve CPER entries: {e}")
                     break
+
             args.cursor[gpu_idx] = new_cursor
             if len(entries) == 0:
                 break
-            if args.folder:
-                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+
+            # When a file destination is set, temporarily redirect stdout
+            # so that helper print() calls go into that file.
+            if log_to_file and log_path is not None:
+                orig_stdout = sys.stdout
+                try:
+                    try:
+                        log_path.parent.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        pass
+                    with log_path.open('a', encoding='utf-8') as f:
+                        sys.stdout = f
+                        if args.folder:
+                            self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit
+                            )
+                        else:
+                            self.display_cper_files_generated(
+                                entries, device_handle, args.folder
+                            )
+                finally:
+                    sys.stdout = orig_stdout
             else:
-                self.display_cper_files_generated(entries, device_handle, args.folder)
+                if args.folder:
+                    self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit
+                    )
+                else:
+                    self.display_cper_files_generated(
+                        entries, device_handle, args.folder
+                    )
+
         if num_entries == 0 and not args.follow:
-            if args.folder:
-                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+            # If nothing was found, still emit the warning/header logic
+            # using the same redirection logic.
+            if log_to_file and log_path is not None:
+                orig_stdout = sys.stdout
+                try:
+                    try:
+                        log_path.parent.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        pass
+                    with log_path.open('a', encoding='utf-8') as f:
+                        sys.stdout = f
+                        if args.folder:
+                            self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit
+                            )
+                        else:
+                            self.display_cper_files_generated(
+                                entries, device_handle, args.folder
+                            )
+                finally:
+                    sys.stdout = orig_stdout
             else:
-                self.display_cper_files_generated(entries, device_handle, args.folder)
+                if args.folder:
+                    self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit
+                    )
+                else:
+                    self.display_cper_files_generated(
+                        entries, device_handle, args.folder
+                    )
+
+
 
     def get_bitmask_ranges(self, bitmask_dict):
         ranges = {}
@@ -2042,3 +2148,84 @@ class AMDSMIHelpers():
                             type_name, gpu_id, e.get_error_info())
 
         return base_board_temp_dict
+
+    def validate_and_set_power_cap(self, device_handle, power_type, power_type_key, requested_power_cap, logger):
+        """Validate and set power cap for a specific sensor.
+
+        Args:
+            device_handle: GPU device handle
+            power_type: Sensor ID (0 for ppt0, 1 for ppt1)
+            power_type_key: Display name for the sensor (e.g., "PPT0")
+            requested_power_cap: Requested power cap value in watts
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        try:
+            power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(device_handle, power_type)
+            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            logging.debug(f"Power cap info for gpu {gpu_id} {power_type_key} | {power_cap_info}")
+
+            min_power_cap = self.convert_SI_unit(power_cap_info["min_power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+            max_power_cap = self.convert_SI_unit(power_cap_info["max_power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+            current_power_cap = self.convert_SI_unit(power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO)
+
+            # Return structured data for JSON/CSV or formatted string for human-readable
+            if requested_power_cap == current_power_cap:
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "already_set",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
+                        "message": f"{power_type_key} power cap is already set to {requested_power_cap}W"
+                    }
+                return f"{power_type_key} power cap is already set to {requested_power_cap}W"
+            elif current_power_cap == 0:
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
+                        "message": f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
+                    }
+                return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
+            elif not (min_power_cap < requested_power_cap <= max_power_cap and requested_power_cap > 0):
+                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
+                min_cap_display = 1 if min_power_cap == 0 else min_power_cap
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "min_power_cap": self.unit_format(logger, min_cap_display, "W"),
+                        "max_power_cap": self.unit_format(logger, max_power_cap, "W"),
+                        "message": f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+                    }
+                return f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+            # Set the power cap
+            new_power_cap = self.convert_SI_unit(requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO)
+            amdsmi_interface.amdsmi_set_power_cap(device_handle, power_type, new_power_cap)
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "success",
+                    "sensor": power_type_key,
+                    "power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "message": f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+                }
+            return f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError('Command requires elevation') from e
+            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap}W"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "sensor": power_type_key,
+                    "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "error": e.get_error_info(detailed=False),
+                    "message": error_msg
+                }
+            return error_msg

@@ -20,9 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_executable(rocprof-sys-unit-tests dummy.cpp $<TARGET_OBJECTS:trace-cache-tests>)
+add_executable(
+    rocprof-sys-unit-tests
+    dummy.cpp
+    $<TARGET_OBJECTS:lib-common-tests>
+    $<TARGET_OBJECTS:trace-cache-tests>
+)
 
 target_link_libraries(
     rocprof-sys-unit-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-core-library
 )

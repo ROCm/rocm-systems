@@ -429,13 +429,20 @@ class RocProfCompute_Base:
             and not args.attach_pid
         ):
             # Use native counter collection tool
-            native_tool_path = str(
-                Path(sys.argv[0]).resolve().parents[2]
-                / "lib"
-                / "rocprofiler-compute"
-                / "librocprofiler-compute-tool.so"
-            )
-            if not Path(native_tool_path).is_file():
+            try:
+                native_tool_path = str(
+                    Path(sys.argv[0]).resolve().parents[2]
+                    / "lib"
+                    / "rocprofiler-compute"
+                    / "librocprofiler-compute-tool.so"
+                )
+            except Exception as e:
+                console_debug(
+                    f"Could not find pre-built native tool: {e}. "
+                    "Building native tool now."
+                )
+                native_tool_path = None
+            if not (native_tool_path and Path(native_tool_path).is_file()):
                 # Build native counter collection tool if not exists
                 native_tool_path = str(
                     Path(
