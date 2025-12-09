@@ -1031,6 +1031,31 @@ hsa_status_t HSA_API hsa_ext_image_create_v2(hsa_agent_t agent,
 hsa_status_t HSA_API hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image);
 
 /**
+ * @brief Create an image view for a specific mip level of a mipmapped array.
+ *
+ * @param[in] agent             : GPU agent
+ * @param[in] mipmapped_array   : Pointer to the mipmapped array handle previously
+ *                                created by hsa_amd_mipmap_array_create
+ * @param[in] mip_level         : Level index (0 = base). Must be < array's num levels.
+ * @param[out] level_image_out  : Output image handle for the level view
+ *
+ * @details
+ *   - Dimensions are clamped to at least 1 when shifting (right shift per level).
+ *   - Row/slice pitches follow underlying layout; for tiled images internal
+ *     SRD setup derives pitches; for linear layout the base pitches may
+ *     be adjusted if required per level (future enhancement).
+ *   - The view inherits access permissions from the parent array.
+ * 
+ * @retval HSA_STATUS_SUCCESS
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT (null pointers, bad level, bad handle)
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES (allocation of view metadata failed)
+ */
+hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                      const hsa_ext_image_t* mipmapped_array,
+                                      uint32_t mip_level,
+                                      hsa_ext_image_t* level_image_out);
+
+/**
  * @brief Copies a portion of one image (the source) to another image (the
  * destination).
  *

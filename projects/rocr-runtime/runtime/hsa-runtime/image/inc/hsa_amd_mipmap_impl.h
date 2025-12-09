@@ -79,10 +79,10 @@ hsa_status_t HSA_API
 hsa_amd_mipmap_array_destroy(const hsa_ext_image_t* image);
 
 
-hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
-                                                          const hsa_ext_image_t* mipmapped_array,
-                                                          uint32_t mip_level,
-                                                          hsa_ext_image_t* level_image_out);
+hsa_status_t HSA_API hsa_mipmap_array_get_level(hsa_agent_t agent,
+                                                const hsa_ext_image_t* mipmapped_array,
+                                                uint32_t mip_level,
+                                                hsa_ext_image_t* level_image_out);
 
 } // extern "C"
 } } // namespace rocr::image

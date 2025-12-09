@@ -59,6 +59,7 @@ struct ImageExtTableInternal : public ImageExtTable {
   decltype(::hsa_ext_image_data_get_info_v2)* hsa_ext_image_data_get_info_v2_fn;
   decltype(::hsa_ext_image_create_v2)* hsa_ext_image_create_v2_fn;
   decltype(::hsa_ext_image_destroy_v2)* hsa_ext_image_destroy_v2_fn;
+  decltype(::hsa_ext_image_mipmap_array_get_level)* hsa_ext_image_mipmap_array_get_level_fn;
 };
 
 struct PcSamplingExtTableInternal : public PcSamplingExtTable {};

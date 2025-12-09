@@ -505,6 +505,21 @@ hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) 
   CATCH;
 }
 
+// per-level view retrieval implementation
+hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                                          const hsa_ext_image_t* mipmapped_array,
+                                                          uint32_t mip_level,
+                                                          hsa_ext_image_t* level_image_out) {
+  TRY if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
+
+  auto* rt = rocr::image::ImageRuntime::instance();
+  if (!rt) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  return rt->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level, *level_image_out);
+
+  CATCH
+}
+
 void LoadImage(core::ImageExtTableInternal* image_api,
                decltype(::hsa_amd_image_create)** interface_api) {
   image_api->hsa_ext_image_get_capability_fn = hsa_ext_image_get_capability;
@@ -541,6 +556,7 @@ void LoadImage(core::ImageExtTableInternal* image_api,
   image_api->hsa_ext_image_data_get_info_v2_fn = hsa_ext_image_data_get_info_v2;
   image_api->hsa_ext_image_create_v2_fn = hsa_ext_image_create_v2;
   image_api->hsa_ext_image_destroy_v2_fn = hsa_ext_image_destroy_v2;
+  image_api->hsa_ext_image_mipmap_array_get_level_fn = hsa_ext_image_mipmap_array_get_level;
 
   *interface_api = hsa_amd_image_create;
 }
