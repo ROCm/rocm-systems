@@ -39,6 +39,9 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <dlfcn.h>
 #include <string>
 #include <vector>
@@ -121,20 +124,13 @@ invoke_register_propagation()
 
     if(!invoke_all_fn)
     {
-        // Build a comma-separated list of table names for the error message
-        std::string table_list;
-        for(size_t i = 0; i < registered_tables.size(); ++i)
-        {
-            if(i > 0) table_list += ", ";
-            table_list += registered_tables[i];
-        }
-
-        ROCP_ERROR << "Found " << registered_tables.size() << " registered API tables ("
-                   << table_list
-                   << ") but rocprofiler_register_invoke_all_registrations is not available. "
-                   << "The loaded rocprofiler-register version (pre-7.0) does not support "
-                      "late-start profiling. "
-                   << "Please update to ROCm 7.0 or later.";
+        ROCP_ERROR << fmt::format(
+            "Found {} registered API tables ({}) but "
+            "rocprofiler_register_invoke_all_registrations is not available. "
+            "The loaded rocprofiler-register version (pre-7.0) does not support "
+            "late-start profiling. Please update to ROCm 7.0 or later.",
+            registered_tables.size(),
+            fmt::join(registered_tables, ", "));
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
     }
 
