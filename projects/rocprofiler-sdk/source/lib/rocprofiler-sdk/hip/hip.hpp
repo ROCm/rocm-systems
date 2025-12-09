@@ -113,9 +113,5 @@ copy_table(TableT* _orig, uint64_t _tbl_instance);
 template <typename TableT>
 void
 update_table(TableT* _orig);
-
-template <typename TableT>
-void
-restore_table(TableT* _table);
 }  // namespace hip
 }  // namespace rocprofiler
