@@ -396,6 +396,13 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, unsigned 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
+  if (hipStream_t lastCaptureStream = e->GetCaptureStream()) {
+    if (hip::isValid(lastCaptureStream)) {
+      if ((lastCaptureStream != nullptr) && (lastCaptureStream != hipStreamLegacy)) {
+        reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->EraseCaptureEvent(event);
+      }
+    }
+  }
   e->SetCaptureStream(stream);
   if ((stream != nullptr && stream != hipStreamLegacy) &&
       (s->GetCaptureStatus() == hipStreamCaptureStatusActive)) {

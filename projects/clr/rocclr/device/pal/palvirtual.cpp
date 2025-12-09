@@ -566,10 +566,10 @@ bool VirtualGPU::Queue::isDone(uint id) {
     // Flush the current command buffer
     if (!flush()) {
       // If flush failed, then exit earlier...
+      gpu_.dev().gpu_error_ = CL_INVALID_OPERATION;
       return false;
     }
   }
-
   if (Pal::Result::Success != iCmdFences_[id % max_command_buffers_]->GetStatus()) {
     return false;
   }

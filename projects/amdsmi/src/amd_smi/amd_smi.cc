@@ -4556,28 +4556,33 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
 
-    info->socket_power = 0xFFFF;
-    info->current_socket_power = 0xFFFF;
-    info->average_socket_power = 0xFFFF;
-    info->gfx_voltage = 0xFFFF;
-    info->soc_voltage = 0xFFFF;
-    info->mem_voltage = 0xFFFF;
-    info->power_limit = 0xFFFF;
+    info->socket_power = get_std_num_limit<decltype(info->socket_power)>();
+    info->current_socket_power = get_std_num_limit<decltype(info->current_socket_power)>();
+    info->average_socket_power = get_std_num_limit<decltype(info->average_socket_power)>();
+    info->gfx_voltage = get_std_num_limit<decltype(info->gfx_voltage)>();
+    info->soc_voltage = get_std_num_limit<decltype(info->soc_voltage)>();
+    info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
+    info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
 
     amdsmi_gpu_metrics_t metrics = {};
     status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        info->current_socket_power = metrics.current_socket_power;
-        info->average_socket_power = metrics.average_socket_power;
-        info->gfx_voltage = metrics.voltage_gfx;
-        info->soc_voltage = metrics.voltage_soc;
-        info->mem_voltage = metrics.voltage_mem;
-    }
+        if (metrics.current_socket_power != get_std_num_limit<decltype(metrics.current_socket_power)>())
+            info->current_socket_power = metrics.current_socket_power;
+        if (metrics.average_socket_power != get_std_num_limit<decltype(metrics.average_socket_power)>())
+            info->average_socket_power = metrics.average_socket_power;
+        if (metrics.voltage_gfx != get_std_num_limit<decltype(metrics.voltage_gfx)>())
+            info->gfx_voltage = metrics.voltage_gfx;
+        if (metrics.voltage_soc != get_std_num_limit<decltype(metrics.voltage_soc)>())
+            info->soc_voltage = metrics.voltage_soc;
+        if (metrics.voltage_mem != get_std_num_limit<decltype(metrics.voltage_mem)>())
+            info->mem_voltage = metrics.voltage_mem;
 
-    if (metrics.current_socket_power != 0xFFFF) {
-        info->socket_power = metrics.current_socket_power;
-    } else if (metrics.average_socket_power != 0xFFFF) {
-        info->socket_power = metrics.average_socket_power;
+        /* store something in socket power */
+        if (info->current_socket_power != get_std_num_limit<decltype(info->current_socket_power)>())
+            info->socket_power = info->current_socket_power;
+        else if (info->average_socket_power != get_std_num_limit<decltype(info->average_socket_power)>())
+            info->socket_power = info->average_socket_power;
     }
 
     int power_limit = 0;
@@ -4585,6 +4590,8 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
     if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
+    } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
+        status = AMDSMI_STATUS_SUCCESS;
     }
 
     // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
