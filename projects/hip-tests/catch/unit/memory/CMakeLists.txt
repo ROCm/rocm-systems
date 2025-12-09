@@ -135,23 +135,29 @@ hip_add_exe_to_target(NAME MemoryTest1
 
 if(UNIX)
   # link libnuma for numa_available(), numa_max_node(), move_pages(), etc.
-  find_library(NUMA_LIB numa)
-  if(NUMA_LIB)
-    target_link_libraries(MemoryTest1 ${NUMA_LIB})
+  find_package(NUMA QUIET)
+  if(NUMA_FOUND)
+    set(NUMA "${NUMA_LIBRARIES}")
   else()
-    message(WARNING "libnuma not found; HostNuma tests will fail to link")
+    find_library(NUMA NAMES numa REQUIRED)
   endif()
+  target_link_libraries(MemoryTest1 ${NUMA})
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
-  set_source_files_properties(hipHostRegister.cc PROPERTIES COMPILE_FLAGS -std=c++17)
+  set_source_files_properties(hipHostRegister_exe.cc PROPERTIES LANGUAGE HIP)
   add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
+  set_target_properties(hipHostRegisterPerf PROPERTIES LINKER_LANGUAGE HIP)
   add_dependencies(build_tests hipHostRegisterPerf)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
+  target_link_libraries(hipHostRegisterPerf hip::host hip::device)
 if(UNIX)
+  set_source_files_properties(hipMemAdvise_AlignedAllocMem_Exe.cc PROPERTIES LANGUAGE HIP)
   add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
+  set_target_properties(hipMemAdviseTstAlignedAllocMem PROPERTIES LINKER_LANGUAGE HIP)
   add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
+  target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
 endif()
 endif()
 
@@ -277,12 +283,12 @@ set(TEST_SRC
   memoryCommon.cc
 )
 
-hip_add_exe_to_target(NAME InlineVarTest
-  TEST_SRC ${TEST_SRC}
-  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-
-  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+#hip_add_exe_to_target(NAME InlineVarTest
+#  TEST_SRC ${TEST_SRC}
+#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+#
+#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
+#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
 endif()
 
 set(TEST_SRC

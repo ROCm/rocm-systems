@@ -97,37 +97,37 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
   switch (memsetType) {
     case hipMemsetTypeDefault:
       if (!async) {
-        INFO("Testing hipMemset call")
+        INFO("Testing hipMemset call");
         HIP_MEMSET_CHECK(hipMemset, devPtr, value, count, false);
       } else {
-        INFO("Testing hipMemsetAsync call")
+        INFO("Testing hipMemsetAsync call");
         HIP_MEMSET_CHECK(hipMemsetAsync, devPtr, value, count, true);
       }
       break;
     case hipMemsetTypeD8:
       if (!async) {
-        INFO("Testing hipMemsetD8 call")
+        INFO("Testing hipMemsetD8 call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD8, devPtr, value, count, false);
       } else {
-        INFO("Testing hipMemsetD8Async call")
+        INFO("Testing hipMemsetD8Async call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD8Async, devPtr, value, count, true);
       }
       break;
     case hipMemsetTypeD16:
       if (!async) {
-        INFO("Testing hipMemsetD16 call")
+        INFO("Testing hipMemsetD16 call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD16, devPtr, value, count, false);
       } else {
-        INFO("Testing hipMemsetD16Async call")
+        INFO("Testing hipMemsetD16Async call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD16Async, devPtr, value, count, true);
       }
       break;
     case hipMemsetTypeD32:
       if (!async) {
-        INFO("Testing hipMemsetD32 call")
+        INFO("Testing hipMemsetD32 call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD32, devPtr, value, count, false);
       } else {
-        INFO("Testing hipMemsetD32Async call")
+        INFO("Testing hipMemsetD32Async call");
         HIP_MEMSET_CHECK_DTYPE(hipMemsetD32Async, devPtr, value, count, true);
       }
       break;
@@ -262,10 +262,10 @@ template <typename T> void checkMemset2D(T value, size_t width, size_t height, b
   }
 
   if (!async) {
-    INFO("Testing hipMemset2D call")
+    INFO("Testing hipMemset2D call");
     HIP_CHECK(hipMemset2D(devPtr, pitch, value, width * elementSize, height));
   } else {
-    INFO("Testing hipMemset2DAsync call")
+    INFO("Testing hipMemset2DAsync call");
     HIP_CHECK(hipMemset2DAsync(devPtr, pitch, value, width * elementSize, height, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -355,7 +355,7 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
   checkMemset2D(valA, width, height, async, pitch, devPtr);
 
   // Set partial region to be second value.
-  INFO("Setting partial square region")
+  INFO("Setting partial square region");
   checkMemset2D(valB, subWidth, subHeight, async, pitch, devPtr);
 
   auto hostPtr = get_device_data_2D<T>(devPtr, pitch, width, height);
@@ -424,7 +424,7 @@ void check_device_data_3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent exten
     for (size_t j = 0; j < height; j++) {
       for (size_t i = 0; i < width; i++) {
         idx = devPitchedPtr.pitch * height * k + devPitchedPtr.pitch * j + i;
-        INFO("idx=" << idx << " hostPtr[idx]=" << hostPtr[idx] << " value=" << value)
+        INFO("idx=" << idx << " hostPtr[idx]=" << hostPtr[idx] << " value=" << value);
         HIP_ASSERT(hostPtr[idx] == value);
       }
     }
@@ -441,10 +441,10 @@ void checkMemset3D(hipPitchedPtr& devPitchedPtr, T value, hipExtent extent, bool
     HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
   }
   if (!async) {
-    INFO("Testing hipMemset3D call")
+    INFO("Testing hipMemset3D call");
     HIP_CHECK(hipMemset3D(devPitchedPtr, value, extent));
   } else {
-    INFO("Testing hipMemset3DAsync call")
+    INFO("Testing hipMemset3DAsync call");
     HIP_CHECK(hipMemset3DAsync(devPitchedPtr, value, extent, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -531,9 +531,13 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
   hipExtent subExtent = make_hipExtent(subWidth * sizeof(T), subHeight, subDepth);
 
   // Set entire region to be first value.
-  INFO("Setting full cuboid region") { checkMemset3D(devPitchedPtr, valA, extent, async); }
+  INFO("Setting full cuboid region");
+  checkMemset3D(devPitchedPtr, valA, extent, async);
+
   // Set partial region to be second value.
-  INFO("Setting partial cuboid region") { checkMemset3D(devPitchedPtr, valB, subExtent, async); }
+  INFO("Setting partial cuboid region");
+  checkMemset3D(devPitchedPtr, valB, subExtent, async);
+
   auto pitch = devPitchedPtr.pitch;
   auto hostPtr = get_device_data_3D<T>(devPitchedPtr, extent);
   T comparVal{0};
