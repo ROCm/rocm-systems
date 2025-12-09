@@ -532,6 +532,13 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
+# src/hip (local hip python wrapper)
+install(
+    DIRECTORY src/hip
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/rocprof_compute_analyze
 install(
     DIRECTORY src/rocprof_compute_analyze

@@ -19,6 +19,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
+* Runtime Compilation of Roofline benchmarking
+  * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the Rocprofiler-Compute project and are compiled at runtime using local HIP and HIPRTC python wrappers.
+  * Roofline binaries compiled from rocm-amdgpu-bench repository have been removed from the project, as Roofline Runtime Compilation performs the same work as the Roofline binaries.
+  * User can collect standalone Roofline empirical peaks without running entire Rocprofiler-Compute's profile mode through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/utils/benchmark.py) - running `benchmark.py` replaces calling standalone Roofline binary.
+
 ### Changed
 
 * Default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
