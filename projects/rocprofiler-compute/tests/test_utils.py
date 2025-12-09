@@ -98,10 +98,8 @@ def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
 
     func_name = inspect.stack()[1].function
 
-    # Include param_id in directory name if provided
     param_suffix = ""
     if param_id:
-        # Sanitize param_id: replace special chars that may not be valid in paths
         param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
 
     output_dir = func_name + param_suffix + suffix
