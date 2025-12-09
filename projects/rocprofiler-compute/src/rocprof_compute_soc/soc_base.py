@@ -36,6 +36,7 @@ import yaml
 
 import config
 from roofline import Roofline
+from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -53,7 +54,6 @@ from utils.utils import (
     convert_metric_id_to_panel_info,
     get_panel_alias,
     is_tcc_channel_counter,
-    mibench,
     parse_sets_yaml,
 )
 
@@ -414,13 +414,28 @@ class OmniSoC_Base:
         os.environ["ROCPROFILER_METRICS_PATH"] = str(
             config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
         )
-        sys.path.append(
-            str(
-                Path(args.rocprofiler_sdk_tool_path).parents[1]
-                / "python3/site-packages"
-            )
+
+        # Backward compatibility support for sdk avail module moved from
+        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
+        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
+        new_path = str(
+            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
         )
-        from rocprofv3 import avail
+        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
+        try:
+            sys.path.append(new_path)
+            from rocprofv3 import avail
+        except ImportError:
+            console_debug(
+                f"Could not import rocprofiler-sdk avail module from {new_path}, "
+                f"trying {old_path}"
+            )
+            try:
+                sys.path.remove(new_path)
+                sys.path.append(old_path)
+                from rocprofv3_avail_module import avail
+            except ImportError:
+                console_error("Failed to import rocprofiler-sdk avail module.")
 
         avail.loadLibrary.libname = str(
             Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
@@ -665,7 +680,9 @@ class OmniSoC_Base:
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                mibench(self.get_args(), self._mspec)
+                result = benchmark.run_on_devices([self.get_args().device])
+                benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+
             self.roofline_obj.post_processing()
 
     @abstractmethod

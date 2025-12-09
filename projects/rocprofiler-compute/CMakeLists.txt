@@ -53,6 +53,15 @@ set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
+include(utils.cmake)
+
+set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
+set(BUILD_DEBIAN_PKGING_FLAG
+    ON
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
+set(COMP_TYPE "main")
 
 # version control info
 execute_process(
@@ -225,6 +234,21 @@ set(PYTEST_NUMPROCS_ANALYSIS
 message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS_ANALYSIS}")
 
 # ---------------------------
+# add tests
+# ---------------------------
+
+option(
+    TEST_FROM_INSTALL
+    "Test from install directory rather than from source directory"
+    OFF
+)
+if(TEST_FROM_INSTALL)
+    set(WORKING_DIR_OPTION "")
+else()
+    set(WORKING_DIR_OPTION WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endif()
+
+# ---------------------------
 # profile mode tests
 # ---------------------------
 
@@ -233,8 +257,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m kernel_execution
         --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -242,48 +265,42 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m dispatch
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_mem
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m mem --junitxml=tests/test_profile_mem.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_join
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m join --junitxml=tests/test_profile_join.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_sort
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m sort --junitxml=tests/test_profile_sort.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_misc
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m misc --junitxml=tests/test_profile_misc.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_path
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m path --junitxml=tests/test_profile_path.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -291,8 +308,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m roofline_1
         --junitxml=tests/test_profile_roofline_1.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -300,8 +316,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m roofline_2
         --junitxml=tests/test_profile_roofline_2.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -309,8 +324,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m section
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -318,8 +332,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -s -m pc_sampling
         --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -327,8 +340,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m sets_func
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -336,8 +348,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -s -m live_attach_detach
         --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -345,8 +356,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -s -m iteration_multiplexing
         --junitxml=tests/test_profile_iteration_multiplexing.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
@@ -376,8 +386,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS_ANALYSIS} --verbose
         --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_analyze_commands.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -389,8 +398,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS}
         --junitxml=tests/test_analyze_workloads.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_analyze_workloads.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -402,8 +410,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m L1_cache
         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_TCP_counters.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -415,8 +422,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m num_xcds_spec_class
         --junitxml=tests/test_num_xcds_spec_class.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_gpu_specs.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -424,8 +430,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m num_xcds_cli_output
         --junitxml=tests/test_num_xcds_cli_output.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_gpu_specs.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -436,8 +441,7 @@ add_test(
     NAME test_utils
     COMMAND
         ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_utils.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_utils.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        tests/test_utils.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -448,8 +452,7 @@ add_test(
     NAME test_autogen_config
     COMMAND
         ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_autogen_config.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_autogen_config.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        ${COV_OPTION} tests/test_autogen_config.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -482,8 +485,9 @@ if(${ENABLE_COVERAGE})
 
     add_test(
         NAME generate_coverage_report
-        COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMAND
+            ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
+            ${WORKING_DIR_OPTION}
     )
 
     set_tests_properties(
@@ -622,6 +626,12 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
 )
 
+set(STANDALONEBINARY_EXTRACT_DIR
+    "/tmp"
+    CACHE PATH
+    "Prefix path for standalone binary extraction"
+)
+
 # Standalone binary creation
 add_custom_target(
     standalonebinary
@@ -643,8 +653,12 @@ add_custom_target(
     # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
         ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
+        --product-name=${STANDALONEBINARY_EXTRACT_DIR}
+        --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID}
         --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
         --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
+        --include-data-files=src/lib/helper.cpp=lib/helper.cpp
+        --include-data-files=src/lib/helper.hpp=lib/helper.hpp
         --include-package=dash_svg --include-package-data=dash_svg
         --include-package=dash_bootstrap_components
         --include-package-data=dash_bootstrap_components --include-package=plotly
@@ -655,7 +669,8 @@ add_custom_target(
         --include-package-data=rocprof_compute_profile
         --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils src/rocprof-compute
+        --include-package=utils --include-package-data=utils
+        --include-package=hip --include-package-data=hip src/rocprof-compute
     # Remove library rpath from executable
     COMMAND patchelf --remove-rpath rocprof-compute.bin
     # Move to build directory
@@ -680,6 +695,24 @@ if(INSTALL_TESTS)
         PATTERN "__pycache__" EXCLUDE
     )
     install(
+        DIRECTORY tests/workloads
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        COMPONENT tests
+        PATTERN "__pycache__" EXCLUDE
+    )
+    install(
+        PROGRAMS
+            tests/vcopy
+            tests/vmem
+            tests/vrandom_access
+            tests/vsequential_access
+            tests/occupancy
+            tests/hip_dynamic_shared
+            tests/mat_mul_max
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        COMPONENT tests
+    )
+    install(
         FILES requirements-test.txt
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
         COMPONENT tests
@@ -696,6 +729,8 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # Packaging
 # ----------
 
+set(PKG_MAINTAINER_NM "rocprofiler compute support")
+set(PKG_MAINTAINER_EMAIL "dl.omnitools@amd.com")
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM" CACHE STRING "")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}" CACHE STRING "")
@@ -799,5 +834,7 @@ set(CPACK_SOURCE_IGNORE_FILES
     /tests
     /build
 )
+
+configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 include(CPack)

@@ -267,7 +267,7 @@ trap_entry:
   //   [0x08] out_buf_t* stochastic_trap_buffers;
   //
   // --- Start profile trap handlers GFX9 --- //
-  // If the wave entered the trap handler: 
+  // If the wave entered the trap handler:
   // If on gfx9:
   // - Check SQ_WAVE_PC_HI_HT_SHIFT bit on TTMP1 register to
   //   identify if it was a host trap.

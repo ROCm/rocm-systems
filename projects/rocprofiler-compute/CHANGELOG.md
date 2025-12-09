@@ -34,6 +34,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
 
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
@@ -47,6 +49,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Adds support for dispatch timeline analysis.
   * Shows duration as median in addition to mean in kernel view.
 
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
@@ -58,6 +64,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Empty cells replaced with `N/A` for unavailable metrics in analysis.
 
 
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
+
 ### Removed
 
 * Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
@@ -67,6 +77,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
+
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
 
 ### Known issues
 
@@ -96,7 +108,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved Roofline Benchmarking by updating the `flops_benchmark` calculation.
 
 ### Resolved issues
-
 * Bugfixes for stability
 
 ## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
@@ -254,7 +265,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
 
 * The profile mode crashes when `--format-rocprof-output json` is selected.
-  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.  
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.
 
 ### Upcoming changes
 
