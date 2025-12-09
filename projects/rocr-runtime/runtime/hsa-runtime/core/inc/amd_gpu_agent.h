@@ -484,12 +484,27 @@ class GpuAgent : public GpuAgentInt {
     const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
     const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
 
-    return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-	    supported_isas()[0]->GetMajorVersion() == 9 &&
-	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
-	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
-	     (supported_isas()[0]->GetMinorVersion() == 5 &&
-	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
+    if (!core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim())
+      return false;
+
+    switch (supported_isas()[0]->GetMajorVersion()) {
+      case 9:
+        switch (supported_isas()[0]->GetMinorVersion()) {
+          case 4:
+            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+          case 5:
+            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+          default:
+            break;
+        }
+        break;
+      case 12:
+        return (supported_isas()[0]->GetMinorVersion() >= 5);
+      default:
+        break;
+    }
+
+    return false;
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
