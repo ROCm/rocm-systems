@@ -349,13 +349,13 @@ set(TEST_SRC
   hipFuncSetAttribute.cc
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
-  hipManagedKeyword.cc
+  hipManagedKeywordBasic.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
-    hipExtLaunchMultiKernelMultiDevice.cc
+    hipExtLaunchMultiKernelMultiDevFunctional.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
