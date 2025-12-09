@@ -103,12 +103,6 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,          ///< Exceeds hardware limits for collection.
     ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,  ///< Agent HW architecture not supported.
     ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,         ///< Permission denied.
-    ROCPROFILER_STATUS_ERROR_HSA_NOT_AVAILABLE,         ///< HSA runtime requested but not available
-                                                        ///< for late-start (not loaded or not
-                                                        ///< initialized)
-    ROCPROFILER_STATUS_ERROR_HIP_NOT_AVAILABLE,         ///< HIP runtime requested but not available
-                                                        ///< for late-start (not loaded or not
-                                                        ///< initialized)
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -428,23 +422,6 @@ typedef enum rocprofiler_intercept_table_t
     ROCPROFILER_ROCJPEG_TABLE        = (1 << 8),
     ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCJPEG_TABLE,
 } rocprofiler_intercept_table_t;
-
-/**
- * @brief Flags for rocprofiler_start_late() function
- *
- * These flags control which runtime APIs are wrapped when late-starting
- * the profiler. Multiple flags can be combined using bitwise OR.
- *
- * @see ::rocprofiler_start_late
- */
-typedef enum rocprofiler_late_start_flags_t
-{
-    ROCPROFILER_LATE_START_HSA   = (1 << 0),  ///< Wrap HSA APIs
-    ROCPROFILER_LATE_START_HIP   = (1 << 1),  ///< Wrap HIP APIs
-    ROCPROFILER_LATE_START_ROCTX = (1 << 2),  ///< Wrap ROCTx APIs
-    ROCPROFILER_LATE_START_ALL   = 0x7,       ///< Wrap all available APIs (HSA | HIP | ROCTx)
-    ROCPROFILER_LATE_START_AUTO  = (1 << 8),  ///< Auto-detect loaded runtimes and wrap all
-} rocprofiler_late_start_flags_t;
 
 /**
  * @brief ROCProfiler Runtime Initialization Tracer Operations.

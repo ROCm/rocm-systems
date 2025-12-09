@@ -118,12 +118,6 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,
                           "Agent HW architecture is not supported, no counter metrics found.")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
                           "Required permission (CAP_PERFMON) is not set, permission denied")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_HSA_NOT_AVAILABLE,
-                          "HSA runtime requested but not available for late-start "
-                          "(not loaded or not initialized)")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_HIP_NOT_AVAILABLE,
-                          "HIP runtime requested but not available for late-start "
-                          "(not loaded or not initialized)")
 
 template <size_t Idx, size_t... Tail>
 const char*
