@@ -64,7 +64,7 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        system: |
+        system:
           - { gpu: 'mi300a', runner: 'rocprofiler-mi300a-dind', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
