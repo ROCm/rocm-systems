@@ -785,13 +785,6 @@ ExecutableImpl::~ExecutableImpl() {
     delete o;
   }
   objects.clear();
-
-  for (auto &symbol_entry : program_symbols_) {
-    delete symbol_entry.second;
-  }
-  for (auto &symbol_entry : agent_symbols_) {
-    delete symbol_entry.second;
-  }
 }
 
 hsa_status_t ExecutableImpl::DefineProgramExternalVariable(
@@ -811,7 +804,7 @@ hsa_status_t ExecutableImpl::DefineProgramExternalVariable(
 
   program_symbols_.insert(
     std::make_pair(std::string(name),
-                   new VariableSymbol(true,
+                   std::make_shared<VariableSymbol>(true,
                                       "", // Only program linkage symbols can be
                                           // defined.
                                       std::string(name),
@@ -895,14 +888,14 @@ Symbol* ExecutableImpl::GetSymbolInternal(
   if (!agent) {
     auto program_symbol = program_symbols_.find(mangled_name);
     if (program_symbol != program_symbols_.end()) {
-      return program_symbol->second;
+      return program_symbol->second.get();
     }
     return nullptr;
   }
 
   auto agent_symbol = agent_symbols_.find(std::make_pair(mangled_name, *agent));
   if (agent_symbol != agent_symbols_.end()) {
-    return agent_symbol->second;
+    return agent_symbol->second.get();
   }
   return nullptr;
 }
@@ -915,14 +908,14 @@ hsa_status_t ExecutableImpl::IterateSymbols(
 
   for (auto &symbol_entry : program_symbols_) {
     hsa_status_t hsc =
-      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (HSA_STATUS_SUCCESS != hsc) {
       return hsc;
     }
   }
   for (auto &symbol_entry : agent_symbols_) {
     hsa_status_t hsc =
-      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (HSA_STATUS_SUCCESS != hsc) {
       return hsc;
     }
@@ -947,7 +940,7 @@ hsa_status_t ExecutableImpl::IterateAgentSymbols(
     }
 
     hsa_status_t status = callback(
-        Executable::Handle(this), agent, Symbol::Handle(symbol_entry.second),
+        Executable::Handle(this), agent, Symbol::Handle(symbol_entry.second.get()),
         data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
@@ -967,7 +960,7 @@ hsa_status_t ExecutableImpl::IterateProgramSymbols(
 
   for (auto &symbol_entry : program_symbols_) {
     hsa_status_t status = callback(
-        Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+        Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
     }
@@ -1223,7 +1216,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   uint32_t codeNum = NextCodeObjectNum();
 
-  code.reset(new code::AmdHsaCode());
+  code = std::make_unique<code::AmdHsaCode>();
 
   std::string substituteFileName;
   for (const Substitute& ss : substitutes) {
@@ -1470,7 +1463,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
   }
 
   uint64_t address = SymbolAddress(agent, sym);
-  SymbolImpl *symbol = nullptr;
+  std::shared_ptr<SymbolImpl> symbol;
   if (string_ends_with(sym->GetSymbolName(), ".kd")) {
     // V3.
     llvm::amdhsa::kernel_descriptor_t kd;
@@ -1485,7 +1478,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
 
     uint64_t size = sym->Size();
 
-    KernelSymbol *kernel_symbol = new KernelSymbol(true,
+    std::shared_ptr<KernelSymbol> kernel_symbol = std::make_shared<KernelSymbol>(true,
                                     sym->GetModuleName(),
                                     sym->GetSymbolName(),
                                     sym->Linkage(),
@@ -1501,7 +1494,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
                                     address);
     symbol = kernel_symbol;
   } else if (sym->IsVariableSymbol()) {
-    symbol = new VariableSymbol(true,
+    symbol = std::make_shared<VariableSymbol>(true,
                        sym->GetModuleName(),
                        sym->GetSymbolName(),
                        sym->Linkage(),
@@ -1536,7 +1529,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
         // calculate end of segment - symbol value.
         size = sym->GetSection()->size() - sym->SectionOffset();
       }
-      KernelSymbol *kernel_symbol = new KernelSymbol(true,
+      std::shared_ptr<KernelSymbol> kernel_symbol = std::make_shared<KernelSymbol>(true,
                                       sym->GetModuleName(),
                                       sym->GetSymbolName(),
                                       sym->Linkage(),

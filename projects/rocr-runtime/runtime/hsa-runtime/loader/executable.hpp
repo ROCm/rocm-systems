@@ -461,7 +461,7 @@ public:
 };
 
 typedef std::string ProgramSymbol;
-typedef std::unordered_map<ProgramSymbol, SymbolImpl*> ProgramSymbolMap;
+typedef std::unordered_map<ProgramSymbol, std::shared_ptr<SymbolImpl>> ProgramSymbolMap;
 
 typedef std::pair<std::string, hsa_agent_t> AgentSymbol;
 struct ASC {
@@ -476,7 +476,7 @@ struct ASH {
     return h ^ (i << 1);
   }
 };
-typedef std::unordered_map<AgentSymbol, SymbolImpl*, ASH, ASC> AgentSymbolMap;
+typedef std::unordered_map<AgentSymbol, std::shared_ptr<SymbolImpl>, ASH, ASC> AgentSymbolMap;
 
 class ExecutableImpl final: public Executable {
 friend class AmdHsaCodeLoader;
