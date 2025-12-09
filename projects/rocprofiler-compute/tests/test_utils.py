@@ -7719,21 +7719,21 @@ def test_amdsmi_ctx():
             amdsmi_shutdown_mock.assert_called_once()
 
 
-def test_amdsmi_get_device_handle():
-    from utils.amdsmi_interface import get_device_handle, import_amdsmi_module
+def test_amdsmi_get_device_handles():
+    from utils.amdsmi_interface import get_device_handles, import_amdsmi_module
 
     _ = import_amdsmi_module()
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
-        get_device_handle()
+        get_device_handles()
         device_handles_mock.assert_called_once()
 
     with mock.patch(
         "amdsmi.amdsmi_get_processor_handles", side_effect=Exception("Mock exception")
     ) as device_handles_mock:
-        handle = get_device_handle()
-        assert handle is None
+        handle = get_device_handles()
+        assert len(handle) == 0
 
 
 def test_amdsmi_get_mem_max_clock():
@@ -7771,7 +7771,7 @@ def test_amdsmi_get_gpu_model():
             "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")
         ):
             model = get_gpu_model()
-            assert model == "N/A"
+            assert model == ("N/A", "N/A", "N/A")
 
 
 def test_amdsmi_get_gpu_vbios_part_number():
