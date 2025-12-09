@@ -843,7 +843,7 @@ Device::~Device() {
 extern const char* SchedulerSourceCode;
 extern const char* SchedulerSourceCode20;
 
-constexpr int TrapHandlerABIVersion = 10;
+constexpr int TrapHandlerABIVersion = 11;
 extern const char* TrapHandlerCode;
 
 // ================================================================================================

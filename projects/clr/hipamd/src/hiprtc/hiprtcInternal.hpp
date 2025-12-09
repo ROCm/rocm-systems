@@ -121,8 +121,8 @@ class RTCCompileProgram : public hip::RTCProgram {
   std::vector<std::string> compile_options_;
   std::vector<std::string> link_options_;
 
-  amd_comgr_data_set_t compile_input_;
-  amd_comgr_data_set_t link_input_;
+  hip::comgr_helper::ComgrDataSetUniqueHandle compile_input_;
+  hip::comgr_helper::ComgrDataSetUniqueHandle link_input_;
 
   bool fgpu_rdc_;
   std::vector<char> LLVMBitcode_;
@@ -141,10 +141,7 @@ class RTCCompileProgram : public hip::RTCProgram {
 
  public:
   RTCCompileProgram(std::string);
-  ~RTCCompileProgram() {
-    amd::Comgr::destroy_data_set(compile_input_);
-    amd::Comgr::destroy_data_set(link_input_);
-  }
+  ~RTCCompileProgram() {}
 
   // Converters
   inline static hiprtcProgram as_hiprtcProgram(RTCCompileProgram* p) {
