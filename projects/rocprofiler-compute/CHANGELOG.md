@@ -19,10 +19,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
-* Runtime Compilation of Roofline benchmarking
-  * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the Rocprofiler-Compute project and are compiled at runtime using local HIP and HIPRTC python wrappers.
-  * Roofline binaries compiled from rocm-amdgpu-bench repository have been removed from the project, as Roofline Runtime Compilation performs the same work as the Roofline binaries.
-  * User can collect standalone Roofline empirical peaks without running entire Rocprofiler-Compute's profile mode through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py) - running `benchmark.py` replaces calling standalone Roofline binary.
+* Runtime compilation of Roofline benchmarking:
+  * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
+  * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed from the project, as Roofline runtime compilation performs the same work as the Roofline binaries.
+  * You can collect standalone Roofline empirical peaks without running the entire ROCm Compute Profiler's profile mode, through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Running the `benchmark.py` Python file replaces calling standalone Roofline binary.
 
 ### Changed
 
