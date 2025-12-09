@@ -517,7 +517,7 @@ add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeS
 # Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
 
-# Find hwloc library
+# Find hwloc library (optional - only needed for certain performance tests)
 # Try pkg-config first (for super-project builds)
 if(PKG_CONFIG_FOUND)
   pkg_check_modules(HWLOC QUIET hwloc)
@@ -527,30 +527,38 @@ if(PKG_CONFIG_FOUND)
   endif()
 endif()
 
-# If not found via pkg-config, try bundled version
+# If not found via pkg-config, check for bundled version (any version)
 if(NOT HWLOC_FOUND)
-  find_library(HWLOC_LIBRARY NAMES hwloc
-    PATHS
-      ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib
-    NO_DEFAULT_PATH
-  )
-  set(HWLOC_BUNDLED_FOUND FALSE)
+  # Use file(GLOB) to find any libhwloc.so* file regardless of version
+  file(GLOB HWLOC_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so*")
   if(HWLOC_LIBRARY)
-    set(HWLOC_BUNDLED_FOUND TRUE)
+    list(GET HWLOC_LIBRARY 0 HWLOC_LIBRARY)  # Take first match if multiple versions exist
+    set(HWLOC_FOUND TRUE)
     message(STATUS "Found bundled hwloc library: ${HWLOC_LIBRARY}")
   else()
     # Fall back to system hwloc
     find_library(HWLOC_LIBRARY NAMES hwloc)
     if(HWLOC_LIBRARY)
+      set(HWLOC_FOUND TRUE)
       message(WARNING "Using system hwloc library: ${HWLOC_LIBRARY}")
       message(WARNING "  Consider using bundled version to avoid compatibility issues")
-    else()
-      message(FATAL_ERROR "hwloc library not found. Please install libhwloc-dev or hwloc-devel package.")
     endif()
   endif()
 endif()
 
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt ${NUMA_LIBS} ${HWLOC_LIBRARY})
+# Handle hwloc availability
+if(HWLOC_FOUND)
+  set(HWLOC_LIBS ${HWLOC_LIBRARY})
+  set(HAVE_HWLOC TRUE)
+  message(STATUS "hwloc support enabled")
+else()
+  message(FATAL_ERROR "hwloc library not found. Required for rocrtst build. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS)")
+endif()
+
+# Add HAVE_HWLOC compile definition
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
+
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt ${NUMA_LIBS} ${HWLOC_LIBS})
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
