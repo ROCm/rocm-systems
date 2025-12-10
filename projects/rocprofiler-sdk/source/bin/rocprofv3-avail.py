@@ -296,7 +296,7 @@ def info_pc_sampling(args):
                 "GPU", info["logical_node_type_id"], "Name", info["name"]
             )
         )
-        print("{:8}:".format("configs"))
+        print("{:8}:".format("configscheck PR"))
         for config in configs:
             print(config)
             print("\n")
