@@ -1,19 +1,20 @@
 # AMD specific test
-if(HIP_PLATFORM MATCHES "amd")
-if(UNIX)
-set(TEST_SRC
-    hipMalloc.cc
-)
-# Creating Custom object file
-add_custom_target(malloc_custom COMMAND g++ -c ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.cpp -I${HIP_PATH}/include -D__HIP_PLATFORM_AMD__ -o malloc.o BYPRODUCTS malloc.o)
-add_library(malloc_gpp OBJECT IMPORTED)
-set_property(TARGET malloc_gpp PROPERTY IMPORTED_OBJECTS "${CMAKE_CURRENT_BINARY_DIR}/malloc.o")
+if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GPP_EXEC)
+    set(TEST_SRC
+        hipMalloc.cc
+    )
 
-hip_add_exe_to_target(NAME gppTests
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests
-                      LINKER_LIBS malloc_gpp)
+    add_custom_target(malloc_custom COMMAND ${GPP_EXEC} -c
+        ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.cpp -I${HIP_INCLUDE_DIR}
+        -D__HIP_PLATFORM_AMD__ -o malloc.o BYPRODUCTS malloc.o)
+    add_library(malloc_gpp OBJECT IMPORTED)
+    set_property(TARGET malloc_gpp PROPERTY IMPORTED_OBJECTS
+        "${CMAKE_CURRENT_BINARY_DIR}/malloc.o")
 
-add_dependencies(gppTests malloc_custom)
-endif()
+    hip_add_exe_to_target(NAME gppTests
+                        TEST_SRC ${TEST_SRC}
+                        TEST_TARGET_NAME build_tests
+                        LINKER_LIBS malloc_gpp)
+
+    add_dependencies(gppTests malloc_custom)
 endif()

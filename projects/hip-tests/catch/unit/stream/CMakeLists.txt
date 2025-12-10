@@ -22,6 +22,7 @@ set(TEST_SRC
     hipStreamLegacy_compiler_options.cc
     hipStreamGetId.cc
     hipStreamSetGetAttributes.cc
+    # TODO renable it TheRock is not finding it
     hipStreamCopyAttributes.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -39,9 +40,6 @@ else()
       # in function definition of hipStreamAttachMemAsync
       # Fixing would break ABI, to be re-enabled when the fix is made.
       hipStreamACb_MultiThread.cc)
-
-  # set_source_files_properties(hipStreamAttachMemAsync_old.cc PROPERTIES
-  # COMPILE_FLAGS -std=c++17)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -54,8 +52,12 @@ endif()
 hip_add_exe_to_target(
   NAME StreamTest
   TEST_SRC ${TEST_SRC} TEST_TARGET_NAME build_tests
-  COMPILE_OPTIONS -std=c++17 COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+  COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
+set_source_files_properties(hipStreamLegacy_exe.cc PROPERTIES LANGUAGE HIP)
+set_target_properties(hipStreamLegacy_exe PROPERTIES LINKER_LANGUAGE HIP)
+target_link_libraries(hipStreamLegacy_exe hip::host hip::device)
+
 add_dependencies(StreamTest hipStreamLegacy_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)

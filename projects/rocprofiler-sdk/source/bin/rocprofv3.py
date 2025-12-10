@@ -984,8 +984,8 @@ def get_args(
 
     import re
 
-    filter_regex = re.compile(filter) if filter != None else None
-    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp != None else None
+    filter_regex = re.compile(filter) if filter is not None else None
+    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp is not None else None
 
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):

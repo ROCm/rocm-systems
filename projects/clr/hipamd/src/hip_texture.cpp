@@ -1468,7 +1468,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef, hipMipmappedArra
   resDesc.res.mipmap.mipmap = mipmappedArray;
 
   hipTextureDesc texDesc = hip::getTextureDesc(texRef);
-
+  texDesc.normalizedCoords = texRef->normalized;
   hipResourceViewFormat format =
       hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(mipmappedArray, format);

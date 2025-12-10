@@ -1,7 +1,7 @@
 "project: amdsmi":
 - changed-files:
   - any-glob-to-any-file: 'projects/amdsmi/**/*'
-  
+
 "project: aqlprofile":
 - changed-files:
   - any-glob-to-any-file: 'projects/aqlprofile/**/*'

@@ -992,6 +992,15 @@ bool Device::populateOCLDeviceConstants() {
       info_.uuid_[i] = unique_id[i + 4];
     }
   }
+
+  hsa_luid_t localUID = {0};
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                          &localUID)) {
+    info_.luidLowPart_ = localUID.low;
+    info_.luidHighPart_ = localUID.high;
+  }
+
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           (amd::IS_HIP)
@@ -1743,53 +1752,33 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
   return true;
 }
 
+// ================================================================================================
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
-#if defined(_WIN32)
-  return false;
-#else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
-  MesaInterop::MESA_INTEROP_KIND kind = MesaInterop::MESA_INTEROP_NONE;
-  MesaInterop::DisplayHandle display;
-  MesaInterop::ContextHandle context;
-
-  if ((flags & amd::Context::EGLDeviceKhr) != 0) {
-    kind = MesaInterop::MESA_INTEROP_EGL;
-    display.eglDisplay = reinterpret_cast<EGLDisplay>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
-    context.eglContext = reinterpret_cast<EGLContext>(gfxContext);
-  } else {
-    kind = MesaInterop::MESA_INTEROP_GLX;
-    display.glxDisplay = reinterpret_cast<Display*>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
-    context.glxContext = reinterpret_cast<GLXContext>(gfxContext);
-  }
-
-  mesa_glinterop_device_info info;
-  info.version = MESA_GLINTEROP_DEVICE_INFO_VERSION;
-  if (!MesaInterop::Init(kind)) {
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
+    LogError("Failed GlInterop::glAssociate()");
     return false;
   }
 
-  if (!MesaInterop::GetInfo(info, kind, display, context)) {
-    return false;
-  }
-
-  return info_.deviceTopology_.pcie.bus == info.pci_bus &&
-         info_.deviceTopology_.pcie.device == info.pci_device &&
-         info_.deviceTopology_.pcie.function == info.pci_function &&
-         info_.vendorId_ == info.vendor_id && pciDeviceId_ == info.device_id;
-
-#endif
+  return true;
 }
 
+// ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
-#if defined(_WIN32)
-  return false;
-#else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
+
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (glDevice != nullptr) {
+    if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
+      LogWarning("Failed GlInterop::glDissociate()");
+      return false;
+    }
+  }
   return true;
-#endif
 }
 
 amd::Memory* Device::findMapTarget(size_t size) const {

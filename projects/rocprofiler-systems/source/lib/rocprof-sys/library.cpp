@@ -578,7 +578,11 @@ rocprofsys_init_tooling_hidden(void)
         ROCPROFSYS_DEBUG_F("State: %s -> State::Active\n",
                            std::to_string(get_state()).c_str());
 
-        trace_cache::get_buffer_storage().start(getpid());
+        {
+            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+            trace_cache::get_buffer_storage().start(getpid());
+        }
+
         set_state(State::Active);  // set to active as very last operation
     } };
 
