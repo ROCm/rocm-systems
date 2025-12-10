@@ -1847,12 +1847,8 @@ get_verbose()
 bool&
 get_use_perfetto()
 {
-    static bool _combined = false;
-    static auto _legacy   = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
-    static auto _cached   = get_config()->at("ROCPROFSYS_TRACE_CACHED");
-    _combined             = static_cast<tim::tsettings<bool>&>(*_legacy).get() ||
-                static_cast<tim::tsettings<bool>&>(*_cached).get();
-    return _combined;
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
 bool&
@@ -2161,10 +2157,6 @@ get_perfetto_output_filename()
 {
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
     auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] Initial ROCPROFSYS_PERFETTO_FILE='%s'\n",
-        _val.c_str());
 
     auto _pos_dir = _val.find_last_of('/');
     auto _dir     = std::string{};
