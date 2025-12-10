@@ -2123,7 +2123,8 @@ def amdsmi_get_gpu_asic_info(
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
         "num_compute_units": _validate_if_max_uint(asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T),
         "target_graphics_version": "gfx" + target_graphics_version,
-        "subsystem_id": subsystem_id
+        "subsystem_id": subsystem_id,
+        "flags": asic_info_struct.flags
     }
 
     string_values = ["market_name", "vendor_name"]
@@ -3067,7 +3068,7 @@ def amdsmi_get_power_info(
     }
 
     for key, value in power_info_dict.items():
-        if value == 0xFFFF:
+        if value in (MaxUIntegerTypes.UINT8_T, MaxUIntegerTypes.UINT16_T, MaxUIntegerTypes.UINT32_T, MaxUIntegerTypes.UINT64_T):
             power_info_dict[key] = "N/A"
 
     return power_info_dict
