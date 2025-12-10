@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocprofvis_db.h"
+#include "schema_version.h"
 #include <vector>
 
 namespace RocProfVis

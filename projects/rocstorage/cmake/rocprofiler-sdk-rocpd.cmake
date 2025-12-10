@@ -48,8 +48,22 @@ function(ROCPD_CONFIGURE_ROCPD_SCHEMA_FILES SCHEMA_DIR SCHEMA_BINARY_DIR)
 
     file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR}/schema)
 
+    # Read schema version from shared header
+    set(ROCSTORAGE_SCHEMA_VERSION "3")  # Default fallback
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/schema_version.h")
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/shared/schema_version.h" SCHEMA_VERSION_CONTENT)
+        string(REGEX MATCH "ROCSTORAGE_SCHEMA_VERSION_STRING \"([0-9]+)\"" _ "${SCHEMA_VERSION_CONTENT}")
+        if(CMAKE_MATCH_1)
+            set(ROCSTORAGE_SCHEMA_VERSION "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+    message(STATUS "[rocstorage] Using schema version: ${ROCSTORAGE_SCHEMA_VERSION}")
+
     foreach(SCHEMA_FILE ${SCHEMA_FILES})
         file(READ "${SCHEMA_DIR}/${SCHEMA_FILE}" SQL_CONTENT)
+
+        # Replace schema version placeholder if it exists
+        string(REPLACE "{{schema_version}}" "${ROCSTORAGE_SCHEMA_VERSION}" SQL_CONTENT "${SQL_CONTENT}")
 
         string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
         string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")

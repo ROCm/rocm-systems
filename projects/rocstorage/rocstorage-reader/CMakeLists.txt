@@ -93,6 +93,7 @@ target_include_directories(rocstorage-reader
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/source/datamodel
         ${CMAKE_CURRENT_SOURCE_DIR}/source/database
+        ${CMAKE_CURRENT_SOURCE_DIR}/../shared
 )
 
 # ------------------------------------------------------------ #
