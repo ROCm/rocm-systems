@@ -129,7 +129,7 @@ Key points:
 
 * Higher arithmetic intensity indicates more computation per byte transferred
 * The balance point depends on the GPU's compute-to-bandwidth ratio
-* Can be calculated theoretically or measured empirically
+* It can be calculated theoretically or measured empirically
 * Different precision types affect both FLOPs and bytes
 
 For modern AMD GPUs:

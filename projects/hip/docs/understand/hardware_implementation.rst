@@ -153,8 +153,8 @@ and pipelines.
 Sequencer and scheduling
 ------------------------
 
-The instruction sequencer (SQ) forms the control center of each compute unit,
-managing instruction flow through the execution pipelines. The sequencer
+The instruction sequencer (SQ) serves as the control center of each compute
+unit, managing instruction flow through the execution pipelines. The sequencer
 maintains wavefront state and coordinates instruction execution across different
 functional units.
 
@@ -248,7 +248,7 @@ The VMEM unit handles all vector memory operations, including loads, stores,
 and atomic operations. Each thread supplies its own address and data, though
 the hardware optimizes access through memory coalescing when threads access
 nearby addresses. The VMEM unit connects to the vector L1 cache and implements
-address generation and coalescing logic.
+both address generation and coalescing logic.
 
 Branch unit
 ^^^^^^^^^^^
