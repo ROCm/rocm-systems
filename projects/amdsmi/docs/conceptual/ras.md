@@ -58,7 +58,7 @@ information.
 
 A static metrics cache was implemented in the amd-smi object which persists over multiple amd-smi instances.
 This also applies to any multiple threaded C/C++ application.
-Upon creation of the first amd-smi instance, a Singleton object that contains the metrics cache is instanciated.
+Upon creation of the first amd-smi instance, a Singleton object that contains the metrics cache is instantiated.
 Any amd-smi instances created thereafter will inherit the Singleton object metrics cache data.
 Each amd-smi creation increases the usage counter in the Singleton object.
 And each amd-smi destruction decreases the usage counter.
