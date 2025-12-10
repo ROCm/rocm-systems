@@ -32,7 +32,7 @@ hip_add_exe_to_target(NAME dynamicLoading
                       TEST_TARGET_NAME build_tests)
 
 if(HIP_PLATFORM MATCHES "amd")
-  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared 
+  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared
     ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
