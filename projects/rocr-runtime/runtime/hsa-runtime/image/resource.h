@@ -225,14 +225,7 @@ private:
   }
 
 ~MipmappedArray() {
-  // Free pMipInfo arrays if allocated (they're stored in addr_output.addr2/addr3.pMipInfo)
-  // Note: We need to check which union member was used and free accordingly
-  if (addr_output.addr2.pMipInfo != nullptr) {
-    delete[] addr_output.addr2.pMipInfo;
-  }
-  if (addr_output.addr3.pMipInfo != nullptr) {
-    delete[] addr_output.addr3.pMipInfo;
-  }
+
 }
 
 public:
@@ -267,8 +260,8 @@ public:
   // Cached surface info.
   union {
     ADDR_COMPUTE_SURFACE_INFO_OUTPUT addr1;   // Pre-GFX9 versions
-    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2;  // GFX9 and later (includes pMipInfo)
-    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3;  // GFX10 and later (includes pMipInfo)
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2;  // GFX9 and later
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3;  // GFX10 and later
   } addr_output;
 
 } MipmappedArray;
