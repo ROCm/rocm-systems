@@ -23,6 +23,7 @@
 #include "database.hpp"
 
 #include "directory.hpp"
+#include "uuid_validation.h"
 
 #include <regex>
 #include <string>
@@ -147,6 +148,14 @@ namespace rocstorage {
 namespace data_storage {
 database::database(std::string db_path, std::string uuid)
     : m_db_path{std::move(db_path)}, m_uuid{std::move(uuid)} {
+  // Validate UUID to ensure compatibility with rocstorage-reader's GUID extraction
+  if (!validation::is_valid_uuid(m_uuid)) {
+    throw std::invalid_argument(
+        "Invalid UUID: " + validation::get_uuid_validation_error(m_uuid) +
+        "\nUUIDs must contain only alphanumeric characters to ensure "
+        "compatibility with rocstorage-reader.");
+  }
+
   create_directory_for_database_file(m_db_path);
   spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
                m_db_path);

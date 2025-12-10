@@ -40,7 +40,7 @@ protected:
         std::to_string(
             ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
         ".db";
-    m_uuid = "test_uuid_12345";
+    m_uuid = "testuuid12345";
   }
 
   void TearDown() override { std::remove(m_database_path.c_str()); }
@@ -230,6 +230,32 @@ TEST_F(database_test, multiple_databases_independent) {
 
   std::remove(path1.c_str());
   std::remove(path2.c_str());
+}
+
+// UUID validation tests - ensure rocstorage-reader compatibility
+TEST_F(database_test, uuid_with_underscores_throws) {
+  EXPECT_THROW(std::make_unique<database>(m_database_path, "test_uuid"),
+               std::invalid_argument);
+}
+
+TEST_F(database_test, uuid_with_hyphens_throws) {
+  EXPECT_THROW(std::make_unique<database>(m_database_path, "test-uuid"),
+               std::invalid_argument);
+}
+
+TEST_F(database_test, uuid_with_spaces_throws) {
+  EXPECT_THROW(std::make_unique<database>(m_database_path, "test uuid"),
+               std::invalid_argument);
+}
+
+TEST_F(database_test, empty_uuid_throws) {
+  EXPECT_THROW(std::make_unique<database>(m_database_path, ""),
+               std::invalid_argument);
+}
+
+TEST_F(database_test, alphanumeric_uuid_succeeds) {
+  EXPECT_NO_THROW(
+      std::make_unique<database>(m_database_path, "abc123XYZ456"));
 }
 
 } // namespace
