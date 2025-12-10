@@ -35,7 +35,7 @@ target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS parallel-overhead parallel-overhead-locks
-        DESTINATION bin
+        DESTINATION share/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )
 endif()

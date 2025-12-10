@@ -158,10 +158,14 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     copy_image_files_and_make_copies()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(TARGETS jpegdecode DESTINATION bin COMPONENT rocprofiler-systems-examples)
+        install(
+            TARGETS jpegdecode
+            DESTINATION share/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
         install(
             FILES ${CMAKE_BINARY_DIR}/images
-            DESTINATION share/rocprofiler-systems/tests/images
+            DESTINATION share/rocprofiler-systems/examples/images
             COMPONENT rocprofiler-systems-examples
         )
     endif()

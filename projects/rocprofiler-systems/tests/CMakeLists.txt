@@ -75,3 +75,39 @@ set_tests_properties(
         LABELS "cleanup;global"
         TIMEOUT 30
 )
+
+if(ROCPROFSYS_INSTALL_EXAMPLES)
+    # Python Validation scripts
+    install(
+        PROGRAMS
+            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
+            ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+        DESTINATION share/rocprofiler-systems/tests/scripts
+        COMPONENT rocprofiler-systems-tests
+    )
+    install(
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Install the test configuration files
+    install(
+        DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-config
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Scripts
+    install(
+        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+    # Nic
+    install(
+        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
+        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
+    )
+endif()

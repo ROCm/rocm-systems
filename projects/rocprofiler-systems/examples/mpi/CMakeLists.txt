@@ -140,13 +140,14 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
             mpi-reduce
             mpi-scatter-gather
             mpi-send-recv
-        DESTINATION bin
+            mpi-allreduce
+        DESTINATION share/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )
     if(ENABLE_FORTRAN_MPI_CTESTS)
         install(
             TARGETS mpi-fortran-intervals
-            DESTINATION bin
+            DESTINATION share/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
     endif()

@@ -22,7 +22,11 @@ target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS code-coverage DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS code-coverage
+        DESTINATION share/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()
 
 set(PYTHON_FILES code-coverage.py)
@@ -42,7 +46,7 @@ if(Python3_FOUND)
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
-                DESTINATION bin
+                DESTINATION share/rocprofiler-systems/examples
                 COMPONENT rocprofiler-systems-examples
             )
         endif()

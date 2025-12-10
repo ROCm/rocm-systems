@@ -19,5 +19,9 @@ add_executable(rewrite-caller rewrite-caller.cpp)
 target_compile_options(rewrite-caller PRIVATE ${_FLAGS})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS rewrite-caller DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS rewrite-caller
+        DESTINATION share/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()

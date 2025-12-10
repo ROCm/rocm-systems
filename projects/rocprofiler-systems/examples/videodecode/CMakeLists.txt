@@ -179,12 +179,12 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
     if(ROCPROFSYS_INSTALL_EXAMPLES)
         install(
             TARGETS videodecode
-            DESTINATION bin
+            DESTINATION share/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
         install(
             FILES ${CMAKE_BINARY_DIR}/videos
-            DESTINATION share/rocprofiler-systems/tests/videos
+            DESTINATION share/rocprofiler-systems/examples/videos
             COMPONENT rocprofiler-systems-examples
         )
     endif()

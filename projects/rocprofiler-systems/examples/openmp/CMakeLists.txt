@@ -92,7 +92,7 @@ target_link_libraries(openmp-lu PRIVATE openmp-common)
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS openmp-cg openmp-lu
-        DESTINATION bin
+        DESTINATION share/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )
 endif()

@@ -25,5 +25,9 @@ target_link_libraries(
 )
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS user-api DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    install(
+        TARGETS user-api
+        DESTINATION share/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()

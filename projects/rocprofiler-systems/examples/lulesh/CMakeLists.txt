@@ -85,13 +85,10 @@ rocprofiler_systems_causal_example_executable(
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
         install(
-            TARGETS kokkoscore kokkoscontainers
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT rocprofiler-systems-examples
-        )
-        set_target_properties(
-            lulesh
-            PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+            TARGETS kokkoscore kokkoscontainers kokkossimd
+            LIBRARY
+                DESTINATION share/rocprofiler-systems/examples/lib
+                COMPONENT rocprofiler-systems-examples
         )
     endif()
 endif()

@@ -21,7 +21,7 @@ target_compile_options(trace-time-window PRIVATE ${_FLAGS})
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS trace-time-window
-        DESTINATION bin
+        DESTINATION share/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )
 endif()

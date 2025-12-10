@@ -121,5 +121,11 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS transferBench DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET transferBench)
+        install(
+            TARGETS transferBench
+            DESTINATION share/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
 endif()

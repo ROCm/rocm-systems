@@ -94,5 +94,11 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS transpose DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(TARGET transpose)
+        install(
+            TARGETS transpose
+            DESTINATION share/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
 endif()

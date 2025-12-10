@@ -142,11 +142,25 @@ function(rocprofiler_systems_causal_example_executable _NAME)
     endif()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(
-            TARGETS ${_NAME} ${_NAME}-rocprofsys ${_NAME}-coz
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples
-            OPTIONAL
+        set(_TARGETS
+            ${_NAME}
+            ${_NAME}-rocprofsys
+            ${_NAME}-ndebug
+            ${_NAME}-rocprofsys-ndebug
+            ${_NAME}-coz
         )
+        set(_EXISTING_TARGETS)
+        foreach(_TGT IN LISTS _TARGETS)
+            if(TARGET ${_TGT})
+                list(APPEND _EXISTING_TARGETS ${_TGT})
+            endif()
+        endforeach()
+        if(_EXISTING_TARGETS)
+            install(
+                TARGETS ${_EXISTING_TARGETS}
+                DESTINATION share/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endif()
 endfunction()

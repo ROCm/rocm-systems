@@ -116,6 +116,14 @@ if(hip_FOUND AND rccl_FOUND)
                 PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
             )
             list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
+
+            if(ROCPROFSYS_INSTALL_EXAMPLES)
+                install(
+                    PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
+                    DESTINATION share/rocprofiler-systems/examples
+                    COMPONENT rocprofiler-systems-examples
+                )
+            endif()
         endforeach()
 
         set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")

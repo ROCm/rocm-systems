@@ -36,7 +36,7 @@ if(Python3_FOUND)
         if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
-                DESTINATION bin
+                DESTINATION share/rocprofiler-systems/examples
                 COMPONENT rocprofiler-systems-examples
             )
         endif()
