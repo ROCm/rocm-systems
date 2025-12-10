@@ -81,15 +81,9 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
   return testResult;
 }
 
-
-<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset.cc
-template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval,
-                                                     enum MemsetType type, size_t numElements) {
-=======
 template <typename T>
 static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval, enum MemsetType type,
                                size_t numElements) {
->>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset.cc
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
@@ -282,7 +276,6 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
   HIP_CHECK(hipFree(p2));
   HIP_CHECK(hipStreamDestroy(s));
 }
-<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset.cc
 /**
  * Test Description
  * ------------------------
@@ -330,5 +323,3 @@ TEST_CASE("Unit_hipMemsetD8_Capture") {
 
   HIP_CHECK(hipFree(dst));
 }
-=======
->>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset.cc

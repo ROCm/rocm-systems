@@ -88,13 +88,8 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
       HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, stream));
       END_CAPTURE(stream);
       HIP_CHECK(hipStreamSynchronize(stream));
-<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
       HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
-                           hipMemcpyDeviceToHost));
-=======
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
-
->>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
+                            hipMemcpyDeviceToHost));
       for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
           validateCount += 1;
@@ -113,13 +108,8 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
       HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, hipStreamPerThread));
       END_CAPTURE(hipStreamPerThread);
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
       HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
                            hipMemcpyDeviceToHost));
-=======
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
->>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
-
       for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
           validateCount += 1;
@@ -129,11 +119,6 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   }
 
   REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
-<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
-  
-=======
-
->>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset2DAsyncMultiThreadAndKernel.cc
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipFree(B_d));
   HIP_CHECK(hipFree(C_d));
@@ -212,3 +197,4 @@ TEST_CASE("Unit_hipMemset2DAsync_MultiThread") {
 
   delete[] t;
 }
+
