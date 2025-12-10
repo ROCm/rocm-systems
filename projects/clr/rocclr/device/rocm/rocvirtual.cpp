@@ -559,19 +559,20 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
           (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
           !ts->command().CpuWaitRequested();
     }
+    bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
     // Check if the signal doesn't match the requested one.
     // Note: runtime needs the interrupts for the callbacks in DD mode
-    if ((signal_list_[current_id_]->flags_.interrupt_ != enqueHandler) && gpu_.dev().ActiveWait()) {
+    if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
       // Use different stacks if an interrupt is required or not.
       // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
       // with the interrupt signal and saves the signal without interrupt, or vise versa
-      auto& pool_get = (enqueHandler) ? signal_pool_irq_ : signal_pool_;
-      auto& pool_save = (enqueHandler) ? signal_pool_ : signal_pool_irq_;
+      auto& pool_get = (use_irq) ? signal_pool_irq_ : signal_pool_;
+      auto& pool_save = (use_irq) ? signal_pool_ : signal_pool_irq_;
 
       // Check if a free signal in the pop stack isn't available
       if (pool_get.empty()) {
         std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
-        if ((signal != nullptr) && CreateSignal(signal.get(), enqueHandler)) {
+        if ((signal != nullptr) && CreateSignal(signal.get(), use_irq)) {
           pool_get.push(signal.release());
         }
       }
@@ -1200,8 +1201,12 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->completion_signal,
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet)->reserved2,
           Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
-
-  Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  // Optimization for native AQL path in windows has problems with PM4 emulation,
+  // skipping the doorbel will not wake up the AQL worker thread
+  //if (IS_WINDOWS && !dev().IsPm4Emulation() && (blocking || !hasPendingDispatch_))
+  {
+    Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  }
 
   // Mark the flag indicating if a dispatch is outstanding.
   // We are not waiting after every dispatch.
@@ -1793,6 +1798,11 @@ VirtualGPU::~VirtualGPU() {
     if (gpu_queue_ == nullptr) {
       gpu_queue_ = roc_device_.AcquireActiveNormalQueue();
     }
+    // Windows requires an interrupt in more cases than Linux for OS fence updates
+    force_irq_ = IS_WINDOWS;
+    // Force extra barrier to make sure OS gets an interrupt,
+    // but avoid if the PM4 emulation, since PM4 path can deadlock during device destruction
+    hasPendingDispatch_ |= IS_WINDOWS && !dev().IsPm4Emulation();
     // Release the resources of signal
     releaseGpuMemoryFence();
   }
@@ -4038,6 +4048,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
     if (vcmd.CpuWaitRequested()) {
+      force_irq_ = IS_WINDOWS;
       // It should be safe to call flush directly if there are not pending dispatches without
       // HSA signal callback
       if (gpu_queue_ == nullptr) {
@@ -4058,6 +4069,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
           }
         } else {
           // Submit a barrier with a cache flushes.
+          force_irq_ = IS_WINDOWS;
           if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
             dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
           } else {
@@ -4068,6 +4080,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       }
       profilingEnd();
     }
+    force_irq_ = false;
   }
 }
 
@@ -4132,7 +4145,9 @@ void VirtualGPU::addPinnedMem(amd::Memory* mem) {
       pinnedMems_.push_back(mem);
     }
   } else {
-    if (command_ != nullptr) {
+    // Optimize pinning path for Linux only(KFD has special tracking for pinned memory) or OpenCL,
+    // since OpenCL always waits for completion on CPU
+    if ((command_ != nullptr) && (IS_LINUX || !amd::IS_HIP)) {
       command_->AddPinnedMemory(mem);
     } else {
       //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
