@@ -1,0 +1,113 @@
+# Example SSH configuration for rocstorage remote access tools
+# Copy relevant sections to ~/.ssh/config
+
+# ==============================================================================
+# SSH ControlMaster Configuration
+# ==============================================================================
+# These settings enable connection reuse, which significantly improves
+# performance for rocstorage-ssh-proxy by avoiding repeated authentication.
+
+# Create the socket directory first:
+#   mkdir -p ~/.ssh/sockets
+#   chmod 700 ~/.ssh/sockets
+
+# ==============================================================================
+# HPC Login Node
+# ==============================================================================
+Host hpc-login
+    HostName login.hpc.example.gov
+    User your-username
+
+    # ControlMaster for connection reuse
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+    # Keep connection alive
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+
+    # Compression (good for slow networks)
+    Compression yes
+
+    # Accept new host keys automatically (optional, less secure)
+    # StrictHostKeyChecking accept-new
+
+# ==============================================================================
+# Compute Nodes via Jump Host
+# ==============================================================================
+# Access compute nodes through the login node
+
+Host compute-*
+    ProxyJump hpc-login
+    User your-username
+
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+
+# ==============================================================================
+# National Lab Examples
+# ==============================================================================
+
+# ORNL Summit/Frontier
+Host summit frontier
+    HostName frontier.olcf.ornl.gov
+    User your-username
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+# NERSC Perlmutter
+Host perlmutter
+    HostName perlmutter-p1.nersc.gov
+    User your-username
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+# LLNL Livermore Computing
+Host lc
+    HostName oslic.llnl.gov
+    User your-username
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+# ANL ALCF (Polaris, Aurora)
+Host polaris aurora
+    HostName polaris.alcf.anl.gov
+    User your-username
+    ControlMaster auto
+    ControlPath ~/.ssh/sockets/%r@%h-%p
+    ControlPersist 600
+
+# ==============================================================================
+# Generic Template
+# ==============================================================================
+# Copy and customize for your HPC site
+
+# Host my-hpc
+#     HostName login.my-hpc.example.edu
+#     User my-username
+#
+#     # Connection reuse
+#     ControlMaster auto
+#     ControlPath ~/.ssh/sockets/%r@%h-%p
+#     ControlPersist 600
+#
+#     # Keep-alive
+#     ServerAliveInterval 30
+#     ServerAliveCountMax 3
+#
+#     # Optional: Compression
+#     Compression yes
+#
+#     # Optional: Specific identity file
+#     IdentityFile ~/.ssh/my-hpc-key
+#
+#     # Optional: Port forwarding for remote server
+#     LocalForward 8080 localhost:8080

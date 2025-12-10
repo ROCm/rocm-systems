@@ -1,0 +1,34 @@
+# Dockerfile for testing rocstorage remote access tools
+# Provides an isolated environment with all dependencies
+
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sqlite3 \
+    curl \
+    openssh-client \
+    sshfs \
+    fuse \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for testing
+RUN useradd -m -s /bin/bash testuser
+
+# Create working directory
+WORKDIR /app
+
+# Copy tools (build context is tools/remote/)
+COPY rocstorage-sshfs rocstorage-ssh-proxy rocstorage-server /app/
+RUN chmod +x /app/rocstorage-sshfs /app/rocstorage-ssh-proxy /app/rocstorage-server
+
+# Copy test script
+COPY tests/test_docker.sh /app/
+RUN chmod +x /app/test_docker.sh
+
+# Switch to non-root user
+USER testuser
+WORKDIR /home/testuser
+
+# Default command runs tests using bash explicitly
+CMD ["bash", "/app/test_docker.sh"]

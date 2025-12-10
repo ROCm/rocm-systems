@@ -1,0 +1,342 @@
+#!/bin/bash
+# rocstorage-sshfs - Mount remote rocstorage databases via SSHFS
+#
+# Usage:
+#   rocstorage-sshfs mount <ssh-host> <remote-path> [local-mount-point]
+#   rocstorage-sshfs unmount <local-mount-point>
+#   rocstorage-sshfs status
+#   rocstorage-sshfs query <local-db-path> <sql>
+#
+# Examples:
+#   rocstorage-sshfs mount hpc-login /scratch/user/traces
+#   rocstorage-sshfs mount hpc-login /scratch/user/traces ~/mnt/traces
+#   rocstorage-sshfs unmount ~/mnt/traces
+#   rocstorage-sshfs query ~/mnt/traces/trace.db "SELECT COUNT(*) FROM rocpd_op"
+
+set -e
+
+SCRIPT_NAME=$(basename "$0")
+DEFAULT_MOUNT_BASE="${HOME}/mnt/rocstorage"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+check_dependencies() {
+    local missing=()
+
+    if ! command -v sshfs &> /dev/null; then
+        missing+=("sshfs")
+    fi
+
+    if ! command -v fusermount &> /dev/null && ! command -v umount &> /dev/null; then
+        missing+=("fusermount or umount")
+    fi
+
+    if ! command -v sqlite3 &> /dev/null; then
+        missing+=("sqlite3")
+    fi
+
+    if [ ${#missing[@]} -ne 0 ]; then
+        log_error "Missing dependencies: ${missing[*]}"
+        echo ""
+        echo "Install with:"
+        echo "  Ubuntu/Debian: sudo apt install sshfs sqlite3"
+        echo "  Fedora/RHEL:   sudo dnf install fuse-sshfs sqlite"
+        echo "  macOS:         brew install macfuse sshfs sqlite"
+        exit 1
+    fi
+}
+
+usage() {
+    cat << EOF
+Usage: $SCRIPT_NAME <command> [options]
+
+Commands:
+  mount <ssh-host> <remote-path> [local-mount-point]
+      Mount a remote directory containing rocstorage databases.
+      Default mount point: ~/mnt/rocstorage/<ssh-host>
+
+  unmount <local-mount-point>
+      Unmount a previously mounted directory.
+
+  status
+      Show all active rocstorage SSHFS mounts.
+
+  query <local-db-path> <sql>
+      Run a SQL query on a mounted database (read-only, immutable mode).
+
+Options for mount:
+  --jump <host>       Use jump host (ProxyJump)
+  --compress          Enable SSH compression (-C)
+  --cache-timeout <s> Cache timeout in seconds (default: 60)
+  --reconnect         Auto-reconnect on connection drop
+
+Examples:
+  # Basic mount
+  $SCRIPT_NAME mount hpc-login /scratch/user/traces
+
+  # Mount with jump host
+  $SCRIPT_NAME mount compute-node /data/traces --jump bastion
+
+  # Query mounted database
+  $SCRIPT_NAME query ~/mnt/rocstorage/hpc-login/trace.db "SELECT * FROM rocpd_op LIMIT 10"
+
+  # Check status
+  $SCRIPT_NAME status
+
+  # Unmount
+  $SCRIPT_NAME unmount ~/mnt/rocstorage/hpc-login
+
+Environment Variables:
+  ROCSTORAGE_MOUNT_BASE   Base directory for mounts (default: ~/mnt/rocstorage)
+  ROCSTORAGE_SSH_OPTIONS  Additional SSH options
+
+EOF
+}
+
+cmd_mount() {
+    local ssh_host=""
+    local remote_path=""
+    local local_mount=""
+    local jump_host=""
+    local compress=""
+    local cache_timeout="60"
+    local reconnect=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --jump)
+                jump_host="$2"
+                shift 2
+                ;;
+            --compress)
+                compress="-C"
+                shift
+                ;;
+            --cache-timeout)
+                cache_timeout="$2"
+                shift 2
+                ;;
+            --reconnect)
+                reconnect=",reconnect"
+                shift
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                exit 1
+                ;;
+            *)
+                if [ -z "$ssh_host" ]; then
+                    ssh_host="$1"
+                elif [ -z "$remote_path" ]; then
+                    remote_path="$1"
+                elif [ -z "$local_mount" ]; then
+                    local_mount="$1"
+                else
+                    log_error "Too many arguments"
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$ssh_host" ] || [ -z "$remote_path" ]; then
+        log_error "Missing required arguments: ssh-host and remote-path"
+        echo ""
+        usage
+        exit 1
+    fi
+
+    # Default mount point
+    if [ -z "$local_mount" ]; then
+        local mount_base="${ROCSTORAGE_MOUNT_BASE:-$DEFAULT_MOUNT_BASE}"
+        local_mount="${mount_base}/${ssh_host}"
+    fi
+
+    # Create mount point if needed
+    if [ ! -d "$local_mount" ]; then
+        log_info "Creating mount point: $local_mount"
+        mkdir -p "$local_mount"
+    fi
+
+    # Check if already mounted
+    if mountpoint -q "$local_mount" 2>/dev/null; then
+        log_warn "Already mounted: $local_mount"
+        log_info "Use '$SCRIPT_NAME unmount $local_mount' to unmount first"
+        exit 0
+    fi
+
+    # Build sshfs options
+    local sshfs_opts="-o cache_timeout=${cache_timeout}"
+    sshfs_opts+=",ServerAliveInterval=15"
+    sshfs_opts+=",ServerAliveCountMax=3"
+    sshfs_opts+=",StrictHostKeyChecking=accept-new"
+
+    if [ -n "$reconnect" ]; then
+        sshfs_opts+="$reconnect"
+    fi
+
+    if [ -n "$jump_host" ]; then
+        sshfs_opts+=",ProxyJump=${jump_host}"
+    fi
+
+    if [ -n "$compress" ]; then
+        sshfs_opts+=",$compress"
+    fi
+
+    # Add any user-specified SSH options
+    if [ -n "$ROCSTORAGE_SSH_OPTIONS" ]; then
+        sshfs_opts+=",$ROCSTORAGE_SSH_OPTIONS"
+    fi
+
+    log_info "Mounting ${ssh_host}:${remote_path} to ${local_mount}"
+    log_info "Options: $sshfs_opts"
+
+    if sshfs "${ssh_host}:${remote_path}" "$local_mount" $sshfs_opts; then
+        log_info "Mount successful!"
+        echo ""
+        echo "Access databases with:"
+        echo "  sqlite3 \"file:${local_mount}/your_trace.db?immutable=1\""
+        echo ""
+        echo "Or use rocstorage C interface with the mounted path."
+        echo ""
+        echo "To unmount: $SCRIPT_NAME unmount $local_mount"
+    else
+        log_error "Mount failed"
+        exit 1
+    fi
+}
+
+cmd_unmount() {
+    local local_mount="$1"
+
+    if [ -z "$local_mount" ]; then
+        log_error "Missing mount point argument"
+        exit 1
+    fi
+
+    # Expand path
+    local_mount=$(realpath -m "$local_mount")
+
+    if ! mountpoint -q "$local_mount" 2>/dev/null; then
+        log_warn "Not a mount point: $local_mount"
+        exit 0
+    fi
+
+    log_info "Unmounting: $local_mount"
+
+    # Try fusermount first, fall back to umount
+    if command -v fusermount &> /dev/null; then
+        fusermount -u "$local_mount"
+    else
+        umount "$local_mount"
+    fi
+
+    log_info "Unmount successful"
+}
+
+cmd_status() {
+    local mount_base="${ROCSTORAGE_MOUNT_BASE:-$DEFAULT_MOUNT_BASE}"
+
+    echo "Active SSHFS mounts:"
+    echo ""
+
+    local found=0
+    while IFS= read -r line; do
+        if [[ "$line" == *"fuse.sshfs"* ]]; then
+            echo "  $line"
+            found=1
+        fi
+    done < <(mount | grep -E "sshfs|fuse")
+
+    if [ $found -eq 0 ]; then
+        echo "  (none)"
+    fi
+
+    echo ""
+
+    # Check mount base directory
+    if [ -d "$mount_base" ]; then
+        echo "Mount base directory: $mount_base"
+        ls -la "$mount_base" 2>/dev/null || true
+    fi
+}
+
+cmd_query() {
+    local db_path="$1"
+    local sql="$2"
+
+    if [ -z "$db_path" ] || [ -z "$sql" ]; then
+        log_error "Usage: $SCRIPT_NAME query <db-path> <sql>"
+        exit 1
+    fi
+
+    if [ ! -f "$db_path" ]; then
+        log_error "Database not found: $db_path"
+        exit 1
+    fi
+
+    # Use immutable mode for SSHFS-mounted databases
+    local uri="file:${db_path}?immutable=1"
+
+    log_info "Querying: $db_path"
+    log_info "SQL: $sql"
+    echo ""
+
+    sqlite3 -header -column "$uri" "$sql"
+}
+
+# Main entry point
+main() {
+    check_dependencies
+
+    if [ $# -eq 0 ]; then
+        usage
+        exit 0
+    fi
+
+    local command="$1"
+    shift
+
+    case "$command" in
+        mount)
+            cmd_mount "$@"
+            ;;
+        unmount|umount)
+            cmd_unmount "$@"
+            ;;
+        status)
+            cmd_status "$@"
+            ;;
+        query)
+            cmd_query "$@"
+            ;;
+        help|--help|-h)
+            usage
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

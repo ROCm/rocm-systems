@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""
+rocstorage-server - Lightweight HTTP server for rocstorage databases
+
+This runs directly on the machine where the database resides (e.g., HPC cluster).
+It provides a REST API for querying the database, which can be accessed via
+SSH tunnel or direct HTTPS connection.
+
+Usage:
+    rocstorage-server --db <path-to-database> [--port <port>]
+    rocstorage-server --db /scratch/user/trace.db --port 8080
+
+Access via SSH tunnel:
+    ssh -L 8080:localhost:8080 hpc-login
+    curl http://localhost:8080/query?sql=SELECT+COUNT(*)+FROM+rocpd_op
+
+Or run in a Singularity/Apptainer container during a job.
+"""
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import threading
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, urlparse
+import hashlib
+
+
+class DatabasePool:
+    """Thread-safe SQLite connection pool."""
+
+    def __init__(self, db_path: str, pool_size: int = 5, read_only: bool = True):
+        self.db_path = db_path
+        self.read_only = read_only
+        self._pool: List[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+        self._max_size = pool_size
+
+        # Validate database exists
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"Database not found: {db_path}")
+
+    def _create_connection(self) -> sqlite3.Connection:
+        """Create a new database connection."""
+        if self.read_only:
+            uri = f"file:{self.db_path}?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        else:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+
+        conn.row_factory = sqlite3.Row
+        # Enable JSON functions if available (SQLite 3.38+)
+        try:
+            conn.execute("SELECT json('[]')")
+        except:
+            pass
+        return conn
+
+    def get_connection(self) -> sqlite3.Connection:
+        """Get a connection from the pool."""
+        with self._lock:
+            if self._pool:
+                return self._pool.pop()
+        return self._create_connection()
+
+    def return_connection(self, conn: sqlite3.Connection):
+        """Return a connection to the pool."""
+        with self._lock:
+            if len(self._pool) < self._max_size:
+                self._pool.append(conn)
+            else:
+                conn.close()
+
+    def close_all(self):
+        """Close all connections in the pool."""
+        with self._lock:
+            for conn in self._pool:
+                conn.close()
+            self._pool.clear()
+
+
+class QueryCache:
+    """Simple in-memory query cache with TTL."""
+
+    def __init__(self, ttl: int = 60, max_size: int = 1000):
+        self._cache: Dict[str, tuple[float, Any]] = {}
+        self._ttl = ttl
+        self._max_size = max_size
+        self._lock = threading.Lock()
+
+    def _hash_key(self, sql: str) -> str:
+        """Create cache key from SQL."""
+        return hashlib.md5(sql.encode()).hexdigest()
+
+    def get(self, sql: str) -> Optional[Any]:
+        """Get cached result if not expired."""
+        key = self._hash_key(sql)
+        with self._lock:
+            if key in self._cache:
+                timestamp, result = self._cache[key]
+                if time.time() - timestamp < self._ttl:
+                    return result
+                else:
+                    del self._cache[key]
+        return None
+
+    def set(self, sql: str, result: Any):
+        """Cache a result."""
+        key = self._hash_key(sql)
+        with self._lock:
+            # Evict oldest entries if cache is full
+            if len(self._cache) >= self._max_size:
+                oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][0])
+                del self._cache[oldest_key]
+            self._cache[key] = (time.time(), result)
+
+    def clear(self):
+        """Clear the cache."""
+        with self._lock:
+            self._cache.clear()
+
+
+class RocstorageDatabase:
+    """Interface to rocstorage SQLite database."""
+
+    def __init__(self, db_path: str, read_only: bool = True, cache_ttl: int = 60):
+        self.db_path = db_path
+        self.pool = DatabasePool(db_path, read_only=read_only)
+        self.cache = QueryCache(ttl=cache_ttl)
+        self._schema_cache: Optional[Dict] = None
+
+    def execute(self, sql: str, params: tuple = (), use_cache: bool = True,
+                limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
+        """Execute a SQL query and return results."""
+
+        # Check cache for SELECT queries
+        cache_key = f"{sql}:{params}:{limit}:{offset}" if use_cache else None
+        if cache_key:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                return {"cached": True, **cached}
+
+        conn = self.pool.get_connection()
+        try:
+            cursor = conn.cursor()
+
+            # Apply limit/offset if specified
+            if limit is not None:
+                sql = f"SELECT * FROM ({sql}) LIMIT {limit} OFFSET {offset}"
+
+            start_time = time.time()
+            cursor.execute(sql, params)
+
+            # Check if it's a SELECT query
+            if cursor.description:
+                columns = [col[0] for col in cursor.description]
+                rows = cursor.fetchall()
+                data = [dict(zip(columns, row)) for row in rows]
+                result = {
+                    "success": True,
+                    "data": data,
+                    "columns": columns,
+                    "row_count": len(data),
+                    "execution_time_ms": round((time.time() - start_time) * 1000, 2)
+                }
+            else:
+                result = {
+                    "success": True,
+                    "rows_affected": cursor.rowcount,
+                    "execution_time_ms": round((time.time() - start_time) * 1000, 2)
+                }
+
+            # Cache the result
+            if cache_key and result.get("success"):
+                self.cache.set(cache_key, result)
+
+            return result
+
+        except sqlite3.Error as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        finally:
+            self.pool.return_connection(conn)
+
+    def get_schema(self) -> Dict[str, Any]:
+        """Get database schema information."""
+        if self._schema_cache:
+            return self._schema_cache
+
+        result = self.execute("""
+            SELECT type, name, sql
+            FROM sqlite_master
+            WHERE type IN ('table', 'view')
+            ORDER BY type, name
+        """, use_cache=True)
+
+        if result.get("success"):
+            self._schema_cache = result
+        return result
+
+    def get_tables(self) -> Dict[str, Any]:
+        """List all tables with row counts."""
+        result = self.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table'
+            ORDER BY name
+        """, use_cache=True)
+
+        if result.get("success"):
+            tables = []
+            for row in result.get("data", []):
+                name = row["name"]
+                # Get row count (cached)
+                count_result = self.execute(f"SELECT COUNT(*) as count FROM [{name}]", use_cache=True)
+                count = count_result.get("data", [{}])[0].get("count", 0) if count_result.get("success") else "?"
+                tables.append({"name": name, "row_count": count})
+            result["data"] = tables
+
+        return result
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get rocstorage metadata."""
+        return self.execute("""
+            SELECT tag, value FROM rocpd_metadata
+        """, use_cache=True)
+
+    def get_traces(self) -> Dict[str, Any]:
+        """Get trace information (time range, etc.)."""
+        result = {}
+
+        # Get time range from events
+        time_result = self.execute("""
+            SELECT
+                MIN(start) as start_time,
+                MAX(end) as end_time,
+                COUNT(*) as event_count
+            FROM rocpd_op
+        """, use_cache=True)
+
+        if time_result.get("success") and time_result.get("data"):
+            result["time_range"] = time_result["data"][0]
+
+        # Get track info
+        tracks_result = self.execute("""
+            SELECT * FROM rocpd_track
+        """, use_cache=True)
+
+        if tracks_result.get("success"):
+            result["tracks"] = tracks_result["data"]
+
+        return {"success": True, "data": result}
+
+    def close(self):
+        """Close database connections."""
+        self.pool.close_all()
+
+
+class RequestHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for database queries."""
+
+    db: RocstorageDatabase = None
+    allowed_origins: List[str] = ["*"]
+
+    def log_message(self, format, *args):
+        """Custom log format."""
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {self.address_string()} - {format % args}")
+
+    def _send_cors_headers(self):
+        """Send CORS headers."""
+        origin = self.headers.get("Origin", "*")
+        if "*" in self.allowed_origins or origin in self.allowed_origins:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _send_json(self, data: Dict[str, Any], status: int = 200):
+        """Send JSON response."""
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self._send_cors_headers()
+        self.end_headers()
+        response = json.dumps(data, indent=2, default=str)
+        self.wfile.write(response.encode())
+
+    def _send_error(self, message: str, status: int = 400):
+        """Send error response."""
+        self._send_json({"success": False, "error": message}, status)
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight."""
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        """Handle GET requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+
+        if path == "/" or path == "/status":
+            self._send_json({
+                "status": "ok",
+                "database": self.db.db_path,
+                "endpoints": {
+                    "/status": "Server status",
+                    "/tables": "List tables with row counts",
+                    "/schema": "Database schema",
+                    "/metadata": "rocstorage metadata",
+                    "/traces": "Trace information",
+                    "/query": "Execute SQL (GET with ?sql= or POST)"
+                }
+            })
+
+        elif path == "/tables":
+            self._send_json(self.db.get_tables())
+
+        elif path == "/schema":
+            self._send_json(self.db.get_schema())
+
+        elif path == "/metadata":
+            self._send_json(self.db.get_metadata())
+
+        elif path == "/traces":
+            self._send_json(self.db.get_traces())
+
+        elif path == "/query":
+            sql = params.get("sql", [None])[0]
+            if not sql:
+                self._send_error("Missing 'sql' parameter")
+                return
+
+            limit = params.get("limit", [None])[0]
+            offset = params.get("offset", ["0"])[0]
+            cache = params.get("cache", ["true"])[0].lower() != "false"
+
+            try:
+                limit = int(limit) if limit else None
+                offset = int(offset)
+            except ValueError:
+                self._send_error("Invalid limit or offset")
+                return
+
+            result = self.db.execute(sql, use_cache=cache, limit=limit, offset=offset)
+            status = 200 if result.get("success") else 400
+            self._send_json(result, status)
+
+        elif path == "/cache/clear":
+            self.db.cache.clear()
+            self._send_json({"success": True, "message": "Cache cleared"})
+
+        else:
+            self._send_error(f"Unknown endpoint: {path}", 404)
+
+    def do_POST(self):
+        """Handle POST requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path != "/query":
+            self._send_error(f"POST not supported for: {path}", 405)
+            return
+
+        # Read request body
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode()
+        except Exception as e:
+            self._send_error(f"Failed to read request: {e}")
+            return
+
+        # Parse request
+        try:
+            content_type = self.headers.get("Content-Type", "")
+            if content_type.startswith("application/json"):
+                request = json.loads(body)
+                sql = request.get("sql")
+                limit = request.get("limit")
+                offset = request.get("offset", 0)
+                use_cache = request.get("cache", True)
+            else:
+                sql = body.strip()
+                limit = None
+                offset = 0
+                use_cache = True
+        except json.JSONDecodeError:
+            self._send_error("Invalid JSON")
+            return
+
+        if not sql:
+            self._send_error("Missing 'sql' in request")
+            return
+
+        result = self.db.execute(sql, use_cache=use_cache, limit=limit, offset=offset)
+        status = 200 if result.get("success") else 400
+        self._send_json(result, status)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Lightweight HTTP server for rocstorage databases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --db /scratch/user/trace.db
+  %(prog)s --db /scratch/user/trace.db --port 8080 --bind 0.0.0.0
+
+Access via SSH tunnel:
+  ssh -L 8080:localhost:8080 hpc-login
+  curl http://localhost:8080/tables
+  curl http://localhost:8080/query?sql=SELECT+COUNT(*)+FROM+rocpd_op
+
+For Singularity/Apptainer:
+  singularity exec container.sif rocstorage-server --db /data/trace.db
+        """
+    )
+
+    parser.add_argument("--db", "-d", required=True, help="Path to SQLite database")
+    parser.add_argument("--port", "-p", type=int, default=8080, help="Port to listen on (default: 8080)")
+    parser.add_argument("--bind", "-b", default="127.0.0.1",
+                        help="Address to bind to (default: 127.0.0.1, use 0.0.0.0 for all interfaces)")
+    parser.add_argument("--cache-ttl", type=int, default=60, help="Query cache TTL in seconds (default: 60)")
+    parser.add_argument("--read-write", action="store_true", help="Allow write operations (default: read-only)")
+
+    args = parser.parse_args()
+
+    # Validate database
+    if not os.path.exists(args.db):
+        print(f"Error: Database not found: {args.db}", file=sys.stderr)
+        sys.exit(1)
+
+    # Create database interface
+    print(f"[DB] Opening database: {args.db}")
+    db = RocstorageDatabase(
+        args.db,
+        read_only=not args.read_write,
+        cache_ttl=args.cache_ttl
+    )
+
+    # Test database access
+    tables_result = db.get_tables()
+    if tables_result.get("success"):
+        tables = tables_result.get("data", [])
+        print(f"[DB] Found {len(tables)} tables")
+        for t in tables[:5]:
+            print(f"     - {t['name']}: {t['row_count']} rows")
+        if len(tables) > 5:
+            print(f"     ... and {len(tables) - 5} more")
+    else:
+        print(f"[DB] Warning: {tables_result.get('error')}")
+
+    # Set up handler
+    RequestHandler.db = db
+
+    # Create and start server
+    server_address = (args.bind, args.port)
+    httpd = HTTPServer(server_address, RequestHandler)
+
+    print(f"\n[Server] Listening on http://{args.bind}:{args.port}")
+    print(f"[Server] Database: {args.db}")
+    print(f"[Server] Mode: {'read-write' if args.read_write else 'read-only'}")
+    print(f"\nAccess via SSH tunnel:")
+    print(f"  ssh -L {args.port}:localhost:{args.port} <remote-host>")
+    print(f"  curl http://localhost:{args.port}/tables")
+    print(f"\nPress Ctrl+C to stop\n")
+
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[Server] Shutting down...")
+    finally:
+        db.close()
+        httpd.server_close()
+
+
+if __name__ == "__main__":
+    main()
