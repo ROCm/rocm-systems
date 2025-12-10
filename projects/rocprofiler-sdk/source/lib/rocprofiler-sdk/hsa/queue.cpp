@@ -43,7 +43,9 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
@@ -103,7 +105,7 @@ context_filter(const context::context* ctx)
 }
 
 bool
-AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+AsyncSignalHandler(hsa_signal_value_t, void* data)
 {
     if(!data) return true;
 
@@ -115,10 +117,10 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         return false;
     }
 
-    get_balanced_signal_slots().fetch_add(1);
-
     auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
     auto& queue_info_session = *shared_ptr_info;
+
+    get_balanced_signal_slots().fetch_add(1);
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
@@ -375,7 +377,8 @@ WriteInterceptor(const void* packets,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
         // If there is a lot of contention for HSA signals, then schedule out the thread
-        if(get_balanced_signal_slots().fetch_sub(1) <= 0)
+        auto prev_balanced = get_balanced_signal_slots().fetch_sub(1);
+        if(prev_balanced <= 0)
         {
             sched_yield();
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
@@ -687,11 +690,29 @@ Queue::sync() const
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
+
+    // Wait for async signal handlers to complete
+    // balanced_slots starts at NUM_SIGNALS, decrements on dispatch, increments on completion
+    while(get_balanced_signal_slots().load() != NUM_SIGNALS)
+    {
+        std::this_thread::yield();
+    }
+
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
     // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
-    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
-        "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
+    auto balanced_slots = get_balanced_signal_slots().load();
+    if(balanced_slots != NUM_SIGNALS)
+    {
+        auto active_kernels_value = _core_api.hsa_signal_load_relaxed_fn(_active_kernels);
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "There are {} incomplete dispatches (balanced_slots={}, NUM_SIGNALS={}, "
+            "_active_kernels signal value={})",
+            NUM_SIGNALS - balanced_slots,
+            balanced_slots,
+            NUM_SIGNALS,
+            active_kernels_value);
+    }
 }
 
 void
