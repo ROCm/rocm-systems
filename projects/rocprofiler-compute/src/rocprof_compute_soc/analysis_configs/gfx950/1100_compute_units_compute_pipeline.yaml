@@ -321,7 +321,7 @@ Panel Config:
       over the total CU cycles.
     Dual-issue VALU Utilization: 
       Indicates what percent of the kernel's duration the VALU was busy executing
-      instructions with dual-issue. Computed as the ratio of the total number of cycles
+      dual-issued instructions. Computed as the ratio of the total number of cycles
       spent by the scheduler co-issuing VALU instructions over the total
       CU cycles.
     VMEM Utilization: Indicates what percent of the kernel's duration the VMEM unit
