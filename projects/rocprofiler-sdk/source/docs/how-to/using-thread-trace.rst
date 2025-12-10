@@ -39,7 +39,7 @@ Prerequisites
 
   * ROCm 7.x build, or
 
-  * Early release can be `built from source <https://github.com/rocm/aqlprofile>`_
+  * Early release can be `built from source <https://github.com/ROCm/rocm-systems/tree/develop/projects/aqlprofile>`_
 
   * Otherwise, ``rocprofv3`` throws error "INVALID_SHADER_DATA" or "Agent not supported".
 

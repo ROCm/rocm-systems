@@ -244,8 +244,8 @@ Sampling types:
 To enable sampling:
 
 1. Use ``rocprof-sys-sample`` (auto-enables sampling).
-2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``. 
-3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
+2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``.
+3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``.
 4. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. For more details, see :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
 
 Causal mode

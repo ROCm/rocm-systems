@@ -1011,8 +1011,8 @@ class AMDSMILogger():
 
         # print the version information first
         amd_smi_version = str(output['version_info']['amd-smi'])
-        if len(amd_smi_version) > 20:
-            amd_smi_version = amd_smi_version[:17] + "..."
+        if len(amd_smi_version) > 60:
+            amd_smi_version = amd_smi_version[:57] + "..."
         rocm_version = "N/A"
         if output['version_info']['rocm version'][0]:
             rocm_version = str(output['version_info']['rocm version'][1]).ljust(8)
@@ -1026,29 +1026,30 @@ class AMDSMILogger():
                 # Extract version using regex to find pattern like "6.8.0-60"
                 match = re.search(r'(\d+\.\d+\.\d+-\d+)', driver_version['driver_version'])
                 if match:
-                    amdgpu_version = match.group(1).ljust(8)
+                    amdgpu_version = match.group(1)[:80]
                 else:
-                    amdgpu_version = "N/A".ljust(8)
+                    amdgpu_version = "N/A"
             else:
-                amdgpu_version = str(driver_version['driver_version'])[:8].ljust(8)
+                amdgpu_version = str(driver_version['driver_version'])[:80]
         fw_pldm_version = str(output['version_info']['fw pldm version'])
         vbios_version = str(output['version_info']['vbios version'])
 
         # print GPU info
         print(default_line_1)
-        print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
+        # Split the version line into 3 lines, each wrapping to the same width
+        print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
+        if amdgpu_version != "N/A":
+            print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
+        if rocm_version != "N/A":
+            print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
 
-        # adjust format depending on whether vbios or fw pldm version is present
-        if vbios_version != "N/A" and fw_pldm_version != "N/A":
-            print("| VBIOS version: {0:22s}  {1:12s}  FW PLDM: {2:15s}|".format(vbios_version, "", fw_pldm_version))
-        elif vbios_version != "N/A" and fw_pldm_version == "N/A":
-            print("| VBIOS version: {0:22s}  {1:37s} |".format(vbios_version, ""))
-        elif fw_pldm_version != "N/A" and vbios_version == "N/A":
-            print("| FW PLDM: {0:15s}  {1:50s} |".format(fw_pldm_version, ""))
-        else:
-            pass  # Both VBIOS and FW PLDM versions are "N/A" so skip this line
+        # only print if the version is not "N/A"
+        if vbios_version != "N/A":
+            print("| VBIOS Version:   {0:22s}  {1:35s} |".format(vbios_version, ""))
+        if fw_pldm_version != "N/A":
+            print("| FW PLDM:         {0:15s}  {1:42s} |".format(fw_pldm_version, ""))
 
-        print("| Platform: {0:25.25s} {1:41s}|".format(str(self.helpers.os_info()), ""))
+        print("| Platform:        {0:25.25s} {1:34s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
@@ -1079,7 +1080,12 @@ class AMDSMILogger():
 
             power_usage = gpu_info['power_usage']
             if power_usage != "N/A":
-                power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
+                power_limit = gpu_info['power_usage']['power_limit']
+                if power_limit != 0:
+                    power_limit = f"/{power_limit}"
+                else:
+                    power_limit = ""
+                power_usage = f"{gpu_info['power_usage']['current_power']}{power_limit} W"
             power_usage = str(power_usage).rjust(13)
 
             gpu_id = str(gpu_info['gpu_id']).rjust(3)
@@ -1099,7 +1105,16 @@ class AMDSMILogger():
 
             mem_usage = gpu_info['mem_usage']
             if mem_usage != "N/A":
-                mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                # Support both VRAM and GTT memory types for APU-aware display
+                if 'used_gtt' in mem_usage and 'total_gtt' in mem_usage:
+                    # GTT memory selected (likely APU)
+                    mem_usage = f"{gpu_info['mem_usage']['used_gtt']}/{gpu_info['mem_usage']['total_gtt']} MB"
+                elif 'used_vram' in mem_usage and 'total_vram' in mem_usage:
+                    # VRAM memory selected (standard or APU with more VRAM)
+                    mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                else:
+                    # Fallback if neither format is found
+                    mem_usage = "N/A"
             mem_usage = mem_usage.rjust(21)
 
             print("| {0:12.12s} {1:22.22s} | {2:5.5s}   {3:6.6s}   {4:5.5s}   {5:13.13s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
