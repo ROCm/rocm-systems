@@ -1,7 +1,16 @@
-# HIP Tests - with Catch2
+# HIP Tests
 
-## Intro and Motivation
-HIP Tests were using HIT framework (a custom framework tailored for HIP) to add, build and run tests. As time progressed the frame got big and took substantial amount of effort to maintain and extend. It also took substantial amount of time to configure. We took this oppurtunity to rewrite the HIP's testing framework and porting the test infra to Catch2 format.
+Collection of HIP runtime tests.
+
+## How to build
+
+### Linux
+
+- `cd hip-tests`
+- `mkdir build && cd build`
+- `cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_PREFIX_PATH=<HIP-Install-Path>`
+- `make -j32 build_tests`
+- `make test`
 
 ## How to write tests
 Tests in Catch2 are declared via ```TEST_CASE```.
