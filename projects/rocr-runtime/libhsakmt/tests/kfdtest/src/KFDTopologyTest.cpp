@@ -95,29 +95,36 @@ TEST_F(KFDTopologyTest, GetNodePropertiesInvalidNodeNum) {
     TEST_END
 }
 
-// Test that HasExpertSchedMode is set correctly based on KFD version
+// Test that HasExpertSchedMode is set correctly based on KFD version and GFX version
+// HasExpertSchedMode = (KFD version >= 1.20) AND (GFX major >= 12)
 TEST_F(KFDTopologyTest, HasExpertSchedModeProperty) {
     TEST_START(TESTPROFILE_RUNALL)
 
     const HsaNodeProperties *pNodeProperties;
     HsaVersionInfo *versionInfo = Get_Version();
 
-    // HasExpertSchedMode should be 1 if KFD version >= 1.20, 0 otherwise
-    bool expectedValue = (versionInfo->KernelInterfaceMajorVersion >= 1 &&
-                          versionInfo->KernelInterfaceMinorVersion > 19);
-
     LOG() << "KFD Version: " << versionInfo->KernelInterfaceMajorVersion << "."
-          << versionInfo->KernelInterfaceMinorVersion
-          << ", Expected HasExpertSchedMode: " << expectedValue << std::endl;
+          << versionInfo->KernelInterfaceMinorVersion << std::endl;
 
     for (unsigned node = 0; node < m_SystemProperties.NumNodes; node++) {
         pNodeProperties = m_NodeInfo.GetNodeProperties(node);
         if (pNodeProperties != NULL && pNodeProperties->NumFComputeCores > 0) {
-            // GPU nodes should have HasExpertSchedMode set based on KFD version
+            // GPU nodes: HasExpertSchedMode should be 1 if both conditions are met:
+            // 1. KFD version >= 1.20 (KernelInterfaceMajorVersion >= 1 && KernelInterfaceMinorVersion > 19)
+            // 2. GFX major version >= 12
+            // Otherwise, it should be 0
+            bool kfdVersionCheck = (versionInfo->KernelInterfaceMajorVersion >= 1 &&
+                                     versionInfo->KernelInterfaceMinorVersion > 19);
+            bool gfxVersionCheck = (pNodeProperties->EngineId.ui32.Major >= 12);
+            bool expectedValue = kfdVersionCheck && gfxVersionCheck;
+
+            LOG() << "Node " << node
+                  << ": GFX Major=" << pNodeProperties->EngineId.ui32.Major
+                  << ", Expected HasExpertSchedMode=" << expectedValue
+                  << ", Actual=" << (int)pNodeProperties->HasExpertSchedMode << std::endl;
+
             EXPECT_EQ(pNodeProperties->HasExpertSchedMode, expectedValue ? 1 : 0)
                 << "Node " << node << " HasExpertSchedMode mismatch";
-            LOG() << "Node " << node << " HasExpertSchedMode: "
-                  << (int)pNodeProperties->HasExpertSchedMode << std::endl;
         }
     }
 
