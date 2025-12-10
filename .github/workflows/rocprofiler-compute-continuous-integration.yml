@@ -91,12 +91,15 @@ jobs:
           if [ '${{ github.event_name }}' = 'schedule' ]; then
             MODE=Nightly
             EXCLUDED_TESTS=""
+            ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
             EXCLUDED_TESTS="test_profile_live_attach_detach"
+            ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
+          echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
           if [ '${{ matrix.system.os-release }}' = '24.04']; then
             CODE_NAME=noble
@@ -148,6 +151,7 @@ jobs:
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             --build-jobs 16 \
+            ${{ steps.setup_env.outputs.add_coverage }} \
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
