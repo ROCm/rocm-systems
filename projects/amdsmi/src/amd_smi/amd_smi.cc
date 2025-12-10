@@ -1716,6 +1716,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
     info->target_graphics_version = std::numeric_limits<uint64_t>::max();
     info->subsystem_id = std::numeric_limits<uint32_t>::max();
+    info->flags = 0;
 
     std::ostringstream ss;
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -1921,6 +1922,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
     // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
     info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
+    info->flags = static_cast<uint64_t>(dev_info.ids_flags);
     libdrm.unload();
 
     ss << __PRETTY_FUNCTION__

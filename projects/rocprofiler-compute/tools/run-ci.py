@@ -88,8 +88,10 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
 
         set(CTEST_UPDATE_COMMAND {GIT_CMD})
-        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} {CMAKE_ARGS}")
-        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all --parallel {BUILD_JOBS}")
+        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} \
+        {CMAKE_ARGS}")
+        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all \
+        --parallel {BUILD_JOBS}")
         set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
         """
 
