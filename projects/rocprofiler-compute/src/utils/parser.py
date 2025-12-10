@@ -80,9 +80,9 @@ SUPPORTED_DENOM: dict[str, str] = {
 
 # Build-in defined in mongodb variables:
 BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
+    "GRBM_GUI_ACTIVE_PER_XCD": "(SUM(GRBM_GUI_ACTIVE) / $num_xcd)",
+    "GRBM_COUNT_PER_XCD": "(SUM(GRBM_COUNT) / $num_xcd)",
+    "GRBM_SPI_BUSY_PER_XCD": "(SUM(GRBM_SPI_BUSY) / $num_xcd)",
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
         $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
         MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
@@ -320,13 +320,18 @@ class MetricEvaluator:
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
+        if isinstance(expr, (int, float)):
+            if pd.isna(expr):
+                return "N/A"
+            return expr
+        if expr in {"", "N/A", None}:
+            return "N/A"
         try:
             # Create comprehensive local context
             local_expr_context = {}
             local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
-
             # Add utility functions to local context
             local_expr_context.update({
                 "to_min": to_min,
@@ -348,10 +353,17 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if eval_result is None or np.isnan(eval_result).any():
+            if eval_result in {"N/A", None}:
                 return "N/A"
-            else:
-                return eval_result
+            # Only check for NaN if eval_result is numeric (not string)
+            if isinstance(eval_result, (int, float, np.number, pd.Series, np.ndarray)):
+                if hasattr(eval_result, 'any'):
+                    if np.isnan(eval_result).any():
+                        return "N/A"
+                else:
+                    if np.isnan(eval_result):
+                        return "N/A"        
+            return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
@@ -375,6 +387,8 @@ class MetricEvaluator:
             console_warning(f"Missing data: {exception}. Using empty value.")
             return ""
 
+        except ValueError as value_error:
+            raise value_error
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     """
@@ -918,9 +932,9 @@ def calc_builtin_vars(
 
     # First pass: calculate per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
+        
         if "PER_XCD" not in variable_key:
             continue
-
         # NB: assume all built-in vars from pmc_perf.csv for now
         eval_string = build_eval_string(
             variable_value, schema.PMC_PERF_FILE_PREFIX, config
@@ -928,14 +942,16 @@ def calc_builtin_vars(
         try:
             # Create temporary evaluator for this calculation
             # Pass sys_vars so that $num_xcd and other system variables are available
+
             temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
-        except (TypeError, NameError, KeyError, AttributeError):
+        except (TypeError, NameError, KeyError, AttributeError) as exception:
             builtin_vars_collection[f"ammolite__{variable_key}"] = None
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
+        
         if "PER_XCD" in variable_key:
             continue
 
@@ -951,6 +967,7 @@ def calc_builtin_vars(
         except (TypeError, NameError, KeyError, AttributeError):
             builtin_vars_collection[f"ammolite__{variable_key}"] = None
 
+    
     return builtin_vars_collection
 
 
@@ -1012,10 +1029,8 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
-        console_warning(f"DEBUG: Evaluating {col} for row {row_id}")  
-        console_warning(f"DEBUG: Expression: {expr[:100]}...") 
         eval_result = metric_evaluator.eval_expression(expr)
-        console_warning(f"DEBUG: Result type: {type(eval_result)}, value: {str(eval_result)[:50]}") 
+        # console_warning(f"{expr} Evaluates to: {type(eval_result)}, value: {str(eval_result)}") 
         dfs[df_id].loc[row_id, col] = eval_result
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
