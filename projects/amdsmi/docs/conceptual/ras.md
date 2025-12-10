@@ -54,7 +54,7 @@ facilitate root cause analysis. Each AFID is associated with category, type, and
 [AFID Event List](https://docs.amd.com/r/en-US/AMD_Field_ID_70122_v1.0/AFID-Event-List) for more
 information.
 
-## Multiple Initialization Performance Optimization
+## Multiple initialization performance optimization
 
 A static metrics cache was implemented in the amd-smi object which persists over multiple amd-smi instances.
 This also applies to any multiple threaded C/C++ application.
