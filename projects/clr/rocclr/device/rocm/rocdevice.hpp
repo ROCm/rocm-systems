@@ -615,6 +615,9 @@ class Device : public NullDevice {
   // Returns the number of allocated normal queues on this device
   uint32_t NumNormalQueues() const { return num_normal_queues_.load(); }
 
+  //! Returns true if PM4 emulation is enabled
+  bool IsPm4Emulation() const { return pm4_emulation_; }
+
  private:
   bool create();
 
@@ -701,6 +704,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;
