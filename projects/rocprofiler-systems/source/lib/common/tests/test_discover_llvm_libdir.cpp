@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "common/environment.hpp"
+#include "filesystem.hpp"
 
-#include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -60,14 +60,14 @@ protected:
     void cleanup_temp_dir(const std::string& dir)
     {
         if(dir.empty()) return;
-        std::string cmd = "rm -rf " + dir;
-        std::system(cmd.c_str());
+        std::error_code ec;
+        test_common::fs::remove_all(dir, ec);
     }
 
     void create_directory(const std::string& path)
     {
-        std::string cmd = "mkdir -p " + path;
-        std::system(cmd.c_str());
+        std::error_code ec;
+        test_common::fs::create_directories(path, ec);
     }
 
     void create_libomptarget(const std::string& dir)
@@ -344,8 +344,8 @@ TEST_F(DiscoverLlvmLibdirTest, PathWithSpaces)
     std::string rocm_path = m_test_dir + "/rocm with spaces";
     std::string llvm_lib  = rocm_path + "/llvm/lib";
 
-    std::string mkdir_cmd = "mkdir -p \"" + llvm_lib + "\"";
-    std::system(mkdir_cmd.c_str());
+    std::error_code ec;
+    test_common::fs::create_directories(llvm_lib, ec);
 
     std::string   lib_path = llvm_lib + "/libomptarget.so";
     std::ofstream ofs(lib_path);

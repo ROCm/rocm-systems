@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "common/path.hpp"
+#include "filesystem.hpp"
 
-#include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -52,8 +52,8 @@ protected:
     void cleanup_temp_dir(const std::string& dir)
     {
         if(dir.empty()) return;
-        std::string cmd = "rm -rf " + dir;
-        std::system(cmd.c_str());
+        std::error_code ec;
+        test_common::fs::remove_all(dir, ec);
     }
 
     std::string create_file(const std::string& name, const std::string& content = "test")
