@@ -232,6 +232,7 @@ struct sample
 
     uint64_t                id                = 0;
     guid_t                  guid              = {};
+    std::string             category          = {};
     std::string             name              = {};
     std::string             symbol            = {};
     pid_t                   nid               = 0;
@@ -710,6 +711,7 @@ load(ArchiveT& ar, rocpd::types::sample& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(symbol);
     LOAD_DATA_FIELD(nid);

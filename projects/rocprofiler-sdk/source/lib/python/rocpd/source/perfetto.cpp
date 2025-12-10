@@ -455,18 +455,38 @@ write_perfetto(
             counter_id_name[record.counter_id] = std::string{record.counter_name};
         }
 
+    std::map<std::string, std::map<uint64_t, double>> pmc_event_values;
+    for(auto ditr : pmc_event_gen)
+    {
+        for(const auto& itr : pmc_event_gen.get(ditr))
+        {
+            pmc_event_values[itr.symbol][itr.event_id] = itr.value;
+        }
+    }
+
+    struct counter_track_data
+    {
+        std::string                               agent_type  = {};
+        std::string                               unit_name   = {};
+        std::string                               description = {};
+        std::map<rocprofiler_timestamp_t, double> samples     = {};
+    };
+
+    auto sample_counter_tracks =
+        std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, counter_track_data>>{};
+
+    auto get_category_string = [](std::string_view _category) {
+        static auto buffer_names  = sdk::get_buffer_tracing_names();
+        auto        _category_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+        for(const auto& citr : buffer_names)
+        {
+            if(_category == citr.name) _category_idx = citr.value;
+        }
+        return sdk::get_perfetto_category(_category_idx);
+    };
+
     // trace events
     {
-        auto get_category_string = [](std::string_view _category) {
-            static auto buffer_names  = sdk::get_buffer_tracing_names();
-            auto        _category_idx = ROCPROFILER_BUFFER_TRACING_NONE;
-            for(const auto& citr : buffer_names)
-            {
-                if(_category == citr.name) _category_idx = citr.value;
-            }
-            return sdk::get_perfetto_category(_category_idx);
-        };
-
         for(auto ditr : region_gen)
         {
             for(auto itr : region_gen.get(ditr))
@@ -569,6 +589,83 @@ write_perfetto(
                     });
 
                 TRACE_EVENT_END(_category, track, itr.end);
+
+                tracing_session->FlushBlocking();
+            }
+        }
+
+        for(auto ditr : sample_gen)
+        {
+            for(const auto& itr : sample_gen.get(ditr))
+            {
+                // Collect sample counter track data here to avoid extra costly looping over
+                // sample_gen
+                if(!itr.symbol.empty())
+                {
+                    // For CPU tracks, use (TID, 0) as the track index
+                    // For GPU tracks, use (0, agent_abs_index) as the track index
+                    std::pair<uint32_t, uint32_t> track_index = {itr.tid, itr.agent_abs_index};
+                    auto& track_data = sample_counter_tracks[itr.symbol][track_index];
+
+                    const auto _agent      = agent_data.at(itr.agent_abs_index).first;
+                    track_data.agent_type  = _agent.type;
+                    track_data.unit_name   = itr.units;
+                    track_data.description = itr.short_description;
+                    track_data.samples.emplace(itr.timestamp,
+                                               pmc_event_values[itr.symbol][itr.event_id]);
+                    continue;
+                }
+
+                auto& track      = thread_tracks.at(itr.tid);
+                auto  _name      = itr.name;
+                auto  _operation = itr.name;
+
+                // Ignore timer sampling events
+                if(std::strcmp(itr.category.c_str(),
+                               sdk::perfetto_category<sdk::category::timer_sampling>::name) == 0)
+                    continue;
+
+                if(itr.has_extdata())
+                {
+                    auto _extdata = itr.get_extdata();
+                    if(_extdata.message && !_extdata.message->empty())
+                        _name = _extdata.message.value();
+                    if(_extdata.operation && !_extdata.operation->empty())
+                        _operation = _extdata.operation.value();
+                }
+
+                auto flow_index = (itr.stack_id == 0) ? (++global_flow_index)
+                                                      : (itr.stack_id ^ this_pid_track.uuid);
+
+                const char* category_name = get_category_string(itr.category);
+
+                auto _category = std::strcmp(category_name,
+                                             sdk::perfetto_category<sdk::category::none>::name) == 0
+                                     ? ::perfetto::DynamicCategory{itr.category}
+                                     : ::perfetto::DynamicCategory{category_name};
+
+                TRACE_EVENT_INSTANT(_category,
+                                    ::perfetto::DynamicString{_name},
+                                    track,
+                                    itr.timestamp,
+                                    ::perfetto::Flow::Global(flow_index),
+                                    "begin_ns",
+                                    itr.timestamp,
+                                    "end_ns",
+                                    itr.timestamp,
+                                    "delta_ns",
+                                    0,
+                                    "tid",
+                                    itr.tid,
+                                    "kind",
+                                    itr.category,
+                                    "operation",
+                                    _operation,
+                                    "corr_id",
+                                    itr.stack_id,
+                                    "ancestor_id",
+                                    itr.parent_stack_id,
+                                    [&](::perfetto::EventContext ctx) { (void) ctx; });
 
                 tracing_session->FlushBlocking();
             }
@@ -889,45 +986,7 @@ write_perfetto(
     // counter tracks
     {
         // sample counter tracks
-        std::map<std::string, std::map<uint64_t, double>> pmc_event_values;
-        for(auto ditr : pmc_event_gen)
-        {
-            for(const auto& itr : pmc_event_gen.get(ditr))
-            {
-                pmc_event_values[itr.symbol][itr.event_id] = itr.value;
-            }
-        }
-
-        struct counter_track_data
-        {
-            std::string                               agent_type  = {};
-            std::string                               unit_name   = {};
-            std::string                               description = {};
-            std::map<rocprofiler_timestamp_t, double> samples     = {};
-        };
-
-        auto sample_endpoints =
-            std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, counter_track_data>>{};
-
-        for(auto ditr : sample_gen)
-        {
-            for(const auto& itr : sample_gen.get(ditr))
-            {
-                // For CPU tracks, use (TID, 0) as the track index
-                // For GPU tracks, use (0, agent_abs_index) as the track index
-                std::pair<uint32_t, uint32_t> track_index = {itr.tid, itr.agent_abs_index};
-                auto& track_data = sample_endpoints[itr.symbol][track_index];
-
-                const auto _agent      = agent_data.at(itr.agent_abs_index).first;
-                track_data.agent_type  = _agent.type;
-                track_data.unit_name   = itr.units;
-                track_data.description = itr.short_description;
-                track_data.samples.emplace(itr.timestamp,
-                                           pmc_event_values[itr.symbol][itr.event_id]);
-            }
-        }
-
-        for(auto& [symbol, track_data] : sample_endpoints)
+        for(auto& [symbol, track_data] : sample_counter_tracks)
         {
             for(auto& [track_index, data] : track_data)
             {

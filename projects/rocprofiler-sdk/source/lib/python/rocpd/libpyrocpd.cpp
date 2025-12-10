@@ -593,7 +593,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 R.timestamp,
                                 R.event_id,
                                 T.nid,
-                                T.tid,
+                                TH.tid,
+                                CN.string AS category,
                                 PMC_I.name,
                                 PMC_I.symbol,
                                 PMC_I.units,
@@ -618,7 +619,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 AND SN.guid = T.guid
                                 INNER JOIN `rocpd_string` CN ON CN.id = E.category_id
                                 AND CN.guid = T.guid
-                                INNER JOIN `info_pmc_schema_3_0` PMC_I ON SN.string = PMC_I.name
+                                LEFT OUTER JOIN `info_pmc_schema_3_0` PMC_I ON SN.string = PMC_I.name
                                 AND PMC_I.guid = T.guid
                                 LEFT OUTER JOIN `rocpd_info_thread` TH ON TH.id = T.tid
                                 AND TH.guid = T.guid;
