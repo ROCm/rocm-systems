@@ -254,7 +254,13 @@ void RdciDmonSubSystem::show_help() const {
 }
 
 void RdciDmonSubSystem::create_temp_group() {
-  if (device_indexes_.size() == 0) {
+  // If a group-id was specified on the command line
+  // do NOT create a temporary group.
+  if (options_.find(OPTIONS_GROUP_ID) != options_.end()) {
+    return;
+  }
+
+  if (device_indexes_.empty()) {
     return;
   }
 
@@ -274,6 +280,9 @@ void RdciDmonSubSystem::create_temp_group() {
       throw RdcException(result, "Fail to add " + info_str + " to the dmon group.");
     }
   }
+
+  // First time we create a temp group, we store it here.
+  // Subsequent calls see OPTIONS_GROUP_ID and will early-return above.
   options_.insert({OPTIONS_GROUP_ID, group_id});
 }
 
@@ -307,12 +316,21 @@ void RdciDmonSubSystem::resolve_device_indexes() {
     throw RdcException(res, "Failed to get all devices");
   }
 
-  // If neither group or device_index was specified, default to all
-  if (raw_device_indexes_.empty()) {
+  const bool has_group =
+      (options_.find(OPTIONS_GROUP_ID) != options_.end());
+
+  // Case 1: no group and no explicit GPU indexes -> default to all devices
+  if (!has_group && raw_device_indexes_.empty()) {
     device_indexes_.assign(device_list, device_list + count);
     return;
   }
 
+  // Case 2: group-id was provided -> we don't need device_indexes_ at all
+  if (has_group) {
+    return;
+  }
+
+  // Case 3: explicit GPU indexes were provided (no group-id)
   std::vector<std::string> vec_ids = split_string(raw_device_indexes_, ',');
   for (const auto& vec_id : vec_ids) {
     if (rdc_is_partition_string(vec_id.c_str())) {
