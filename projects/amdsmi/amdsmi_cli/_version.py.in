@@ -1,0 +1,1 @@
+__version__ = "@amd_smi_lib_VERSION_STRING@"

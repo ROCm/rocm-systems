@@ -74,14 +74,14 @@ jobs:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
-      options: 
-        --privileged 
+      options:
+        --privileged
         --ipc host
         --group-add video
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
-        
+
     steps:
       - uses: actions/checkout@v5
         with:
@@ -170,6 +170,19 @@ jobs:
             -- \
             -L "rocm" \
             -LE "rccl|runtime|ompvv"
+
+      - name: Check for Leftover Buffered Files
+        timeout-minutes: 5
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          set -v
+          if find /tmp -maxdepth 1 -name 'buffered*' -print -quit | grep -q .; then
+            echo "Error: Found leftover buffered storage files in /tmp:"
+            ls -lh /tmp/buffered*
+            exit 1
+          else
+            echo "✓ No buffered storage files found in /tmp"
+          fi
 
       - name: Output Logs
         if: failure() && steps.run_ci.outcome == 'failure'

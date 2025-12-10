@@ -62,8 +62,11 @@ struct TraceConfig {
   // SE mask for tracing; note -> replicated for all XCCs
   uint64_t se_mask = 0x11;
 
+  // Maps shader engine IDs to list of buffers
+  std::unordered_map<int, std::vector<void*>> buffer_data{};
+
   uint64_t capacity_per_se = 0x1000;
-  uint64_t capacity_per_disabled_se = 0x1000;
+  uint64_t capacity_per_disabled_se = 0;
   std::unordered_map<int, int> target_cu_per_se{};
   std::unordered_map<int, uint64_t> se_base_addresses{};
 

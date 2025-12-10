@@ -38,7 +38,7 @@ THE SOFTWARE.
 template <typename T> __global__ void surfCubemapLayeredKernelR(hipSurfaceObject_t surfaceObject,
                                                                 T* outputData, int width,
                                                                 int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -50,7 +50,7 @@ template <typename T> __global__ void surfCubemapLayeredKernelR(hipSurfaceObject
 template <typename T> __global__ void surfCubemapLayeredKernelW(hipSurfaceObject_t surfaceObject,
                                                                 T* inputData, int width,
                                                                 int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -62,7 +62,7 @@ template <typename T> __global__ void surfCubemapLayeredKernelW(hipSurfaceObject
 template <typename T> __global__ void surfCubemapLayeredKernelRW(hipSurfaceObject_t surfaceObject,
                                                                  hipSurfaceObject_t outputSurfObj,
                                                                  int width, int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {

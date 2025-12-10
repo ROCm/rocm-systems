@@ -26,15 +26,10 @@
 import csv
 import re
 import subprocess
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
 import test_utils
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -55,14 +50,6 @@ MI300_CHIP_IDS = {
     "29857": "MI300X_A1",
     "29858": "MI308X",
 }
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("ascii")
 
 
 def gpu_soc():

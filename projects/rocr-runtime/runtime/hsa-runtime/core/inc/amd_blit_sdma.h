@@ -71,6 +71,10 @@ class BlitSdmaBase : public core::Blit {
                                              const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
+                                     const std::vector<core::Signal*>& dep_signals,
+                                     core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) = 0;
 };
 
 template <bool useGCR> class BlitSdma : public BlitSdmaBase {

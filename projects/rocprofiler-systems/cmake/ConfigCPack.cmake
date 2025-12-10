@@ -177,8 +177,7 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
             timer
         )
             list(
-                APPEND
-                _DEBIAN_PACKAGE_DEPENDS
+                APPEND _DEBIAN_PACKAGE_DEPENDS
                 "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
             )
         endforeach()

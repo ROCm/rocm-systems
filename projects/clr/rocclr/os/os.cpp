@@ -177,10 +177,4 @@ bool Os::skipIDIV(address& pc) {
   return false;
 }
 
-void Os::setThreadAffinity(const void* handle, unsigned int cpu) {
-  ThreadAffinityMask mask;
-  mask.set(cpu);
-  setThreadAffinity(handle, mask);
-}
-
 }  // namespace amd

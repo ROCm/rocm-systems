@@ -66,9 +66,8 @@ Event::~Event() {
     delete callback;
     callback = next;
   }
-  // Release the notify event
-  if (notify_event_ != nullptr) {
-    notify_event_->release();
+  if (auto* notifyEvent = notify_event_.load(std::memory_order_acquire)) {
+    notifyEvent->release();
   }
   // Destroy global HW event if available
   if ((hw_event_ != nullptr) && (device_ != nullptr)) {
@@ -100,6 +99,7 @@ uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
 
 // Global epoch time since the first processed command
 uint64_t epoch = 0;
+std::once_flag epoch_init;
 // ================================================================================================
 bool Event::setStatus(int32_t status, uint64_t timeStamp) {
   assert(status <= CL_QUEUED && "invalid status");
@@ -112,9 +112,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
 
   if (profilingInfo().enabled_) {
     timeStamp = recordProfilingInfo(status, timeStamp);
-    if (epoch == 0) {
-      epoch = profilingInfo().queued_;
-    }
+    std::call_once(epoch_init, [&]{ epoch = profilingInfo().queued_;});
   }
 
   if (amd::IS_HIP) {
@@ -270,11 +268,10 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
         // @note: Force the marker always in OCL for now, since OCL events require precise
         // sequence of the status update
-        ((HwEvent() == nullptr) || !amd::IS_HIP) && !notified_.test_and_set()) {
+        ((HwEvent() == nullptr) || !amd::IS_HIP) && (notify_event_ == nullptr)) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this, cpu_wait);
       if (command == NULL) {
-        notified_.clear();
         return false;
       }
       command->enqueue();
@@ -796,8 +793,9 @@ bool CopyMemoryP2PCommand::validateMemory() {
       device::Memory* mem =
           devices[0]->P2PStage()->getDeviceMemory(*devices[0]->GlbCtx().devices()[d]);
       if (nullptr == mem) {
-        DevLogPrintfError("Cannot get P2P stage Device Memory for device: 0x%x \n",
-                          devices[0]->GlbCtx().devices()[d]);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+                "Cannot get P2P stage Device Memory for device: 0x%x \n",
+                devices[0]->GlbCtx().devices()[d]);
         return false;
       }
     }

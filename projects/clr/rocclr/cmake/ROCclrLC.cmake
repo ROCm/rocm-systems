@@ -37,7 +37,7 @@ if (NOT amd_comgr_FOUND)
 endif()
 
 get_target_property(_amd_comgr_lib_type amd_comgr TYPE)
-target_compile_definitions(rocclr PUBLIC WITH_LIGHTNING_COMPILER USE_COMGR_LIBRARY)
+target_compile_definitions(rocclr PUBLIC)
 if(_amd_comgr_lib_type STREQUAL "SHARED_LIBRARY")
   target_compile_definitions(rocclr PUBLIC COMGR_DYN_DLL)
 endif()

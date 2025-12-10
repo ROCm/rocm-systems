@@ -137,11 +137,6 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
 TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   // Height Width Vector
   std::vector<unsigned int> hw_vec = {2048, 1024, 512, 256, 64};
   std::vector<unsigned int> mip_vec = {8, 4, 2, 1};
@@ -181,11 +176,6 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
  */
 TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
 #if defined(_WIN32)
   unsigned int width = 64;

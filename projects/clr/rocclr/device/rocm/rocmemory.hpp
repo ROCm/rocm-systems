@@ -154,7 +154,9 @@ class Memory : public device::Memory {
     return (memFlags & CL_MEM_SVM_ATOMICS) == 0 ? Device::MemorySegment::kNoAtomics
                                                 : ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0
                                                        ? Device::MemorySegment::kUncachedAtomics
-                                                       : Device::MemorySegment::kAtomics);
+                                                : ((memFlags & ROCCLR_MEM_IO_MEMORY) != 0
+                                                       ? Device::MemorySegment::kIoMemory
+                                                       : Device::MemorySegment::kAtomics));
   }
 
  private:

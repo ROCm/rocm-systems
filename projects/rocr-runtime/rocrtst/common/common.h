@@ -112,6 +112,8 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
+bool isEmuModeEnabled();
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored

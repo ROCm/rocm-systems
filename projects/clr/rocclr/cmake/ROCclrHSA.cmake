@@ -67,13 +67,6 @@ endif()
 
 #target_include_directories(rocclr PRIVATE ${AMD_HSA_INCLUDE_DIR}/..)
 
-find_package(NUMA)
-if(NUMA_FOUND)
-  target_compile_definitions(rocclr PUBLIC ROCCLR_SUPPORT_NUMA_POLICY)
-  target_include_directories(rocclr PUBLIC ${NUMA_INCLUDE_DIR})
-  target_link_libraries(rocclr PUBLIC ${NUMA_LIBRARIES})
-endif()
-
 find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE
@@ -83,7 +76,6 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/roccounters.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocdevice.cpp
-  ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rockernel.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocmemory.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocprintf.cpp
@@ -92,5 +84,13 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocsignal.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
+
+if(UNIX)
+  target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop.cpp)
+else()
+  target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop_windows.cpp)
+endif()
 
 target_compile_definitions(rocclr PUBLIC WITH_HSA_DEVICE)

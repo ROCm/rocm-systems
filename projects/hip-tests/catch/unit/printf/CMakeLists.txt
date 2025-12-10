@@ -10,7 +10,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "nvidia")
   set(LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(LINKER_LIBS hiprtc)
+  set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
 if(UNIX)
@@ -44,8 +44,7 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
   hip_add_exe_to_target(NAME PrintfTest
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS}
-                    COMPILE_OPTIONS -std=c++17)
+                    LINKER_LIBS ${LINKER_LIBS})
 endif()
 
 if(UNIX)
@@ -67,6 +66,23 @@ add_executable(printfLength_exe EXCLUDE_FROM_ALL printfLength_exe.cc)
 add_executable(printfSpecifiers_exe EXCLUDE_FROM_ALL printfSpecifiers_exe.cc)
 add_executable(printfFlagsNonHost_exe EXCLUDE_FROM_ALL printfFlagsNonHost_exe.cc)
 add_executable(printfSpecifiersNonHost_exe EXCLUDE_FROM_ALL printfSpecifiersNonHost_exe.cc)
+
+set_source_files_properties(printfFlags_exe.cc PROPERTIES LANGUAGE HIP)
+set_source_files_properties(printfLength_exe.cc PROPERTIES LANGUAGE HIP)
+set_source_files_properties(printfSpecifiers_exe.cc PROPERTIES LANGUAGE HIP)
+set_source_files_properties(printfFlagsNonHost_exe.cc PROPERTIES LANGUAGE HIP)
+set_source_files_properties(printfSpecifiersNonHost_exe.cc PROPERTIES LANGUAGE HIP)
+set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE HIP)
+set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE HIP)
+target_link_libraries(printfFlags_exe hip::host hip::device)
+target_link_libraries(printfLength_exe hip::host hip::device)
+target_link_libraries(printfSpecifiers_exe hip::host hip::device)
+target_link_libraries(printfFlagsNonHost_exe hip::host hip::device)
+target_link_libraries(printfSpecifiersNonHost_exe hip::host hip::device)
+
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              printfFlags_exe
              printfLength_exe

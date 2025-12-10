@@ -76,10 +76,10 @@ get_stream_map()
 }
 
 auto
-add_stream(hipStream_t stream)
+add_stream(hipStream_t stream, bool reindex_existing = true)
 {
     return get_stream_map()->wlock(
-        [](stream_map_t& _data, hipStream_t _stream) {
+        [](stream_map_t& _data, hipStream_t _stream, const bool _reindex_existing) {
             static uint64_t idx_offset = 0;
 
             auto idx = _data.size() + idx_offset;
@@ -91,6 +91,8 @@ add_stream(hipStream_t stream)
 
             if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
+                // Do not change the index if attachment mode is currently active
+                if(!_reindex_existing) return _data.at(_stream);
                 idx_offset += 1;
                 // Handle special hipStreamPerThread case where each thread has it's own implicit
                 // stream ID. No need to update map since hipStreamPerThread is defined as 0x02
@@ -108,7 +110,8 @@ add_stream(hipStream_t stream)
             }
             return _data.at(_stream);
         },
-        stream);
+        stream,
+        reindex_existing);
 }
 
 auto
@@ -128,18 +131,25 @@ get_stream_id(hipStream_t stream)
         if(thr_stream_id.handle == 0) thr_stream_id = add_stream(stream);
         return thr_stream_id;
     }
-    return get_stream_map()->rlock(
-        [](const stream_map_t& _data, hipStream_t _stream) {
-            ROCP_ERROR_IF(_data.count(_stream) == 0)
+    auto stream_id = get_stream_map()->rlock(
+        [](const stream_map_t& _data,
+           hipStream_t         _stream) -> std::optional<rocprofiler_stream_id_t> {
+            ROCP_INFO_IF(_data.count(_stream) == 0 &&
+                         !rocprofiler::registration::supports_attachment())
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
-            // Stream may not be tracked during attachment. You should use queue grouping with
-            // attachment
-            if(_data.count(_stream) == 0) return add_stream(_stream);
-            return _data.at(_stream);
+            if(_data.count(_stream) != 0)
+                return std::optional<rocprofiler_stream_id_t>{_data.at(_stream)};
+            return std::nullopt;
         },
         stream);
+    // Stream ID already exists
+    if(stream_id) return *stream_id;
+
+    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::supports_attachment()) << fmt::format(
+        "Stream ID is not present in {} when attach feature is not being used", __FUNCTION__);
+    return add_stream(stream, false);
 }
 
 // Map rocprofiler_hip_stream_operation_t to respective name

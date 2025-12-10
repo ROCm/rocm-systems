@@ -45,7 +45,13 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import get_uuid, is_workload_empty, merge_counters_spatial_multiplex
+from utils.utils import (
+    get_panel_alias,
+    get_uuid,
+    is_workload_empty,
+    merge_counters_iteration_multiplex,
+    merge_counters_spatial_multiplex,
+)
 
 # the build-in config to list kernel names purpose only
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
@@ -96,6 +102,12 @@ class OmniAnalyze_Base:
     @demarcate
     def spatial_multiplex_merge_counters(self, df: pd.DataFrame) -> pd.DataFrame:
         return merge_counters_spatial_multiplex(df)
+
+    @demarcate
+    def iteration_multiplex_merge_counters(
+        self, df: pd.DataFrame, policy: str
+    ) -> pd.DataFrame:
+        return merge_counters_iteration_multiplex(df, policy)
 
     @demarcate
     def generate_configs(
@@ -160,21 +172,41 @@ class OmniAnalyze_Base:
         }
         for key, value in self._arch_configs[arch].metric_list.items():
             dot_count = str(key).count(".")
-            if dot_count == 0:
-                prefix = ""
-            elif dot_count == 1:
-                prefix = "\t"
-            else:
-                prefix = "\t\t"
+            indent = "\t" * min(dot_count, 2)
 
-            description = metric_descriptions.get(key, "") if dot_count > 1 else ""
+            print(f"{indent}{key} -> {value}\n")
 
-            print(f"{prefix}{key} -> {value}\n")
-            if description:
-                formatted_desc = f"\n{prefix}".join(
-                    textwrap.wrap(description, width=40)
-                )
-                print(f"{prefix}{formatted_desc}\n")
+            if dot_count > 1:
+                description = metric_descriptions.get(key, "")
+                if description:
+                    wrapped = textwrap.wrap(description, width=40)
+                    print(f"{indent}" + f"\n{indent}".join(wrapped) + "\n")
+
+        sys.exit(0)
+
+    @demarcate
+    def list_blocks(self) -> None:
+        args = self.get_args()
+        arch = args.list_blocks
+
+        if arch not in self.__supported_archs:
+            console_error("analysis", "Unsupported arch")
+        if arch not in self._arch_configs:
+            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
+            self.generate_configs(
+                arch,
+                args.config_dir,
+                args.list_stats,
+                args.filter_metrics,
+                sys_info.iloc[0],
+            )
+
+        print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+        for key, value in self._arch_configs[arch].metric_list.items():
+            panel_alias_dict = get_panel_alias()
+            if key.count(".") > 0:
+                continue
+            print(f"{key:<8} {panel_alias_dict[value]:<16} {value}")
 
         sys.exit(0)
 
@@ -207,6 +239,9 @@ class OmniAnalyze_Base:
         args = self.get_args()
         if args.list_metrics:
             self.list_metrics()
+
+        if args.list_blocks:
+            self.list_blocks()
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
@@ -367,6 +402,17 @@ class OmniAnalyze_Base:
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(args.path[0][0])
 
+        # Check dispatch filtering isn't used with iteration multiplexing
+        if (
+            self._profiling_config.get("iteration_multiplexing") is not None
+            and args.gpu_dispatch_id
+        ):
+            console_error(
+                "analysis",
+                "Dispatch filtering (-d/--dispatch) cannot be used "
+                "with profiling data collected with iteration multiplexing.",
+            )
+
         # initalize runs
         self._runs = self.initalize_runs()
 
@@ -394,3 +440,12 @@ class OmniAnalyze_Base:
     def run_analysis(self) -> None:
         """Run analysis."""
         console_debug("analysis", "generating analysis")
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            console_log(
+                "analysis",
+                (
+                    "Profiling data was collected using iteration multiplexing. "
+                    "Some metrics may represent aggregated values "
+                    "across multiple iterations."
+                ),
+            )

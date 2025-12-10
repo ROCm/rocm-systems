@@ -41,7 +41,7 @@ namespace amd::pal {
 class Settings;
 class Device;
 class VirtualGPU;
-class HSAILKernel;
+class Kernel;
 
 // ================================================================================================
 enum class RgpSqqtBarrierReason : uint32_t {
@@ -99,7 +99,7 @@ class RgpCaptureMgr final : public ICaptureMgr {
 
   static RgpCaptureMgr* Create(Pal::IPlatform* platform, const Device& device);
 
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+  void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
                    size_t z) override;
 
   void PostDispatch(VirtualGPU* gpu) override;
@@ -230,7 +230,7 @@ class RgpCaptureMgr {
                                Pal::SubmitInfo& submitInfo) const {
     return Pal::Result::Success;
   }
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y, size_t z) {}
+  void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y, size_t z) {}
   void PostDispatch(VirtualGPU* gpu) {}
   void FinishRGPTrace(VirtualGPU* gpu, bool aborted) {}
   bool RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue, bool* debug_vmid) const {

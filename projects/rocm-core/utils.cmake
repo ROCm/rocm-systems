@@ -1,28 +1,5 @@
-################################################################################
-##
-## MIT License
-##
-## Copyright (c) 2017 - 2023 Advanced Micro Devices, Inc. All rights Reserved.
-##
-## Permission is hereby granted, free of charge, to any person obtaining a copy
-## of this software and associated documentation files (the "Software"), to deal
-## in the Software without restriction, including without limitation the rights
-## to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-## copies of the Software, and to permit persons to whom the Software is
-## furnished to do so, subject to the following conditions:
-##
-## The above copyright notice and this permission notice shall be included in all
-## copies or substantial portions of the Software.
-##
-## THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-## IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-## FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-## AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-## LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-## OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-## SOFTWARE.
-##
-################################################################################
+##Copyright © Advanced Micro Devices, Inc., or its affiliates.
+##SPDX-License-Identifier: MIT
 
 ## Parses the VERSION_STRING variable and places
 ## the first, second and third number values in
@@ -225,7 +202,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
         )
       endif()
 
-      # Install Change Log 
+      # Install Change Log
       find_program ( DEB_GZIP_EXEC gzip )
       if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" )
         execute_process(
@@ -251,7 +228,7 @@ function( configure_debian_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T
 endfunction()
 
 # Set variables for changelog and copyright
-# For Debian specific Packages 
+# For Debian specific Packages
 function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINTAINER_NM_T DEB_MAINTAINER_EMAIL_T )
     # Setting configure flags
     set( DEB_PACKAGE_NAME             "${DEB_PACKAGE_NAME_T}" CACHE STRING "Debian Package Name" )
@@ -260,7 +237,7 @@ function( set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DE
     set( DEB_MAINTAINER_EMAIL         "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email" )
     set( DEB_COPYRIGHT_YEAR           "2025" CACHE STRING "Debian Package Copyright Year" )
     set( DEB_LICENSE                  "MIT" CACHE STRING "Debian Package License Type" )
-    set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" ) 
+    set( DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name" )
 
     if( BUILD_ENABLE_LINTIAN_OVERRIDES )
       set( DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name" )

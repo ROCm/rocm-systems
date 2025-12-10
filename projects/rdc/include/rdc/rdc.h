@@ -193,6 +193,9 @@ typedef enum {
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
   RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  //!< PCIe link recovery count
+  RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,          //!< PCIe NAK received count
+  RDC_FI_PCIE_NAK_SENT_COUNT_ACC,          //!< PCIe NAK sent count
 
   /**
    * @brief GPU usage related fields
@@ -516,6 +519,9 @@ typedef struct {
   rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
                                         //!< pcie_tx/pcie_rx are not available on mi300, max integer
                                         //!< returned, so use pcie_total
+  uint32_t pcie_lc_perf_other_end_recovery_count; //!< PCIE other end recovery count
+  uint32_t pcie_nak_sent_count_acc;     //!< PCIE NAK sent accumulated count
+  uint32_t pcie_nak_rcvd_count_acc;     //!< PCIE NAK received accumulated count 
   rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
   rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
   rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats

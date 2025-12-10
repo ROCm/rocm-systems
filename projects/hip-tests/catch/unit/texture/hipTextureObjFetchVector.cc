@@ -131,11 +131,6 @@ template <typename T> bool runTest() {
 TEST_CASE("Unit_hipTextureFetch_vector") {
   CHECK_IMAGE_SUPPORT
 
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
-
   // test for char
   runTest<char1>();
   runTest<char2>();

@@ -25,7 +25,6 @@
 #include <vector>
 #include <cstdio>
 #include "top.hpp"
-#include "library.hpp"
 #include <cassert>
 #include <sstream>
 #ifdef __linux__
@@ -316,16 +315,15 @@ class Options {
   void setDumpFileName(const char* val);
 
  public:
-  LibrarySelector libraryType_;
   std::string sourceFileName_;
 };
 
 OptionDescriptor* getOptDescTable();
 bool init();
 bool teardown();
-bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly, bool isLC);
-inline bool parseLinkOptions(std::string& options, Options& Opts, bool isLC) {
-  return parseAllOptions(options, Opts, true /*linkOptsOnly*/, isLC);
+bool parseAllOptions(std::string& options, Options& Opts, bool linkOptsOnly);
+inline bool parseLinkOptions(std::string& options, Options& Opts) {
+  return parseAllOptions(options, Opts, true /*linkOptsOnly*/);
 }
 
 

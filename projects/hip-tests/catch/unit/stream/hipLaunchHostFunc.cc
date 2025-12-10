@@ -313,7 +313,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_KernelHost") {
 // Test scenario 5
 // scenario that validates the host launch function on multi device
 // environment.
-TEST_CASE("Unit_hipLaunchHostFunc_multidevice") {
+TEST_CASE("Unit_hipLaunchHostFunc_multidevice", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {

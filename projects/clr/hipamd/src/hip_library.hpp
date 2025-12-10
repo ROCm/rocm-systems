@@ -57,6 +57,10 @@ class LibraryContainer {
   // Register the kernel function, make an entry in global state
   void Register(std::string name, int device, hipKernel_t k);
 
+  // Enumerate atmost maxKernels kernel handles in this library
+  hipError_t EnumerateKernels(hipKernel_t* k, unsigned int maxKernels);
+  hipError_t GetKernelName(const char** name, hipKernel_t kernel);
+
  private:
   LibraryContainer() = delete;
   LibraryContainer(const LibraryContainer&) = delete;

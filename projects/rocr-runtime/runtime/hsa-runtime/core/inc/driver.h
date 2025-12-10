@@ -348,7 +348,7 @@ public:
 
   /// @brief Releases the residency of the memory
   /// @param[in] mem address of memory to be made unresident
-  /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
+  /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.

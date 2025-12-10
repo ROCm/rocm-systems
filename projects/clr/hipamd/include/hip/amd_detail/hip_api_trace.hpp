@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 16
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 20
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -685,6 +685,8 @@ typedef hipError_t (*t_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)(
     int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
     unsigned int flags);
 typedef hipError_t (*t_hipModuleUnload)(hipModule_t module);
+typedef hipError_t (*t_hipOccupancyAvailableDynamicSMemPerBlock)(size_t* dynamicSmemSize, const void* f,
+                                                                 int numBlocks, int blockSize);
 typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* f,
                                                                      int blockSize,
                                                                      size_t dynSharedMemPerBlk);
@@ -1105,7 +1107,15 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
+                                                   hipLibrary_t library);
+typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
+typedef hipError_t (*t_hipKernelGetName)(const char** name, hipKernel_t kernel);
+typedef hipError_t (*t_hipGetProcAddress_spt)(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                              hipDriverProcAddressQueryResult* symbolStatus);
 
+typedef hipError_t (*t_hipKernelGetParamInfo)(hipKernel_t kernel, size_t paramIndex,
+                                              size_t* paramOffset, size_t* paramSize);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1683,8 +1693,22 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
   t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 17
+  t_hipLibraryEnumerateKernels hipLibraryEnumerateKernels_fn;
+  t_hipKernelGetLibrary hipKernelGetLibrary_fn;
+  t_hipKernelGetName hipKernelGetName_fn;
+  
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
+  t_hipOccupancyAvailableDynamicSMemPerBlock hipOccupancyAvailableDynamicSMemPerBlock_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 19
+  t_hipGetProcAddress_spt hipGetProcAddress_spt_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 20
+  t_hipKernelGetParamInfo hipKernelGetParamInfo_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 21
 
   // ******************************************************************************************* //
   //

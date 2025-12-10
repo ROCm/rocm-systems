@@ -41,9 +41,16 @@ def test_attachment_kernel_trace(kernel_input_data):
         simple_kernel_found
     ), f"Expected 'simple_kernel' not found in kernel names: {kernel_names}"
 
+    kernel_threads = set()
+    kernel_streams = set()
+    NUM_KERNEL_THREADS = 32
+    expected_stream_ids = set([i for i in range(1, 9)])
+
     # Verify basic kernel properties
     for row in kernel_input_data:
         if "simple_kernel" in row["Kernel_Name"]:
+            assert "Stream_Id" in row
+            assert "Thread_Id" in row
             assert row["Kind"] == "KERNEL_DISPATCH"
             assert int(row["Queue_Id"]) > 0
             assert int(row["Kernel_Id"]) > 0
@@ -59,6 +66,15 @@ def test_attachment_kernel_trace(kernel_input_data):
             assert int(row["Grid_Size_Y"]) >= 1
             assert int(row["Grid_Size_Z"]) >= 1
 
+            thread_id = int(row["Thread_Id"])
+            stream_id = int(row["Stream_Id"])
+            kernel_threads.add(thread_id)
+            kernel_streams.add(stream_id)
+
+    # Exactly 8 streams and 32 threads
+    len(kernel_threads) == NUM_KERNEL_THREADS
+    kernel_streams == expected_stream_ids
+
 
 def test_attachment_memory_copy_trace(memory_copy_input_data):
     """Verify that memory copy operations were captured during attachment."""
@@ -70,8 +86,11 @@ def test_attachment_memory_copy_trace(memory_copy_input_data):
 
     host_to_device_count = 0
     device_to_host_count = 0
+    memory_copy_streams = set()
+    expected_stream_ids = set([i for i in range(1, 9)])
 
     for row in memory_copy_input_data:
+        assert "Stream_Id" in row
         assert row["Kind"] == "MEMORY_COPY"
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
@@ -83,10 +102,15 @@ def test_attachment_memory_copy_trace(memory_copy_input_data):
             "MEMORY_COPY_DEVICE_TO_HOST" in row["Direction"] or "D2H" in row["Direction"]
         ):
             device_to_host_count += 1
+        stream_id = int(row["Stream_Id"])
+        memory_copy_streams.add(stream_id)
 
     # We should have both H2D and D2H copies
     assert host_to_device_count > 0, "No host-to-device memory copies captured"
     assert device_to_host_count > 0, "No device-to-host memory copies captured"
+
+    # Exactly 8 streams
+    memory_copy_streams == expected_stream_ids
 
 
 def test_attachment_hsa_api_trace(hsa_input_data):

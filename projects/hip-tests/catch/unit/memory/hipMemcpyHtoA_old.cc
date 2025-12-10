@@ -93,8 +93,8 @@ Output: "A_d" output of hipMemcpyHtoA is copied to "hData" host variable
         validated the result with "B_h"
 */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext", "[hipMemcpyHtoA]", char, int,
-                   float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext",
+                   "[hipMemcpyHtoA][multigpu]", char, int, float) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

@@ -24,9 +24,10 @@
 ##############################################################################
 import argparse
 import logging
+from collections.abc import Hashable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Hashable, Optional
+from typing import Any, Optional
 
 import pandas as pd
 from textual.widgets import TextArea
