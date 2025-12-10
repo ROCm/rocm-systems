@@ -99,7 +99,10 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
 
   size_t sizeElements = width * numH * depth;
   size_t elements = numW * numH * depth;
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
 
+=======
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
@@ -253,6 +256,7 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   size_t slicePitch = pitch * extent.height;
 
   // Point devptr to selected slice
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
   char *devPtrSlice = (reinterpret_cast<char *>(devicePitchedPointer.ptr))
                        + slice_index * slicePitch;
   hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x,
@@ -260,14 +264,21 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   hipPitchedPtr modDevPitchedPtr = make_hipPitchedPtr(devPtrSlice, pitch,
                                          arr_dimensions.x, arr_dimensions.y);
   
+=======
+  char* devPtrSlice =
+      (reinterpret_cast<char*>(devicePitchedPointer.ptr)) + slice_index * slicePitch;
+  hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x, arr_dimensions.y, 1);
+  hipPitchedPtr modDevPitchedPtr =
+      make_hipPitchedPtr(devPtrSlice, pitch, arr_dimensions.x, arr_dimensions.y);
+  GENERATE_CAPTURE();
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
   if (bAsync) {
     GENERATE_CAPTURE();
     // Memset selected slice (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     BEGIN_CAPTURE(stream);
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              extentSlice, stream));
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, extentSlice, stream));
     END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
@@ -298,15 +309,27 @@ static void seekAndSet3DArraySlice(bool bAsync) {
         if (z == slice_index) {
           if (array3D[z][y][x] != memsetval4seeked) {
             INFO("seekAndSet3DArray Slice: mismatch at index: Arr("
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
                  << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
                  << ", memsetval:" << std::hex << memsetval4seeked);
+=======
+                 << z << "," << y << "," << x << ") "
+                 << "computed:" << std::hex << array3D[z][y][x] << ", memsetval:" << std::hex
+                 << memsetval4seeked);
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
             REQUIRE(false);
           }
         } else {
           if (array3D[z][y][x] != memsetval) {
             INFO("seekAndSet3DArray Slice: mismatch at index: Arr("
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
                  << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
                  << ", memsetval:" << std::hex << memsetval);
+=======
+                 << z << "," << y << "," << x << ") "
+                 << "computed:" << std::hex << array3D[z][y][x] << ", memsetval:" << std::hex
+                 << memsetval);
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
             REQUIRE(false);
           }
         }
@@ -359,8 +382,7 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     BEGIN_CAPTURE(stream);
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              setExtent, stream));
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, setExtent, stream));
     END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
@@ -392,15 +414,27 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
             (x >= XPOS_START && x <= XPOS_END)) {
           if (array3D[z][y][x] != memsetval4seeked) {
             INFO("seekAndSet3DArray Portion: mismatch at index: Arr("
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
                  << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
                  << ", memsetval:" << std::hex << memsetval4seeked);
+=======
+                 << z << "," << y << "," << x << ") "
+                 << "computed:" << std::hex << array3D[z][y][x] << ", memsetval:" << std::hex
+                 << memsetval4seeked);
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
             REQUIRE(false);
           }
         } else {
           if (array3D[z][y][x] != memsetval) {
             INFO("seekAndSet3DArray Portion: mismatch at index: Arr("
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset3DFunctional.cc
                  << z << "," << y << "," << x << ") " << "computed:" << std::hex << array3D[z][y][x]
                  << ", memsetval:" << std::hex << memsetval);
+=======
+                 << z << "," << y << "," << x << ") "
+                 << "computed:" << std::hex << array3D[z][y][x] << ", memsetval:" << std::hex
+                 << memsetval);
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset3DFunctional.cc
             REQUIRE(false);
           }
         }

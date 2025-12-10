@@ -82,8 +82,14 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
 }
 
 
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset.cc
 template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval,
                                                      enum MemsetType type, size_t numElements) {
+=======
+template <typename T>
+static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval, enum MemsetType type,
+                               size_t numElements) {
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset.cc
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.
@@ -94,23 +100,22 @@ template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval
   A_h = reinterpret_cast<T*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
   GENERATE_CAPTURE();
-  for (int offset = MAX_OFFSET; offset >= 0; offset --) {
+  for (int offset = MAX_OFFSET; offset >= 0; offset--) {
     BEGIN_CAPTURE(stream);
     if (type == hipMemsetTypeDefault) {
-      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset,
-                                            stream));
+      HIP_CHECK(hipMemsetAsync(A_d + offset, memsetval, numElements - offset, stream));
 
     } else if (type == hipMemsetTypeD8) {
-      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                            numElements - offset, stream));
+      HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                 stream));
 
     } else if (type == hipMemsetTypeD16) {
-      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                            numElements - offset, stream));
+      HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                  stream));
 
     } else if (type == hipMemsetTypeD32) {
-      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)(A_d + offset), memsetval,
-                                            numElements - offset, stream));
+      HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)(A_d + offset), memsetval, numElements - offset,
+                                  stream));
     }
     END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -255,8 +260,8 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
   GENERATE_CAPTURE();
   HIP_CHECK(hipStreamCreate(&s));
   BEGIN_CAPTURE(s);
-  HIP_CHECK(hipMemsetAsync(p2, 0, 32*32*4, s));
-  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32*32, s));
+  HIP_CHECK(hipMemsetAsync(p2, 0, 32 * 32 * 4, s));
+  HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)p3, 0x3fe00000, 32 * 32, s));
   END_CAPTURE(s);
   HIP_CHECK(hipStreamSynchronize(s));
 
@@ -277,6 +282,7 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
   HIP_CHECK(hipFree(p2));
   HIP_CHECK(hipStreamDestroy(s));
 }
+<<<<<<< HEAD:projects/hip-tests/catch/unit/memory/hipMemset.cc
 /**
  * Test Description
  * ------------------------
@@ -324,3 +330,5 @@ TEST_CASE("Unit_hipMemsetD8_Capture") {
 
   HIP_CHECK(hipFree(dst));
 }
+=======
+>>>>>>> bbb6ff795f (SWDEV-487921-Addressed the clang-format issues):catch/unit/memory/hipMemset.cc
