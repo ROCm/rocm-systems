@@ -838,7 +838,7 @@ hsa_status_t ExecutableImpl::DefineAgentExternalVariable(
 
   auto insert_status = agent_symbols_.insert(
     std::make_pair(std::make_pair(std::string(name), agent),
-                   new VariableSymbol(true,
+                   std::make_shared<VariableSymbol>(true,
                                       "", // Only program linkage symbols can be
                                           // defined.
                                       std::string(name),
