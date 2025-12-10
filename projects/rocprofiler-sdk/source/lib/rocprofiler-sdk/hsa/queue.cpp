@@ -697,22 +697,6 @@ Queue::sync() const
     {
         std::this_thread::yield();
     }
-
-    // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
-    // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
-    // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
-    auto balanced_slots = get_balanced_signal_slots().load();
-    if(balanced_slots != NUM_SIGNALS)
-    {
-        auto active_kernels_value = _core_api.hsa_signal_load_relaxed_fn(_active_kernels);
-        ROCP_CI_LOG(WARNING) << fmt::format(
-            "There are {} incomplete dispatches (balanced_slots={}, NUM_SIGNALS={}, "
-            "_active_kernels signal value={})",
-            NUM_SIGNALS - balanced_slots,
-            balanced_slots,
-            NUM_SIGNALS,
-            active_kernels_value);
-    }
 }
 
 void
