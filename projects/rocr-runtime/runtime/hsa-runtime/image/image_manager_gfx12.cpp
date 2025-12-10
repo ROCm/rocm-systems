@@ -1092,6 +1092,120 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
+  const metadata_amd_gfx12_t* desc_gfx12 = reinterpret_cast<const metadata_amd_gfx12_t*>(desc);
+  const void* mipmap_data_addr = mipmap_array.data;
+  
+  ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap_array.desc.format, mipmap_array.desc.geometry);
+  if (mipmap_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED || mipmap_prop.element_size == 0) {
+    return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
+  
+  const Swizzle swizzle = ImageLut().MapSwizzle(mipmap_array.desc.format.channel_order);
+  
+  if (IsLocalMemory(mipmap_array.data)) {
+    mipmap_data_addr = reinterpret_cast<const void*>(
+        reinterpret_cast<uintptr_t>(mipmap_array.data) - local_memory_base_address_);
+  }
+  
+  // Copy the pre-computed SRD words 0-7 from metadata
+  mipmap_array.srd[0] = desc_gfx12->word0.u32All;
+  mipmap_array.srd[1] = desc_gfx12->word1.u32All;
+  mipmap_array.srd[2] = desc_gfx12->word2.u32All;
+  mipmap_array.srd[3] = desc_gfx12->word3.u32All;
+  mipmap_array.srd[4] = desc_gfx12->word4.u32All;
+  mipmap_array.srd[5] = desc_gfx12->word5.u32All;
+  mipmap_array.srd[6] = desc_gfx12->word6.u32All;
+  mipmap_array.srd[7] = desc_gfx12->word7.u32All;
+  
+  if (mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    // 1DB uses buffer descriptors
+    SQ_BUF_RSRC_WORD0 word0;
+    SQ_BUF_RSRC_WORD1 word1;
+    SQ_BUF_RSRC_WORD3 word3;
+    
+    word0.val = 0;
+    word0.f.BASE_ADDRESS = PtrLow32(mipmap_data_addr);
+    
+    word1.val = mipmap_array.srd[1];
+    word1.f.BASE_ADDRESS_HI = PtrHigh32(mipmap_data_addr);
+    word1.f.STRIDE = mipmap_prop.element_size;
+    
+    word3.val = mipmap_array.srd[3];
+    word3.f.DST_SEL_X = swizzle.x;
+    word3.f.DST_SEL_Y = swizzle.y;
+    word3.f.DST_SEL_Z = swizzle.z;
+    word3.f.DST_SEL_W = swizzle.w;
+    word3.f.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
+    word3.f.INDEX_STRIDE = mipmap_prop.element_size;
+    
+    mipmap_array.srd[0] = word0.val;
+    mipmap_array.srd[1] = word1.val;
+    mipmap_array.srd[3] = word3.val;
+    
+    mipmap_array.row_pitch = mipmap_array.desc.width * mipmap_prop.element_size;
+    mipmap_array.slice_pitch = mipmap_array.row_pitch;
+  } else {
+    // Non-1DB uses image descriptors
+    uint32_t hwPixelSize = ImageLut().GetPixelSize(mipmap_prop.data_format, mipmap_prop.data_type);
+    if (mipmap_prop.element_size != hwPixelSize) {
+      return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+    }
+    
+    reinterpret_cast<SQ_IMG_RSRC_WORD0*>(&mipmap_array.srd[0])->bits.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
+    reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
+    reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_X = swizzle.x;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Y = swizzle.y;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Z = swizzle.z;
+    reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_W = swizzle.w;
+    
+    if (mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+        mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1D) {
+      reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.TYPE =
+          ImageLut().MapGeometry(mipmap_array.desc.geometry);
+    }
+  }
+  
+  // Looks like this is only used for CPU copies.
+  mipmap_array.row_pitch = 0;
+  mipmap_array.slice_pitch = 0;
+  
+  // Store mipmap-specific metadata
+  mipmap_array.srd[8] = mipmap_array.desc.format.channel_type;
+  mipmap_array.srd[9] = mipmap_array.desc.format.channel_order;
+  mipmap_array.srd[10] = static_cast<uint32_t>(mipmap_array.desc.width);
+  mipmap_array.srd[11] = mipmap_array.num_levels;
+  
+  // Allocate and populate pMipInfo from metadata mip_offsets
+  ADDR3_MIP_INFO* mip_info_storage = new ADDR3_MIP_INFO[mipmap_array.num_levels];
+  memset(mip_info_storage, 0, sizeof(ADDR3_MIP_INFO) * mipmap_array.num_levels);
+  
+  // Extract per-level information from mip_offsets array
+  for (uint32_t level = 0; level < mipmap_array.num_levels; level++) {
+    // mip_offsets contains offset bits [39:8], shift left by 8 to get actual byte offset
+    mip_info_storage[level].offset = static_cast<uint64_t>(desc_gfx12->mip_offsets[level]) << 8;
+    
+    // Calculate dimensions for this level (halve at each level)
+    mip_info_storage[level].pixelPitch = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.width >> level));
+    mip_info_storage[level].pixelHeight = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.height >> level));
+    mip_info_storage[level].depth = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.depth >> level));
+  }
+  
+  // Store pMipInfo in addr_output for later use by PopulateMipLevelSrd
+  mipmap_array.addr_output.addr3.pMipInfo = mip_info_storage;
+  
+  // Total size calculation from metadata (estimate from last level)
+  uint32_t last_level = mipmap_array.num_levels - 1;
+  uint64_t last_level_size = mip_info_storage[last_level].pixelPitch * 
+                             mip_info_storage[last_level].pixelHeight * 
+                             mip_info_storage[last_level].depth * 
+                             mipmap_prop.element_size;
+  mipmap_array.size = mip_info_storage[last_level].offset + last_level_size;
+  
+  return HSA_STATUS_SUCCESS;
+}
+
 void ImageManagerGfx12::printSRDDetailed(const uint32_t* srd) const {
   if (!srd) {
     printf("\n========== Image SRD (GFX12) - Detailed ==========\n");

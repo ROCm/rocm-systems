@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef EXT_IMAGE_IMAGE_MANAGER_NV_H_
-#define EXT_IMAGE_IMAGE_MANAGER_NV_H_
+#ifndef EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
+#define EXT_IMAGE_IMAGE_MANAGER_NV_H_ 
 
 #include "addrlib/inc/addrinterface.h"
 #include "image_manager_kv.h"
@@ -84,6 +84,9 @@ class ImageManagerNv : public ImageManagerKv {
   /// @brief Fill mipmap structure with device specific mipmapped array object.
   virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array) const;
 
+  /// @brief Fill mipmap structure with pre-computed AMD metadata descriptor.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const;
+
   /// @brief Create mip level view using SRD BASE_LEVEL/LAST_LEVEL fields
   virtual hsa_status_t PopulateMipLevelSrd(MipmappedArray& level_view,
         const MipmappedArray& mipmap_array, uint32_t mip_level) const;
@@ -110,4 +113,4 @@ class ImageManagerNv : public ImageManagerKv {
 
 }  // namespace image
 }  // namespace rocr
-#endif  // EXT_IMAGE_IMAGE_MANAGER_NV_H_
+#endif  // EXT_IMAGE_IMAGE_MANAGER_NV_H_ 

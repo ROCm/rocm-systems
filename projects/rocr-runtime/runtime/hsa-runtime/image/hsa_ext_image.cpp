@@ -369,6 +369,48 @@ hsa_status_t hsa_ext_image_create_with_layout(
   CATCH;
 }
 
+hsa_status_t hsa_ext_image_data_get_info_with_layout_v2(
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_access_permission_t access_permission, hsa_ext_image_data_layout_t image_data_layout,
+    size_t image_data_row_pitch, size_t image_data_slice_pitch,
+    hsa_ext_image_data_info_t* image_data_info) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  if ((image_descriptor == NULL) || (image_data_info == NULL) ||
+      (access_permission < HSA_ACCESS_PERMISSION_RO) ||
+      (access_permission > HSA_ACCESS_PERMISSION_RW) ||
+      (image_data_layout != HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // V2 descriptor: only single-level images supported with LINEAR layout
+  // Mipmap levels must be 0 or 1 for LINEAR layout
+  uint32_t mipmap_levels =
+      (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+  if (mipmap_levels > 1) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert V2 descriptor to V1 for internal use
+  hsa_ext_image_descriptor_t desc_v1;
+  desc_v1.geometry = image_descriptor->geometry;
+  desc_v1.width = image_descriptor->width;
+  desc_v1.height = image_descriptor->height;
+  desc_v1.depth = image_descriptor->depth;
+  desc_v1.array_size = image_descriptor->array_size;
+  desc_v1.format = image_descriptor->format;
+
+  enforceDefaultPitch(agent, &desc_v1, image_data_row_pitch, image_data_slice_pitch);
+
+  return ImageRuntime::instance()->GetImageSizeAndAlignment(
+      agent, desc_v1, image_data_layout, image_data_row_pitch, image_data_slice_pitch,
+      *image_data_info);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_image_create(hsa_agent_t agent,
                                   const hsa_ext_image_descriptor_t* image_descriptor,
                                   const hsa_amd_image_descriptor_t* image_layout,
@@ -385,6 +427,45 @@ hsa_status_t hsa_amd_image_create(hsa_agent_t agent,
 
   return ImageRuntime::instance()->CreateImageHandleWithLayout(
       agent, *image_descriptor, image_layout, image_data, access_permission, *image);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_image_create_v2(hsa_agent_t agent,
+                                     const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                     const hsa_amd_image_descriptor_t* image_layout,
+                                     const void* image_data,
+                                     hsa_access_permission_t access_permission,
+                                     hsa_ext_image_t* image) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  if (image_descriptor == NULL || image_data == NULL || image == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert V2 descriptor to V1 for internal use
+  hsa_ext_image_descriptor_t desc_v1;
+  desc_v1.geometry = image_descriptor->geometry;
+  desc_v1.width = image_descriptor->width;
+  desc_v1.height = image_descriptor->height;
+  desc_v1.depth = image_descriptor->depth;
+  desc_v1.array_size = image_descriptor->array_size;
+  desc_v1.format = image_descriptor->format;
+
+  uint32_t mipmap_levels =
+      (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+
+  if (mipmap_levels > 1) {
+    // Mipmapped array path with AMD layout
+    return ImageRuntime::instance()->CreateMipmapArrayHandleWithLayout(
+        agent, desc_v1, image_layout, image_data, access_permission, mipmap_levels, *image);
+  } else {
+    // Regular single-level image path with AMD layout
+    return ImageRuntime::instance()->CreateImageHandleWithLayout(
+        agent, desc_v1, image_layout, image_data, access_permission, *image);
+  }
   CATCH;
 }
 

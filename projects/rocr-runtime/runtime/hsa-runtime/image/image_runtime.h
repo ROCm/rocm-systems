@@ -104,6 +104,14 @@ class ImageRuntime {
       const void* image_data, const hsa_access_permission_t access_permission,
       hsa_ext_image_t& image);
 
+  /// @brief Create mipmapped array object with AMD-specific layout and return its handle.
+  hsa_status_t CreateMipmapArrayHandleWithLayout(
+      hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+      const hsa_amd_image_descriptor_t* image_layout,
+      const void* image_data, const hsa_access_permission_t access_permission,
+      uint32_t num_mipmap_levels,
+      hsa_ext_image_t& image_handle);
+
   /// @brief Destroy the device image object referenced by the handle.
   hsa_status_t DestroyImageHandle(const hsa_ext_image_t& image);
 

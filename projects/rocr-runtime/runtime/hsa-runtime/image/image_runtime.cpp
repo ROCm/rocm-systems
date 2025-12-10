@@ -515,7 +515,7 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
 
   if(image_layout->version!=1)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
-
+  
   uint32_t id;
   HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
 
@@ -539,6 +539,64 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
   if (core::Runtime::runtime_singleton_->flag().image_print_srd()) image->printSRD();
 
   image_handle.handle = image->Convert();
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
+    hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data, const hsa_access_permission_t access_permission,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_t& image_handle) {
+  
+  image_handle.handle = 0;
+  
+  if (!IsMultipleOf(image_data, 256)) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  if (image_layout->version != 1) {
+    return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
+
+  uint32_t id;
+  HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
+
+  if (image_layout->deviceID != (0x1002 << 16 | id)) {
+    return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
+
+  if (num_mipmap_levels == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const metadata_amd_t* desc = reinterpret_cast<const metadata_amd_t*>(image_layout);
+
+  MipmappedArray* mipmap_array = MipmappedArray::Create(component);
+  if (!mipmap_array) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  mipmap_array->component = component;
+  mipmap_array->desc = mipmap_descriptor;
+  mipmap_array->permission = access_permission;
+  mipmap_array->num_levels = num_mipmap_levels;
+  mipmap_array->data = const_cast<void*>(image_data);
+  mipmap_array->flags = 0;
+
+  ImageManager* manager = image_manager(component);
+  if (!manager) {
+    MipmappedArray::Destroy(mipmap_array);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  hsa_status_t status = manager->PopulateMipmapSrd(*mipmap_array, desc);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(mipmap_array);
+    return status;
+  }
+
+  image_handle.handle = mipmap_array->Convert();
   return HSA_STATUS_SUCCESS;
 }
 
