@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+   Copyright (c) 2024-25 Advanced Micro Devices, Inc. All rights reserved.
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
    in the Software without restriction, including without limitation the rights
@@ -12,21 +12,16 @@
    IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
    FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.
  */
-
 #include "mempool_common.hh"
-
 #include <limits>
-
 #pragma clang diagnostic ignored "-Wunused-parameter"
-
 static bool thread_results[NUMBER_OF_THREADS];
 static constexpr auto NUM_ELM{1024 * 1024};
 static constexpr int streamPerAsic = 2;
-
 /**
  * @addtogroup hipMallocAsync hipMallocAsync
  * @{
@@ -34,12 +29,11 @@ static constexpr int streamPerAsic = 2;
  * `hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream)`
  * - Allocates memory with stream ordered semantics
  */
-
 /**
  * Test Description
  * ------------------------
- *  - Basic test to verify proper allocation and stream ordering of hipMallocAsync when one
- * memory allocation is performed.
+ *  - Basic test to verify proper allocation and stream ordering of
+ * hipMallocAsync when one memory allocation is performed.
  * Test source
  * ------------------------
  *  - /unit/memory/hipMallocAsync.cc
@@ -54,12 +48,11 @@ TEST_CASE("Unit_hipMallocAsync_Basic_OneAlloc") {
       },
       MemPools::dev_default);
 }
-
 /**
  * Test Description
  * ------------------------
- *  - Basic test to verify proper allocation and stream ordering of hipMallocAsync when two
- * memory allocations are performed.
+ *  - Basic test to verify proper allocation and stream ordering of
+ * hipMallocAsync when two memory allocations are performed.
  * Test source
  * ------------------------
  *  - /unit/memory/hipMallocAsync.cc
@@ -74,11 +67,11 @@ TEST_CASE("Unit_hipMallocAsync_Basic_TwoAllocs") {
       },
       MemPools::dev_default);
 }
-
 /**
  * Test Description
  * ------------------------
- *  - Basic test to verify that memory allocated with hipMallocAsync can be properly reused.
+ *  - Basic test to verify that memory allocated with hipMallocAsync can be
+ * properly reused
  * Test source
  * ------------------------
  *  - /unit/memory/hipMallocAsync.cc
@@ -91,8 +84,6 @@ TEST_CASE("Unit_hipMallocAsync_Basic_Reuse") {
                               hipStream_t stream) { return hipMallocAsync(dev_ptr, size, stream); },
                            MemPools::dev_default);
 }
-
-
 /**
  * Test Description
  * ------------------------
@@ -112,32 +103,30 @@ TEST_CASE("Unit_hipMallocAsync_Negative_Parameters") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(0)
-
-      int* p = nullptr;
+  int* p = nullptr;
   size_t max_size = std::numeric_limits<size_t>::max();
   size_t alloc_size = 1024;
   MemPoolGuard mempool(MemPools::dev_default, device_id);
   StreamGuard stream(Streams::created);
-
   SECTION("dev_ptr is nullptr") {
     HIP_CHECK_ERROR(hipMallocAsync(nullptr, alloc_size, stream.stream()), hipErrorInvalidValue);
   }
-
   SECTION("Size is max size_t") {
     HIP_CHECK_ERROR(hipMallocAsync(reinterpret_cast<void**>(&p), max_size, stream.stream()),
                     hipErrorOutOfMemory);
   }
 }
-
 /**
  * Common function to allocate memory using hipMallocAsync API through a stream,
  * launch kernel and perform vectorADD and validate results. Free memory using
  * hipFreeAsync.
  */
 static bool checkMallocAsync(hipStream_t stream) {
+  GENERATE_CAPTURE();
   streamMemAllocTest testObj(NUM_ELM);
   // Create host buffer with test data.
   testObj.createHostBufferWithData();
+  BEGIN_CAPTURE(stream);
   // Allocate device memory.
   testObj.allocFromDefMempool(stream);
   // Transfer data to it asyncronously on stream.
@@ -147,6 +136,7 @@ static bool checkMallocAsync(hipStream_t stream) {
   testObj.transferFromMempool(stream);
   // Free Buffer Asynchronously on stream.
   testObj.freeDevBuf(stream);
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   // verify and validate
   REQUIRE(true == testObj.validateResult());
@@ -158,6 +148,7 @@ static bool checkMallocAsync(hipStream_t stream) {
  * Test Description
  * ------------------------
  *    - Test case to perform basic scenario.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -166,13 +157,12 @@ static bool checkMallocAsync(hipStream_t stream) {
  */
 TEST_CASE("Unit_hipMallocAsync_basic") {
   checkMempoolSupported(0)
-      // create a stream
-      hipStream_t stream;
+  // create a stream
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(true == checkMallocAsync(stream));
   HIP_CHECK(hipStreamDestroy(stream));
 }
-
 /**
  * Test Description
  * ------------------------
@@ -180,6 +170,7 @@ TEST_CASE("Unit_hipMallocAsync_basic") {
  * hipMallocAsync API for a stream1 and stream2, launch kernel and
  * perform vectorADD, synchronize stream1 and stream2 and validate
  * results. Free memory using hipFreeAsync.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -187,7 +178,8 @@ TEST_CASE("Unit_hipMallocAsync_basic") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent") {
-  checkMempoolSupported(0) streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
+  checkMempoolSupported(0)
+  streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
   // create multiple streams
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -220,13 +212,70 @@ TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent") {
   testObj1.freeHostBuf();
   testObj2.freeHostBuf();
 }
-
 /**
  * Test Description
  * ------------------------
- *    - Allocate memory using hipMallocAsync API through stream1 and record event1,
- * allocate event1 to stream2 and put stream2 to wait, launch kernel through
- * stream2 and perform vectorADD and validate results. Free memory using hipFreeAsync.
+ * - Test case to perform multi stream, During stream capture
+ * allocate memory using hipMallocAsync API for a stream1 and stream2.
+ * Stream2 memory allocation should not happen.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipMallocAsync.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+#if HT_AMD  // Disabled for NVIDIA due to defect SWDEV-512429
+TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent_Capture") {
+  checkMempoolSupported(0)
+  int *A_h, *B_h;
+  int *A_d, *B_d;
+  size_t byte_size = NUM_ELM * sizeof(int);
+  // create multiple streams
+  hipStream_t stream1, stream2;
+  HIP_CHECK(hipStreamCreate(&stream1));
+  HIP_CHECK(hipStreamCreate(&stream2));
+  // Create host buffer with test data.
+  A_h = reinterpret_cast<int*>(malloc(byte_size));
+  REQUIRE(A_h != nullptr);
+  B_h = reinterpret_cast<int*>(malloc(byte_size));
+  REQUIRE(B_h != nullptr);
+  for (int i = 0; i < NUM_ELM; i++) {
+    A_h[i] = 2 * i + 1;  // Odd
+    B_h[i] = 2 * i;      // Even
+  }
+  hipStreamCaptureMode flags = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                        hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream1, flags));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d), byte_size, stream1));
+  HIP_CHECK_ERROR(hipMallocAsync(reinterpret_cast<void**>(&B_d), byte_size, stream2),
+                  hipErrorStreamCaptureUnsupported);
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t graph_exec = nullptr;
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream1));
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  // synchronize both stream1 and stream2
+  HIP_CHECK(hipStreamSynchronize(stream1));
+  HIP_CHECK(hipStreamSynchronize(stream2));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream1));
+  // Destroy resources
+  HIP_CHECK(hipStreamDestroy(stream1));
+  HIP_CHECK(hipStreamDestroy(stream2));
+  free(A_h);
+  free(B_h);
+}
+#endif
+/**
+ * Test Description
+ * ------------------------
+ *    - Allocate memory using hipMallocAsync API through stream1 and record
+ * event1, allocate event1 to stream2 and put stream2 to wait, launch kernel
+ * through stream2 and perform vectorADD and validate results. Free memory using
+ * hipFreeAsync.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -234,7 +283,8 @@ TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_StreamEvent_CrissCross") {
-  checkMempoolSupported(0) streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
+  checkMempoolSupported(0)
+  streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
   // create two streams.
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -278,12 +328,12 @@ TEST_CASE("Unit_hipMallocAsync_StreamEvent_CrissCross") {
   testObj1.freeHostBuf();
   testObj2.freeHostBuf();
 }
-
 /**
  * Test Description
  * ------------------------
- *    - Test case to perform multi device scenario, get number of devices available
- * and call checkMallocAsync function for each device available.
+ *    - Test case to perform multi device scenario, get number of devices
+ * available and call checkMallocAsync function for each device available.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -294,14 +344,14 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int i = 0; i < num_devices; i++) {
-    checkMempoolSupported(i) HIP_CHECK(hipSetDevice(i));
+    checkMempoolSupported(i)
+	HIP_CHECK(hipSetDevice(i));
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     REQUIRE(true == checkMallocAsync(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   }
 }
-
 /**
  * Test Description
  * ------------------------
@@ -309,6 +359,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice", "[multigpu]") {
  * to it asynchrously, launch Kernel, transfer results back to host
  * asynchronously and free buffer async in streams across all GPUs.
  * The execution in of the queued commands must happen concurrently.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -329,7 +380,6 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, 
   // Free Buffer Asynchronously on stream.
   testObj->freeDevBuf(strm);
 }
-
 TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
@@ -337,7 +387,8 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent", "[multigpu]") {
   std::vector<streamMemAllocTest*> tesObjBuf;
   // Allocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    checkMempoolSupported(idx) HIP_CHECK(hipSetDevice(idx));
+    checkMempoolSupported(idx)
+	HIP_CHECK(hipSetDevice(idx));
     HIP_CHECK(hipStreamCreate(&stream_buf[idx]));
     streamMemAllocTest* testObj = new streamMemAllocTest(NUM_ELM);
     tesObjBuf.push_back(testObj);
@@ -365,7 +416,6 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent", "[multigpu]") {
   }
   delete[] stream_buf;
 }
-
 /**
  * Test Description
  * ------------------------
@@ -373,6 +423,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent", "[multigpu]") {
  * to it asynchrously, launch Kernel, transfer results back to host
  * asynchronously and free buffer async in streams across all GPUs
  * using multiple streams per GPU.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -383,12 +434,13 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)
-      // 2 stream per ASIC
-      hipStream_t* stream_buf = new hipStream_t[streamPerAsic * num_devices];
+  // 2 stream per ASIC
+  hipStream_t* stream_buf = new hipStream_t[streamPerAsic * num_devices];
   std::vector<streamMemAllocTest*> tesObjBuf;
   // Allocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    checkMempoolSupported(idx) HIP_CHECK(hipSetDevice(idx));
+    checkMempoolSupported(idx)
+	HIP_CHECK(hipSetDevice(idx));
     HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic * idx]));
     HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic * idx + 1]));
     streamMemAllocTest* testObj1 = new streamMemAllocTest(NUM_ELM);
@@ -434,6 +486,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream", "[multigpu]") {
  * ------------------------
  *    - Assign device memory using hipMalloc, launch kernel and perform
  * vector square and validate. Free memory using hipFreeAsync API.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -441,7 +494,8 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream", "[multigpu]") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
-  checkMempoolSupported(0) size_t byte_size = NUM_ELM * sizeof(float);
+  checkMempoolSupported(0)
+  size_t byte_size = NUM_ELM * sizeof(float);
   // create a stream
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -474,12 +528,12 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
   free(A_h);
   free(C_h);
 }
-
 /**
  * Test Description
  * ------------------------
  *    - Assign device memory using hipMallocAsync, launch kernel and perform
  * vector square and validate. Free memory using hipFree API.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -487,10 +541,11 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
+  GENERATE_CAPTURE();
   size_t byte_size = NUM_ELM * sizeof(float);
   checkMempoolSupported(0)
-      // create a stream
-      hipStream_t stream;
+  // create a stream
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   float *A_h, *C_h;
   float *A_d, *C_d;
@@ -503,6 +558,7 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
     C_h[i] = 0;
   }
   // assign memory to device pointers
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d), byte_size, stream));
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C_d), byte_size, stream));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream));
@@ -510,6 +566,7 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
                      dim3(THREADS_PER_BLOCK), 0, stream, static_cast<const float*>(A_d), C_d,
                      NUM_ELM);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream));
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(C_d)));
@@ -521,12 +578,32 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
   free(A_h);
   free(C_h);
 }
-
+static bool checkMallocAsyncThread(hipStream_t stream) {
+  streamMemAllocTest testObj(NUM_ELM);
+  // Create host buffer with test data.
+  testObj.createHostBufferWithData();
+  // Allocate device memory.
+  testObj.allocFromDefMempool(stream);
+  // Transfer data to it asyncronously on stream.
+  testObj.transferToMempool(stream);
+  // Execute kernel and transfer result back to host asynchronously on stream.
+  testObj.runKernel(stream);
+  testObj.transferFromMempool(stream);
+  // Free Buffer Asynchronously on stream.
+  testObj.freeDevBuf(stream);
+  HIP_CHECK(hipStreamSynchronize(stream));
+  // verify and validate
+  REQUIRE(true == testObj.validateResult());
+  // Destroy resources
+  testObj.freeHostBuf();
+  return true;
+}
 /**
  * Test Description
  * ------------------------
  *    - Test case to check hipMallocAsync allocation and usage in multiple
  * threads. Each thread will use a local stream.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -536,10 +613,9 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
 static void threadTestLocalStream(int threadNum) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  thread_results[threadNum] = checkMallocAsync(stream);
+  thread_results[threadNum] = checkMallocAsyncThread(stream);
   HIP_CHECK(hipStreamDestroy(stream));
 }
-
 static bool testhipMallocAsyncMThreadLocalStrm() {
   std::vector<std::thread> tests;
   // Spawn the test threads
@@ -558,16 +634,16 @@ static bool testhipMallocAsyncMThreadLocalStrm() {
   }
   return status;
 }
-
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
-  checkMempoolSupported(0) REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
+  checkMempoolSupported(0)
+  REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
 }
-
 /**
  * Test Description
  * ------------------------
  *    - Test case to check hipMallocAsync allocation and usage in multiple
  * threads. Threads will use a common shared stream.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -575,9 +651,8 @@ TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
  *    - HIP_VERSION >= 6.2
  */
 static void threadTestCommonStream(int threadNum, hipStream_t stream) {
-  thread_results[threadNum] = checkMallocAsync(stream);
+  thread_results[threadNum] = checkMallocAsyncThread(stream);
 }
-
 static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
   std::vector<std::thread> tests;
   // Spawn the test threads
@@ -596,9 +671,9 @@ static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
   }
   return status;
 }
-
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
-  checkMempoolSupported(0) hipStream_t stream;
+  checkMempoolSupported(0)
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(true == testhipMallocAsyncMThreadLocalStrm(stream));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -609,6 +684,7 @@ TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
  *    - Test case to check MallocAsync functionality on user created stream,
  * null stream and hipstreamperthread concurrently. launch kernel and wait
  * for all streams to complete and validate results.
+ * Test source
  * ------------------------
  *    - catch\unit\memory\hipMallocAsync.cc
  * Test requirements
@@ -616,8 +692,10 @@ TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
-  checkMempoolSupported(0) streamMemAllocTest testObj[3] = {
-      streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM)};
+  GENERATE_CAPTURE();
+  checkMempoolSupported(0)
+  streamMemAllocTest testObj[3] = {
+     streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM)};
   // create multiple streams
   hipStream_t stream[3];
   HIP_CHECK(hipStreamCreate(&stream[0]));
@@ -625,6 +703,7 @@ TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
   stream[2] = hipStreamPerThread;
   // Queue operations on the 3 streams
   for (int idx = 0; idx < 3; idx++) {
+    BEGIN_CAPTURE(stream[idx]);
     // Create host buffer with test data.
     testObj[idx].createHostBufferWithData();
     // Allocate device memory and transfer data to it asyncronously on stream.
@@ -635,6 +714,7 @@ TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
     testObj[idx].transferFromMempool(stream[idx]);
     // Free Buffer Asynchronously on stream.
     testObj[idx].freeDevBuf(stream[idx]);
+    END_CAPTURE(stream[idx]);
   }
   // Wait for the 3 streams
   for (int idx = 0; idx < 3; idx++) {
@@ -646,7 +726,6 @@ TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
   }
   HIP_CHECK(hipStreamDestroy(stream[0]));
 }
-
 /**
  * End doxygen group StreamOTest.
  * @}

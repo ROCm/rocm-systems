@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
   StreamGuard stream(Streams::created);
 
   SECTION("dev_ptr is nullptr") {
-    HIP_CHECK(hipFreeAsync(nullptr, stream.stream()));
+    HIP_CHECK_ERROR(hipFreeAsync(nullptr, stream.stream()), hipErrorInvalidValue);
   }
 
   SECTION("Double free") {
@@ -87,9 +87,8 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipFreeAsync_capturehipFreeAsync") {
+  GENERATE_CAPTURE();
   HIP_CHECK(hipSetDevice(0));
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
   hipMemPool_t memPool;
   int rows, cols;
@@ -98,21 +97,17 @@ TEST_CASE("Unit_hipFreeAsync_capturehipFreeAsync") {
   HIP_CHECK(hipDeviceGetDefaultMemPool(&memPool, 0));
   HIP_CHECK(hipStreamCreate(&stream));
   int* devMem;
-
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&devMem), sizeof(int) * rows * cols,
                                    memPool, stream));
   HIP_CHECK(hipFreeAsync(devMem, stream));
-  // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
-
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
-
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+/**
+ *
+ * End doxygen group StreamOTest.
+ * @}
+ */
