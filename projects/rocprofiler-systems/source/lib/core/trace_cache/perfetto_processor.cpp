@@ -437,70 +437,7 @@ perfetto_processor_t::prepare_for_processing()
 {
     initialize_perfetto();
     setup_perfetto();
-
-    enable_categories_for_post_processing();
-
     start_session();
-}
-
-void
-perfetto_processor_t::enable_categories_for_post_processing()
-{
-    // Enable categories used for kernel/memory operations
-    trait::runtime_enabled<category::rocm>::set(true);
-    trait::runtime_enabled<category::rocm_kernel_dispatch>::set(true);
-    trait::runtime_enabled<category::rocm_memory_copy>::set(true);
-    trait::runtime_enabled<category::rocm_memory_allocate>::set(true);
-
-    // Enable categories used for sampling
-    trait::runtime_enabled<category::timer_sampling>::set(true);
-    trait::runtime_enabled<category::overflow_sampling>::set(true);
-    trait::runtime_enabled<category::sampling>::set(true);
-
-    // Enable categories used for user/host events
-    trait::runtime_enabled<category::user>::set(true);
-    trait::runtime_enabled<category::host>::set(true);
-
-    // Enable categories used for process/thread metrics
-    trait::runtime_enabled<category::process_page>::set(true);
-    trait::runtime_enabled<category::process_virt>::set(true);
-    trait::runtime_enabled<category::process_peak>::set(true);
-    trait::runtime_enabled<category::process_context_switch>::set(true);
-    trait::runtime_enabled<category::process_page_fault>::set(true);
-    trait::runtime_enabled<category::process_user_mode_time>::set(true);
-    trait::runtime_enabled<category::process_kernel_mode_time>::set(true);
-    trait::runtime_enabled<category::cpu_freq>::set(true);
-
-    // Enable categories used for thread metrics and counters
-    trait::runtime_enabled<category::thread_cpu_time>::set(true);
-    trait::runtime_enabled<category::thread_peak_memory>::set(true);
-    trait::runtime_enabled<category::thread_context_switch>::set(true);
-    trait::runtime_enabled<category::thread_page_fault>::set(true);
-    trait::runtime_enabled<category::thread_hardware_counter>::set(true);
-
-    // Enable categories used for GPU counter collection and communication
-    trait::runtime_enabled<category::rocm_counter_collection>::set(true);
-    trait::runtime_enabled<category::comm_data>::set(true);
-    trait::runtime_enabled<category::mpi>::set(true);
-
-    // Enable AMD SMI categories
-    trait::runtime_enabled<category::amd_smi>::set(true);
-    trait::runtime_enabled<category::amd_smi_gfx_busy>::set(true);
-    trait::runtime_enabled<category::amd_smi_umc_busy>::set(true);
-    trait::runtime_enabled<category::amd_smi_mm_busy>::set(true);
-    trait::runtime_enabled<category::amd_smi_temp>::set(true);
-    trait::runtime_enabled<category::amd_smi_power>::set(true);
-    trait::runtime_enabled<category::amd_smi_memory_usage>::set(true);
-    trait::runtime_enabled<category::amd_smi_vcn_activity>::set(true);
-    trait::runtime_enabled<category::amd_smi_jpeg_activity>::set(true);
-    trait::runtime_enabled<category::amd_smi_xgmi_link_width>::set(true);
-    trait::runtime_enabled<category::amd_smi_xgmi_link_speed>::set(true);
-    trait::runtime_enabled<category::amd_smi_xgmi_read_data>::set(true);
-    trait::runtime_enabled<category::amd_smi_xgmi_write_data>::set(true);
-    trait::runtime_enabled<category::amd_smi_pcie_link_width>::set(true);
-    trait::runtime_enabled<category::amd_smi_pcie_link_speed>::set(true);
-    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_acc>::set(true);
-    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_inst>::set(true);
 }
 
 void
@@ -986,32 +923,6 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 void
 perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 {
-    // using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
-    // using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
-    // using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
-    // using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
-    // using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
-    // using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
-    // using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
-    // using amd_smi_jpeg_track  =
-    // perfetto_counter_track<category::amd_smi_jpeg_activity>; using
-    // amd_smi_xgmi_link_width_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_link_width>;
-    // using amd_smi_xgmi_link_speed_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
-    // using amd_smi_xgmi_read_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_read_data>;
-    // using amd_smi_xgmi_write_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_write_data>;
-    // using amd_smi_pcie_link_width_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_link_width>;
-    // using amd_smi_pcie_link_speed_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_link_speed>;
-    // using amd_smi_pcie_bandwidth_acc_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
-    // using amd_smi_pcie_bandwidth_inst_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
-
     // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
     using gpu_metrics_t = gpu::gpu_metrics_t;
 
@@ -1029,36 +940,6 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     auto _ts        = _amd_smi.timestamp;
     auto _device_id = _amd_smi.device_id;
 
-    // auto setup_tracks = [&]() {
-    //     if(amd_smi_gfx_track::exists(_device_id)) return;
-
-    //     auto make_track_name = [&](const char* metric) {
-    //         return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
-    //     };
-
-    //     if(is_busy_enabled)
-    //     {
-    //         amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
-    //         amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
-    //         amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
-    //     }
-    //     if(is_temp_enabled)
-    //     {
-    //         amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
-    //                                     "deg C");
-    //     }
-    //     if(is_power_enabled)
-    //     {
-    //         amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
-    //     }
-    //     if(is_mem_usage_enabled)
-    //     {
-    //         amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"),
-    //         "MB");
-    //     }
-    // };
-
-    // setup_tracks();
     setup_amd_smi_tracks(_device_id, is_busy_enabled, is_temp_enabled, is_power_enabled,
                          is_mem_usage_enabled);
 
