@@ -96,4 +96,4 @@ Dispatch table chaining
 ROCprofiler-SDK can save the original values of the function pointers such as ``foo_fn`` in ``impl::construct_dispatch_table()`` and install its own function pointers in its place. This results in the public C API function ``foo`` calling into the ROCprofiler-SDK function pointer, which in turn, calls the original function pointer to ``impl::foo``. This phenomenon is named chaining. Once ROCprofiler-SDK
 makes necessary modifications to the dispatch table, tools requesting access to the raw dispatch table via ``rocprofiler_at_intercept_table_registration`` are provided the pointer to the dispatch table.
 
-For examples on dispatch table chaining, see `samples/intercept_table <https://github.com/ROCm/rocprofiler-sdk/tree/amd-staging/samples/intercept_table>`_.
+For examples on dispatch table chaining, see `samples/intercept_table <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples/intercept_table>`_.

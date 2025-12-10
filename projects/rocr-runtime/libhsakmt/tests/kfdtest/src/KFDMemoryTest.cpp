@@ -70,10 +70,7 @@ void KFDMemoryTest::TearDown() {
  * NOTICE: There are memory usage limit checks in hsa/kfd according to the total
  * physical system memory.
  */
-static void MMapLarge(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MMapLarge(int gpuNode) {
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Test not supported on APU." << std::endl;
@@ -134,7 +131,9 @@ TEST_F(KFDMemoryTest, MMapLarge) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MMapLarge));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MMapLarge(gpuNode);
+    }));
 
     TEST_END
 }
@@ -156,11 +155,9 @@ TEST_F(KFDMemoryTest, MMapLarge) {
  * is a gpu vm fault while running rocr conformance test. Here we try to simulate the
  * same test behaviour.
  */
-static void MapUnmapToNodes(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDMemoryTest::MapUnmapToNodes(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
-	HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId < FAMILY_AI) {
         LOG() << "Skipping test: Test requires gfx9 and later asics." << std::endl;
@@ -168,10 +165,10 @@ static void MapUnmapToNodes(KFDTEST_PARAMETERS* pTestParamters) {
     }
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     if (gpuNodes.size() < 2) {
         LOG() << "Skipping test: At least two GPUs are required." << std::endl;
         return;
@@ -217,21 +214,20 @@ static void MapUnmapToNodes(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, MapUnmapToNodes) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MapUnmapToNodes));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        MapUnmapToNodes(gpuNode);
+    }));
 
     TEST_END
 }
 
 // Basic test of hsaKmtMapMemoryToGPU and hsaKmtUnmapMemoryToGPU
-static void MapMemoryToGPU(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MapMemoryToGPU(int gpuNode) {
 
     unsigned int *nullPtr = NULL;
     unsigned int* pDb = NULL;
 
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, pKFDMemoryTest->GetHsaMemFlags(),
+    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, GetHsaMemFlags(),
                    reinterpret_cast<void**>(&pDb)), gpuNode);
     // verify that pDb is not null before it's being used
     ASSERT_NE_GPU(nullPtr, pDb, gpuNode) << "hsaKmtAllocMemory returned a null pointer";
@@ -244,7 +240,9 @@ static void MapMemoryToGPU(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, MapMemoryToGPU) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MapMemoryToGPU));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MapMemoryToGPU(gpuNode);
+    }));
 
     TEST_END
 }
@@ -282,16 +280,13 @@ TEST_F(KFDMemoryTest, MemoryAlloc) {
 }
 
 // Basic test for hsaKmtAllocMemory
-static void MemoryAllocAll(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MemoryAllocAll(int gpuNode) {
 
     HsaMemFlags memFlags = {0};
     memFlags.ui32.NonPaged = 1; // sys mem vs vram
     HSAuint64 available;
 
-    if (pKFDMemoryTest->Get_Version()->KernelInterfaceMinorVersion < 9) {
+    if (Get_Version()->KernelInterfaceMinorVersion < 9) {
         LOG() << "Available memory IOCTL not present in KFD. Exiting." << std::endl;
         return;
     }
@@ -323,15 +318,14 @@ static void MemoryAllocAll(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, MemoryAllocAll) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MemoryAllocAll));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MemoryAllocAll(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void AccessPPRMem(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::AccessPPRMem(int gpuNode) {
 
     if (hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Test requires APU." << std::endl;
@@ -372,22 +366,21 @@ static void AccessPPRMem(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, AccessPPRMem) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AccessPPRMem));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AccessPPRMem(gpuNode);
+    }));
 
     TEST_END
 }
 
 // Linux OS-specific Test for registering OS allocated memory
-static void MemoryRegister(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MemoryRegister(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-	const HsaNodeProperties *pNodeProperties = pKFDMemoryTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+	const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
 
     /* Different unaligned memory locations to be mapped for GPU
      * access:
@@ -485,28 +478,27 @@ static void MemoryRegister(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, MemoryRegister) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MemoryRegister));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MemoryRegister(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MemoryRegisterSamePtr(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MemoryRegisterSamePtr(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-	HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Will run on APU once APU+dGPU supported." << std::endl;
         return;
     }
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     HSAuint64 nGPU = gpuNodes.size();  // number of gpu nodes
     static volatile HSAuint32 mem[4];
     HSAuint64 gpuva1, gpuva2;
@@ -561,7 +553,9 @@ static void MemoryRegisterSamePtr(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MemoryRegisterSamePtr));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MemoryRegisterSamePtr(gpuNode);
+    }));
 
     TEST_END
 }
@@ -577,19 +571,16 @@ TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
 #define SCRATCH_SIZE (SCRATCH_SLICE_NUM * SCRATCH_SLICE_SIZE)
 #define SCRATCH_SLICE_OFFSET(i) ((i) * SCRATCH_SLICE_SIZE)
 
-static void FlatScratchAccess(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
-
-	HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId == FAMILY_CI || m_FamilyId == FAMILY_KV) {
         LOG() << "Skipping test: VI-based shader not supported on other ASICs." << std::endl;
         return;
     }
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
@@ -622,7 +613,7 @@ static void FlatScratchAccess(KFDTEST_PARAMETERS* pTestParamters) {
 
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(ScratchCopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
-    const HsaNodeProperties *pNodeProperties = pKFDMemoryTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+    const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
 
     /* TODO: Add support to all GPU Nodes.
      * The loop over the system nodes is removed as the test can be executed only on GPU nodes. This
@@ -681,15 +672,14 @@ static void FlatScratchAccess(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, FlatScratchAccess) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(FlatScratchAccess));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->FlatScratchAccess(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void GetTileConfigTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::GetTileConfigTest(int gpuNode) {
 
     HSAuint32 tile_config[32] = {0};
     HSAuint32 macro_tile_config[16] = {0};
@@ -722,12 +712,14 @@ static void GetTileConfigTest(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, GetTileConfigTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(GetTileConfigTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GetTileConfigTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-void SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
+void KFDMemoryTest::SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
                                         HSAuint64 highMB, int nodeToMap,
                                         HSAuint64 *lastSizeMB) {
     int ret;
@@ -788,17 +780,14 @@ void SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
  * In that situation, it will take too much time to finish the test because of
  * the onerous memory swap operation. So we limit the buffer size that way.
  */
-static void LargestSysBufferTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::LargestSysBufferTest(int gpuNode) {
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
         return;
     }
 
-    int gpuNum = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU().size();
+    int gpuNum = Get_NodeInfo()->GetNodesWithGPU().size();
 
 	/* if no gpu node */
 	if (gpuNum <= 0)
@@ -807,14 +796,14 @@ static void LargestSysBufferTest(KFDTEST_PARAMETERS* pTestParamters) {
     HSAuint64 lastTestedSizeMB = 0;
 
     HSAuint64 sysMemSizeMB;
-    sysMemSizeMB = pKFDMemoryTest->GetSysMemSize() >> 20;
+    sysMemSizeMB = GetSysMemSize() >> 20;
 
     sysMemSizeMB/=gpuNum;
 
     LOG() << "Found System Memory of " << std::dec << sysMemSizeMB
                     << "MB. Using 95% of that for the test" << std::endl;
 
-    SearchLargestBuffer(0, pKFDMemoryTest->GetHsaMemFlags(), sysMemSizeMB*0.95, gpuNode,
+    SearchLargestBuffer(0, GetHsaMemFlags(), sysMemSizeMB*0.95, gpuNode,
                     &lastTestedSizeMB);
 
     LOG() << "The largest allocated system buffer is " << std::dec
@@ -825,15 +814,14 @@ TEST_F(KFDMemoryTest, LargestSysBufferTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(LargestSysBufferTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->LargestSysBufferTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void LargestVramBufferTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-   int gpuNode = pTestParamters->gpuNode;
-   KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::LargestVramBufferTest(int gpuNode) {
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
@@ -847,7 +835,7 @@ static void LargestVramBufferTest(KFDTEST_PARAMETERS* pTestParamters) {
     memFlags.ui32.NonPaged = 1;
 
     HSAuint64 vramSizeMB;
-    vramSizeMB = pKFDMemoryTest->GetVramSize(gpuNode) >> 20;
+    vramSizeMB = GetVramSize(gpuNode) >> 20;
 
     LOG() << "Found VRAM of " << std::dec << vramSizeMB << "MB." << std::endl;
 
@@ -872,7 +860,9 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(LargestVramBufferTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->LargestVramBufferTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -881,10 +871,7 @@ TEST_F(KFDMemoryTest, LargestVramBufferTest) {
  * fails, then unmaps and frees them afterwards. Meanwhile, a queue task is
  * performed on each buffer.
  */
-static void BigSysBufferStressTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-   int gpuNode = pTestParamters->gpuNode;
-   KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::BigSysBufferStressTest(int gpuNode) {
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Running on APU fails and locks the system." << std::endl;
@@ -909,7 +896,7 @@ static void BigSysBufferStressTest(KFDTEST_PARAMETERS* pTestParamters) {
     for (int repeat = 1; repeat < 5; repeat++) {
 
         for (i = 0; i < ARRAY_ENTRIES; i++) {
-            ret = hsaKmtAllocMemory(0 /* system */, block_size, pKFDMemoryTest->GetHsaMemFlags(),
+            ret = hsaKmtAllocMemory(0 /* system */, block_size, GetHsaMemFlags(),
                     reinterpret_cast<void**>(&pDb_array[i]));
             if (ret)
                 break;
@@ -940,16 +927,15 @@ TEST_F(KFDMemoryTest, BigSysBufferStressTest) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(LargestVramBufferTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BigSysBufferStressTest(gpuNode);
+    }));
 
     TEST_END
 }
 
 #define VRAM_ALLOCATION_ALIGN (1 << 21)  //Align VRAM allocations to 2MB
-static void MMBench(KFDTEST_PARAMETERS* pTestParamters) {
-
-   int gpuNode = pTestParamters->gpuNode;
-   KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MMBench(int gpuNode) {
 
     unsigned testIndex, sizeIndex, memType, nMemTypes;
     const char *memTypeStrings[2] = {"SysMem", "VRAM"};
@@ -982,13 +968,13 @@ static void MMBench(KFDTEST_PARAMETERS* pTestParamters) {
     HsaMemMapFlags mapFlags = {0};
     HSAuint64 altVa;
 
-    HSAuint64 vramSizeMB = pKFDMemoryTest->GetVramSize(gpuNode) >> 20;
+    HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     bool is_all_large_bar = true;
 
     for (unsigned i = 0; i < gpuNodes.size(); i++) {
-        if (!pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(gpuNodes.at(i))) {
+        if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNodes.at(i))) {
                 is_all_large_bar = false;
                 break;
         }
@@ -1185,19 +1171,18 @@ TEST_F(KFDMemoryTest, MMBench) {
      TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MMBench));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MMBench(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void QueryPointerInfo(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::QueryPointerInfo(int gpuNode) {
 
     unsigned int bufSize = PAGE_SIZE * 8;  // CZ and Tonga need 8 pages
     HsaPointerInfo ptrInfo;
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     HSAuint64 nGPU = gpuNodes.size();  // number of gpu nodes
 
     /* GraphicHandle is tested at KFDGraphicsInterop.RegisterGraphicsHandle */
@@ -1221,7 +1206,7 @@ static void QueryPointerInfo(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_EQ_GPU((HSAuint64)ptrInfo.NMappedNodes, 0, gpuNode);
 
     /* Skip testing local memory if the platform does not have it */
-    if (pKFDMemoryTest->GetVramSize(gpuNode)) {
+    if (GetVramSize(gpuNode)) {
         HsaMemoryBuffer localBuffer(bufSize, gpuNode, false, true);
         EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo(localBuffer.As<void*>(), &ptrInfo), gpuNode);
         EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_ALLOCATED, gpuNode);
@@ -1290,7 +1275,9 @@ TEST_F(KFDMemoryTest, QueryPointerInfo) {
 
 	 TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(QueryPointerInfo));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+            this->QueryPointerInfo(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1305,10 +1292,7 @@ TEST_F(KFDMemoryTest, QueryPointerInfo) {
  * the child terminates, the parent checks that the copy was
  * successful.
  */
-static void PtraceAccess(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::PtraceAccess(int gpuNode) {
 
     HsaMemFlags memFlags = {0};
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
@@ -1335,7 +1319,7 @@ static void PtraceAccess(KFDTEST_PARAMETERS* pTestParamters) {
 
     // Try to alloc local memory from GPU node
     memFlags.ui32.NonPaged = 1;
-    if (pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
+    if (Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
         EXPECT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode, PAGE_SIZE*2 + (4 << 20),
                                             memFlags, &mem[1]), gpuNode);
         mem[1] = reinterpret_cast<void *>(reinterpret_cast<HSAuint8 *>(mem[1]) + VRAM_OFFSET);
@@ -1446,21 +1430,20 @@ static void PtraceAccess(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, PtraceAccess) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(PtraceAccess));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PtraceAccess(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void PtraceAccessInvisibleVram(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::PtraceAccessInvisibleVram(int gpuNode) {
 
 	Assembler* m_pAsm;
-	m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+	m_pAsm = GetAssemblerFromNodeId(gpuNode);
 	ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     char *hsaDebug = getenv("HSA_DEBUG");
 
@@ -1603,7 +1586,9 @@ static void PtraceAccessInvisibleVram(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, PtraceAccessInvisibleVram) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(PtraceAccessInvisibleVram));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PtraceAccessInvisibleVram(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1614,10 +1599,7 @@ void CatchSignal(int IntrSignal) {
     IntrSignalReceviced = IntrSignal;
 }
 
-static void SignalHandling(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::SignalHandling(int gpuNode) {
 
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Test not supported on APU." << std::endl;
@@ -1636,7 +1618,7 @@ static void SignalHandling(KFDTEST_PARAMETERS* pTestParamters) {
     pid_t ParentPid = getpid();
     EXPECT_EQ(0, sigaction(SIGUSR1, &sa, NULL)) << "An error occurred while setting a signal handler";
 
-    sysMemSize = pKFDMemoryTest->GetSysMemSize();
+    sysMemSize = GetSysMemSize();
 
     /* System (kernel) memory are limited to 3/8th System RAM
      * Try to allocate 1/4th System RAM
@@ -1649,8 +1631,8 @@ static void SignalHandling(KFDTEST_PARAMETERS* pTestParamters) {
      */
     size = size > (3ULL << 30) ? (3ULL << 30) : size;
 
-    pKFDMemoryTest->GetHsaMemFlags().ui32.NoNUMABind = 1;
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(0 /* system */, size, pKFDMemoryTest->GetHsaMemFlags(), reinterpret_cast<void**>(&pDb)), gpuNode);
+    GetHsaMemFlags().ui32.NoNUMABind = 1;
+    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(0 /* system */, size, GetHsaMemFlags(), reinterpret_cast<void**>(&pDb)), gpuNode);
     // Verify that pDb is not null before it's being used
     EXPECT_NE_GPU(nullPtr, pDb, gpuNode) << "hsaKmtAllocMemory returned a null pointer";
 
@@ -1695,25 +1677,24 @@ static void SignalHandling(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDMemoryTest, SignalHandling) {
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SignalHandling));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SignalHandling(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CheckZeroInitializationSysMem(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::CheckZeroInitializationSysMem(int gpuNode) {
 
     int ret;
 
-    int gpuNum = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU().size();
+    int gpuNum = Get_NodeInfo()->GetNodesWithGPU().size();
 
 	/* if no gpu node */
 	if (gpuNum <= 0)
 		return;
 
-    HSAuint64 sysMemSizeMB = pKFDMemoryTest->GetSysMemSize() >> 20;
+    HSAuint64 sysMemSizeMB = GetSysMemSize() >> 20;
 
     /* Testing system memory */
     HSAuint64 * pDb = NULL;
@@ -1733,10 +1714,10 @@ static void CheckZeroInitializationSysMem(KFDTEST_PARAMETERS* pTestParamters) {
     unsigned int offset = 257;  // a constant offset, should be smaller than 512.
     unsigned int size = sysBufSizePerGPU / sizeof(*pDb);
 
-    pKFDMemoryTest->GetHsaMemFlags().ui32.NoNUMABind = 1;
+    GetHsaMemFlags().ui32.NoNUMABind = 1;
 
     while (count--) {
-        ret = hsaKmtAllocMemory(0 /* system */, sysBufSizePerGPU, pKFDMemoryTest->GetHsaMemFlags(),
+        ret = hsaKmtAllocMemory(0 /* system */, sysBufSizePerGPU, GetHsaMemFlags(),
                                 reinterpret_cast<void**>(&pDb));
         if (ret) {
             LOG() << "Failed to allocate system buffer of" << std::dec << sysBufSizeMB
@@ -1767,7 +1748,9 @@ TEST_F(KFDMemoryTest, CheckZeroInitializationSysMem) {
 	TEST_START(TESTPROFILE_RUNALL);
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CheckZeroInitializationSysMem));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CheckZeroInitializationSysMem(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1790,10 +1773,7 @@ static inline void access(volatile void *sd, int size, int rw) {
  * On large-bar system, test the visible vram access speed.
  * KFD is not allowed to alloc visible vram on non-largebar system.
  */
-static void MMBandWidth(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::MMBandWidth(int gpuNode) {
 
     unsigned nBufs = 1000; /* measure us, report ns */
     unsigned testIndex, sizeIndex, memType;
@@ -1813,11 +1793,11 @@ static void MMBandWidth(KFDTEST_PARAMETERS* pTestParamters) {
     HsaMemFlags memFlags = {0};
     HsaMemMapFlags mapFlags = {0};
 
-    HSAuint64 vramSizeMB = pKFDMemoryTest->GetVramSize(gpuNode) >> 20;
+    HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
 
     LOG() << "Found VRAM of " << std::dec << vramSizeMB << "MB." << std::endl;
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode) || !vramSizeMB) {
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode) || !vramSizeMB) {
         LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
         return;
     }
@@ -1926,7 +1906,9 @@ TEST_F(KFDMemoryTest, MMBandWidth) {
 	TEST_START(TESTPROFILE_RUNALL);
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MMBandWidth));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MMBandWidth(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1938,23 +1920,20 @@ TEST_F(KFDMemoryTest, MMBandWidth) {
  * HDP flush so only run on vega10 and after.
  * This should only run on large bar system.
  */
-static void HostHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::HostHdpFlush(int gpuNode) {
 
 	Assembler* m_pAsm;
-	m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+	m_pAsm = GetAssemblerFromNodeId(gpuNode);
 	ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-	HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
-    HsaMemFlags memoryFlags = pKFDMemoryTest->GetHsaMemFlags();
+    HsaMemFlags memoryFlags = GetHsaMemFlags();
     /* buffer[0]: signal; buffer[1]: Input to shader; buffer[2]: Output to
      * shader
      */
     unsigned int *buffer = NULL;
-    const HsaNodeProperties *pNodeProperties = pKFDMemoryTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+    const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
     HSAuint32 *mmioBase = NULL;
     unsigned int *nullPtr = NULL;
 
@@ -1967,9 +1946,9 @@ static void HostHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
         LOG() << "Skipping test: Test requires gfx9 and later asics." << std::endl;
         return;
     }
-    HSAuint64 vramSizeMB = pKFDMemoryTest->GetVramSize(gpuNode) >> 20;
+    HSAuint64 vramSizeMB = GetVramSize(gpuNode) >> 20;
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode) || !vramSizeMB) {
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode) || !vramSizeMB) {
         LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
         return;
     }
@@ -2031,7 +2010,9 @@ TEST_F(KFDMemoryTest, HostHdpFlush) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(HostHdpFlush));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->HostHdpFlush(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2045,17 +2026,14 @@ TEST_F(KFDMemoryTest, HostHdpFlush) {
  * This should only run on system with at least one
  * large bar node (which is used as device 0).
  */
-static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::DeviceHdpFlush(int gpuNode) {
 
 	Assembler* m_pAsm;
-	m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+	m_pAsm = GetAssemblerFromNodeId(gpuNode);
 	ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-	HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
-    HsaMemFlags memoryFlags = pKFDMemoryTest->GetHsaMemFlags();
+	HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    HsaMemFlags memoryFlags = GetHsaMemFlags();
     /* buffer is physically on device 0.
      * buffer[0]: Use as signaling b/t devices;
      * buffer[1]: Device 1 write to buffer[1] and device 0 read it
@@ -2068,7 +2046,7 @@ static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
     std::vector<int> nodes;
     int numPeers;
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     if (gpuNodes.size() < 2) {
         LOG() << "Skipping test: At least two GPUs are required." << std::endl;
         return;
@@ -2079,7 +2057,7 @@ static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
         nodes.push_back(g_TestNodeId);
         nodes.push_back(g_TestDstNodeId);
 
-        if (!pKFDMemoryTest->Get_NodeInfo()->IsPeerAccessibleByNode(g_TestDstNodeId, g_TestNodeId)) {
+        if (!Get_NodeInfo()->IsPeerAccessibleByNode(g_TestDstNodeId, g_TestNodeId)) {
             LOG() << "Skipping test: first GPU specified is not peer-accessible." << std::endl;
             return;
         }
@@ -2089,7 +2067,7 @@ static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
             return;
         }
     } else {
-        pKFDMemoryTest->Get_NodeInfo()->FindAccessiblePeers(&nodes, gpuNode);
+        Get_NodeInfo()->FindAccessiblePeers(&nodes, gpuNode);
         if (nodes.size() < 2) {
             LOG() << "Skipping test: Test requires at least one large bar GPU." << std::endl;
             LOG() << "               or two GPUs are XGMI connected." << std::endl;
@@ -2100,8 +2078,8 @@ static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
     const HsaNodeProperties *pNodePropertiesDev1 = NULL;
     unsigned int m_FamilyIdDev1 = 0;
 
-    pNodeProperties = pKFDMemoryTest->Get_NodeInfo()->GetNodeProperties(nodes[0]);
-    pNodePropertiesDev1 = pKFDMemoryTest->Get_NodeInfo()->GetNodeProperties(nodes[1]);
+    pNodeProperties = Get_NodeInfo()->GetNodeProperties(nodes[0]);
+    pNodePropertiesDev1 = Get_NodeInfo()->GetNodeProperties(nodes[1]);
     if (!pNodeProperties || !pNodePropertiesDev1) {
         LOG() << "Failed to get gpu node properties." << std::endl;
         return;
@@ -2114,12 +2092,12 @@ static void DeviceHdpFlush(KFDTEST_PARAMETERS* pTestParamters) {
         return;
     }
 
-    if (pKFDMemoryTest->Get_NodeInfo()->IsNodeXGMItoCPU(nodes[0])) {
+    if (Get_NodeInfo()->IsNodeXGMItoCPU(nodes[0])) {
         LOG() << "Skipping test: PCIe link to CPU is required." << std::endl;
         return;
     }
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(nodes[0])) {
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(nodes[0])) {
         LOG() << "Skipping test: Test requires device 0 large bar GPU." << std::endl;
         return;
     }
@@ -2189,7 +2167,9 @@ TEST_F(KFDMemoryTest, DeviceHdpFlush) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(DeviceHdpFlush));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->DeviceHdpFlush(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2202,16 +2182,13 @@ TEST_F(KFDMemoryTest, DeviceHdpFlush) {
  * since the cache should be invalidated on write and second read
  * should go to physical VRAM instead of cache.
  */
-static void CacheInvalidateOnSdmaWrite(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::CacheInvalidateOnSdmaWrite(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     HsaMemoryBuffer tmpBuffer(PAGE_SIZE, 0, true /* zero */);
     volatile HSAuint32 *tmp = tmpBuffer.As<volatile HSAuint32 *>();
@@ -2259,28 +2236,27 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnSdmaWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CacheInvalidateOnSdmaWrite));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CacheInvalidateOnSdmaWrite(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CacheInvalidateOnCPUWrite(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::CacheInvalidateOnCPUWrite(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId != FAMILY_AR) {
         LOG() << "Skipping test: Test requires arcturus series asics." << std::endl;
         return;
     }
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
+    if (!Get_NodeInfo()->IsGPUNodeLargeBar(gpuNode)) {
         LOG() << "Skipping test: Test requires a large bar GPU." << std::endl;
         return;
     }
@@ -2326,21 +2302,20 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnCPUWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CacheInvalidateOnCPUWrite));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CacheInvalidateOnCPUWrite(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CacheInvalidateOnRemoteWrite(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::CacheInvalidateOnRemoteWrite(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     HsaMemoryBuffer tmpBuffer(PAGE_SIZE, 0, true /* zero */);
     volatile HSAuint32 *tmp = tmpBuffer.As<volatile HSAuint32 *>();
@@ -2352,7 +2327,7 @@ static void CacheInvalidateOnRemoteWrite(KFDTEST_PARAMETERS* pTestParamters) {
         return;
     }
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     if (gpuNodes.size() < 2) {
         LOG() << "Skipping test: At least two GPUs are required." << std::endl;
         return;
@@ -2415,7 +2390,9 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnRemoteWrite) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CacheInvalidateOnRemoteWrite));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CacheInvalidateOnRemoteWrite(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2423,16 +2400,13 @@ TEST_F(KFDMemoryTest, CacheInvalidateOnRemoteWrite) {
 /* Test is for new cache coherence on Aldebaran. It is to verify
  * two GPUs can coherently share a fine grain FB.
  */
-static void VramCacheCoherenceWithRemoteGPU(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::VramCacheCoherenceWithRemoteGPU(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     HsaMemoryBuffer tmpBuffer(PAGE_SIZE, 0, true /* zero */);
     volatile HSAuint32 *tmp = tmpBuffer.As<volatile HSAuint32 *>();
@@ -2444,7 +2418,7 @@ static void VramCacheCoherenceWithRemoteGPU(KFDTEST_PARAMETERS* pTestParamters) 
         return;
     }
 
-    const std::vector<int> gpuNodes = pKFDMemoryTest->Get_NodeInfo()->GetNodesWithGPU();
+    const std::vector<int> gpuNodes = Get_NodeInfo()->GetNodesWithGPU();
     if (gpuNodes.size() < 2) {
         LOG() << "Skipping test: At least two GPUs are required." << std::endl;
         return;
@@ -2513,7 +2487,9 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithRemoteGPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(VramCacheCoherenceWithRemoteGPU));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->VramCacheCoherenceWithRemoteGPU(gpuNode); 
+    }));
 
     TEST_END
 }
@@ -2522,16 +2498,13 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithRemoteGPU) {
  * new XGMI coherence HW link in caches between CPU and GPUs
  * in local FB with fine grain mode.
  */
-static void VramCacheCoherenceWithCPU(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::VramCacheCoherenceWithCPU(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId != FAMILY_AL && m_FamilyId != FAMILY_AV) {
         LOG() << "Skipping test: Test requires aldebaran or aqua vanjaram series asics." << std::endl;
@@ -2540,7 +2513,7 @@ static void VramCacheCoherenceWithCPU(KFDTEST_PARAMETERS* pTestParamters) {
 
     const int dwLocation = 0x80;
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsNodeXGMItoCPU(gpuNode)) {
+    if (!Get_NodeInfo()->IsNodeXGMItoCPU(gpuNode)) {
         LOG() << "Skipping test: XGMI link to CPU is required." << std::endl;
         return;
     }
@@ -2590,7 +2563,9 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithCPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(VramCacheCoherenceWithCPU));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->VramCacheCoherenceWithCPU(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2599,16 +2574,13 @@ TEST_F(KFDMemoryTest, VramCacheCoherenceWithCPU) {
  * new XGMI coherence HW link in caches between CPU and GPUs
  * in system RAM.
  */
-static void SramCacheCoherenceWithGPU(KFDTEST_PARAMETERS* pTestParamters) {
-
-	int gpuNode = pTestParamters->gpuNode;
-	KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::SramCacheCoherenceWithGPU(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    HSAuint32 m_FamilyId = pKFDMemoryTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId != FAMILY_AL && m_FamilyId != FAMILY_AV) {
         LOG() << "Skipping test: Test requires aldebaran or aqua vanjaram series asics." << std::endl;
@@ -2617,7 +2589,7 @@ static void SramCacheCoherenceWithGPU(KFDTEST_PARAMETERS* pTestParamters) {
 
     const int dwLocation = 0x80;
 
-    if (!pKFDMemoryTest->Get_NodeInfo()->IsNodeXGMItoCPU(gpuNode)) {
+    if (!Get_NodeInfo()->IsNodeXGMItoCPU(gpuNode)) {
         LOG() << "Skipping test: XGMI link to CPU is required." << std::endl;
         return;
     }
@@ -2625,7 +2597,7 @@ static void SramCacheCoherenceWithGPU(KFDTEST_PARAMETERS* pTestParamters) {
     unsigned int *fineBuffer = NULL;
     unsigned int tmp;
 
-    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, pKFDMemoryTest->GetHsaMemFlags(),
+    ASSERT_SUCCESS_GPU(hsaKmtAllocMemory(gpuNode /* system */, PAGE_SIZE, GetHsaMemFlags(),
                        reinterpret_cast<void**>(&fineBuffer)), gpuNode);
     ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(fineBuffer, PAGE_SIZE, NULL), gpuNode);
     fineBuffer[0] = 0;
@@ -2670,7 +2642,9 @@ TEST_F(KFDMemoryTest, SramCacheCoherenceWithGPU) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SramCacheCoherenceWithGPU));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SramCacheCoherenceWithGPU(gpuNode);
+    }));
 
     TEST_END
 }
@@ -3082,16 +3056,13 @@ TEST_F(KFDMemoryTest, MultiThreadRegisterUserptrTest) {
     TEST_END
 }
 
-static void ExportDMABufTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::ExportDMABufTest(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    if (pKFDMemoryTest->Get_Version()->KernelInterfaceMinorVersion < 12) {
+    if (Get_Version()->KernelInterfaceMinorVersion < 12) {
         LOG() << "Skipping test, requires KFD ioctl version 1.12 or newer" << std::endl;
         return;
     }
@@ -3099,7 +3070,7 @@ static void ExportDMABufTest(KFDTEST_PARAMETERS* pTestParamters) {
     // Use a GTT BO for export because it's conveniently CPU accessible.
     // On multi-GPU systems this also checks for interactions with driver-
     // internal DMA buf use for DMA attachment to multiple GPUs
-    HsaMemFlags memFlags = pKFDMemoryTest->GetHsaMemFlags();
+    HsaMemFlags memFlags = GetHsaMemFlags();
     memFlags.ui32.NonPaged = 1;
 
     HSAuint32 *buf;
@@ -3166,26 +3137,25 @@ TEST_F(KFDMemoryTest, ExportDMABufTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(ExportDMABufTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->ExportDMABufTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void VA_VRAM_Only_AllocTest(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDMemoryTest* pKFDMemoryTest = (KFDMemoryTest*)pTestParamters->pTestObject;
+void KFDMemoryTest::VA_VRAM_Only_AllocTest(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDMemoryTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-   if (pKFDMemoryTest->Get_Version()->KernelInterfaceMinorVersion < 12) {
+   if (Get_Version()->KernelInterfaceMinorVersion < 12) {
         LOG() << "Skipping test, requires KFD ioctl version 1.12 or newer" << std::endl;
         return;
     }
 
-    HsaMemFlags memFlags = pKFDMemoryTest->GetHsaMemFlags();
+    HsaMemFlags memFlags = GetHsaMemFlags();
     memFlags.ui32.NonPaged = 1;
     memFlags.ui32.HostAccess = 0;
 
@@ -3223,7 +3193,9 @@ TEST_F(KFDMemoryTest, VA_VRAM_Only_AllocTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
 	TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(VA_VRAM_Only_AllocTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->VA_VRAM_Only_AllocTest(gpuNode);
+    }));
 
     TEST_END
 }

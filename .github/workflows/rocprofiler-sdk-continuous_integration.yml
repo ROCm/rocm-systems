@@ -34,7 +34,7 @@ permissions:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
+  ROCM_VERSION: "7.1.1"
   PYTHON_VENV_PATH: "rocprofiler-sdk"
   PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"

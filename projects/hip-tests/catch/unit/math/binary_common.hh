@@ -35,7 +35,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       if constexpr (std::is_same_v<float, T>) {                                                    \
         ys[i] = func_name##f(x1s[i], x2s[i]);                                                      \
       } else if constexpr (std::is_same_v<double, T>) {                                            \

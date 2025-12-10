@@ -78,6 +78,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       - amdsmi_set_power_cap()
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
 
+- **Added PTL Support to `amd-smi static` and `amd-smi set`**
+  - `amd-smi set` now support --ptl-status 0|1 and --ptl-format FORMAT1,FORMAT2
+  - `amd-smi static -l` shows current state and format of PTL
+
+  ```console
+  $ amd-smi static -l
+  GPU: 0
+      LIMIT:
+        PTL_STATE: Enabled
+        PTL_FORMAT: I8,F64
+  ```
+
 ### Changed
 
 - **The `amd-smi` command now shows hsmp rather than amd_hsmp**.  
@@ -385,6 +397,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Non sudo privliged users were unable to see the BDF due to logical errors.
 
 ### Resolved Issues
+
+- **Fixed CPER component not being redirected to output file issue when using `amd-smi ras --cper --folder <folder_name> --file <file_name> --follow`**.
+  - Utlized the AMDSMILogger to redirect to output file when --file option is used
 
 - **Fixed a CPER record count mismatch issue when using the `amd-smi ras --cper --file-limit`**.  
   - Fixed deletion calculation to use files_to_delete = len(folder_files) - file_limit for exact file count management

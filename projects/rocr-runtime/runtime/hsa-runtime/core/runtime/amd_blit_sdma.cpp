@@ -785,7 +785,7 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
       *reinterpret_cast<uint64_t*>(queue_resource_.Queue_DoorBell) = new_index;
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() ||
           core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF()) {
-        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId));
+        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId, new_index));
       }
 
       atomic::Store(&cached_commit_index_, new_index, std::memory_order_release);
