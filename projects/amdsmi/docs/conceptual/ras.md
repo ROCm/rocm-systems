@@ -90,8 +90,7 @@ These environment variables control how long information is stored in the data c
 Therefore calls for the system information will not trigger a system retrieval until the cache goes invalid and needs refreshing.
 
 ### Best practice
-The best practice is defined by the User.  If a mutliple threaded application or multiple amd-smi instances are only going to need information every 5 seconds, then set the environment variable to something slightly less than 5 seconds.
-```
+You should tune the cache refresh interval based on how frequently your application accesses data. If a multi-threaded application or multiple amd-smi instances are only going to need information every 5 seconds, then set the `AMD_GPU_METRICS_CACHE_MS` environment variable to something slightly less than 5 seconds.
 AMD_GPU_METRICS_CACHE_MS = 4900 ms
 ```
 In that way, the system is not constantly updating the cache from requests by each of the instances in the threads.
