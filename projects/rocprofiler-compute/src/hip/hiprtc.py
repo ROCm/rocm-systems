@@ -24,6 +24,7 @@
 ##############################################################################
 
 import ctypes
+import os
 from ctypes import (
     POINTER,
     byref,
@@ -33,7 +34,6 @@ from ctypes import (
     c_size_t,
     c_void_p,
 )
-import os
 
 _lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libhiprtc.so")
 

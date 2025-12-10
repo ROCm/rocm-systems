@@ -105,7 +105,17 @@ Description: Checks the type of device with provided handle.
 
 Input parameters: device handle as an instance of `amdsmi_processor_handle`
 
-Output: Integer, type of gpu
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`processor_type` | A string representing the processor type name.
+
+* Possible `processor_type` values include:
+  * `"AMD_GPU"` - AMD GPU processor
+  * `"AMD_CPU"` - AMD CPU processor
+  * `"AMD_CPU_CORE"` - AMD CPU core processor
+  * `"UNKNOWN"` - Unknown processor type
 
 Exceptions that can be thrown by `amdsmi_get_processor_type` function:
 
@@ -122,8 +132,9 @@ Example:
 
 ```python
 try:
-    type_of_GPU = amdsmi_get_processor_type(processor_handle)
-    if type_of_GPU == 1:
+    info = amdsmi_get_processor_type(processor_handle)
+    processor_type = info["processor_type"]
+    if processor_type == AmdSmiProcessorType.AMD_GPU.name:
         print("This is an AMD GPU")
 except AmdSmiException as e:
     print(e)
@@ -689,7 +700,7 @@ Example:
 
 ```python
 try:
-    devices = amdsmi_get_processor_handles(handle)
+    devices = amdsmi_get_processor_handles()
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
@@ -755,12 +766,12 @@ try:
     else:
         for device in devices:
             cache_info = amdsmi_get_gpu_cache_info(device)
-            for cache_index, cache_values in cache_info.items():
-                print(cache_values['cache_properties'])
-                print(cache_values['cache_size'])
-                print(cache_values['cache_level'])
-                print(cache_values['max_num_cu_shared'])
-                print(cache_values['num_cache_instance'])
+            for cache_values in cache_info.values():
+                for cache_value in cache_values:
+                    print(cache_value['cache_properties'])
+                    print(cache_value['cache_level'])
+                    print(cache_value['max_num_cu_shared'])
+                    print(cache_value['num_cache_instance'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -1754,7 +1765,7 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        event = AmdSmiEventReader(device[0], AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET)
+        event = AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET])
         event.read(10000)
 except AmdSmiException as e:
     print(e)
@@ -1770,7 +1781,7 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        with AmdSmiEventReader(device[0], AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET) as event:
+        with AmdSmiEventReader(devices[0], [AmdSmiEvtNotificationType.GPU_PRE_RESET, AmdSmiEvtNotificationType.GPU_POST_RESET]) as event:
             event.read(10000)
 except AmdSmiException as e:
     print(e)
@@ -1897,7 +1908,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            profile = ...
+            profile = AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
              amdsmi_set_gpu_power_profile(device, 0, profile)
 except AmdSmiException as e:
     print(e)
@@ -1913,7 +1924,7 @@ Input parameters:
 * `processor_handle` handle for the given device
 * `min_clk_value` minimum clock value for desired clock range
 * `max_clk_value` maximum clock value for desired clock range
-* `clk_type`AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
+* `clk_type` SYS | MEM range type
 
 Output: None
 
@@ -1939,7 +1950,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_clk_range(device, 0, 1000, AmdSmiClkType.AMDSMI_CLK_TYPE_SYS)
+            amdsmi_set_gpu_clk_range(device, 0, 1000, AmdSmiClkType.SYS)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2266,10 +2277,10 @@ It is not supported on virtual machine guest
 Input parameters:
 
 * `processor_handle` handle for the given device
-* `level` AMDSMI_FREQ_IND_MIN|AMDSMI_FREQ_IND_MAX to set the minimum (0)
+* `level` MIN | MAX to set the minimum (0)
 or maximum (1) speed
 * `clk_value` value to apply to the clock range
-* `clk_type` AMDSMI_CLK_TYPE_SYS | AMDSMI_CLK_TYPE_MEM range type
+* `clk_type` SYS | MEM range type
 
 Output: None
 
@@ -2297,9 +2308,9 @@ try:
         for device in devices:
             amdsmi_set_gpu_od_clk_info(
                 device,
-                AmdSmiFreqInd.AMDSMI_FREQ_IND_MAX,
+                AmdSmiFreqInd.MAX,
                 1000,
-                AmdSmiClkType.AMDSMI_CLK_TYPE_SYS
+                AmdSmiClkType.SYS
             )
 except AmdSmiException as e:
     print(e)
@@ -2732,7 +2743,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            perf_level = amdsmi_get_gpu_perf_level(dev)
+            perf_level = amdsmi_get_gpu_perf_level(device)
             print(perf_level)
 except AmdSmiException as e:
     print(e)
@@ -3413,7 +3424,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventGroup.XGMI)
+            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
 except AmdSmiException as e:
     print(e)
 ```
@@ -3450,7 +3461,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventGroup.XGMI)
+            event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_0_REQUEST_TX)
             amdsmi_gpu_destroy_counter(event_handle)
 except AmdSmiException as e:
     print(e)
@@ -3535,6 +3546,7 @@ try:
     else:
         for device in devices:
             event_handle = amdsmi_gpu_create_counter(device, AmdSmiEventType.XGMI_1_REQUEST_TX)
+            amdsmi_gpu_control_counter(event_handle, AmdSmiCounterCommand.CMD_START)
             amdsmi_gpu_read_counter(event_handle)
 except AmdSmiException as e:
     print(e)
@@ -3738,7 +3750,7 @@ Input parameters:
 
 * `processor_handle` handle for the given device
 * `clk_type` the type of clock for which the set of frequencies will be modified
-as AmdSmiClkType
+as a string of AmdSmiClkType. Example AmdSmiClkType.SCLK becomes "SCLK".
 * `freq_bitmask`  bitmask indicating the indices of the frequencies that are to
 be enabled (1) and disabled (0). Only the lowest ::amdsmi_frequencies_t.num_supported
 bits of this mask are relevant.
@@ -3767,7 +3779,7 @@ try:
     else:
         for device in devices:
             freq_bitmask = 0
-             amdsmi_set_clk_freq(device, AmdSmiClkType.GFX, freq_bitmask)
+            amdsmi_set_clk_freq(device, "SCLK", freq_bitmask)
 except AmdSmiException as e:
     print(e)
 ```
@@ -4700,21 +4712,20 @@ try:
     if len(devices) == 0:
         print("No GPUs on machine")
     else:
-        for device in devices:
+        for device_num, device in enumerate(devices):
             link_metrics = amdsmi_get_link_metrics(device)
-            print(link_metrics['bit_rate'])
-            print(link_metrics['max_bandwidth'])
-            for idx, link in enumerate(link_metrics['links']):
-                print(f"{idx}: {link['bdf']}, {link['read']} KB, {link['write']} KB")
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print(link_metrics['num_links'])
+            for idx, links in enumerate(link_metrics['links']):
+                print(f"{idx}: {links['bdf']}, {links['read']} KB, {links['write']} KB")
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
                     print('internal')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
                     print('pcie')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
                     print('xgmi')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
                     print('not applicable')
-                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+                if links['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
                     print('unknown')
 except AmdSmiException as e:
     print(e)
@@ -4775,7 +4786,7 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_P2P_status
+### amdsmi_topo_get_p2p_status
 
 Description: Retrieve the connection type and P2P capabilities between 2 GPUs
 
@@ -4791,7 +4802,7 @@ Fields | Description
 `type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `cap` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`is_iolink_coherent`</td><td>1 == True; 0 == False; Uint_max = Undefined</td></tr><tr><td>`is_iolink_atomics_32bit`</td><td>Supports 32bit atomics</td></tr><tr><td>`is_iolink_atomics_64bit`</td><td>Supports 64bit atomics</td></tr><tr><td>`is_iolink_dma`</td><td>Supports DMA</td></tr><tr><td>`is_iolink_bi_directional`</td><td>Is the IOLink Bidirectional</td></tr></tbody></table>
 
-Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
+Exceptions that can be thrown by `amdsmi_topo_get_p2p_status` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -4814,7 +4825,7 @@ try:
     else:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
-        link_type = amdsmi_get_P2P_status(processor_handle_src, processor_handle_dest)
+        link_type = amdsmi_topo_get_p2p_status(processor_handle_src, processor_handle_dest)
         if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
             print('internal')
         if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
@@ -6278,8 +6289,8 @@ Example:
 
 ```python
 try:
-    processor_handles = amdsmi_get_cpusocket_handles()
-    if len(processor_handles) == 0:
+    socket_handles = amdsmi_get_cpusocket_handles()
+    if len(socket_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for socket in socket_handles:
@@ -6315,9 +6326,9 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            nbio = amdsmi_get_cpu_socket_lclk_dpm_level(processor)
-            print(nbio['max_dpm_level'])
-            print(nbio['max_dpm_level'])
+            nbio = amdsmi_get_cpu_socket_lclk_dpm_level(processor, 0)
+            print(nbio['nbio_max_dpm_level'])
+            print(nbio['nbio_max_dpm_level'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -6349,7 +6360,7 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            link_rate = amdsmi_set_cpu_pcie_link_rate(processor, 0, 0)
+            link_rate = amdsmi_set_cpu_pcie_link_rate(processor, 0)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6443,8 +6454,10 @@ try:
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
+        encoding = 0
+        link_name = "P0"
         for processor in processor_handles:
-            xgmi_bw = amdsmi_get_cpu_current_xgmi_bw(processor)
+            xgmi_bw = amdsmi_get_cpu_current_xgmi_bw(processor, encoding, link_name)
             print(xgmi_bw)
 except AmdSmiException as e:
     print(e)

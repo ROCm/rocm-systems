@@ -1156,7 +1156,8 @@ pub struct AmdsmiAsicInfoT {
     pub num_of_compute_units: u32,
     pub target_graphics_version: u64,
     pub subsystem_id: u32,
-    pub reserved: [u32; 21usize],
+    pub flags: u64,
+    pub reserved: [u32; 19usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {

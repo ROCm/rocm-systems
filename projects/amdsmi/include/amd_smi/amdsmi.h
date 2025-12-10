@@ -927,7 +927,8 @@ typedef struct {
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
     uint32_t subsystem_id; //!> The subsystem ID
-    uint32_t reserved[21];
+    uint64_t flags;        //!< Chip flags
+    uint32_t reserved[19];
 } amdsmi_asic_info_t;
 
 /**

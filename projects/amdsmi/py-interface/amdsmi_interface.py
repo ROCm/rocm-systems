@@ -2123,7 +2123,8 @@ def amdsmi_get_gpu_asic_info(
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
         "num_compute_units": _validate_if_max_uint(asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T),
         "target_graphics_version": "gfx" + target_graphics_version,
-        "subsystem_id": subsystem_id
+        "subsystem_id": subsystem_id,
+        "flags": asic_info_struct.flags
     }
 
     string_values = ["market_name", "vendor_name"]
