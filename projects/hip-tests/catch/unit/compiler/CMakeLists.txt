@@ -18,7 +18,7 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-  set(OFFLOAD_ARCH_GENERIC_STR 
+  set(OFFLOAD_ARCH_GENERIC_STR
     --offload-arch=gfx9-generic
     --offload-arch=gfx9-4-generic:sramecc+:xnack-
     --offload-arch=gfx9-4-generic:sramecc-:xnack-
@@ -76,11 +76,11 @@ if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
     hipSquareGenericTarget.cc
   )
-  hip_add_exe_to_target(NAME hipSquareGenericTarget
+  hip_add_exe_to_target(NAME hipSquareGenericTargetDefault
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-  set_target_properties(hipSquareGenericTarget PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
-  target_compile_options(hipSquareGenericTarget PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
+  set_target_properties(hipSquareGenericTargetDefault PROPERTIES COMPILE_FLAGS "-mcode-object-version=6 ${DISABLE_GENERIC_TARGET_ONLY}")
+  target_compile_options(hipSquareGenericTargetDefault PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
   hip_add_exe_to_target(NAME hipSquareGenericTargetCompressed
                       TEST_SRC ${TEST_SRC}
@@ -88,10 +88,10 @@ if(HIP_PLATFORM MATCHES "amd")
   set_target_properties(hipSquareGenericTargetCompressed PROPERTIES COMPILE_FLAGS " -DGENERIC_COMPRESSED ${DISABLE_GENERIC_TARGET_ONLY} -mcode-object-version=6 --offload-compress")
   target_compile_options(hipSquareGenericTargetCompressed PUBLIC ${OFFLOAD_ARCH_GENERIC_STR})
 
-  add_dependencies(hipSquareGenericTarget hipSquareGenericTargetCompressed)
+  add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetCompressed)
   if(BUILD_SHARED_LIBS)
-    add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
-    add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
+    add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnly)
+    add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
   # SWDEV-548807 skip building hipSpirvTest
