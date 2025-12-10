@@ -51,7 +51,6 @@
 
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ext_amd.h"
-#include "image/inc/hsa_amd_mipmap_impl.h"
 #include "blit_kernel.h"
 #include "image_manager.h"
 #include "util.h"
@@ -164,8 +163,7 @@ class ImageRuntime {
     size_t row_pitch,
     size_t slice_pitch,
     size_t& size_out,
-    size_t& alignment_out,
-    uint32_t& max_levels_out);
+    size_t& alignment_out);
 
   /// @brief Destroy the mipmapped array object referenced by the handle.
   hsa_status_t DestroyMipmapArrayHandle(const hsa_ext_image_t& image_handle);

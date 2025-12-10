@@ -52,7 +52,6 @@
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
-#include "image/inc/hsa_amd_mipmap_impl.h"  // For PopulateAddrInput / mip helpers
 #include "resource.h"
 #include "image_manager_kv.h"
 #include "image_manager_ai.h"
@@ -100,13 +99,11 @@ hsa_status_t ImageRuntime::GetMipmapArraySizeAndAlignment(
     size_t row_pitch,
     size_t slice_pitch,
     size_t& size_out,
-    size_t& alignment_out,
-    uint32_t& max_levels_out) {
+    size_t& alignment_out) {
   size_out = 0;
   alignment_out = 0;
-  max_levels_out = ComputeMaxMipLevels(desc);
 
-  if (num_mipmap_levels == 0 || num_mipmap_levels > max_levels_out)
+  if (num_mipmap_levels == 0 || num_mipmap_levels > ComputeMaxMipLevels(desc))
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // Validate the image format and geometry.
@@ -744,10 +741,9 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
   // Validate mipmap array size and alignment requirements
   size_t required_size = 0;
   size_t required_alignment = 0;
-  uint32_t max_mip_levels = 0;
   hsa_status_t status = GetMipmapArraySizeAndAlignment(
       component, mipmap_descriptor, num_mipmap_levels, mipmap_layout, image_data_row_pitch,
-      image_data_slice_pitch, required_size, required_alignment, max_mip_levels);
+      image_data_slice_pitch, required_size, required_alignment);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
@@ -844,21 +840,14 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
   debug_print("Creating mip level %u view for %u level mipmap\n",
               mip_level, array->num_levels);
 
-  // Create a plain MipmappedArray object to represent the level view
+  // Create a view that references the parent mipmap array
   MipmappedArray* level_view = MipmappedArray::Create(component);
   if (!level_view) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Populate basic properties
-  level_view->component = component;
-  level_view->desc = array->desc;
-  level_view->permission = array->permission;
-  level_view->num_levels = 1;
-  level_view->tile_mode = array->tile_mode;
-  level_view->data = array->data;
-  level_view->row_pitch = array->row_pitch;
-  level_view->slice_pitch = array->slice_pitch;
+  // Copy entire parent structure (srd is a fixed array, so it's deep-copied automatically)
+  *level_view = *array;
 
-  // Populate SRD
+  // Modify SRD to select only the specific mip level
   ImageManager* manager = image_manager(component);
   if (!manager) {
     MipmappedArray::Destroy(level_view);

@@ -1359,13 +1359,7 @@ hsa_status_t ImageManagerGfx12::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Populate SRD
-  hsa_status_t status = PopulateImageSrd(level_view);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // Modify SRD to select only the specific mip level
+  // SRD already copied from parent, just modify BASE_LEVEL/LAST_LEVEL fields
   uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
 
   // GFX12 SRD WORDs 1 and 3 has BASE_LEVEL and LAST_LEVEL fields

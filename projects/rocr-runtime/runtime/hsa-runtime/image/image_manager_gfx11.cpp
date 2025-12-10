@@ -891,6 +891,7 @@ hsa_status_t ImageManagerGfx11::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     word1.val = 0;
     word1.f.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
+    word1.f.MAX_MIP = mipmap.num_levels - 1;
     word1.f.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
     // Only take the lowest 2 bits of (mipmap.desc.width - 1)
     word1.f.WIDTH = BitSelect<0, 1>(mipmap.desc.width - 1);
@@ -991,6 +992,7 @@ hsa_status_t ImageManagerGfx11::PopulateMipmapSrd(MipmappedArray& mipmap_array, 
   reinterpret_cast<SQ_IMG_RSRC_WORD0*>(&mipmap_array.srd[0])->bits.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
   reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
   reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
+  reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.MAX_MIP = mipmap_array.num_levels - 1;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_X = swizzle.x;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Y = swizzle.y;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Z = swizzle.z;
@@ -1201,13 +1203,7 @@ hsa_status_t ImageManagerGfx11::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Populate SRD
-  hsa_status_t status = PopulateImageSrd(level_view);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // Modify SRD to select only the specific mip level
+  // SRD already copied from parent, just modify BASE_LEVEL/LAST_LEVEL fields
   uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
 
   // GFX11 SRD WORD3 has BASE_LEVEL and LAST_LEVEL fields

@@ -395,7 +395,7 @@ hsa_status_t hsa_ext_image_data_get_info_with_layout_v2(
   }
 
   // Convert V2 descriptor to V1 for internal use
-  hsa_ext_image_descriptor_t desc_v1;
+  hsa_ext_image_descriptor_t desc_v1 = {};
   desc_v1.geometry = image_descriptor->geometry;
   desc_v1.width = image_descriptor->width;
   desc_v1.height = image_descriptor->height;
@@ -446,7 +446,7 @@ hsa_status_t hsa_amd_image_create_v2(hsa_agent_t agent,
   }
 
   // Convert V2 descriptor to V1 for internal use
-  hsa_ext_image_descriptor_t desc_v1;
+  hsa_ext_image_descriptor_t desc_v1 = {};
   desc_v1.geometry = image_descriptor->geometry;
   desc_v1.width = image_descriptor->width;
   desc_v1.height = image_descriptor->height;
@@ -488,45 +488,23 @@ hsa_status_t hsa_ext_image_data_get_info_v2(hsa_agent_t agent,
 
   // Check if this is a mipmap request
   uint32_t mipmap_levels =
-      (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+  (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
+
+  // Convert V2 descriptor to V1 for internal use
+  hsa_ext_image_descriptor_t desc_v1 = {};
+  desc_v1.geometry = image_descriptor->geometry;
+  desc_v1.width = image_descriptor->width;
+  desc_v1.height = image_descriptor->height;
+  desc_v1.depth = image_descriptor->depth;
+  desc_v1.array_size = image_descriptor->array_size;
+  desc_v1.format = image_descriptor->format;
 
   if (mipmap_levels > 1) {
-    // Mipmapped array path
-    size_t size_out = 0;
-    size_t alignment_out = 0;
-    uint32_t max_levels_out = 0;
-
-    // Convert V2 descriptor to V1 for internal use
-    hsa_ext_image_descriptor_t desc_v1;
-    desc_v1.geometry = image_descriptor->geometry;
-    desc_v1.width = image_descriptor->width;
-    desc_v1.height = image_descriptor->height;
-    desc_v1.depth = image_descriptor->depth;
-    desc_v1.array_size = image_descriptor->array_size;
-    desc_v1.format = image_descriptor->format;
-
-    hsa_status_t status = ImageRuntime::instance()->GetMipmapArraySizeAndAlignment(
-        agent, desc_v1, mipmap_levels, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, size_out,
-        alignment_out, max_levels_out);
-
-    if (status != HSA_STATUS_SUCCESS) {
-      return status;
-    }
-
-    image_data_info->size = size_out;
-    image_data_info->alignment = alignment_out;
-    return HSA_STATUS_SUCCESS;
-
+    return ImageRuntime::instance()->GetMipmapArraySizeAndAlignment(
+        agent, desc_v1, mipmap_levels, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0,
+        image_data_info->size, image_data_info->alignment);
   } else {
     // Regular image path (single level)
-    hsa_ext_image_descriptor_t desc_v1;
-    desc_v1.geometry = image_descriptor->geometry;
-    desc_v1.width = image_descriptor->width;
-    desc_v1.height = image_descriptor->height;
-    desc_v1.depth = image_descriptor->depth;
-    desc_v1.array_size = image_descriptor->array_size;
-    desc_v1.format = image_descriptor->format;
-
     return ImageRuntime::instance()->GetImageSizeAndAlignment(
         agent, desc_v1, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, *image_data_info);
   }
@@ -552,7 +530,7 @@ hsa_status_t hsa_ext_image_create_v2(hsa_agent_t agent,
       (image_descriptor->mipmap_levels == 0) ? 1 : image_descriptor->mipmap_levels;
 
   // Convert V2 descriptor to V1 for internal use
-  hsa_ext_image_descriptor_t desc_v1;
+  hsa_ext_image_descriptor_t desc_v1 = {};
   desc_v1.geometry = image_descriptor->geometry;
   desc_v1.width = image_descriptor->width;
   desc_v1.height = image_descriptor->height;
@@ -591,7 +569,8 @@ hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
                                                           const hsa_ext_image_t* mipmapped_array,
                                                           uint32_t mip_level,
                                                           hsa_ext_image_t* level_image_out) {
-  TRY if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
+  TRY
+  if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
 
   auto* rt = rocr::image::ImageRuntime::instance();
   if (!rt) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

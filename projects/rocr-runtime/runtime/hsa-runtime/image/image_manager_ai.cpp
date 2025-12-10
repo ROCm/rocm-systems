@@ -732,6 +732,7 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
     word4.f.bc_swizzle = GetBcSwizzle(swizzle);
 
     word5.val = 0;
+    word5.f.max_mip = mipmap.num_levels - 1;
     word6.val = 0;
     word7.val = 0;
 
@@ -798,6 +799,7 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap_array, con
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Y = swizzle.y;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Z = swizzle.z;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_W = swizzle.w;
+  reinterpret_cast<SQ_IMG_RSRC_WORD5*>(&mipmap_array.srd[5])->bits.MAX_MIP = mipmap_array.num_levels - 1;
   
   if (mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
       mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1D) {
@@ -1001,13 +1003,7 @@ hsa_status_t ImageManagerAi::PopulateMipLevelSrd(
     const MipmappedArray& mipmap_array,
     uint32_t mip_level) const {
 
-  // Populate SRD
-  hsa_status_t status = PopulateImageSrd(level_view);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // Modify SRD to select only the specific mip level
+  // SRD already copied from parent, just modify BASE_LEVEL/LAST_LEVEL fields
   uint32_t* srd_words = reinterpret_cast<uint32_t*>(level_view.srd);
 
   // SRD WORD3 has BASE_LEVEL and LAST_LEVEL fields

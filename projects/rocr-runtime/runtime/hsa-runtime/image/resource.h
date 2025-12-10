@@ -210,23 +210,21 @@ public:
 /// @brief Structure representing a mipmapped image array.
 typedef struct MipmappedArray : public Image {
 private:
-  MipmappedArray() {
+  MipmappedArray()
+      : size(0),
+        num_levels(0),
+        flags(0) {
     component.handle = 0;
-    data = NULL;
-    size = 0;
+    data = nullptr;
     std::memset(srd, 0, sizeof(srd));
     std::memset(&desc, 0, sizeof(desc));
     permission = HSA_ACCESS_PERMISSION_RO;
-    num_levels = 0;
-    flags = 0;
     std::memset(&addr_output, 0, sizeof(addr_output));
     row_pitch = slice_pitch = 0;
     tile_mode = LINEAR;
   }
 
-~MipmappedArray() {
-
-}
+  ~MipmappedArray() {}
 
 public:
  /// @brief Create a MipmappedArray.
