@@ -638,6 +638,8 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     event_ms = total_flops / mean / 1e6
 
     print(
+        f"Peak VALU {unit}s ({type}), GPU ID: {device}, "
+        f"workgroupSize:{workgroup_size}, "
         f"workgroups:{workgroups}, experiments:{num_experiments}, "
         f"{unit}:{total_flops}, duration:{event_ms:.1f} ms, "
         f"mean:{mean:.1f} {rate}, stdev={stdev:.1f} GFLOPS"
