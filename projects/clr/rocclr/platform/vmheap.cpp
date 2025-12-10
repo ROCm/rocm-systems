@@ -75,7 +75,9 @@ bool VmHeap::CommitMemory(void* addr, size_t size) {
 
   // Enable memory access
   if (!device_->SetMemAccess(addr, padded_size, Device::VmmAccess::kReadWrite)) {
-    LogError("SetAccess failed for the commited memory in VmHeap!");
+    LogError("SetAccess failed for the committed memory in VmHeap!");
+    SvmBuffer::free(device_->context(), phys_mem_obj->getSvmPtr());
+    return false;
   }
   return true;
 }
