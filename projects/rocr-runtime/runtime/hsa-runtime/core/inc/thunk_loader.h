@@ -332,7 +332,9 @@ class ThunkLoader {
                                       HsaAisFlags flags, \
                                       HSAuint64 *SizeCopiedInBytes, \
                                       HSAint32 *status);
-
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetMemoryHandle))(void *MemoryAddress, \
+                                      HSAuint64 SizeInBytes, \
+                                      uint64_t  *SharedMemoryHandle);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -480,6 +482,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
+    HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);

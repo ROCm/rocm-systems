@@ -90,6 +90,7 @@ hsaKmtPcSamplingStart;
 hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtAisReadWriteFile;
+hsaKmtGetMemoryHandle;
 local: *;
 };
 
