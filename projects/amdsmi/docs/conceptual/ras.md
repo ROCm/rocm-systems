@@ -89,7 +89,7 @@ AMD_ASIC_INFO_CACHE_MS = 10000 ms
 These environment variables control how long information is stored in the data cache before it is refreshed.
 Therefore calls for the system information will not trigger a system retrieval until the cache goes invalid and needs refreshing.
 
-### Best Practice
+### Best practice
 The best practice is defined by the User.  If a mutliple threaded application or multiple amd-smi instances are only going to need information every 5 seconds, then set the environment variable to something slightly less than 5 seconds.
 ```
 AMD_GPU_METRICS_CACHE_MS = 4900 ms
