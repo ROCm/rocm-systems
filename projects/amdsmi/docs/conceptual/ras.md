@@ -94,7 +94,7 @@ The best practice is defined by the User.  If a mutliple threaded application or
 ```
 AMD_GPU_METRICS_CACHE_MS = 4900 ms
 ```
-In that way the system is not constantly updating the cache from requests by each of the instances in the treads.
+In that way, the system is not constantly updating the cache from requests by each of the instances in the threads.
 
 
 ## From concept to action
