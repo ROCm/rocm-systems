@@ -729,7 +729,7 @@ write_rocpd(
         };
 
     static auto get_thread_id =
-        [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val) {
+        [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val, std::string track_name = {}) {
             if(thread_ids.count(val) == 0)
             {
                 thread_ids.emplace(val);
@@ -742,6 +742,7 @@ write_rocpd(
                                              insert_value("ppid", tool_metadata.parent_process_id),
                                              insert_value("pid", this_pid),
                                              insert_value("tid", val),
+                                             insert_value("name", track_name),
                                          });
 
                 execute_raw_sql_statements(conn, stmt);
@@ -1657,7 +1658,7 @@ write_rocpd(
                 }
 
                 // insert thread info if it doesn't already exist
-                get_thread_id(data.tid);
+                get_thread_id(data.tid, "KFD EVENTS");
 
                 // get KFD category and create event entry
                 auto category = tool_metadata.buffer_names.at(data.kind);
