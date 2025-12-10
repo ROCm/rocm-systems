@@ -843,9 +843,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                             as_hex(_lookup_addr).c_str(), as_hex(_addr).c_str(),
                             as_hex(_sym_addr).c_str(),
                             (_location.empty()) ? "" : _location.data(),
-                            rocprofsys::utility::get_demangler()
-                                .demangle(itr.func)
-                                .c_str(),
+                            rocprofsys::utility::demangle(itr.func).c_str(),
                             itr.file.c_str(), itr.line, itr.address.as_string().c_str(),
                             itr.address.size());
                     }

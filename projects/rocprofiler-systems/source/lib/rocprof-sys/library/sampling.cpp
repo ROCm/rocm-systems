@@ -1548,8 +1548,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                         tracing::add_perfetto_annotation(
                                             ctx, _label.c_str(),
                                             JOIN('@',
-                                                 rocprofsys::utility::get_demangler()
-                                                     .demangle(line.name),
+                                                 rocprofsys::utility::demangle(line.name),
                                                  JOIN(':', line.location, line.line)));
                                     }
                                 }

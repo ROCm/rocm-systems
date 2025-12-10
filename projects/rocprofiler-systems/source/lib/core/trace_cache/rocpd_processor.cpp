@@ -40,7 +40,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <timemory/utility/demangle.hpp>
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include "library/rocprofiler-sdk/fwd.hpp"
@@ -91,10 +90,8 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
 
-    auto region_name_primary_key =
-        m_data_processor->insert_string(rocprofsys::utility::get_demangler()
-                                            .demangle(kernel_symbol->kernel_name)
-                                            .c_str());
+    auto region_name_primary_key = m_data_processor->insert_string(
+        rocprofsys::utility::demangle(kernel_symbol->kernel_name).c_str());
 
     auto stack_id        = _kds.correlation_id_internal;
     auto parent_stack_id = _kds.correlation_id_ancestor;

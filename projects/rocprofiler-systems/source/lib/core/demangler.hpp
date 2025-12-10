@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 
@@ -58,19 +59,25 @@ struct demangler
     {
         if(_mangled_name.empty()) return {};
 
-        std::lock_guard<std::mutex> _lk{ m_mutex };
+        const auto result = try_get_from_cache(_mangled_name);
+        if(result._found)
+        {
+            return result._cache_it->second;
+        }
 
-        auto _it = m_cache.find(_mangled_name);
-        if(_it != m_cache.end()) return _it->second;
-
-        auto _result = demangle_impl(_mangled_name.data());
-        m_cache.emplace(_mangled_name, _result);
-        return _result;
+        return demangle_and_cache(_mangled_name);
     }
 
 private:
-    std::mutex                                      m_mutex;
+    std::shared_mutex                               m_mutex;
     std::map<std::string, std::string, std::less<>> m_cache;
+    using cache_iterator = typename decltype(m_cache)::iterator;
+
+    struct cache_result
+    {
+        bool           _found;
+        cache_iterator _cache_it;
+    };
 
     static std::string demangle_impl(const char* _mangled_name)
     {
@@ -81,6 +88,34 @@ private:
         if(_status != 0 || !_demangled) return std::string{ _mangled_name };
 
         return std::string{ _demangled.get() };
+    }
+
+    cache_result try_get_from_cache(std::string_view _mangled_name)
+    {
+        std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
+
+        auto _it = m_cache.find(_mangled_name);
+        if(_it != m_cache.end())
+        {
+            return { true, _it };
+        }
+
+        return { false, m_cache.end() };
+    }
+
+    std::string demangle_and_cache(std::string_view _mangled_name)
+    {
+        std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
+
+        auto _it = m_cache.find(_mangled_name);
+        if(_it != m_cache.end())
+        {
+            return _it->second;
+        }
+
+        auto _result = demangle_impl(_mangled_name.data());
+        m_cache.emplace(_mangled_name, _result);
+        return _result;
     }
 };
 
