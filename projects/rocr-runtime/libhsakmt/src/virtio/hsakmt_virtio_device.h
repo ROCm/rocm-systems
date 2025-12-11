@@ -37,6 +37,8 @@ extern "C" {
 
 #define vhsakmt_atomic_inc_return(ptr) (atomic_fetch_add((ptr), 1) + 1)
 #define vhsakmt_atomic_dec_return(ptr) (atomic_fetch_sub((ptr), 1) - 1)
+#define vhsakmt_atomic_inc(ptr) ((void)atomic_fetch_add((ptr), 1))
+#define vhsakmt_atomic_dec(ptr) ((void)atomic_fetch_sub((ptr), 1))
 
 #define VHSA_VPTR_TO_UINT64(vptr) ((uint64_t)(unsigned long)(vptr))
 #define VHSA_UINT64_TO_VPTR(v) ((void*)(unsigned long)(v))
@@ -185,6 +187,7 @@ int vhsakmt_set_node_doorbell(vhsakmt_device_handle dev, uint32_t node, void* do
 void* vhsakmt_node_doorbell(vhsakmt_device_handle dev, uint32_t node);
 bool vhsakmt_is_scratch_mem(vhsakmt_device_handle dev, void* addr);
 bool vhsakmt_is_userptr(vhsakmt_device_handle dev, void* addr);
+struct vhsakmt_node* vhsakmt_get_node_by_id(vhsakmt_device_handle dev, uint32_t node_id);
 
 /*hsakmt_virtio_device.c*/
 int vhsakmt_execbuf_cpu(vhsakmt_device_handle dev, struct vhsakmt_ccmd_req* req, const char* from);
