@@ -260,7 +260,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
     fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
     std::ifstream file(fullpath.c_str(), std::ifstream::in);
     if (!file.is_open()) {
-        return AMDSMI_STATUS_API_FAILED;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     file.getline(val, DATA_SIZE);
@@ -616,12 +616,9 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
     std::strncpy(version, empty.c_str(), len-1);
     openFileAndModifyBuffer("/sys/module/amdgpu/version",
                                       version, static_cast<size_t>(len));
-    if (version[0] == '\0') {
-        openFileAndModifyBuffer("/proc/version", version, static_cast<size_t>(len));
-        if (version[0] == '\0') {
-            return AMDSMI_STATUS_IO;
-        }
-    }
+    if (version[0] == '\0')
+        return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+
     return status;
 }
 

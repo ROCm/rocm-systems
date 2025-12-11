@@ -634,7 +634,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
   // Validating hipGraphKernelNodeGetParams API
   HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode, &receivedKernelNodeParams));
 
-  REQUIRE(receivedKernelNodeParams.func == addOneKernel);
+  REQUIRE((receivedKernelNodeParams.func == addOneKernel));
   REQUIRE(receivedKernelNodeParams.gridDim.x == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.y == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.z == 1);
@@ -661,7 +661,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
 
   HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode, &receivedKernelNodeParams));
 
-  REQUIRE(receivedKernelNodeParams.func == addTwoKernel);
+  REQUIRE((receivedKernelNodeParams.func == addTwoKernel));
   REQUIRE(receivedKernelNodeParams.gridDim.x == 2);
   REQUIRE(receivedKernelNodeParams.gridDim.y == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.z == 1);

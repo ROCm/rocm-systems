@@ -62,7 +62,7 @@ HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properti
 }
 
 bool HostQueue::terminate() {
-  // incase of force destroy skip checking on the last command
+  // In case of force destroy skip checking on the last command
   if (AMD_DIRECT_DISPATCH) {
     if (!forceDestroy_ && vdev() != nullptr) {
       // If the queue still has the last command, then wait and release it
@@ -201,7 +201,7 @@ void HostQueue::finish(bool cpu_wait) {
     command->enqueue();
   }
 
-  // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
+  // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
   if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
@@ -217,8 +217,13 @@ void HostQueue::finish(bool cpu_wait) {
     // during finish()
     if (command == lastEnqueueCommand_) {
       device_.removeFromActiveQueues(this);
-      lastEnqueueCommand_->release();
-      lastEnqueueCommand_ = nullptr;
+      // Under Windows runtime can't destroy objects in the callback thread.
+      // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
+      // then keep the lastEnqueueCommand_ for the interrupt handling.
+      if (IS_LINUX || cpu_wait) {
+        lastEnqueueCommand_->release();
+        lastEnqueueCommand_ = nullptr;
+      }
     }
   }
   // Release all HW queues, which are idle or nearly idle

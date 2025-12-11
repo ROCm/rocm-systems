@@ -82,13 +82,11 @@ class AMDSMICommands():
                     nh = amdsmi_interface.amdsmi_get_node_handle(dev)
                     if nh is not None:
                         self.node_handle = nh
-                        continue
+                        # Only need one handle, break after first success
+                        break
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
-                                      amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL):
-                        logging.debug("Unable to get node handle: %s", e.get_error_info())
-                    else:
-                        raise e
+                    logging.debug("Unable to get node handle: %s", e.get_error_info())
+                    # Node handle functionality is optional, so don't raise an error
 
         if self.helpers.is_amd_hsmp_initialized():
             try:
@@ -914,7 +912,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get soc pstate policy info for gpu %s | %s", gpu_id, e.get_error_info())
 
-                static_dict['soc_pstate'] = policy_info
+                # Format for CSV output - flatten completely to avoid extra columns
+                if self.logger.is_csv_format() and isinstance(policy_info, dict):
+                    policies_str = ', '.join(
+                        f"{p['policy_id']}:{p['policy_description']}"
+                        for p in policy_info.get('policies', [])
+                    ) or 'N/A'
+                    
+                    static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
+                    static_dict['current_id'] = policy_info.get('current_id', 'N/A')
+                    static_dict['policies'] = policies_str
+                else:
+                    static_dict['soc_pstate'] = policy_info
         if 'xgmi_plpd' in current_platform_args:
             if args.xgmi_plpd:
                 try:
@@ -923,7 +932,18 @@ class AMDSMICommands():
                     policy_info = "N/A"
                     logging.debug("Failed to get xgmi_plpd info for gpu %s | %s", gpu_id, e.get_error_info())
 
-                static_dict['xgmi_plpd'] = policy_info
+                # Format for CSV output - flatten completely to avoid extra columns
+                if self.logger.is_csv_format() and isinstance(policy_info, dict):
+                    policies_str = ', '.join(
+                        f"{p['policy_id']}:{p['policy_description']}"
+                        for p in policy_info.get('policies', [])
+                    ) or 'N/A'
+                    
+                    static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
+                    static_dict['current_id'] = policy_info.get('current_id', 'N/A')
+                    static_dict['policies'] = policies_str
+                else:
+                    static_dict['xgmi_plpd'] = policy_info
         if 'process_isolation' in current_platform_args:
             if args.process_isolation:
                 try:
@@ -1949,7 +1969,7 @@ class AMDSMICommands():
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         voltage_unit)
-                        elif key == "socket_power":
+                        elif 'power' in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
                                                                         value,
                                                                         power_unit)
@@ -4793,6 +4813,16 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                        soc_pstate_info = amdsmi_interface.amdsmi_get_soc_pstate(args.gpu)
+                        policy_string = "N/A"
+                        # Check if 'policies' key exists before accessing it
+                        if 'policies' in soc_pstate_info and soc_pstate_info['policies']:
+                            policy_string = ""
+                            for policy in soc_pstate_info['policies']:
+                                policy_string += f"{policy['policy_id']}: {policy['policy_description']}, "
+                            policy_string = policy_string.rstrip(", ")  # Remove trailing comma and space
+                        print(f"Valid SOC P-State Policies: [{policy_string}]\n")
                     self.logger.store_output(args.gpu, 'socpstate', f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}")
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -4807,6 +4837,16 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                        xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(args.gpu)
+                        policy_string = "N/A"
+                        # Check if 'policies' key exists before accessing it
+                        if 'policies' in xgmi_plpd_info and xgmi_plpd_info['policies']:
+                            policy_string = ""
+                            for policy in xgmi_plpd_info['policies']:
+                                policy_string += f"{policy['policy_id']}: {policy['policy_description']}, "
+                            policy_string = policy_string.rstrip(", ")  # Remove trailing comma and space
+                        print(f"Valid XGMI PLPD Policies: [{policy_string}]\n")
                     self.logger.store_output(args.gpu, 'xgmiplpd', f"[{e.get_error_info(detailed=False)}] Unable to set XGMI per-link power down policy to {args.xgmi_plpd}")
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -4983,50 +5023,23 @@ class AMDSMICommands():
         # Universal args
         if isinstance(args.power_cap, tuple):
             pwr_type = args.power_cap.pwr_type
-            pwr_type_as_int = (0 if pwr_type == "ppt0" else 1 if pwr_type == "ppt1" else None)
-            pwr_type = pwr_type.upper()
             requested_power_cap = args.power_cap.watts
-            try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu, pwr_type_as_int)
-                logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                min_power_cap = power_cap_info["min_power_cap"]
-                min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                max_power_cap = power_cap_info["max_power_cap"]
-                max_power_cap = self.helpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                current_power_cap = power_cap_info["power_cap"]
-                current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                min_power_cap = "N/A"
-                max_power_cap = "N/A"
-                current_power_cap = "N/A"
-                self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
-                self.logger.print_output()
-                self.logger.clear_multiple_devices_output()
-                return
 
-            if requested_power_cap == current_power_cap:
-                self.logger.store_output(args.gpu, 'powercap', f"{pwr_type} power cap is already set to {requested_power_cap}W")
-            elif current_power_cap == 0:
-                self.logger.store_output(args.gpu, 'powercap', f"Unable to set {pwr_type} power cap to {requested_power_cap}W, current value is {current_power_cap}W")
-            elif requested_power_cap >= min_power_cap and requested_power_cap <= max_power_cap and requested_power_cap > 0:
-                try:
-                    new_power_cap = self.helpers.convert_SI_unit(requested_power_cap, AMDSMIHelpers.SI_Unit.BASE,
-                                                                    AMDSMIHelpers.SI_Unit.MICRO)
-                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, pwr_type_as_int, new_power_cap)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                        raise PermissionError('Command requires elevation') from e
-                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set {pwr_type} power cap to {requested_power_cap}W")
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
-
-                self.logger.store_output(args.gpu, 'powercap', f"Successfully set {pwr_type} power cap to {requested_power_cap}W")
+            # If pwr_type is None, default to ppt0 (legacy behavior)
+            if pwr_type is None:
+                pwr_type = "ppt0"
+                pwr_type_as_int = 0
             else:
-                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
-                if min_power_cap == 0:
-                    min_power_cap = 1
-                self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap}W and {max_power_cap}W")
+                pwr_type_as_int = 0 if pwr_type == "ppt0" else 1
+
+            # Set the power cap for the specified sensor
+            pwr_type_upper = pwr_type.upper()
+            result = self.helpers.validate_and_set_power_cap(
+                args.gpu, pwr_type_as_int, pwr_type_upper, requested_power_cap, self.logger)
+            self.logger.store_output(args.gpu, 'powercap', result)
+            if multiple_devices:
+                self.logger.store_multiple_device_output()
+                return  # Skip printing when there are multiple devices
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
@@ -6188,69 +6201,76 @@ class AMDSMICommands():
             self.logger.table_header += 'PCIE_REPLAY'.rjust(13)
 
         if args.vram_usage and not args.default_output:
+            mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(args.gpu, gpu_id)
+
             try:
-                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                monitor_values['vram_used'] = vram_used
-                monitor_values['vram_free'] = vram_total - vram_used
-                monitor_values['vram_total'] = vram_total
-                if vram_total != 0:
-                    monitor_values['vram_percent'] = round ((vram_used / vram_total) * 100, 2)
+                mem_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, mem_type) // (1024*1024)
+                mem_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, mem_type) // (1024*1024)
+                monitor_values['vram_used'] = mem_used
+                monitor_values['vram_free'] = mem_total - mem_used
+                monitor_values['vram_total'] = mem_total
+                if mem_total != 0:
+                    monitor_values['vram_percent'] = round ((mem_used / mem_total) * 100, 2)
                 else:
                     monitor_values['vram_percent'] = "N/A"
 
-                vram_usage_unit = "MB"
-                vram_percent_unit = "%"
+                mem_usage_unit = "MB"
+                mem_percent_unit = "%"
                 if self.logger.is_human_readable_format():
-                    monitor_values['vram_used'] = f"{monitor_values['vram_used']} {vram_usage_unit}"
-                    monitor_values['vram_free'] = f"{monitor_values['vram_free']} {vram_usage_unit}"
-                    monitor_values['vram_total'] = f"{monitor_values['vram_total']} {vram_usage_unit}"
-                    monitor_values['vram_percent'] = f"{monitor_values['vram_percent']} {vram_percent_unit}"
+                    monitor_values['vram_used'] = f"{monitor_values['vram_used']} {mem_usage_unit}"
+                    monitor_values['vram_free'] = f"{monitor_values['vram_free']} {mem_usage_unit}"
+                    monitor_values['vram_total'] = f"{monitor_values['vram_total']} {mem_usage_unit}"
+                    monitor_values['vram_percent'] = f"{monitor_values['vram_percent']} {mem_percent_unit}"
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = {"value" : monitor_values['vram_used'],
-                                                   "unit" : vram_usage_unit}
+                                                   "unit" : mem_usage_unit}
                     monitor_values['vram_free'] = {"value" : monitor_values['vram_free'],
-                                                   "unit" : vram_usage_unit}
+                                                   "unit" : mem_usage_unit}
                     monitor_values['vram_total'] = {"value" : monitor_values['vram_total'],
-                                                    "unit" : vram_usage_unit}
+                                                    "unit" : mem_usage_unit}
                     monitor_values['vram_percent'] = {"value" : monitor_values['vram_percent'],
-                                                      "unit" : vram_percent_unit}
+                                                      "unit" : mem_percent_unit}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['vram_used'] = "N/A"
                 monitor_values['vram_free'] = "N/A"
                 monitor_values['vram_total'] = "N/A"
                 monitor_values['vram_percent'] = "N/A"
-                logging.debug("Failed to get vram memory usage on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get %s memory usage on gpu %s | %s", mem_type_name.lower(), gpu_id, e.get_error_info())
 
-            self.logger.table_header += 'VRAM_USED'.rjust(11)
-            self.logger.table_header += 'VRAM_FREE'.rjust(12)
-            self.logger.table_header += 'VRAM_TOTAL'.rjust(12)
-            self.logger.table_header += 'VRAM%'.rjust(9)
+            # Use appropriate headers based on memory type
+            self.logger.table_header += f'{mem_type_name}_USED'.rjust(11)
+            self.logger.table_header += f'{mem_type_name}_FREE'.rjust(12)
+            self.logger.table_header += f'{mem_type_name}_TOTAL'.rjust(12)
+            self.logger.table_header += f'{mem_type_name}%'.rjust(9)
 
         if args.vram_usage and args.default_output:
+            mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(args.gpu, gpu_id)
+
             try:
-                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_usage_unit = "GB"
+                mem_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, mem_type) // (1024*1024)
+                mem_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, mem_type) // (1024*1024)
+                mem_usage_unit = "GB"
                 if self.logger.is_json_format():
-                    monitor_values['vram_used'] = {"value" : round(vram_used/1024,1),
-                                                   "unit" : vram_usage_unit}
-                    monitor_values['vram_total'] = {"value" : round(vram_total/1024,1),
-                                                    "unit" : vram_usage_unit}
+                    monitor_values['vram_used'] = {"value" : round(mem_used/1024,1),
+                                                   "unit" : mem_usage_unit}
+                    monitor_values['vram_total'] = {"value" : round(mem_total/1024,1),
+                                                    "unit" : mem_usage_unit}
                 elif self.logger.is_csv_format():
-                    monitor_values['vram_used'] = round(vram_used/1024,1)
-                    monitor_values['vram_total'] = round(vram_total/1024,1)
+                    monitor_values['vram_used'] = round(mem_used/1024,1)
+                    monitor_values['vram_total'] = round(mem_total/1024,1)
                 else:
-                    monitor_values['vram_usage'] = f"{vram_used/1024:5.1f}/{vram_total/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
+                    monitor_values['vram_usage'] = f"{mem_used/1024:5.1f}/{mem_total/1024:5.1f} {mem_usage_unit}".rjust(16,' ')
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = "N/A"
                     monitor_values['vram_total'] = "N/A"
                 else:
                     monitor_values['vram_usage'] = "N/A"
-                logging.debug("Failed to get vram memory usage on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get %s memory usage on gpu %s | %s", mem_type_name.lower(), gpu_id, e.get_error_info())
 
-            self.logger.table_header += 'VRAM_USAGE'.rjust(16)
+            # Use appropriate header based on memory type
+            header_name = f'{mem_type_name}_USAGE'
+            self.logger.table_header += header_name.rjust(16)
 
         if args.pcie:
             if pcie_info != "N/A":
@@ -7521,7 +7541,13 @@ class AMDSMICommands():
                     current_power = gpu_metrics['current_socket_power']
                 else:
                     current_power = gpu_metrics['average_socket_power']
-                temperature = gpu_metrics['temperature_hotspot']
+                # If the hotspot temperature is not available use the edge temp (applicable to APUs)
+                if gpu_metrics['temperature_hotspot'] != "N/A":
+                    temperature = gpu_metrics['temperature_hotspot']
+                elif gpu_metrics['temperature_edge'] != "N/A":
+                    temperature = gpu_metrics['temperature_edge']
+                else:
+                    temperature = "N/A"
             else:
                 mem_util = "N/A"
                 gfx_util = "N/A"
@@ -7541,11 +7567,20 @@ class AMDSMICommands():
                 power_usage = "N/A"
             gpu_info_dict.update({"power_usage": power_usage})
 
-            # memory usage
+            # memory usage - Use APU-aware memory selection
             try:
-                total_vram = amdsmi_interface.amdsmi_get_gpu_memory_total(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                used_vram = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                mem_usage = {"used_vram": used_vram, "total_vram": total_vram}
+                # Use helper method to determine appropriate memory type
+                mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(processor, gpu_id)
+
+                # Get memory usage and total using the determined memory type
+                used_mem = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, mem_type) // (1024*1024)
+                total_mem = amdsmi_interface.amdsmi_get_gpu_memory_total(processor, mem_type) // (1024*1024)
+
+                # Create appropriate dictionary keys based on memory type
+                if mem_type_name == "GTT":
+                    mem_usage = {"used_gtt": used_mem, "total_gtt": total_mem}
+                else:
+                    mem_usage = {"used_vram": used_mem, "total_vram": total_mem}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 mem_usage = "N/A"
             gpu_info_dict.update({"mem_usage": mem_usage})

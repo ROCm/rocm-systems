@@ -136,48 +136,133 @@ find_package(amd_smi REQUIRED)
 
 set (ONLY64STR "64")
 
-if (DEFINED LLVM_DIR)
-  set(CLANG ${LLVM_DIR}/clang)
-  if (NOT EXISTS ${CLANG})
-    message("ERROR: path to clang (${CLANG}) is not valid. Is define LLVM_DIR correct?")
-    return()
-  endif()
-else()
-    message("WARNING: LLVM_DIR define is not set. Kernels will not be built.")
+# Find LLVM/Clang using find_package instead of hardcoded LLVM_DIR
+find_package(LLVM REQUIRED CONFIG)
+if(NOT LLVM_FOUND)
+  message(FATAL_ERROR "LLVM not found. Cannot build kernels.")
 endif()
 
-if (DEFINED OPENCL_DIR)
-  set(OPENCL_INC_DIR ${OPENCL_DIR}/include)
-  set(OPENCL_LIB_DIR ${OPENCL_DIR}/lib)
-else()
-    message("WARNING: OPENCL_DIR define is not set. Kernels will not be built.")
-endif()
+# Add LLVM CMake modules to module path
+list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
+include(AddLLVM)
 
+# Find clang executable from LLVM package
+find_program(CLANG
+  NAMES clang
+  HINTS ${LLVM_TOOLS_BINARY_DIR}
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+
+message(STATUS "Found LLVM: ${LLVM_PACKAGE_VERSION}")
+message(STATUS "LLVM Binary Dir: ${LLVM_TOOLS_BINARY_DIR}")
+message(STATUS "LLVM Library Dir: ${LLVM_LIBRARY_DIR}")
+message(STATUS "Found Clang: ${CLANG}")
+
+# Set OpenCL version
 if (DEFINED OPENCL_VER)
   set(OPENCL_VER ${OPENCL_VER})
 else()
-  message("OPENCL_VER define is not set. Using default")
+  message(STATUS "OPENCL_VER not defined, using default: 2.0")
   set(OPENCL_VER "2.0")
 endif()
 
+# Find OpenCL headers using clang's resource directory
+execute_process(
+  COMMAND ${CLANG} -print-resource-dir
+  OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  RESULT_VARIABLE CLANG_RESULT
+)
+
+if(NOT CLANG_RESULT EQUAL 0)
+  message(FATAL_ERROR "Failed to get clang resource directory")
+endif()
+
+set(OPENCL_INC_DIR "${CLANG_RESOURCE_DIR}/include")
+
 if(NOT EXISTS "${OPENCL_INC_DIR}/opencl-c.h")
-  if(DEFINED ENV{LLVM_PROJECT_ROOT})
-    set(OPENCL_INC_DIR "$ENV{LLVM_PROJECT_ROOT}/clang/lib/Headers/")
+  message(FATAL_ERROR "opencl-c.h not found in ${OPENCL_INC_DIR}")
+endif()
+
+message(STATUS "OpenCL headers: ${OPENCL_INC_DIR}")
+message(STATUS "OpenCL version: ${OPENCL_VER}")
+
+# Find AMD Device Libraries (bitcode files) using find_package or manual search
+find_package(AMDDeviceLibs QUIET CONFIG)
+
+if(AMDDeviceLibs_FOUND)
+  # Use the package-provided location
+  message(STATUS "Found AMDDeviceLibs via CONFIG")
+  # Try to get the bitcode directory from any target
+  if(TARGET AMDDeviceLibs::oclc_isa_version_803)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+  elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
   else()
-    set(OPENCL_INC_DIR "${OPENCL_DIR}/../../../external/llvm-project/clang/lib/Headers/")
-  endif()
-  if(NOT EXISTS "${OPENCL_INC_DIR}/opencl-c.h")
-    message(WARNING "opencl-c.h not found.")
+    # Fallback to manual search even if package was found
+    set(AMDDeviceLibs_FOUND FALSE)
   endif()
 endif()
 
+if(NOT AMDDeviceLibs_FOUND)
+  # Fallback: search relative to LLVM installation
+  message(STATUS "Searching for AMD Device Libraries manually...")
+
+  find_path(BITCODE_DIR 
+    NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
+    HINTS
+      "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
+      "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/lib/amdgcn/bitcode"
+    NO_DEFAULT_PATH
+  )
+  
+  if(NOT BITCODE_DIR)
+    message(FATAL_ERROR 
+      "AMD Device Libraries (bitcode) not found!\n"
+      "Searched locations:\n"
+      "  ${LLVM_LIBRARY_DIR}/amdgcn/bitcode\n"
+      "  ${LLVM_LIBRARY_DIR}/../amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode\n"
+      "Please ensure device-libs are built and installed.")
+  endif()
+endif()
+
+message(STATUS "Found Device Libraries: ${BITCODE_DIR}")
+
+# Validate bitcode files exist
+if(NOT EXISTS "${BITCODE_DIR}")
+  message(FATAL_ERROR "BITCODE_DIR does not exist: ${BITCODE_DIR}")
+endif()
+
+# Check for either old or new device-libs layout
+if(EXISTS "${BITCODE_DIR}/opencl.amdgcn.bc")
+  message(STATUS "Using new device-libs layout (opencl.amdgcn.bc)")
+elseif(EXISTS "${BITCODE_DIR}/opencl.bc")
+  message(STATUS "Using old device-libs layout (opencl.bc)")
+else()
+  message(WARNING 
+    "No standard device library files found in ${BITCODE_DIR}\n"
+    "Expected either 'opencl.amdgcn.bc' or 'opencl.bc'\n"
+    "Will attempt to continue, but kernel builds may fail.")
+endif()
+
+# Target devices configuration
 if (NOT DEFINED TARGET_DEVICES)
-  message("No targets devices provided on command line")
+  message("No target devices provided on command line")
   message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
   message("  Using default target of ${DEFAULT_TARGETS}")
   list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
 endif()
 
+# Build type configuration
 string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
 if("${tmp}" STREQUAL release)
   set(BUILD_TYPE "Release")
@@ -186,19 +271,6 @@ else()
   set(BUILD_TYPE "Debug")
   set(ISDEBUG 1)
 endif()
-
-find_path(BITCODE_DIR NAMES "opencl.bc" "opencl.amdgcn.bc"
-  PATHS
-    "${ROCM_DIR}/amdgcn/bitcode"
-    "${ROCM_DIR}/lib/bitcode"
-    "${ROCM_DIR}/lib"
-    "${ROCM_DIR}/lib/x86_64/bitcode"
-    "${OPENCL_DIR}/amdgcn/bitcode"
-    "${OPENCL_DIR}/lib/x86_64/bitcode"
-    "${LLVM_DIR}/../lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/x86_64/bitcode")
 
 #
 # Print out the build configuration being used:
@@ -220,8 +292,10 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("------Target Devices: ${TARGET_DEVICES}")
 message("----------Clang path: " ${CLANG})
-message("----------OpenCL Dir: " ${OPENCL_DIR})
+message("------OpenCL Inc Dir: " ${OPENCL_INC_DIR})
 message("-------OpenCL version " ${OPENCL_VER})
+message("-------BITCODE_DIR: " ${BITCODE_DIR})
+message("------------LLVM Dir: " ${LLVM_DIR})
 message("")
 
 set(KERNELS_DIR ${PROJECT_SOURCE_DIR}/kernels)
@@ -408,11 +482,83 @@ build_sample_for_devices("cu_mask")
 
 set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
+# Check for numa library and headers (same approach as libhsakmt)
+find_package(PkgConfig)
+find_package(NUMA)
+if(NUMA_FOUND)
+  set(NUMA_LIBS ${NUMA_LIBRARIES})
+  message(STATUS "Found NUMA package: ${NUMA_LIBRARIES}")
+  if(NUMA_INCLUDE_DIRS)
+    include_directories(${NUMA_INCLUDE_DIRS})
+    message(STATUS "NUMA include dirs: ${NUMA_INCLUDE_DIRS}")
+  endif()
+  set(HAVE_NUMA TRUE)
+else()
+  # Fallback to manual detection
+  find_library(NUMA_LIBRARY NAMES numa)
+  if(NUMA_LIBRARY)
+    set(NUMA_LIBS ${NUMA_LIBRARY})
+    message(STATUS "Found numa library (fallback): ${NUMA_LIBRARY}")
+    set(HAVE_NUMA TRUE)
+  else()
+    message(WARNING "NUMA library not found. Building without numa support.")
+    message(WARNING "  Install libnuma-dev (Debian/Ubuntu) or numactl-devel (RHEL/CentOS)")
+    set(NUMA_LIBS "")
+    set(HAVE_NUMA FALSE)
+    # Exclude numa-dependent files from build
+    list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy.*\\.cc$")
+  endif()
+endif()
+
 # Build rules
 add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeSources} ${stressSources}
                                            ${common_srcs} ${testCommonSources})
 
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so.5)
+# Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
+
+# Find hwloc library (optional - only needed for certain performance tests)
+# Try pkg-config first (for super-project builds)
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(HWLOC QUIET hwloc)
+  if(HWLOC_FOUND)
+    set(HWLOC_LIBRARY ${HWLOC_LINK_LIBRARIES})
+    message(STATUS "Found hwloc via pkg-config: ${HWLOC_LIBRARY}")
+  endif()
+endif()
+
+# If not found via pkg-config, check for bundled version (any version)
+if(NOT HWLOC_FOUND)
+  # Use file(GLOB) to find any libhwloc.so* file regardless of version
+  file(GLOB HWLOC_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so*")
+  if(HWLOC_LIBRARY)
+    list(GET HWLOC_LIBRARY 0 HWLOC_LIBRARY)  # Take first match if multiple versions exist
+    set(HWLOC_FOUND TRUE)
+    message(STATUS "Found bundled hwloc library: ${HWLOC_LIBRARY}")
+  else()
+    # Fall back to system hwloc
+    find_library(HWLOC_LIBRARY NAMES hwloc)
+    if(HWLOC_LIBRARY)
+      set(HWLOC_FOUND TRUE)
+      message(WARNING "Using system hwloc library: ${HWLOC_LIBRARY}")
+      message(WARNING "  Consider using bundled version to avoid compatibility issues")
+    endif()
+  endif()
+endif()
+
+# Handle hwloc availability
+if(HWLOC_FOUND)
+  set(HWLOC_LIBS ${HWLOC_LIBRARY})
+  set(HAVE_HWLOC TRUE)
+  message(STATUS "hwloc support enabled")
+else()
+  message(FATAL_ERROR "hwloc library not found. Required for rocrtst build. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS)")
+endif()
+
+# Add HAVE_HWLOC compile definition
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
+
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt ${NUMA_LIBS} ${HWLOC_LIBS})
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})

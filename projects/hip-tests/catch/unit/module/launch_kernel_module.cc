@@ -38,6 +38,8 @@ __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
 
 __global__ void CoopKernel() {
   cooperative_groups::grid_group grid = cooperative_groups::this_grid();
-  grid.sync();
+  // TODO: remove syncthreads with grid sync when compiler issue is fixed
+  // grid.sync();
+  __syncthreads();
 }
 }
