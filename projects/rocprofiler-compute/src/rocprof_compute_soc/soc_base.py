@@ -36,7 +36,6 @@ import yaml
 
 import config
 from roofline import Roofline
-from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -650,6 +649,9 @@ class OmniSoC_Base:
     @abstractmethod
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
+        # Dynamic import to isolate hip dependency during profile time only
+        from utils import benchmark
+
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
 
         # Roofline can be skipped via --no-roof
