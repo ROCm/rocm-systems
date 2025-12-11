@@ -65,6 +65,7 @@ struct demangler
             return result._cache_it->second;
         }
 
+        // Possible improvement: Limit the cache size to avoid memory bloat
         return demangle_and_cache(_mangled_name);
     }
 
