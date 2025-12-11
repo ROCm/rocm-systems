@@ -527,8 +527,16 @@ finalize()
     ROCP_TRACE << "Finalize called";
     for(auto& ctx : context::get_registered_contexts())
     {
-        if(ctx->device_thread_trace) ctx->device_thread_trace->resource_deinit();
-        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
+        if(ctx->device_thread_trace)
+        {
+            ctx->device_thread_trace->stop_context();
+            ctx->device_thread_trace->resource_deinit();
+        }
+        if(ctx->dispatch_thread_trace)
+        {
+            ctx->dispatch_thread_trace->stop_context();
+            ctx->dispatch_thread_trace->resource_deinit();
+        }
     }
 
     code_object::finalize();

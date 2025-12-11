@@ -107,8 +107,8 @@ if(ROCPROFILER_BUILD_FMT)
     add_subdirectory(fmt EXCLUDE_FROM_ALL)
 
     target_link_libraries(rocprofiler-sdk-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)
-    # Note: Do NOT use SYSTEM here - it would give these headers lower priority
-    # than /opt/rocm/include, causing ABI mismatch with ROCm's fmt version
+    # Note: Do NOT use SYSTEM here - it would give these headers lower priority than
+    # /opt/rocm/include, causing ABI mismatch with ROCm's fmt version
     target_include_directories(
         rocprofiler-sdk-fmt
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/fmt/include>)
