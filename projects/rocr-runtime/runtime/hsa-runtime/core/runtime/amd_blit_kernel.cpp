@@ -43,6 +43,7 @@
 #include "core/inc/amd_blit_kernel.h"
 
 #include <algorithm>
+#include <mutex>
 #include <sstream>
 #include <string>
 
@@ -53,8 +54,22 @@
 namespace rocr {
 namespace AMD {
 
-static std::string& kBlitKernelSource() {
-  static std::string kBlitKernelSource_(R"(
+// Structure to hold blit kernel source and cached parameters.
+// Allocated on first use, destroyed explicitly during Runtime::Unload().
+struct BlitKernelParamsData {
+  std::string source;
+  int copy_aligned_vec_width;
+  int copy_aligned_unroll;
+  int copy_misaligned_unroll;
+  int fill_vec_width;
+  int fill_unroll;
+  bool initialized;
+};
+
+static BlitKernelParamsData* g_blit_params = nullptr;
+static std::once_flag g_blit_params_init_flag;
+
+static const char* kBlitKernelSourceText = R"(
   // Compatibility function for GFXIP 7.
 
   function s_load_dword_offset(byte_offset)
@@ -491,45 +506,68 @@ static std::string& kBlitKernelSource() {
   L_FILL_PHASE_2_DONE:
     s_endpgm
   end
-)");
-  return kBlitKernelSource_;
-}
+)";
 
 // Search kernel source for variable definition and return value.
-int GetKernelSourceParam(const char* paramName) {
+static int GetKernelSourceParam(const std::string& source, const char* paramName) {
   std::stringstream paramDef;
   paramDef << "var " << paramName << " = ";
 
-  std::string::size_type paramDefLoc =
-                              kBlitKernelSource().find(paramDef.str());
+  std::string::size_type paramDefLoc = source.find(paramDef.str());
   assert(paramDefLoc != std::string::npos);
   std::string::size_type paramValLoc = paramDefLoc + paramDef.str().size();
-  std::string::size_type paramEndLoc =
-      kBlitKernelSource().find('\n', paramDefLoc);
+  std::string::size_type paramEndLoc = source.find('\n', paramDefLoc);
   assert(paramEndLoc != std::string::npos);
 
-  std::string paramVal(&kBlitKernelSource()[paramValLoc],
-                       &kBlitKernelSource()[paramEndLoc]);
+  std::string paramVal(&source[paramValLoc], &source[paramEndLoc]);
   return std::stoi(paramVal);
 }
 
-
-#define DEFINE_KERNEL_PARAM_FUNC(name) \
-static int& name() { \
-    static std::once_flag initFlag; \
-    static int val; \
-    std::call_once(initFlag, [&]() { \
-        val = GetKernelSourceParam(#name); \
-    }); \
-    return val; \
+// Initialize the blit kernel params on first access.
+static void InitBlitKernelParams() {
+  std::call_once(g_blit_params_init_flag, []() {
+    g_blit_params = new BlitKernelParamsData();
+    g_blit_params->source = kBlitKernelSourceText;
+    g_blit_params->copy_aligned_vec_width = GetKernelSourceParam(g_blit_params->source, "kCopyAlignedVecWidth");
+    g_blit_params->copy_aligned_unroll = GetKernelSourceParam(g_blit_params->source, "kCopyAlignedUnroll");
+    g_blit_params->copy_misaligned_unroll = GetKernelSourceParam(g_blit_params->source, "kCopyMisalignedUnroll");
+    g_blit_params->fill_vec_width = GetKernelSourceParam(g_blit_params->source, "kFillVecWidth");
+    g_blit_params->fill_unroll = GetKernelSourceParam(g_blit_params->source, "kFillUnroll");
+    g_blit_params->initialized = true;
+  });
 }
 
-// Use the macro to define the functions
-DEFINE_KERNEL_PARAM_FUNC(kCopyAlignedVecWidth)
-DEFINE_KERNEL_PARAM_FUNC(kCopyAlignedUnroll)
-DEFINE_KERNEL_PARAM_FUNC(kCopyMisalignedUnroll)
-DEFINE_KERNEL_PARAM_FUNC(kFillVecWidth)
-DEFINE_KERNEL_PARAM_FUNC(kFillUnroll)
+// Destroy blit kernel params during Runtime::Unload().
+void DestroyBlitKernelParams() {
+  delete g_blit_params;
+  g_blit_params = nullptr;
+}
+
+// Accessor functions for cached kernel parameters.
+static int kCopyAlignedVecWidth() {
+  InitBlitKernelParams();
+  return g_blit_params->copy_aligned_vec_width;
+}
+
+static int kCopyAlignedUnroll() {
+  InitBlitKernelParams();
+  return g_blit_params->copy_aligned_unroll;
+}
+
+static int kCopyMisalignedUnroll() {
+  InitBlitKernelParams();
+  return g_blit_params->copy_misaligned_unroll;
+}
+
+static int kFillVecWidth() {
+  InitBlitKernelParams();
+  return g_blit_params->fill_vec_width;
+}
+
+static int kFillUnroll() {
+  InitBlitKernelParams();
+  return g_blit_params->fill_unroll;
+}
 
 static unsigned extractAqlBits(unsigned v, unsigned pos, unsigned width) {
   return (v >> pos) & ((1 << width) - 1);

@@ -70,6 +70,7 @@
 #endif
 
 #include "core/common/shared.h"
+#include "core/inc/amd_blit_kernel.h"
 #include "core/inc/amd_core_dump.hpp"
 #include "core/inc/amd_cpu_agent.h"
 #include "core/inc/amd_gpu_agent.h"
@@ -2457,6 +2458,11 @@ void Runtime::Unload() {
 
   asyncSignals_.reset();
   asyncExceptions_.reset();
+
+  // Destroy blit kernel parameters after async handlers are destroyed.
+  // This ensures deterministic cleanup ordering instead of relying on
+  // static destruction order.
+  AMD::DestroyBlitKernelParams();
 
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_->DestroySignal();

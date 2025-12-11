@@ -53,6 +53,11 @@
 
 namespace rocr {
 namespace AMD {
+
+/// @brief Destroys blit kernel parameters allocated during runtime.
+/// Called during Runtime::Unload() to ensure deterministic cleanup ordering.
+void DestroyBlitKernelParams();
+
 class BlitKernel : public core::Blit {
  public:
   explicit BlitKernel(core::Queue* queue);

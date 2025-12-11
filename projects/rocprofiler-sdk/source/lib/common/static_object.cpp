@@ -77,3 +77,5 @@ register_static_dtor(static_dtor_func_t&& _func)
 }
 }  // namespace common
 }  // namespace rocprofiler
+
+// Trigger CI
