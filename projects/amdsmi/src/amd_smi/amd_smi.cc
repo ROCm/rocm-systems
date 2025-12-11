@@ -1716,6 +1716,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
     info->target_graphics_version = std::numeric_limits<uint64_t>::max();
     info->subsystem_id = std::numeric_limits<uint32_t>::max();
+    info->flags = 0;
 
     std::ostringstream ss;
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -1921,6 +1922,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
     // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
     info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
+    info->flags = static_cast<uint64_t>(dev_info.ids_flags);
     libdrm.unload();
 
     ss << __PRETTY_FUNCTION__
@@ -3766,8 +3768,36 @@ amdsmi_status_t amdsmi_get_soc_pstate(amdsmi_processor_handle processor_handle,
                          amdsmi_dpm_policy_t* policy) {
     AMDSMI_CHECK_INIT();
 
-    return rsmi_wrapper(rsmi_dev_soc_pstate_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+    if (policy == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Initialize output structure to zero
+    memset(policy, 0, sizeof(*policy));
+
+    // Use rsmi structure with correct size (32-byte description fields)
+    rsmi_dpm_policy_t rsmi_policy = {};
+    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_soc_pstate_get, processor_handle, 0,
+                    &rsmi_policy);
+    
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    // Copy data from rsmi structure to amdsmi structure field-by-field
+    // to handle the different structure sizes properly
+    policy->num_supported = rsmi_policy.num_supported;
+    policy->current = rsmi_policy.current;
+    
+    for (uint32_t i = 0; i < rsmi_policy.num_supported && i < AMDSMI_MAX_NUM_PM_POLICIES; i++) {
+        policy->policies[i].policy_id = rsmi_policy.policies[i].policy_id;
+        strncpy(policy->policies[i].policy_description, 
+                rsmi_policy.policies[i].policy_description,
+                AMDSMI_MAX_STRING_LENGTH - 1);
+        policy->policies[i].policy_description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
@@ -3782,8 +3812,36 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
                          amdsmi_dpm_policy_t* policy) {
     AMDSMI_CHECK_INIT();
 
-    return rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+    if (policy == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Initialize output structure to zero
+    memset(policy, 0, sizeof(*policy));
+
+    // Use rsmi structure with correct size (32-byte description fields)
+    rsmi_dpm_policy_t rsmi_policy = {};
+    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle, 0,
+                    &rsmi_policy);
+    
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    // Copy data from rsmi structure to amdsmi structure field-by-field
+    // to handle the different structure sizes properly
+    policy->num_supported = rsmi_policy.num_supported;
+    policy->current = rsmi_policy.current;
+    
+    for (uint32_t i = 0; i < rsmi_policy.num_supported && i < AMDSMI_MAX_NUM_PM_POLICIES; i++) {
+        policy->policies[i].policy_id = rsmi_policy.policies[i].policy_id;
+        strncpy(policy->policies[i].policy_description, 
+                rsmi_policy.policies[i].policy_description,
+                AMDSMI_MAX_STRING_LENGTH - 1);
+        policy->policies[i].policy_description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle processor_handle,
@@ -4556,28 +4614,33 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
 
-    info->socket_power = 0xFFFF;
-    info->current_socket_power = 0xFFFF;
-    info->average_socket_power = 0xFFFF;
-    info->gfx_voltage = 0xFFFF;
-    info->soc_voltage = 0xFFFF;
-    info->mem_voltage = 0xFFFF;
-    info->power_limit = 0xFFFF;
+    info->socket_power = get_std_num_limit<decltype(info->socket_power)>();
+    info->current_socket_power = get_std_num_limit<decltype(info->current_socket_power)>();
+    info->average_socket_power = get_std_num_limit<decltype(info->average_socket_power)>();
+    info->gfx_voltage = get_std_num_limit<decltype(info->gfx_voltage)>();
+    info->soc_voltage = get_std_num_limit<decltype(info->soc_voltage)>();
+    info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
+    info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
 
     amdsmi_gpu_metrics_t metrics = {};
     status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        info->current_socket_power = metrics.current_socket_power;
-        info->average_socket_power = metrics.average_socket_power;
-        info->gfx_voltage = metrics.voltage_gfx;
-        info->soc_voltage = metrics.voltage_soc;
-        info->mem_voltage = metrics.voltage_mem;
-    }
+        if (metrics.current_socket_power != get_std_num_limit<decltype(metrics.current_socket_power)>())
+            info->current_socket_power = metrics.current_socket_power;
+        if (metrics.average_socket_power != get_std_num_limit<decltype(metrics.average_socket_power)>())
+            info->average_socket_power = metrics.average_socket_power;
+        if (metrics.voltage_gfx != get_std_num_limit<decltype(metrics.voltage_gfx)>())
+            info->gfx_voltage = metrics.voltage_gfx;
+        if (metrics.voltage_soc != get_std_num_limit<decltype(metrics.voltage_soc)>())
+            info->soc_voltage = metrics.voltage_soc;
+        if (metrics.voltage_mem != get_std_num_limit<decltype(metrics.voltage_mem)>())
+            info->mem_voltage = metrics.voltage_mem;
 
-    if (metrics.current_socket_power != 0xFFFF) {
-        info->socket_power = metrics.current_socket_power;
-    } else if (metrics.average_socket_power != 0xFFFF) {
-        info->socket_power = metrics.average_socket_power;
+        /* store something in socket power */
+        if (info->current_socket_power != get_std_num_limit<decltype(info->current_socket_power)>())
+            info->socket_power = info->current_socket_power;
+        else if (info->average_socket_power != get_std_num_limit<decltype(info->average_socket_power)>())
+            info->socket_power = info->average_socket_power;
     }
 
     int power_limit = 0;
@@ -4585,6 +4648,8 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
     if (status2 == AMDSMI_STATUS_SUCCESS) {
         info->power_limit = power_limit;
+    } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
+        status = AMDSMI_STATUS_SUCCESS;
     }
 
     // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
@@ -4612,6 +4677,9 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     // Get the driver version
     status = smi_amdgpu_get_driver_version(gpu_device,
                 &length, info->driver_version);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
     std::string render_name = gpu_device->get_gpu_path();
