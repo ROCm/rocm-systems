@@ -123,6 +123,8 @@ int vamdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type ty
                      uint32_t* shared_handle);
 int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
                      uint32_t shared_handle, struct amdgpu_bo_import_result* output);
+int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64_t addr,
+                    uint64_t flags, uint32_t ops);
 
 #ifdef __cplusplus
 }
