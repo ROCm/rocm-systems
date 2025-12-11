@@ -6159,69 +6159,76 @@ class AMDSMICommands():
             self.logger.table_header += 'PCIE_REPLAY'.rjust(13)
 
         if args.vram_usage and not args.default_output:
+            mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(args.gpu, gpu_id)
+
             try:
-                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                monitor_values['vram_used'] = vram_used
-                monitor_values['vram_free'] = vram_total - vram_used
-                monitor_values['vram_total'] = vram_total
-                if vram_total != 0:
-                    monitor_values['vram_percent'] = round ((vram_used / vram_total) * 100, 2)
+                mem_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, mem_type) // (1024*1024)
+                mem_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, mem_type) // (1024*1024)
+                monitor_values['vram_used'] = mem_used
+                monitor_values['vram_free'] = mem_total - mem_used
+                monitor_values['vram_total'] = mem_total
+                if mem_total != 0:
+                    monitor_values['vram_percent'] = round ((mem_used / mem_total) * 100, 2)
                 else:
                     monitor_values['vram_percent'] = "N/A"
 
-                vram_usage_unit = "MB"
-                vram_percent_unit = "%"
+                mem_usage_unit = "MB"
+                mem_percent_unit = "%"
                 if self.logger.is_human_readable_format():
-                    monitor_values['vram_used'] = f"{monitor_values['vram_used']} {vram_usage_unit}"
-                    monitor_values['vram_free'] = f"{monitor_values['vram_free']} {vram_usage_unit}"
-                    monitor_values['vram_total'] = f"{monitor_values['vram_total']} {vram_usage_unit}"
-                    monitor_values['vram_percent'] = f"{monitor_values['vram_percent']} {vram_percent_unit}"
+                    monitor_values['vram_used'] = f"{monitor_values['vram_used']} {mem_usage_unit}"
+                    monitor_values['vram_free'] = f"{monitor_values['vram_free']} {mem_usage_unit}"
+                    monitor_values['vram_total'] = f"{monitor_values['vram_total']} {mem_usage_unit}"
+                    monitor_values['vram_percent'] = f"{monitor_values['vram_percent']} {mem_percent_unit}"
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = {"value" : monitor_values['vram_used'],
-                                                   "unit" : vram_usage_unit}
+                                                   "unit" : mem_usage_unit}
                     monitor_values['vram_free'] = {"value" : monitor_values['vram_free'],
-                                                   "unit" : vram_usage_unit}
+                                                   "unit" : mem_usage_unit}
                     monitor_values['vram_total'] = {"value" : monitor_values['vram_total'],
-                                                    "unit" : vram_usage_unit}
+                                                    "unit" : mem_usage_unit}
                     monitor_values['vram_percent'] = {"value" : monitor_values['vram_percent'],
-                                                      "unit" : vram_percent_unit}
+                                                      "unit" : mem_percent_unit}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['vram_used'] = "N/A"
                 monitor_values['vram_free'] = "N/A"
                 monitor_values['vram_total'] = "N/A"
                 monitor_values['vram_percent'] = "N/A"
-                logging.debug("Failed to get vram memory usage on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get %s memory usage on gpu %s | %s", mem_type_name.lower(), gpu_id, e.get_error_info())
 
-            self.logger.table_header += 'VRAM_USED'.rjust(11)
-            self.logger.table_header += 'VRAM_FREE'.rjust(12)
-            self.logger.table_header += 'VRAM_TOTAL'.rjust(12)
-            self.logger.table_header += 'VRAM%'.rjust(9)
+            # Use appropriate headers based on memory type
+            self.logger.table_header += f'{mem_type_name}_USED'.rjust(11)
+            self.logger.table_header += f'{mem_type_name}_FREE'.rjust(12)
+            self.logger.table_header += f'{mem_type_name}_TOTAL'.rjust(12)
+            self.logger.table_header += f'{mem_type_name}%'.rjust(9)
 
         if args.vram_usage and args.default_output:
+            mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(args.gpu, gpu_id)
+
             try:
-                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                vram_usage_unit = "GB"
+                mem_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, mem_type) // (1024*1024)
+                mem_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, mem_type) // (1024*1024)
+                mem_usage_unit = "GB"
                 if self.logger.is_json_format():
-                    monitor_values['vram_used'] = {"value" : round(vram_used/1024,1),
-                                                   "unit" : vram_usage_unit}
-                    monitor_values['vram_total'] = {"value" : round(vram_total/1024,1),
-                                                    "unit" : vram_usage_unit}
+                    monitor_values['vram_used'] = {"value" : round(mem_used/1024,1),
+                                                   "unit" : mem_usage_unit}
+                    monitor_values['vram_total'] = {"value" : round(mem_total/1024,1),
+                                                    "unit" : mem_usage_unit}
                 elif self.logger.is_csv_format():
-                    monitor_values['vram_used'] = round(vram_used/1024,1)
-                    monitor_values['vram_total'] = round(vram_total/1024,1)
+                    monitor_values['vram_used'] = round(mem_used/1024,1)
+                    monitor_values['vram_total'] = round(mem_total/1024,1)
                 else:
-                    monitor_values['vram_usage'] = f"{vram_used/1024:5.1f}/{vram_total/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
+                    monitor_values['vram_usage'] = f"{mem_used/1024:5.1f}/{mem_total/1024:5.1f} {mem_usage_unit}".rjust(16,' ')
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = "N/A"
                     monitor_values['vram_total'] = "N/A"
                 else:
                     monitor_values['vram_usage'] = "N/A"
-                logging.debug("Failed to get vram memory usage on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get %s memory usage on gpu %s | %s", mem_type_name.lower(), gpu_id, e.get_error_info())
 
-            self.logger.table_header += 'VRAM_USAGE'.rjust(16)
+            # Use appropriate header based on memory type
+            header_name = f'{mem_type_name}_USAGE'
+            self.logger.table_header += header_name.rjust(16)
 
         if args.pcie:
             if pcie_info != "N/A":
@@ -7518,11 +7525,20 @@ class AMDSMICommands():
                 power_usage = "N/A"
             gpu_info_dict.update({"power_usage": power_usage})
 
-            # memory usage
+            # memory usage - Use APU-aware memory selection
             try:
-                total_vram = amdsmi_interface.amdsmi_get_gpu_memory_total(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                used_vram = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
-                mem_usage = {"used_vram": used_vram, "total_vram": total_vram}
+                # Use helper method to determine appropriate memory type
+                mem_type, mem_type_name = self.helpers.get_apu_memory_type_and_name(processor, gpu_id)
+
+                # Get memory usage and total using the determined memory type
+                used_mem = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, mem_type) // (1024*1024)
+                total_mem = amdsmi_interface.amdsmi_get_gpu_memory_total(processor, mem_type) // (1024*1024)
+
+                # Create appropriate dictionary keys based on memory type
+                if mem_type_name == "GTT":
+                    mem_usage = {"used_gtt": used_mem, "total_gtt": total_mem}
+                else:
+                    mem_usage = {"used_vram": used_mem, "total_vram": total_mem}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 mem_usage = "N/A"
             gpu_info_dict.update({"mem_usage": mem_usage})
