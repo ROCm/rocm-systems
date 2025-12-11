@@ -255,8 +255,6 @@ using client_library_vec_t = std::vector<std::optional<client_library>>;
 client_library_vec_t
 find_clients()
 {
-    ROCP_INFO << "Discovering rocprofiler-sdk tool libraries can take several seconds...";
-    auto _timer          = common::simple_timer{"Client library discovery"};
     auto data            = client_library_vec_t{};
     auto priority_offset = get_client_offset();
 
@@ -334,6 +332,9 @@ find_clients()
 
     auto env = get_env_libs();
 
+    // set to true to disable elf utils optimizations
+    auto optimize_elf_parsing = common::get_env("ROCPROFILER_OPTIMIZE_FIND_CLIENTS", true);
+
     if(!env.empty())
     {
         for(const auto& itr : env)
@@ -342,8 +343,7 @@ find_clients()
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto _elf_timer = common::simple_timer{fmt::format("ELF parsing for {}", itr)};
-                auto elfinfo    = common::elf_utils::read(itr);
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
@@ -419,8 +419,7 @@ find_clients()
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto _elf_timer = common::simple_timer{fmt::format("ELF parsing for {}", itr)};
-                auto elfinfo    = common::elf_utils::read(itr);
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
