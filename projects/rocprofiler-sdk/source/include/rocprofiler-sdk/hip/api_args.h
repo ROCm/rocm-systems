@@ -34,6 +34,12 @@
 #include <hip/amd_detail/amd_hip_gl_interop.h>
 #include <hip/amd_detail/hip_api_trace.hpp>
 
+#if defined(__has_include)
+#    if __has_include(<rocm-core/rocm_version.h>)
+#        include <rocm-core/rocm_version.h>
+#    endif
+#endif
+
 #include <stdint.h>
 
 ROCPROFILER_EXTERN_C_INIT
@@ -3288,25 +3294,41 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 15
     struct
     {
-        hipLibrary_t*     library;
-        const void*       code;
+        hipLibrary_t* library;
+        const void*   code;
+#    if(ROCM_VERSION_MAJOR == 7) && (ROCM_VERSION_MINOR == 1) && (ROCM_VERSION_PATCH == 0) &&      \
+        HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+        hipJitOption**     jitOptions;
+        void**             jitOptionsValues;
+        unsigned int       numJitOptions;
+        hipLibraryOption** libraryOptions;
+#    else
         hipJitOption*     jitOptions;
         void**            jitOptionsValues;
         unsigned int      numJitOptions;
         hipLibraryOption* libraryOptions;
-        void**            libraryOptionValues;
-        unsigned int      numLibraryOptions;
+#    endif
+        void**       libraryOptionValues;
+        unsigned int numLibraryOptions;
     } hipLibraryLoadData;
     struct
     {
-        hipLibrary_t*     library;
-        const char*       fileName;
+        hipLibrary_t* library;
+        const char*   fileName;
+#    if(ROCM_VERSION_MAJOR == 7) && (ROCM_VERSION_MINOR == 1) && (ROCM_VERSION_PATCH == 0) &&      \
+        HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+        hipJitOption**     jitOptions;
+        void**             jitOptionsValues;
+        unsigned int       numJitOptions;
+        hipLibraryOption** libraryOptions;
+#    else
         hipJitOption*     jitOptions;
         void**            jitOptionsValues;
         unsigned int      numJitOptions;
         hipLibraryOption* libraryOptions;
-        void**            libraryOptionValues;
-        unsigned int      numLibraryOptions;
+#    endif
+        void**       libraryOptionValues;
+        unsigned int numLibraryOptions;
     } hipLibraryLoadFromFile;
     struct
     {
