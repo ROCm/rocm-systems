@@ -2411,7 +2411,11 @@ int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
 
 int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
                                  int *drm_fd, uint64_t *cpu_addr) {
+#ifdef HSAKMT_VIRTIO_ENABLED
+  int renderFd = vamdgpu_device_get_fd(static_cast<AMD::GpuAgent*>(agent)->libDrmDev());
+#else
   int renderFd = fn_amdgpu_device_get_fd(static_cast<AMD::GpuAgent*>(agent)->libDrmDev());
+#endif
   if (renderFd < 0) return HSA_STATUS_ERROR;
 
   uint32_t gem_handle = 0;
@@ -3622,11 +3626,13 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    void* mapped_ptr =
-        mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
-             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-    if (mapped_ptr != va)
-      return HSA_STATUS_ERROR;
+    if (targetAgent->driver().kernel_driver_type_ != core::DriverType::KFD_VIRTIO) {
+      void* mapped_ptr =
+          mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
+              reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
+      if (mapped_ptr != va)
+        return HSA_STATUS_ERROR;
+    }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
         shareable_handle, va, mappedHandle->offset, size, perms);
