@@ -80,9 +80,9 @@ SUPPORTED_DENOM: dict[str, str] = {
 
 # Build-in defined in mongodb variables:
 BUILD_IN_VARS: dict[str, str] = {
-    "GRBM_GUI_ACTIVE_PER_XCD": "(SUM(GRBM_GUI_ACTIVE) / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(SUM(GRBM_COUNT) / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD": "(SUM(GRBM_SPI_BUSY) / $num_xcd)",
+    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
         $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
         MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
@@ -319,7 +319,8 @@ class MetricEvaluator:
         self.empirical_peaks = empirical_peaks
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
-        """Evaluate a single expression with proper local context."""
+        """Evaluate a single expression with proper local context."""                
+                
         if isinstance(expr, (int, float)):
             if pd.isna(expr):
                 return "N/A"
@@ -347,13 +348,38 @@ class MetricEvaluator:
                 "to_concat": to_concat,
             })
 
+            # # Debug print for GRBM expressions
+            # if isinstance(expr,str) and "grbm" in expr.lower() and "ammolite__num_xcd" in expr:
+            #     console_warning("Local context keys:",local_expr_context)
+            #     console_warning(f"=== EVAL DEBUG for: {expr} ===")
+                
+            #     if 'raw_pmc_df' in local_expr_context:
+            #         pmc_df = local_expr_context['raw_pmc_df']
+            #         console_warning(f"raw_pmc_df type: {type(pmc_df)}")
+                    
+            #         grbm_col = pmc_df['pmc_perf']['GRBM_GUI_ACTIVE']
+            #         console_warning(f"GRBM_GUI_ACTIVE type: {type(grbm_col)}")
+            #         console_warning(f"GRBM_GUI_ACTIVE shape: {getattr(grbm_col, 'shape', 'No shape')}")
+            #         console_warning(f"GRBM_GUI_ACTIVE values: {grbm_col}")
+            #         console_warning("GRBM_GUI_ACTIVE index:",grbm_col.index)
+            #     else:
+            #         console_error("raw_pmc_df not found in local_expr_context.")
+                
+            #     # Print num_xcd
+            #     num_xcd = local_expr_context.get('ammolite__num_xcd')
+            #     console_warning(f"ammolite__num_xcd type: {type(num_xcd)}")
+            #     console_warning(f"ammolite__num_xcd value: {num_xcd}")
+                
             eval_result = eval(
                 compile(expr, "<string>", "eval"),
                 {},
                 local_expr_context,
             )
-
-            if eval_result in {"N/A", None}:
+            console_warning(f"Evaluated expression '{expr}' with result: {eval_result}")
+            
+            if eval_result is None:
+                return "N/A"
+            if isinstance(eval_result, str) and eval_result == "N/A":
                 return "N/A"
             # Only check for NaN if eval_result is numeric (not string)
             if isinstance(eval_result, (int, float, np.number, pd.Series, np.ndarray)):
@@ -366,6 +392,7 @@ class MetricEvaluator:
             return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
+            
             if "empirical_peak" in str(exception):
                 console_warning(f"Missing empirical peak data: {exception}.")
                 return "N/A"
@@ -374,6 +401,7 @@ class MetricEvaluator:
                 return "N/A"
 
         except AttributeError as attribute_error:
+
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
                 console_warning(
                     f"Failed to evaluate expression '{expr}': {attribute_error}."
@@ -386,9 +414,6 @@ class MetricEvaluator:
         except pd.errors.IntCastingNaNError as exception:
             console_warning(f"Missing data: {exception}. Using empty value.")
             return ""
-
-        except ValueError as value_error:
-            raise value_error
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     """
