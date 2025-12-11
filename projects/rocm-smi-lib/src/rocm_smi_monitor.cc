@@ -350,9 +350,15 @@ int32_t Monitor::setTempSensorLabelMap(void) {
     if (ret) {
       index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
     } else {
-      t_type = kTempSensorNameMap.at(type_str);
-      temp_type_index_map_[t_type] = file_index;
-      index_temp_type_map_.insert({file_index, t_type});
+      auto it = kTempSensorNameMap.find(type_str);
+      if (it == kTempSensorNameMap.end()) {
+        // Unknown sensor type label, treat as invalid
+        index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
+      } else {
+        t_type = it->second;
+        temp_type_index_map_[t_type] = file_index;
+        index_temp_type_map_.insert({file_index, t_type});
+      }
     }
     return 0;
   };
@@ -386,9 +392,15 @@ int32_t Monitor::setVoltSensorLabelMap(void) {
     if (ret) {
       index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
     } else {
-      t_type = kVoltSensorNameMap.at(type_str);
-      volt_type_index_map_[t_type] = file_index;
-      index_volt_type_map_.insert({file_index, t_type});
+      auto it = kVoltSensorNameMap.find(type_str);
+      if (it == kVoltSensorNameMap.end()) {
+        // Unknown sensor type label, treat as invalid
+        index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
+      } else {
+        t_type = it->second;
+        volt_type_index_map_[t_type] = file_index;
+        index_volt_type_map_.insert({file_index, t_type});
+      }
     }
     return 0;
   };
