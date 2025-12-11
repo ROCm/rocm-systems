@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,18 +26,19 @@ THE SOFTWARE.
 #include <utils.hh>
 
 TEST_CASE("Unit_hipMemRangeGetAttributes_Positive_Basic") {
+  GENERATE_CAPTURE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
   }
-
   LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
-
   HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetReadMostly, 0));
   HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetPreferredLocation, 0));
   HIP_CHECK(hipMemPrefetchAsync(allocation.ptr(), kPageSize, hipCpuDeviceId));
   HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, 0));
-
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  BEGIN_CAPTURE(stream);
   constexpr size_t num_attributes = 4;
   std::array<hipMemRangeAttribute, num_attributes> attributes = {
       hipMemRangeAttributeReadMostly, hipMemRangeAttributePreferredLocation,
@@ -52,7 +53,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_Positive_Basic") {
   HIP_CHECK(hipMemRangeGetAttributes(reinterpret_cast<void**>(data.data()), data_sizes.data(),
                                      attributes.data(), num_attributes, allocation.ptr(),
                                      kPageSize));
-
+  END_CAPTURE(stream);
   REQUIRE(data[0][0] == 1);
   REQUIRE(data[1][0] == 0);
   REQUIRE(data[2][0] == hipCpuDeviceId);
@@ -61,6 +62,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_Positive_Basic") {
   for (auto ptr : data) {
     delete ptr;
   }
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TEST_CASE("Unit_hipMemRangeGetAttributes_Negative_Parameters") {

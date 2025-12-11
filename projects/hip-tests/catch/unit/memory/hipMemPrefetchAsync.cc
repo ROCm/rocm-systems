@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -48,6 +48,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
 }
 
 TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
+  GENERATE_CAPTURE();
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -62,9 +63,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
     HIP_CHECK(hipSetDevice(device));
     LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize);
     StreamGuard sg(Streams::created);
+    BEGIN_CAPTURE(sg.stream());
     HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()));
     MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(alloc2.ptr(), alloc1.ptr(),
                                                                        count);
+    END_CAPTURE(sg.stream());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamSynchronize(sg.stream()));
     ArrayFindIfNot(alloc1.ptr(), fill_value, count);
@@ -77,6 +80,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
 }
 
 TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
+  GENERATE_CAPTURE();
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -85,9 +89,11 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
 
   StreamGuard sg(stream_type);
+  BEGIN_CAPTURE(sg.stream());
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   LaunchDelayKernel(std::chrono::milliseconds{100}, sg.stream());
   HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, sg.stream()));
+  END_CAPTURE(sg.stream());
   HIP_CHECK_ERROR(hipStreamQuery(sg.stream()), hipErrorNotReady);
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 }

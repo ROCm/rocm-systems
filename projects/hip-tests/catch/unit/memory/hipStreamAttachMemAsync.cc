@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <utils.hh>
 
 TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Basic") {
+  GENERATE_CAPTURE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory is not supported");
     return;
@@ -35,12 +36,14 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Basic") {
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,
                                            hipMemAttachHost);
-
+  BEGIN_CAPTURE(stream.stream());
   HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), managed.ptr(), 0));
+  END_CAPTURE(stream.stream());
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 }
 
 TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Pageable") {
+  GENERATE_CAPTURE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory is not supported");
     return;
@@ -52,9 +55,11 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_Pageable") {
   }
 
   StreamGuard stream(Streams::created);
+  BEGIN_CAPTURE(stream.stream());
   LinearAllocGuard<hipDeviceptr_t> pageable(LinearAllocs::malloc, kPageSize);
 
   HIP_CHECK(hipStreamAttachMemAsync(stream.stream(), pageable.ptr(), kPageSize));
+  END_CAPTURE(stream.stream());
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 }
 
@@ -107,6 +112,7 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachGlobal", "[multigpu]") {
 // the memory on the device from any stream on a device that has a zero value for the device
 // attribute cudaDevAttrConcurrentManagedAccess.
 TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachHost") {
+  GENERATE_CAPTURE();
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory is not supported");
     return;
@@ -118,11 +124,13 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachHost") {
   }
 
   StreamGuard stream(Streams::created);
+  BEGIN_CAPTURE(stream.stream());
   LinearAllocGuard<int> managed_global(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> managed_host(LinearAllocs::hipMallocManaged, sizeof(int));
 
   HIP_CHECK(hipStreamAttachMemAsync(
       stream.stream(), reinterpret_cast<hipDeviceptr_t*>(managed_host.ptr()), 0, hipMemAttachHost));
+  END_CAPTURE(stream.stream());
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   HipTest::launchKernel(Set, 1, 1, 0, stream.stream(), managed_global.ptr(), 32);
@@ -183,7 +191,7 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Negative_Parameters") {
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,
                                            hipMemAttachHost);
-
+  
   SECTION("dev_ptr == nullptr") {
     HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream.stream(), nullptr), hipErrorInvalidValue);
   }
