@@ -411,34 +411,6 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 string(TIMESTAMP CURRENT_YEAR "%Y")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
 
-## Process the Debian install/remove scripts to update the CPACK variables
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
-    DEBIAN/postinst
-    @ONLY
-    FILE_PERMISSIONS
-    OWNER_READ
-    OWNER_WRITE
-    OWNER_EXECUTE
-    GROUP_READ
-    GROUP_EXECUTE
-    WORLD_READ
-    WORLD_EXECUTE)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in
-    DEBIAN/prerm
-    @ONLY
-    FILE_PERMISSIONS
-    OWNER_READ
-    OWNER_WRITE
-    OWNER_EXECUTE
-    GROUP_READ
-    GROUP_EXECUTE
-    WORLD_READ
-    WORLD_EXECUTE)
-list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
-     "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
-
 # Configure pre-rm for tests only
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm.in
@@ -452,10 +424,6 @@ configure_file(
     GROUP_EXECUTE
     WORLD_READ
     WORLD_EXECUTE)
-
-# Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
-set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
 # install copyright file into share/doc/amd-smi-lib/copyright
 # required for debian package compliance
@@ -515,14 +483,6 @@ endif()
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
 # set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev")
-
-## Process the Rpm install/remove scripts to update the CPACK variables
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
-set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
-set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
-set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
 
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
