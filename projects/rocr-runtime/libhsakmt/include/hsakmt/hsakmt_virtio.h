@@ -112,6 +112,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
+int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
+                             amdgpu_device_handle* device_handle);
+int vamdgpu_device_deinitialize(amdgpu_device_handle device_handle);
 
 #ifdef __cplusplus
 }
