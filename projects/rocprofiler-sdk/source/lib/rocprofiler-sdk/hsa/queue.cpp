@@ -166,7 +166,7 @@ AsyncSignalHandler(hsa_signal_value_t, void* data)
             queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
 
-    // we need to decrement this reference count at the end of the functions
+    // Decrement both kern_count and ref_count before async_complete
     auto* _corr_id = queue_info_session.correlation_id;
     if(_corr_id)
     {
@@ -301,11 +301,11 @@ WriteInterceptor(const void* packets,
 
         // if we constructed a correlation id, this decrements the reference count after the
         // underlying function returns
-        auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop]() {
+        auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop, corr_id]() {
             if(_corr_id_pop)
             {
                 context::pop_latest_correlation_id(_corr_id_pop);
-                _corr_id_pop->sub_ref_count();
+                corr_id->sub_ref_count();
             }
         }};
 

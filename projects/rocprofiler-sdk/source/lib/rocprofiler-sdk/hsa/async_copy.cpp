@@ -357,13 +357,14 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
 
-    // we need to decrement this reference count at the end of the functions
-    auto* _corr_id = _data->correlation_id;
-    auto  _dtor    = common::scope_destructor{[&_lk, &_data, &_corr_id]() {
+    // Decrement ref_count before deleting data
+    auto  _dtor    = common::scope_destructor{[&_lk, &_data]() {
+        if(_data->correlation_id)
+        {
+            _data->correlation_id->sub_ref_count();
+        }
         _lk.reset();  // reset the unique_ptr so the lock is released
         delete _data;
-
-        if(_corr_id) _corr_id->sub_ref_count();
     }};
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
@@ -702,7 +703,7 @@ async_copy_impl(Args... args)
         if(_corr_id_pop)
         {
             context::pop_latest_correlation_id(_corr_id_pop);
-            _corr_id_pop->sub_ref_count();
+            _data->correlation_id->sub_ref_count();
         }
         _data->start_ts = common::timestamp_ns();
     }};
