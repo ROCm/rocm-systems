@@ -302,3 +302,33 @@ int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
 
   return rsp->ret;
 }
+
+int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64_t addr,
+                     uint64_t flags, uint32_t ops) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle vbo = (vhsakmt_bo_handle)bo;
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_VA_OP,
+      .res_id = vbo->real.res_id,
+      .amdgpu_va_op_args =
+          {
+              .bo = (uint64_t)bo,
+              .offset = offset,
+              .size = size,
+              .addr = addr,
+              .flags = flags,
+              .ops = ops,
+          },
+  };
+
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+  return rsp->ret;
+}

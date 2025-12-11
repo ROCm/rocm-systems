@@ -49,6 +49,7 @@ vamdgpu_bo_cpu_map;
 vamdgpu_bo_free;
 vamdgpu_bo_export;
 vamdgpu_bo_import;
+vamdgpu_bo_va_op;
 local: *;
 };
 

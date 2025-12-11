@@ -340,6 +340,7 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
   VHSAKMT_CCMD_MEMORY_AMDGPU_IMPORT,
   VHSAKMT_CCMD_MEMORY_AMDGPU_EXPORT,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_VA_OP,
   VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
 };
 
@@ -399,6 +400,17 @@ typedef struct _memory_amdgpu_export_args {
 } memory_amdgpu_export_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_export_args)
 
+typedef struct _memory_amdgpu_va_op_args {
+  uint64_t bo;
+  uint64_t offset;
+  uint64_t size;
+  uint64_t addr;
+  uint64_t flags;
+  uint32_t ops;
+  uint32_t pad;
+} memory_amdgpu_va_op_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_va_op_args)
+
 typedef struct _memory_export_dmabuf_args {
   uint64_t MemoryAddress;
   uint64_t MemorySizeInBytes;
@@ -419,6 +431,7 @@ struct vhsakmt_ccmd_memory_req {
     memory_export_dmabuf_args export_dmabuf_args;
     memory_amdgpu_import_args amdgpu_import_args;
     memory_amdgpu_export_args amdgpu_export_args;
+    memory_amdgpu_va_op_args amdgpu_va_op_args;
   };
   uint64_t blob_id;
   uint32_t type;
