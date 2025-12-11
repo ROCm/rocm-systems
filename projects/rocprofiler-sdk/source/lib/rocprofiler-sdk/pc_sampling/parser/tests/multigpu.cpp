@@ -78,9 +78,10 @@ multithread_queue_hammer(size_t tid, Latch* latch)
     std::array<std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>>, NUM_QUEUES>
         active_dispatches;
 
-    int    num_reset_queues         = 0;
-    int    num_samples_generated    = 0;
-    int    num_dispatches_generated = 0;
+    // TODO: remove unused variable suppression and use these stats or remove them
+    [[maybe_unused]] int    num_reset_queues         = 0;
+    [[maybe_unused]] int    num_samples_generated    = 0;
+    [[maybe_unused]] int    num_dispatches_generated = 0;
     double avg_q_occupancy          = 0;
     size_t max_q_occupancy          = 0;
 
