@@ -831,13 +831,30 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
         info->hip_id = kfd_info.node_id - cached_smallest_node_id;
     }
 
-    // Retrieve HIP UUID
+    // Retrieve HIP UUID - first try KFD, then fallback to sysfs
+    uint64_t device_uuid = std::numeric_limits<uint64_t>::max();
+
+    // First try KFD
+    amdsmi_kfd_info_t kfd_info_uuid;
+    amdsmi_status_t kfd_status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info_uuid);
+    if (kfd_status == AMDSMI_STATUS_SUCCESS) {
+        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info_uuid.node_id, &device_uuid);
+        if (kfd_ret == 0) {
+            status = AMDSMI_STATUS_SUCCESS;
+        }
+    }
+
+    // If KFD fails, fallback to sysfs
+    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
+        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &device_uuid);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            device_uuid = std::numeric_limits<uint64_t>::max();
+        }
+    }
+
     std::ostringstream ss_uuid;
-    uint64_t device_uuid = 0;
-    std::string hip_uuid_str;
-    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &device_uuid);
     ss_uuid << "GPU-" << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
-    hip_uuid_str = ss_uuid.str();
+    std::string hip_uuid_str = ss_uuid.str();
     smi_clear_char_and_reinitialize(info->hip_uuid, AMDSMI_MAX_STRING_LENGTH, hip_uuid_str);
 
     ss << "; device_uuid (dec): " << device_uuid << "\n"
@@ -1001,6 +1018,7 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(
     return AMDSMI_STATUS_SUCCESS;
 }
 
+// Change to query oam 0 if given a UBB sensor type
 amdsmi_status_t  amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
                     amdsmi_temperature_type_t sensor_type,
                     amdsmi_temperature_metric_t metric, int64_t *temperature) {
@@ -4749,6 +4767,8 @@ amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *
             ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
+
+// Add UBB Power to power_info struct
 amdsmi_status_t
 amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
     AMDSMI_CHECK_INIT();

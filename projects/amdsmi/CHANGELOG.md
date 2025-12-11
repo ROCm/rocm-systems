@@ -18,10 +18,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
-  
+
 ### Changed
 
-- N/A
+- **Aligned `hip_uuid` in `amdsmi_get_gpu_enumeration_info()` with rocminfo**.  
+  - The `hip_uuid` field now sources from KFD ensuring consistency with rocminfo and KFD's UUID generation.
+  - The `asic_serial` field now returns N/A on partitioned devices.
 
 ### Removed
 
@@ -39,21 +41,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
   - Affected command: `amd-smi static --xgmi-plpd`
 
-### Changed
-
-- N/A
-
-### Removed
-
-- N/A
-
-### Optimized
-
-- N/A
-
-### Resolved Issues
-
-- - **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
+- **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
   - Updated driver logic to detect when `amdsmi_get_gpu_xgmi_link_status()` should return `AMDSMI_STATUS_NOT_SUPPORTED`. In mVF configurations, links are connected over XGMI and active, but security restrictions prevent the driver from exposing link status. In these cases we now return `AMDSMI_STATUS_NOT_SUPPORTED` instead of reporting the links as down.
   - Example outputs:
 
@@ -213,97 +201,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
   - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
 
-## amd_smi_lib for ROCm 7.11.0
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.2.1
 
 ### Added
 
-- **Added `--hex` flag to `amd-smi bad-pages` command**.  
-  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
-
-  ```console
-  $ amd-smi bad-pages --hex
-  GPU: 0
-      RETIRED:
-          PAGE_ADDRESS: 0x7f8000
-          PAGE_SIZE: 0x1000
-          STATUS: RESERVED
-      PENDING: N/A
-      UN_RES: N/A
-  ```
-
-- **Added flexible argument ordering for `amd-smi set --power-cap`**.  
-  - The `--power-cap` option now accepts arguments in any order, improving usability.
-    - Both syntaxes are now supported:
-      - `amd-smi set --power-cap <power-cap-type> <new-cap>`
-      - `amd-smi set --power-cap <new-cap> <power-cap-type>`
-
-  Example:
-
-  ```console
-  $ sudo amd-smi set --power-cap ppt1 1150
-  GPU: 0
-    POWERCAP: Successfully set ppt1 power cap to 1150W
-    ...
-
-  $ sudo amd-smi set --power-cap 1100 ppt1
-  GPU: 0
-    POWERCAP: Successfully set ppt1 power cap to 1100W
-    ...
-  ```
-
-- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
-  - Set/get CPU ISO frequency policy:
-    - `amd-smi set --cpu-railisofreq-policy (0-1)`
-    - `amd-smi metric --cpu-railisofreq-policy`
-  - Set/get Data Fabric C-state control:
-    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
-    - `amd-smi metric --cpu-dfcstate-ctrl`
-
-  ```console
-  $amd-smi set --cpu-railisofreq-policy 0
-  CPU: 0
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
-
-  CPU: 1
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
-
-  $amd-smi metric --cpu-railisofreq-policy
-  CPU: 0
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
-
-  CPU: 1
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
-
-  $amd-smi set --cpu-dfcstate-ctrl 0
-  CPU: 0
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
-
-  CPU: 1
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
-
-  $amd-smi metric --cpu-dfcstate-ctrl
-  CPU: 0
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
-
-  CPU: 1
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
-  ```
+- **Added gpu_board and base_board temperatures to monitor**.  
+  - Added GPU board and base board temperature sensors to `amd-smi monitor` command.
 
 ### Changed
 
-- **Modified output file handling options for `--file` argument**.
-  - Previously tool always appended to existing files without confirmation
-  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
-  - Interactive prompt when file exists and no flag is specified:
-    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
+- N/A
 
 ### Removed
 
@@ -315,8 +230,28 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
-  - This issue caused all policy IDs to display as 0.
+- **Fixed `amd-smi metric` JSON output under watch mode**.  
+  - Resolved issue where JSON output was not formatted correctly when using watch mode with metrics.
+
+- **Fixed `amd-smi` not redirecting output to file when `--json` option is used**.  
+  - Resolved issue where output was not properly redirected to file when using JSON format.
+
+- **Fixed `amd-smi ras --cper` component not being redirected to output file with `--follow`**.  
+  - Resolved issue where CPER component output was not redirected when using the follow option.
+
+- **Fixed list of AFIDs printing garbage values when given invalid CPER files**.  
+  - Resolved issue where invalid CPER files caused garbage output for AFID lists.
+
+- **Fixed JSON output for `amd-smi reset`**.  
+  - Resolved issue where JSON output was not formatted correctly for reset commands.
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
 
 ## amd_smi_lib for ROCm 7.2.0
 
