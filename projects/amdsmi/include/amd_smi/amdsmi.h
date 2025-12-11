@@ -2430,7 +2430,7 @@ typedef struct {
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
  *  sockets with AMD GPUS, and AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS returns
  *  sockets with either AMD GPUS or CPUS.
- *  Currently, only AMDSMI_INIT_AMD_GPUS is supported.
+ *  Both AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_CPUS flags are supported.
  *
  *  @param[in] init_flags Bit flags that tell SMI how to initialze. Values of
  *  ::amdsmi_init_flags_t may be OR'd together and passed through @p init_flags
