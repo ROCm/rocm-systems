@@ -134,6 +134,8 @@ static void vhsakmt_device_destroy(struct vhsakmt_device* dev) {
   if (dev->vhsakmt_nodes) free(dev->vhsakmt_nodes);
 
   virtio_gpu_close(dev->vgdev);
+  free(dev);
+  dev_list = NULL;
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCloseKFD(void) {
