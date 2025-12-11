@@ -190,17 +190,17 @@ def get_amdgpu_driver_version() -> str:
     return "N/A"
 
 
-def get_gpu_vram_size() -> int:
-    """Get the GPU VRAM size in MB."""
+def get_gpu_vram_size() -> str:
+    """Get the GPU VRAM size in KB."""
     amdsmi = import_amdsmi_module()
     error = None
     for device in get_device_handles():
         try:
             vram_info = amdsmi.amdsmi_get_gpu_vram_info(device)
-            vram_size = int(vram_info["vram_size"])
-            console_debug(f"GPU VRAM Size: {vram_size} MB")
+            vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
+            console_debug(f"GPU VRAM Size: {vram_size} KB")
             return vram_size
         except Exception as e:
             error = e
     console_warning(f"Error getting GPU VRAM size: {error}")
-    return 0
+    return "0"
