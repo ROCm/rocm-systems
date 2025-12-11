@@ -191,7 +191,7 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Negative_Parameters") {
   StreamGuard stream(Streams::created);
   LinearAllocGuard<hipDeviceptr_t> managed(LinearAllocs::hipMallocManaged, kPageSize,
                                            hipMemAttachHost);
-  
+
   SECTION("dev_ptr == nullptr") {
     HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream.stream(), nullptr), hipErrorInvalidValue);
   }

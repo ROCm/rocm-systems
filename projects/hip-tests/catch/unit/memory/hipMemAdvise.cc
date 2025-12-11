@@ -38,8 +38,7 @@ static inline hipMemoryAdvise GetUnsetMemAdvice(const hipMemoryAdvise advice) {
   }
 }
 
-static inline hipMemRangeAttribute
-GetMemAdviceAttr(const hipMemoryAdvise advice) {
+static inline hipMemRangeAttribute GetMemAdviceAttr(const hipMemoryAdvise advice) {
   switch (advice) {
     case hipMemAdviseSetAccessedBy:
       return hipMemRangeAttributeAccessedBy;
@@ -69,8 +68,7 @@ std::vector<int> GetDevicesWithAdviseSupport() {
 TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -79,17 +77,13 @@ TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic") {
     LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, kPageSize);
     int32_t attribute = 0;
     HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
-    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      GetMemAdviceAttr(advice), alloc.ptr(),
-                                      kPageSize));
+    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                      alloc.ptr(), kPageSize));
     REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice),
-                           device));
-    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      GetMemAdviceAttr(advice), alloc.ptr(),
-                                      kPageSize));
-    REQUIRE((advice == hipMemAdviseSetReadMostly ? 0 : hipInvalidDeviceId) ==
-            attribute);
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice), device));
+    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                      alloc.ptr(), kPageSize));
+    REQUIRE((advice == hipMemAdviseSetReadMostly ? 0 : hipInvalidDeviceId) == attribute);
   };
 
 // Disabled due to defect - EXSWHTEC-132
@@ -97,23 +91,19 @@ TEST_CASE("Unit_hipMemAdvise_Set_Unset_Basic") {
   SECTION("hipMemAdviseSetAccessedBy") { SetUnset(hipMemAdviseSetAccessedBy); }
 #endif
   SECTION("hipMemAdviseSetReadMostly") { SetUnset(hipMemAdviseSetReadMostly); }
-  SECTION("hipMemAdviseSetPreferredLocation") {
-    SetUnset(hipMemAdviseSetPreferredLocation);
-  }
+  SECTION("hipMemAdviseSetPreferredLocation") { SetUnset(hipMemAdviseSetPreferredLocation); }
 }
 
 TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));
 
-  std::array<hipMemoryAdvise, 3> advice{hipMemAdviseSetReadMostly,
-                                        hipMemAdviseSetPreferredLocation,
+  std::array<hipMemoryAdvise, 3> advice{hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation,
                                         hipMemAdviseSetAccessedBy};
   hipError_t error_capture = hipSuccess;
   for (int i = 0; i < 6; ++i) {
@@ -121,15 +111,13 @@ TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference") {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
     BEGIN_CAPTURE_SYNC(error_capture, true);
     for (const auto a : advice) {
-      HIP_CHECK_ERROR((hipMemAdvise(alloc.ptr(), kPageSize, a, device)),
-                      error_capture);
+      HIP_CHECK_ERROR((hipMemAdvise(alloc.ptr(), kPageSize, a, device)), error_capture);
     }
     END_CAPTURE_SYNC(error_capture);
     for (const auto a : advice) {
       int32_t attribute = 0;
-      HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                        GetMemAdviceAttr(a), alloc.ptr(),
-                                        kPageSize));
+      HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(a),
+                                        alloc.ptr(), kPageSize));
       REQUIRE((a == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
     }
   }
@@ -138,38 +126,31 @@ TEST_CASE("Unit_hipMemAdvise_No_Flag_Interference") {
 TEST_CASE("Unit_hipMemAdvise_Rounding") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = supported_devices.front();
 
-  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged,
-                                  3 * kPageSize);
+  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);
   REQUIRE_FALSE(reinterpret_cast<intptr_t>(alloc.ptr()) % kPageSize);
-  const auto [offset, width] = GENERATE_COPY(
-      std::make_pair(kPageSize / 4, kPageSize / 2),  // Withing page
-      std::make_pair(kPageSize / 2, kPageSize),      // Across page border
-      std::make_pair(kPageSize / 2, kPageSize * 2)); // Across two page borders
-  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy,
-                         device));
-  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) {
-    return a - a % n;
-  };
+  const auto [offset, width] =
+      GENERATE_COPY(std::make_pair(kPageSize / 4, kPageSize / 2),   // Withing page
+                    std::make_pair(kPageSize / 2, kPageSize),       // Across page border
+                    std::make_pair(kPageSize / 2, kPageSize * 2));  // Across two page borders
+  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy, device));
+  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) { return a - a % n; };
   constexpr auto RoundUp = [RoundDown](const intptr_t a, const intptr_t n) {
     return RoundDown(a + n - 1, n);
   };
   const auto base = alloc.ptr();
   const auto rounded_up = RoundUp(offset + width, kPageSize);
   unsigned int attribute = 0;
-  HIP_CHECK(hipMemRangeGetAttribute(
-      &attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
-      reinterpret_cast<void *>(base), rounded_up));
+  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
+                                    reinterpret_cast<void*>(base), rounded_up));
   REQUIRE(device == static_cast<int>(attribute));
-  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                    hipMemRangeAttributeAccessedBy, alloc.ptr(),
-                                    3 * kPageSize));
+  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
+                                    alloc.ptr(), 3 * kPageSize));
   REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
           static_cast<int>(attribute));
 }
@@ -178,12 +159,10 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
   GENERATE_CAPTURE();
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
   }
   supported_devices.push_back(hipCpuDeviceId);
-  const auto Test = [](const int device, const hipMemoryAdvise advice,
-                       bool capture) {
+  const auto Test = [](const int device, const hipMemoryAdvise advice, bool capture) {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
     int32_t attribute = 0;
     if (capture) {
@@ -191,9 +170,9 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
       HIP_CHECK(hipStreamCreate(&stream));
       HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
       HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
-      HIP_CHECK(hipMemRangeGetAttribute(
-          &attribute, sizeof(attribute),
-          hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(), kPageSize));
+      HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
+                                        hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
+                                        kPageSize));
       hipGraph_t graph = nullptr;
       hipGraphExec_t graph_exec = nullptr;
       HIP_CHECK(hipStreamEndCapture(stream, &graph))
@@ -204,37 +183,33 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
       HIP_CHECK(hipStreamDestroy(stream));
     } else {
       HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
-      HIP_CHECK(hipMemRangeGetAttribute(
-          &attribute, sizeof(attribute),
-          hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(), kPageSize));
+      HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
+                                        hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
+                                        kPageSize));
     }
     REQUIRE(attribute == hipInvalidDeviceId);
   };
-  const auto device = GENERATE_COPY(
-      from_range(std::begin(supported_devices), std::end(supported_devices)));
+  const auto device =
+      GENERATE_COPY(from_range(std::begin(supported_devices), std::end(supported_devices)));
 
   SECTION("hipMemAdviseSetPreferredLocation") {
     Test(device, hipMemAdviseSetPreferredLocation, capture);
   }
 // Disabled on AMD due to defect - EXSWHTEC-132
 #if HT_NVIDIA
-  SECTION("hipMemAdviseSetAccessedBy") {
-    Test(device, hipMemAdviseSetAccessedBy);
-  }
+  SECTION("hipMemAdviseSetAccessedBy") { Test(device, hipMemAdviseSetAccessedBy); }
 #endif
 }
 
 TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
   }
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   constexpr size_t count = kPageSize / sizeof(*alloc.ptr());
 
-  const auto ReadWriteManagedMemory = [&](const int device,
-                                          const hipMemoryAdvise advice) {
+  const auto ReadWriteManagedMemory = [&](const int device, const hipMemoryAdvise advice) {
     HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
     std::fill_n(alloc.ptr(), count, -1);
     ArrayFindIfNot(alloc.ptr(), -1, count);
@@ -247,47 +222,38 @@ TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
     }
 
     int32_t attribute = 0;
-    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      GetMemAdviceAttr(advice), alloc.ptr(),
-                                      kPageSize));
+    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                      alloc.ptr(), kPageSize));
     REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
   };
 
 // Disabled on AMD due to defect - EXSWHTEC-133
 #if HT_NVIDIA
-  SECTION("ReadMostly") {
-    ReadWriteManagedMemory(hipInvalidDeviceId, hipMemAdviseSetReadMostly);
-  }
+  SECTION("ReadMostly") { ReadWriteManagedMemory(hipInvalidDeviceId, hipMemAdviseSetReadMostly); }
 #endif
   supported_devices.push_back(hipCpuDeviceId);
 
-  const auto device = GENERATE_COPY(
-      from_range(std::begin(supported_devices), std::end(supported_devices)));
+  const auto device =
+      GENERATE_COPY(from_range(std::begin(supported_devices), std::end(supported_devices)));
   supported_devices.pop_back();
-  SECTION("PreferredLocation") {
-    ReadWriteManagedMemory(device, hipMemAdviseSetPreferredLocation);
-  }
+  SECTION("PreferredLocation") { ReadWriteManagedMemory(device, hipMemAdviseSetPreferredLocation); }
 
 // Disabled on AMD due to defect - EXSWHTEC-132
 #if HT_NVIDIA
-  SECTION("AccessedBy") {
-    ReadWriteManagedMemory(device, hipMemAdviseSetAccessedBy);
-  }
+  SECTION("AccessedBy") { ReadWriteManagedMemory(device, hipMemAdviseSetAccessedBy); }
 #endif
 }
 
 TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
   }
   supported_devices.push_back(hipCpuDeviceId);
-  const auto advice =
-      GENERATE(hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation
-               // Skipped due to defect - EXSWHTEC - 132
-               // hipMemAdviseSetAccessedBy
-      );
+  const auto advice = GENERATE(hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation
+                               // Skipped due to defect - EXSWHTEC - 132
+                               // hipMemAdviseSetAccessedBy
+  );
   const auto device = GENERATE_COPY(from_range(supported_devices));
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
@@ -298,15 +264,14 @@ TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise") {
     HIP_CHECK(hipStreamSynchronize(nullptr));
     int32_t attribute = 0;
     HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      hipMemRangeAttributeLastPrefetchLocation,
-                                      alloc.ptr(), kPageSize));
+                                      hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
+                                      kPageSize));
     REQUIRE(d == attribute);
   }
 
   int32_t attribute = 0;
-  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                    GetMemAdviceAttr(advice), alloc.ptr(),
-                                    kPageSize));
+  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                    alloc.ptr(), kPageSize));
   REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
 }
 
@@ -314,8 +279,7 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
   GENERATE_CAPTURE();
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   // Disabling this hipCpuDeviceId scenario as it fails due to ROCr issue
@@ -327,13 +291,11 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
   if (capture) {
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
     for (const auto device : supported_devices) {
-      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy,
-                             device));
+      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device));
     }
     std::vector<int> accessed_by(supported_devices.size(), hipInvalidDeviceId);
-    HIP_CHECK(hipMemRangeGetAttribute(
-        accessed_by.data(), sizeof(int) * accessed_by.size(),
-        hipMemRangeAttributeAccessedBy, alloc.ptr(), kPageSize));
+    HIP_CHECK(hipMemRangeGetAttribute(accessed_by.data(), sizeof(int) * accessed_by.size(),
+                                      hipMemRangeAttributeAccessedBy, alloc.ptr(), kPageSize));
     hipGraph_t graph = nullptr;
     hipGraphExec_t graph_exec = nullptr;
     HIP_CHECK(hipStreamEndCapture(stream, &graph))
@@ -344,13 +306,11 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
     HIP_CHECK(hipGraphDestroy(graph));
   } else {
     for (const auto device : supported_devices) {
-      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy,
-                             device));
+      HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device));
     }
     std::vector<int> accessed_by(supported_devices.size(), hipInvalidDeviceId);
-    HIP_CHECK(hipMemRangeGetAttribute(
-        accessed_by.data(), sizeof(int) * accessed_by.size(),
-        hipMemRangeAttributeAccessedBy, alloc.ptr(), kPageSize));
+    HIP_CHECK(hipMemRangeGetAttribute(accessed_by.data(), sizeof(int) * accessed_by.size(),
+                                      hipMemRangeAttributeAccessedBy, alloc.ptr(), kPageSize));
     REQUIRE_THAT(accessed_by, Catch::Matchers::Equals(supported_devices));
   }
   HIP_CHECK(hipStreamDestroy(stream));
@@ -359,8 +319,7 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
 TEST_CASE("Unit_hipMemAdvise_Negative_Parameters") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
   }
   const auto device = supported_devices.front();
 
@@ -369,46 +328,38 @@ TEST_CASE("Unit_hipMemAdvise_Negative_Parameters") {
 // Disabled on NVIDIA due to defect - EXSWHTEC-122
 #if HT_AMD
   SECTION("Invalid advice") {
-    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize,
-                                 static_cast<hipMemoryAdvise>(-1), device),
+    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize, static_cast<hipMemoryAdvise>(-1), device),
                     hipErrorInvalidValue);
   }
 #endif
 
-  const auto advice =
-      GENERATE(hipMemAdviseSetAccessedBy, hipMemAdviseSetReadMostly,
-               hipMemAdviseSetPreferredLocation);
+  const auto advice = GENERATE(hipMemAdviseSetAccessedBy, hipMemAdviseSetReadMostly,
+                               hipMemAdviseSetPreferredLocation);
   SECTION("count == 0") {
-    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), 0, advice, device),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), 0, advice, device), hipErrorInvalidValue);
   }
 
 // Disabled due to defect - EXSWHTEC-131
 #if HT_NVIDIA
   SECTION("count larger than allocation size") {
-    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize + 1, advice, device),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize + 1, advice, device), hipErrorInvalidValue);
   }
 #endif
 
   SECTION("dev_ptr == nullptr") {
-    HIP_CHECK_ERROR(hipMemAdvise(nullptr, kPageSize, advice, device),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemAdvise(nullptr, kPageSize, advice, device), hipErrorInvalidValue);
   }
 
   SECTION("dev_ptr pointing to non-managed memory") {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMalloc, kPageSize);
-    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize, advice, device),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize, advice, device), hipErrorInvalidValue);
   }
 
 // Disabled on AMD due to defect - EXSWHTEC-130
 #if HT_NVIDIA
   SECTION("Invalid device") {
-    HIP_CHECK_ERROR(
-        hipMemAdvise(alloc.ptr(), kPageSize, advice, hipInvalidDeviceId),
-        (advice == hipMemAdviseSetReadMostly ? hipSuccess
-                                             : hipErrorInvalidDevice));
+    HIP_CHECK_ERROR(hipMemAdvise(alloc.ptr(), kPageSize, advice, hipInvalidDeviceId),
+                    (advice == hipMemAdviseSetReadMostly ? hipSuccess : hipErrorInvalidDevice));
   }
 #endif
 }
@@ -416,8 +367,7 @@ TEST_CASE("Unit_hipMemAdvise_Negative_Parameters") {
 TEST_CASE("Unit_hipMemAdvise_Set_Unset_StreamCapture") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
@@ -429,22 +379,18 @@ TEST_CASE("Unit_hipMemAdvise_Set_Unset_StreamCapture") {
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
     int32_t attribute = 0;
     HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, advice, device));
-    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      GetMemAdviceAttr(advice), alloc.ptr(),
-                                      kPageSize));
+    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                      alloc.ptr(), kPageSize));
     REQUIRE((advice == hipMemAdviseSetReadMostly ? 1 : device) == attribute);
-    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice),
-                           device));
-    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                      GetMemAdviceAttr(advice), alloc.ptr(),
-                                      kPageSize));
+    HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, GetUnsetMemAdvice(advice), device));
+    HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), GetMemAdviceAttr(advice),
+                                      alloc.ptr(), kPageSize));
     hipGraph_t graph = nullptr;
     hipGraphExec_t graph_exec = nullptr;
     HIP_CHECK(hipStreamEndCapture(stream, &graph))
     HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
     HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-    REQUIRE((advice == hipMemAdviseSetReadMostly ? 0 : hipInvalidDeviceId) ==
-            attribute);
+    REQUIRE((advice == hipMemAdviseSetReadMostly ? 0 : hipInvalidDeviceId) == attribute);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipStreamDestroy(stream));
@@ -455,48 +401,39 @@ TEST_CASE("Unit_hipMemAdvise_Set_Unset_StreamCapture") {
   SECTION("hipMemAdviseSetAccessedBy") { SetUnset(hipMemAdviseSetAccessedBy); }
 #endif
   SECTION("hipMemAdviseSetReadMostly") { SetUnset(hipMemAdviseSetReadMostly); }
-  SECTION("hipMemAdviseSetPreferredLocation") {
-    SetUnset(hipMemAdviseSetPreferredLocation);
-  }
+  SECTION("hipMemAdviseSetPreferredLocation") { SetUnset(hipMemAdviseSetPreferredLocation); }
 }
 
 TEST_CASE("Unit_hipMemAdvise_Rounding_StreamCapture") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(
-        "Test needs at least 1 device that supports managed memory");
+    HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = supported_devices.front();
-  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged,
-                                  3 * kPageSize);
+  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);
   REQUIRE_FALSE(reinterpret_cast<intptr_t>(alloc.ptr()) % kPageSize);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
-  const auto [offset, width] = GENERATE_COPY(
-      std::make_pair(kPageSize / 4, kPageSize / 2),  // Withing page
-      std::make_pair(kPageSize / 2, kPageSize),      // Across page border
-      std::make_pair(kPageSize / 2, kPageSize * 2)); // Across two page borders
-  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy,
-                         device));
-  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) {
-    return a - a % n;
-  };
+  const auto [offset, width] =
+      GENERATE_COPY(std::make_pair(kPageSize / 4, kPageSize / 2),   // Withing page
+                    std::make_pair(kPageSize / 2, kPageSize),       // Across page border
+                    std::make_pair(kPageSize / 2, kPageSize * 2));  // Across two page borders
+  HIP_CHECK(hipMemAdvise(alloc.ptr() + offset, width, hipMemAdviseSetAccessedBy, device));
+  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) { return a - a % n; };
   constexpr auto RoundUp = [RoundDown](const intptr_t a, const intptr_t n) {
     return RoundDown(a + n - 1, n);
   };
   const auto base = alloc.ptr();
   const auto rounded_up = RoundUp(offset + width, kPageSize);
   unsigned int attribute = 0;
-  HIP_CHECK(hipMemRangeGetAttribute(
-      &attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
-      reinterpret_cast<void *>(base), rounded_up));
+  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
+                                    reinterpret_cast<void*>(base), rounded_up));
   REQUIRE(device == static_cast<int>(attribute));
-  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                    hipMemRangeAttributeAccessedBy, alloc.ptr(),
-                                    3 * kPageSize));
+  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
+                                    alloc.ptr(), 3 * kPageSize));
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;
   HIP_CHECK(hipStreamEndCapture(stream, &graph))

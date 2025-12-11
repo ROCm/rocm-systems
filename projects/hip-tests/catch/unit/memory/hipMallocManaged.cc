@@ -33,7 +33,7 @@
 
 // Kernel functions
 
-__global__ void KernelMul_MngdMem(int *Hmm, int *Dptr, size_t n) {
+__global__ void KernelMul_MngdMem(int* Hmm, int* Dptr, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = index; i < n; i += stride) {
@@ -41,7 +41,7 @@ __global__ void KernelMul_MngdMem(int *Hmm, int *Dptr, size_t n) {
   }
 }
 
-__global__ void KernelMulAdd_MngdMem(int *Hmm, size_t n) {
+__global__ void KernelMulAdd_MngdMem(int* Hmm, size_t n) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = index; i < n; i += stride) {
@@ -60,9 +60,10 @@ static unsigned threadsPerBlock{256};
 TEST_CASE("Unit_hipMallocManaged_Basic") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    WARN("GPU doesn't support hipDeviceAttributeManagedMemory attribute so "
-         "defaulting to system "
-         "memory.");
+    WARN(
+        "GPU doesn't support hipDeviceAttributeManagedMemory attribute so "
+        "defaulting to system "
+        "memory.");
   }
   hipError_t error_capture = hipSuccess;
   BEGIN_CAPTURE_SYNC(error_capture, true);
@@ -86,8 +87,7 @@ TEST_CASE("Unit_hipMallocManaged_Basic") {
 TEST_CASE("Unit_hipMallocManaged_Advanced") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
   float *A, *B, *C;
@@ -99,12 +99,9 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
 
   hipDevice_t device = hipCpuDeviceId;
 
-  HIP_CHECK(hipMemAdvise(A, numElements * sizeof(float),
-                                hipMemAdviseSetReadMostly, device));
-  if (error_capture != hipErrorStreamCaptureUnsupported) {
-    HIP_CHECK(hipMemPrefetchAsync(A, numElements * sizeof(float), 0));
-    HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), 0));
-  }
+  HIP_CHECK(hipMemAdvise(A, numElements * sizeof(float), hipMemAdviseSetReadMostly, device));
+  HIP_CHECK(hipMemPrefetchAsync(A, numElements * sizeof(float), 0));
+  HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), 0));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
                                     hipMemRangeAttributeLastPrefetchLocation, A,
@@ -113,22 +110,19 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
     INFO("hipMemRangeGetAttribute error, device = " << device);
   }
   uint32_t read_only = 0xf;
-  HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only),
-                                    hipMemRangeAttributeReadMostly, A,
-                                    numElements * sizeof(float)));
+  HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only), hipMemRangeAttributeReadMostly,
+                                    A, numElements * sizeof(float)));
   if (read_only != 1) {
     SUCCEED("hipMemRangeGetAttribute error, read_only = " << read_only);
   }
 
-  unsigned blocks =
-      HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
   hipEvent_t event0, event1;
   HIP_CHECK(hipEventCreate(&event0));
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventRecord(event0, 0));
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                     0, static_cast<const float *>(A),
-                     static_cast<const float *>(B), C, numElements);
+  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                     static_cast<const float*>(A), static_cast<const float*>(B), C, numElements);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipEventRecord(event1, 0));
   HIP_CHECK(hipDeviceSynchronize());
@@ -136,8 +130,7 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
   HIP_CHECK(hipEventElapsedTime(&time, event0, event1));
   printf("Time %.3f ms\n", time);
   float maxError = 0.0f;
-  HIP_CHECK(
-      hipMemPrefetchAsync(B, numElements * sizeof(float), hipCpuDeviceId));
+  HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), hipCpuDeviceId));
   HIP_CHECK(hipDeviceSynchronize());
   device = 0;
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
@@ -165,21 +158,20 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
 TEST_CASE("Unit_hipMallocManaged_Large") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    WARN("GPU doesn't support hipDeviceAttributeManagedMemory attribute so "
-         "defaulting to system "
-         "memory.");
+    WARN(
+        "GPU doesn't support hipDeviceAttributeManagedMemory attribute so "
+        "defaulting to system "
+        "memory.");
   }
 
-  float *A;
-  HIP_CHECK_ERROR(hipMallocManaged(&A, std::numeric_limits<size_t>::max()),
-                  hipErrorOutOfMemory);
+  float* A;
+  HIP_CHECK_ERROR(hipMallocManaged(&A, std::numeric_limits<size_t>::max()), hipErrorOutOfMemory);
 }
 
 TEST_CASE("Unit_hipMallocManaged_Advanced_StreamCapture") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
-    HipTest::HIP_SKIP_TEST(
-        "GPU doesn't support managed memory so skipping test.");
+    HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
   hipStream_t stream;
@@ -194,8 +186,7 @@ TEST_CASE("Unit_hipMallocManaged_Advanced_StreamCapture") {
 
   hipDevice_t device = hipCpuDeviceId;
 
-  HIP_CHECK(hipMemAdvise(A, numElements * sizeof(float),
-                         hipMemAdviseSetReadMostly, device));
+  HIP_CHECK(hipMemAdvise(A, numElements * sizeof(float), hipMemAdviseSetReadMostly, device));
   HIP_CHECK(hipMemPrefetchAsync(A, numElements * sizeof(float), 0));
   HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), 0));
   hipGraph_t graph = nullptr;
@@ -211,22 +202,19 @@ TEST_CASE("Unit_hipMallocManaged_Advanced_StreamCapture") {
     INFO("hipMemRangeGetAttribute error, device = " << device);
   }
   uint32_t read_only = 0xf;
-  HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only),
-                                    hipMemRangeAttributeReadMostly, A,
-                                    numElements * sizeof(float)));
+  HIP_CHECK(hipMemRangeGetAttribute(&read_only, sizeof(read_only), hipMemRangeAttributeReadMostly,
+                                    A, numElements * sizeof(float)));
   if (read_only != 1) {
     SUCCEED("hipMemRangeGetAttribute error, read_only = " << read_only);
   }
 
-  unsigned blocks =
-      HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, numElements);
   hipEvent_t event0, event1;
   HIP_CHECK(hipEventCreate(&event0));
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventRecord(event0, 0));
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                     0, static_cast<const float *>(A),
-                     static_cast<const float *>(B), C, numElements);
+  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                     static_cast<const float*>(A), static_cast<const float*>(B), C, numElements);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipEventRecord(event1, 0));
   HIP_CHECK(hipDeviceSynchronize());
@@ -234,8 +222,7 @@ TEST_CASE("Unit_hipMallocManaged_Advanced_StreamCapture") {
   HIP_CHECK(hipEventElapsedTime(&time, event0, event1));
   printf("Time %.3f ms\n", time);
   float maxError = 0.0f;
-  HIP_CHECK(
-      hipMemPrefetchAsync(B, numElements * sizeof(float), hipCpuDeviceId));
+  HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), hipCpuDeviceId));
   HIP_CHECK(hipDeviceSynchronize());
   device = 0;
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
