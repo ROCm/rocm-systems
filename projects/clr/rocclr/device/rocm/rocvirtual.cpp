@@ -1279,6 +1279,10 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   size_t processedPackets = 0;
   size_t batchSize = 1;
 
+  // Allocate arrays once outside the loop to avoid repeated stack allocations
+  uint16_t validHeaders[kMaxBatchSize];
+  uint16_t validSetups[kMaxBatchSize];
+
   while (processedPackets < numPackets) {
     uint64_t currentReadIndex = Hsa::queue_load_read_index_scacquire(gpu_queue_);
     uint64_t currentWriteIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
@@ -1309,18 +1313,38 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
     setFenceDirty(true);
 
-    // Save header of first packet in this batch
-    AqlPacket* firstPacket = packets[processedPackets];
-    uint16_t firstPacketHeader = firstPacket->header;
-    uint16_t firstPacketRest = firstPacket->setup;
-    // Separate header for doorbell ring that can be modified
-    uint16_t doorbellHeader = firstPacketHeader;
+    // Save headers and setups for all packets in this batch
+    for (size_t i = 0; i < batchSize; ++i) {
+      AqlPacket* packet = packets[processedPackets + i];
+      validHeaders[i] = packet->header;
+      validSetups[i] = packet->setup;
+    }
 
-    // Save header of last packet in this batch (if different from first)
-    AqlPacket* lastPacket = packets[processedPackets + batchSize - 1];
-    uint16_t lastPacketHeader = lastPacket->header;
+    // Apply system scope modifications to saved headers
+    if (addSystemScope_) {
+      // Add system scope on the acq on first packet
+      validHeaders[0] &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
+      validHeaders[0] |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
 
-    // Process batchSize packets
+      // Add system scope on the release on last packet
+      validHeaders[batchSize - 1] &=
+          ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      validHeaders[batchSize - 1] |=
+          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
+      addSystemScope_ = false;
+    }
+
+    // Calculate fence_state_ from last packet's header
+    auto expected_fence_state =
+        extractAqlBits(validHeaders[batchSize - 1], HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                       HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
+    if (expected_fence_state == amd::Device::kCacheStateSystem) {
+      setFenceDirty(false);
+    }
+    fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
+
+    // Copy all packet bodies to queue (with invalid headers)
     for (size_t i = 0; i < batchSize; ++i) {
       size_t packetIndex = processedPackets + i;
       uint64_t index = startIndex + i;
@@ -1344,7 +1368,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         current_signal->flags_.isPacketDispatch_ = true;
       }
 
-      //Add blocking command if needed (only for the last packet)
+      // Add blocking command if needed (only for the last packet)
       if (blocking && (packetIndex == numPackets - 1)) {
         if (packet->completion_signal.handle == 0) {
           packet->completion_signal = Barriers().ActiveSignal();
@@ -1353,55 +1377,19 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
       AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
 
-      // For first packet in batch, invalidate header before writing
-      bool isFirstPacket = (i == 0);
-      bool isLastPacket = (i == batchSize - 1);
+      // Save original header and invalidate before copy
+      uint16_t savedHeader = packet->header;
+      packet->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
-      if (isFirstPacket) {
-        if (addSystemScope_) {
-          // Add system scope on the acq on first packet (modify doorbell header)
-          doorbellHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
-          doorbellHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
-        }
-        // Invalidate the header of the first packet in the batch
-        packet->header = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
-      }
-
-      // For the end packet in batch set flags
-      if (isLastPacket) {
-        if (addSystemScope_) {
-          // If batch has only 1 packet, update doorbell header for release scope
-          // (packet->header is already invalid, so don't modify it)
-          if (batchSize == 1) {
-            doorbellHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-            doorbellHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-          } else {
-            // Add system scope on the release on last packet (different from first)
-            packet->header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-            packet->header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-          }
-          addSystemScope_ = false;
-        }
-        // Use doorbellHeader for single packet batch (packet->header is invalid),
-        // else use packet->header
-        uint16_t headerForFenceState = (batchSize == 1) ? doorbellHeader : packet->header;
-        auto expected_fence_state =
-            extractAqlBits(headerForFenceState, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                           HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
-        // Reset fence_dirty_ flag if we submit a packet with system scopes
-        if (expected_fence_state == amd::Device::kCacheStateSystem) {
-          setFenceDirty(false);
-        }
-        fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
-      }
-
-      // Copy the packet to the queue
+      // Copy the packet to the queue (with invalid header)
       *aql_loc = *packet;
+
+      // Restore the packet header
+      packet->header = savedHeader;
 
       // Print kernel name for kernel dispatch packets
       if (kernelNames && packetIndex < kernelNames->size()) {
-        // Use doorbellHeader for first packet (packet->header is invalid), else use packet->header
-        uint16_t headerForPrint = isFirstPacket ? doorbellHeader : packet->header;
+        uint16_t headerForPrint = validHeaders[i];
         uint8_t packetType =
             extractAqlBits(headerForPrint, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
@@ -1438,21 +1426,19 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), index);
         }
       }
-
-      // Restore the header of the first packet
-      if (isFirstPacket) {
-        packet->header = firstPacketHeader;
-      }
-
-      // Restore the header of the last packet (if different from first)
-      if (isLastPacket && batchSize > 1) {
-        packet->header = lastPacketHeader;
-      }
     }
 
-    // Write valid header for the first packet in the batch
-    AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[startIndex & queueMask];
-    packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), doorbellHeader, firstPacketRest);
+    // Write valid headers for inner packets (indices 1 to batchSize-1) first
+    for (size_t i = 1; i < batchSize; ++i) {
+      uint64_t index = startIndex + i;
+      AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
+      packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), validHeaders[i], validSetups[i]);
+    }
+
+    // Write valid header for the first packet in the batch (last)
+    AqlPacket* first_aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[startIndex & queueMask];
+    packet_store_release(reinterpret_cast<uint32_t*>(first_aql_loc), validHeaders[0],
+                         validSetups[0]);
 
     // Ring doorbell for this batch
     Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex);
