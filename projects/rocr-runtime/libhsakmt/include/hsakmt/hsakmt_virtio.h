@@ -119,6 +119,10 @@ int vamdgpu_device_get_fd(amdgpu_device_handle device_handle);
 int vdrmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data, unsigned long size);
 int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu);
 int vamdgpu_bo_free(amdgpu_bo_handle buf_handle);
+int vamdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type type,
+                     uint32_t* shared_handle);
+int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
+                     uint32_t shared_handle, struct amdgpu_bo_import_result* output);
 
 #ifdef __cplusplus
 }
