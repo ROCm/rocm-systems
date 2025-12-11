@@ -62,6 +62,9 @@ namespace component
 {
 using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
+// The maximum limit for the number of threads is set at 4096. declared and stored in the
+// set_storage struct's `types.hpp` file.
+constexpr size_t allowed_max_threads = 4096;
 
 namespace
 {
@@ -181,7 +184,21 @@ pthread_create_gotcha::wrapper::operator()() const
     auto        _coverage    = (get_mode() == Mode::Coverage);
     const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto& _info        = thread_info::init(m_config.offset);
-    auto        _dtor        = [&]() {
+    auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
+    if(static_cast<size_t>(_sequent_value) >= allowed_max_threads)
+    {
+        static std::once_flag thread_limit_warning_flag;
+        std::call_once(thread_limit_warning_flag, []() {
+            ROCPROFSYS_WARNING_F(
+                1,
+                "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
+                "reached. Further thread creation and profiling will be "
+                "disabled to prevent resource exhaustion.\n",
+                allowed_max_threads);
+        });
+        return m_routine(m_arg);
+    }
+    auto _dtor = [&]() {
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
         {

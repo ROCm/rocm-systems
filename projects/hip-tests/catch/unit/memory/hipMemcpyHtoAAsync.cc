@@ -105,17 +105,17 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative") {
  *  - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
-  #if HT_NVIDIA
+#if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
-  #else
+#else
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int row, col;
   row = 1;
   col = GENERATE(3, 4, 100);
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   for (int i = 0; i < (row * col); i++) {
     B_h[i] = i;
   }
@@ -136,17 +136,13 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
     HIP_CHECK(hipStreamDestroy(stream));
   }
   SECTION("With Stream per thread") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
-                                 hipStreamPerThread));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
-                                hipStreamPerThread));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamPerThread));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamPerThread));
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
   }
   SECTION("With Legacy Stream") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
-                                 hipStreamLegacy));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
-                                hipStreamLegacy));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamLegacy));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamLegacy));
     HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
   }
 
@@ -170,7 +166,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
+TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice", "[multigpu]") {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
@@ -178,13 +174,13 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
   CHECK_IMAGE_SUPPORT
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
-  for (int i=0; i < devCount; i++) {
+  for (int i = 0; i < devCount; i++) {
     HIP_CHECK(hipSetDevice(i));
     int row, col;
     row = 1;
     col = GENERATE(3, 4, 100);
-    int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
-    int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
     for (int i = 0; i < (row * col); i++) {
       B_h[i] = i;
     }
@@ -207,7 +203,41 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
   }
 #endif
 }
+
+TEST_CASE("UnitHipMemcpyHtoAAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  auto host_src = std::make_unique<std::vector<int>>(N);
+  auto host_dst = std::make_unique<std::vector<int>>(N);
+  constexpr size_t kCopySize = N * sizeof(int);
+  size_t offset = GENERATE(0, N * sizeof(int) / 2);
+
+  std::iota(host_src->begin(), host_src->end(), 0);
+
+  auto channel_desc = hipCreateChannelDesc<int>();
+  hipArray_t dst_array = nullptr;
+  HIP_CHECK(hipMallocArray(&dst_array, &channel_desc, kCopySize));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyHtoAAsync(dst_array, offset, host_src->data(), kCopySize - offset, nullptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamSynchronize(nullptr));
+
+  HIP_CHECK(hipMemcpyAtoH(host_dst->data(), dst_array, offset, kCopySize - offset));
+
+  for (size_t i = 0; i < offset / sizeof(int); ++i) {
+    REQUIRE((*host_src)[i] == (*host_dst)[i]);
+  }
+
+  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

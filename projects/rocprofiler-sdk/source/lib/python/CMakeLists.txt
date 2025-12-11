@@ -16,3 +16,4 @@ endif()
 
 add_subdirectory(roctx)
 add_subdirectory(rocpd)
+add_subdirectory(rocprofv3)

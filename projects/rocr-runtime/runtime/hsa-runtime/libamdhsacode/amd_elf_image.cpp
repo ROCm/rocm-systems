@@ -213,18 +213,18 @@ namespace elf {
 #else // _WIN32
       int in = _open(filename.c_str(), O_RDONLY);
       if (in < 0) { return perror("open failed"); }
-      if (_lseek(in, 0L, SEEK_END) < 0) { 
+      if (_lseek(in, 0L, SEEK_END) < 0) {
         _close(in);
-        return perror("lseek failed"); 
+        return perror("lseek failed");
       }
       off_t size;
-      if ((size = _lseek(in, 0L, SEEK_CUR)) < 0) { 
+      if ((size = _lseek(in, 0L, SEEK_CUR)) < 0) {
         _close(in);
-        return perror("lseek(2) failed"); 
+        return perror("lseek(2) failed");
       }
-      if (_lseek(in, 0L, SEEK_SET) < 0) { 
+      if (_lseek(in, 0L, SEEK_SET) < 0) {
         _close(in);
-        return perror("lseek(3) failed"); 
+        return perror("lseek(3) failed");
       }
       if (_lseek(d, 0L, SEEK_SET) < 0) { return perror("lseek(3) failed"); }
       ssize_t written;
@@ -274,7 +274,16 @@ namespace elf {
     {
       size_t size1 = getSize();
       void* buffer1 = malloc(size1);
-      if (_read(d, buffer1, size1) < 0) { free(buffer1); return perror("read failed"); }
+      ssize_t bytes_read = _read(d, buffer1, size1);
+      if (bytes_read < 0) {
+        free(buffer1);
+        return perror("read failed");
+      }
+      if (static_cast<size_t>(bytes_read) != size1) {
+        free(buffer1);
+        return perror("Incomplete read");
+      }
+
       *buffer = buffer1;
       if (size) { *size = size1; }
       return true;
@@ -284,7 +293,10 @@ namespace elf {
     {
       size_t size1 = getSize();
       if (size < size1) { return error("Buffer size is not enough"); }
-      if (_read(d, buffer, size1) < 0) { return perror("read failed"); }
+      ssize_t bytes_read = _read(d, buffer, size1);
+      if (bytes_read < 0) { return perror("read failed"); }
+      if (static_cast<size_t>(bytes_read) != size1) { return perror("Incomplete read"); }
+
       return true;
     }
 

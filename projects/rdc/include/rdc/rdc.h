@@ -25,10 +25,6 @@ THE SOFTWARE.
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
-
-#ifdef __cplusplus
-
 // cstddef include causes issues on older GCC
 // use stddef.h instead
 #if __GNUC__ < 9
@@ -197,6 +193,9 @@ typedef enum {
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
   RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  //!< PCIe link recovery count
+  RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,          //!< PCIe NAK received count
+  RDC_FI_PCIE_NAK_SENT_COUNT_ACC,          //!< PCIe NAK sent count
 
   /**
    * @brief GPU usage related fields
@@ -424,6 +423,30 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+
+  /**
+   * @brief RDC CPU related fields
+   */
+  RDC_FI_CPU_SKT_COUNT = 10000,  //!< CPU socket count
+  RDC_FI_CPU_FIRST = RDC_FI_CPU_SKT_COUNT,
+  RDC_FI_CPU_MODEL,                  //!< Name of the model
+  RDC_FI_CPU_MODEL_ID,               //!< CPU model identifier
+  RDC_FI_CPU_FAMILY,                 //!< CPU family identifier
+  RDC_FI_CPU_CORES_PER_SKT,          //!< CPU cores per socket
+  RDC_FI_CPU_SKT_ENERGY,             //!< CPU socket energy consumption (microjoules)
+  RDC_FI_CPU_HSMP_DRIVER_VERSION,    //!< HSMP driver version
+  RDC_FI_CPU_SMU_FW_VERSION,         //!< SMU firmware version
+  RDC_FI_CPU_HSMP_PROTO_VERSION,     //!< HSMP protocol version
+  RDC_FI_CPU_FCLK_FREQUENCY,         //!< CPU fabric clock frequency (MHz)
+  RDC_FI_CPU_MCLK_FREQUENCY,         //!< CPU memory clock frequency (MHz)
+  RDC_FI_CPU_CCLK_LIMIT,             //!< CPU core clock limit (MHz)
+  RDC_FI_CPU_SKT_ACTIVE_FREQ_LIMIT,  //!< CPU socket active frequency limit (MHz)
+  RDC_FI_CPU_SKT_FREQ_LIMIT_SRC,     //!< CPU socket frequency limit source type
+  RDC_FI_CPU_SKT_FREQ_RANGE_MAX,     //!< CPU socket maximum frequency range (MHz)
+  RDC_FI_CPU_SKT_FREQ_RANGE_MIN,     //!< CPU socket minimum frequency range (MHz)
+  RDC_FI_CPU_SKT_C0_RESIDENCY,       //!< CPU socket C0 residency percentage
+  RDC_FI_CPU_SKT_LCLK_DPM_LEVEL,     //!< CPU socket LCLK DPM level
+  RDC_FI_CPU_LAST = RDC_FI_CPU_SKT_LCLK_DPM_LEVEL,
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -496,6 +519,9 @@ typedef struct {
   rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
                                         //!< pcie_tx/pcie_rx are not available on mi300, max integer
                                         //!< returned, so use pcie_total
+  uint32_t pcie_lc_perf_other_end_recovery_count; //!< PCIE other end recovery count
+  uint32_t pcie_nak_sent_count_acc;     //!< PCIE NAK sent accumulated count
+  uint32_t pcie_nak_rcvd_count_acc;     //!< PCIE NAK received accumulated count 
   rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
   rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
   rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
@@ -1812,15 +1838,15 @@ rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
 bool rdc_is_partition_string(const char* s);
 
 /**
- * @brief Parse partition id into physical gpu and partition
+ * @brief Parse partition id into socket and partition
  *
  * @param[in] s - singular partition string
- * @param[out] physicalGpu - socket id
+ * @param[out] socket - socket id
  * @param[out] partition - partition id
  *
  * @retval bool - success
  */
-bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition);
+bool rdc_parse_partition_string(const char* s, uint32_t* socket, uint32_t* partition);
 
 #ifdef __cplusplus
 }

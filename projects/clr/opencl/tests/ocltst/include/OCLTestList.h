@@ -33,11 +33,11 @@ class OCLTest;
 //
 //  exported function pointer typedefs
 //
-typedef unsigned int(OCLLCONV *TestCountFuncPtr)(void);
-typedef const char *(OCLLCONV *TestNameFuncPtr)(unsigned int);
-typedef OCLTest *(OCLLCONV *CreateTestFuncPtr)(unsigned int);
-typedef void(OCLLCONV *DestroyTestFuncPtr)(OCLTest *);
-typedef unsigned int(OCLLCONV *TestVersionFuncPtr)(void);
-typedef const char *(OCLLCONV *TestLibNameFuncPtr)(void);
+typedef unsigned int(OCLLCONV* TestCountFuncPtr)(void);
+typedef const char*(OCLLCONV* TestNameFuncPtr)(unsigned int);
+typedef OCLTest*(OCLLCONV* CreateTestFuncPtr)(unsigned int);
+typedef void(OCLLCONV* DestroyTestFuncPtr)(OCLTest*);
+typedef unsigned int(OCLLCONV* TestVersionFuncPtr)(void);
+typedef const char*(OCLLCONV* TestLibNameFuncPtr)(void);
 
 #endif  // _OCLMODULE_H_

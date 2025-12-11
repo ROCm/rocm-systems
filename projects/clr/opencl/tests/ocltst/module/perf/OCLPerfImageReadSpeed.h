@@ -29,8 +29,7 @@ class OCLPerfImageReadSpeed : public OCLTestImp {
   virtual ~OCLPerfImageReadSpeed();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -52,8 +51,7 @@ class OCLPerfPinnedImageReadSpeed : public OCLPerfImageReadSpeed {
   OCLPerfPinnedImageReadSpeed();
   virtual ~OCLPerfPinnedImageReadSpeed();
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual unsigned int close(void);
 
   cl_mem inBuffer_;

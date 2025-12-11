@@ -1,9 +1,12 @@
 exclude: |
+  (?x)
     third_party/
+    # avoid checking build directories for any subproject
     build/
     build-.*/
     _build/
-    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile
+    # external source of truth
+    shared/amdgpu-windows-interop
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -28,8 +31,8 @@ repos:
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
 
-  - repo: https://github.com/cheshirekow/cmake-format-precommit
-    rev: v0.6.10
+  - repo: https://github.com/BlankSpruce/gersemi
+    # gersemi replaces cmake-format and cmake-lint
+    rev: 0.22.1
     hooks:
-      - id: cmake-format
-      - id: cmake-lint
+      - id: gersemi

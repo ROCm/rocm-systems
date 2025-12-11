@@ -26,6 +26,8 @@ import sys
 import pytest
 import re
 import os
+import glob
+import json
 
 
 def test_json_data(json_data):
@@ -63,6 +65,44 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
             assert any([hsa_memory_bytes == fs for fs in tool_memory])
             break
     assert found == True
+
+
+def test_realtime_clock(output_path):
+
+    def verify_sorted(timestamps):
+
+        # Sort by shader_clock (index 0)
+        timestamps_sorted = sorted(timestamps, key=lambda ts: ts[0])
+        # Ensure realtime clock is non descreasing
+        assert all(
+            curr[1] >= prev[1]
+            for prev, curr in zip(timestamps_sorted, timestamps_sorted[1:])
+        )
+
+    def verify_gfxclock(timestamps, rt_frequency):
+
+        delta_shader_clock = timestamps[-1][0] - timestamps[0][0]
+        delta_realtime_ts = timestamps[-1][1] - timestamps[0][1]
+        gfxclock = rt_frequency * delta_shader_clock / delta_realtime_ts
+
+        # gfxclock must be positive
+        assert gfxclock > 0
+        # gfxclock must be <10GHz
+        assert gfxclock < 1e10
+
+    pattern = os.path.join(output_path, "ui_output_*", "realtime.json")
+    for rt_file in glob.glob(pattern):
+        with open(rt_file, "r", encoding="utf-8") as f:
+            json_file = json.load(f)
+
+        frequency = json_file["metadata"]["frequency"]
+        # frequency = 0 means aqlprofile is not instrumented
+        if frequency > 0:
+            for key, value in json_file.items():
+                # Exclude metadata and single-clock timestamps
+                if "metadata" not in key and len(value) >= 2:
+                    verify_sorted(value)
+                    verify_gfxclock(value, frequency)
 
 
 if __name__ == "__main__":

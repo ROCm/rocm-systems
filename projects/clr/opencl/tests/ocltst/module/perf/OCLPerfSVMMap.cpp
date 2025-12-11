@@ -43,8 +43,7 @@ static size_t sizeList[] = {
 };
 
 #define NUM_FLAGS 4
-static const cl_map_flags Flags[NUM_FLAGS] = {CL_MAP_READ, CL_MAP_WRITE,
-                                              CL_MAP_READ | CL_MAP_WRITE,
+static const cl_map_flags Flags[NUM_FLAGS] = {CL_MAP_READ, CL_MAP_WRITE, CL_MAP_READ | CL_MAP_WRITE,
                                               CL_MAP_WRITE_INVALIDATE_REGION};
 
 OCLPerfSVMMap::OCLPerfSVMMap() {
@@ -55,7 +54,7 @@ OCLPerfSVMMap::OCLPerfSVMMap() {
 
 OCLPerfSVMMap::~OCLPerfSVMMap() {}
 
-void OCLPerfSVMMap::open(unsigned int test, char *units, double &conversion,
+void OCLPerfSVMMap::open(unsigned int test, char* units, double& conversion,
                          unsigned int deviceId) {
 #if defined(CL_VERSION_2_0)
   _deviceId = deviceId;
@@ -66,8 +65,8 @@ void OCLPerfSVMMap::open(unsigned int test, char *units, double &conversion,
   testSize_ = test % NUM_SIZES;
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   cl_device_svm_capabilities caps;
@@ -92,9 +91,8 @@ void OCLPerfSVMMap::open(unsigned int test, char *units, double &conversion,
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfSVMMap::run(void) {
   if (skip_) {
@@ -105,9 +103,9 @@ void OCLPerfSVMMap::run(void) {
     return;
   }
 #if defined(CL_VERSION_2_0)
-  void *buffer;
+  void* buffer;
   CPerfCounter timer;
-  void *hostPtr = NULL;
+  void* hostPtr = NULL;
 
   const size_t bufSize = sizeList[testSize_] * sizeof(cl_int4);
   const cl_map_flags flag = Flags[testFlag_];
@@ -121,8 +119,7 @@ void OCLPerfSVMMap::run(void) {
   for (size_t i = 0; i < iter; ++i) {
     timer.Start();
 
-    error_ = clEnqueueSVMMap(cmdQueues_[_deviceId], CL_FALSE, flag, buffer,
-                             bufSize, 0, 0, 0);
+    error_ = clEnqueueSVMMap(cmdQueues_[_deviceId], CL_FALSE, flag, buffer, bufSize, 0, 0, 0);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueSVMMap() failed");
 
     error_ = clEnqueueSVMUnmap(cmdQueues_[_deviceId], buffer, 0, 0, 0);
@@ -133,16 +130,16 @@ void OCLPerfSVMMap::run(void) {
     timer.Stop();
   }
 
-  clSVMFree(context_, (void *)buffer);
+  clSVMFree(context_, (void*)buffer);
 
   char pFlags[4];
   pFlags[0] = (testFlag_ == 0 || testFlag_ == 2) ? 'R' : '_';  // CL_MAP_READ
   pFlags[1] = (testFlag_ == 1 || testFlag_ == 2) ? 'W' : '_';  // CL_MAP_WRITE
-  pFlags[2] = (testFlag_ == 3) ? 'I' : '_';  // CL_MAP_WRITE_INVALIDATE_REGION
+  pFlags[2] = (testFlag_ == 3) ? 'I' : '_';                    // CL_MAP_WRITE_INVALIDATE_REGION
 
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), "Map + Unmap (GB/s) for %6d KB, flags=%3s",
-           (int)bufSize / 1024, pFlags);
+  SNPRINTF(buf, sizeof(buf), "Map + Unmap (GB/s) for %6d KB, flags=%3s", (int)bufSize / 1024,
+           pFlags);
 
   testDescString = buf;
   double sec = timer.GetElapsedTime();

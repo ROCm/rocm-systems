@@ -186,7 +186,7 @@ bool verifyAdd_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val += divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[0]));
+    REQUIRE(val == Catch::Approx(gpuData[0]));
     return true;
   }
   return val == gpuData[0];
@@ -199,7 +199,7 @@ bool verifySub_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
     if (activeLanes[i]) val -= divergentValue[i];
   }
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[1]));
+    REQUIRE(val == Catch::Approx(gpuData[1]));
     return true;
   }
   return val == gpuData[1];
@@ -213,7 +213,7 @@ bool verifyMax_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[2]));
+    REQUIRE(val == Catch::Approx(gpuData[2]));
     return true;
   }
   return val == gpuData[2];
@@ -227,7 +227,7 @@ bool verifyMin_divValue(T* gpuData, int len, bool* activeLanes, T* divergentValu
   }
 
   if (std::is_same<T, float>::value) {
-    REQUIRE(val == Approx(gpuData[3]));
+    REQUIRE(val == Catch::Approx(gpuData[3]));
     return true;
   }
   return val == gpuData[3];
@@ -503,7 +503,7 @@ static void runFloatTest() {
   bool* dIActiveLanes;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
   HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
-  
+
   // copy host memory to device to initialize to zero
   HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
@@ -550,6 +550,7 @@ static void runFloatTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -592,7 +593,7 @@ template <typename T> static void runDivIntTest() {
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
   HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(T)));
-  
+
   // copy host memory to device to initialize to zero
   HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
@@ -768,8 +769,11 @@ static void runDivFloatTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIDivValues);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
+  HIP_CHECK(hipFree(dIDivValues));
 }
 
 /*

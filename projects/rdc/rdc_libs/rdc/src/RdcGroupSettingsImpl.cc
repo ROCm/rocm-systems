@@ -37,7 +37,9 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
   // Add the default job stats fields
   rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
                               RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
-                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_MEM_CLOCK,   RDC_FI_GPU_TEMP};
+                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  
+                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, RDC_FI_PCIE_NAK_SENT_COUNT_ACC, 
+                              RDC_FI_MEM_CLOCK,        RDC_FI_GPU_TEMP};
   char job_field_group[] = "JobStatsFields";
   rdc_field_grp_t fgid = JOB_FIELD_ID;
 
@@ -95,8 +97,9 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
       }
     }
   } else {
-    if (entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) {
-      RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index
+    if ((entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) &&
+        (entity_info.device_type == RDC_DEVICE_TYPE_GPU)) {
+      RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index << "." << entity_info.device_type
                                << " is not partitionable, but a partition instance was provided.");
       return RDC_ST_BAD_PARAMETER;
     }

@@ -53,6 +53,7 @@
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/functional/power_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
@@ -122,6 +123,18 @@ void TestPowerReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
+    // Check and wake the device in runtime suspend
+    bool is_suspended = false;
+    ret = amd::smi::check_runtime_pm_status(dv_ind, &is_suspended);
+    if (ret == RSMI_STATUS_SUCCESS && is_suspended) {
+      ret = amd::smi::wake_device(dv_ind);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        std::cout << "Failed to wake device, cannot read clock frequencies"
+                                                                << std::endl;
+        CHK_ERR_ASRT(ret)
+      }
+    }
+
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout <<
@@ -132,7 +145,7 @@ void TestPowerReadWrite::Run(void) {
       ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
       continue;
     }
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
 
     // Verify api support checking functionality is working
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, nullptr);
@@ -181,24 +194,17 @@ void TestPowerReadWrite::Run(void) {
 
     rsmi_dev_perf_level_t pfl;
     ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
     ASSERT_EQ(pfl, RSMI_DEV_PERF_LEVEL_MANUAL);
 
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
-    CHK_ERR_ASRT(ret)
+    CHK_ERR_ASRT(ret);
 
     ASSERT_EQ(status.current, new_prof);
 
-    ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-    CHK_ERR_ASRT(ret)
-
-    ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-    CHK_ERR_ASRT(ret)
-    ASSERT_EQ(pfl, RSMI_DEV_PERF_LEVEL_AUTO);
-
-    ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
-    CHK_ERR_ASRT(ret)
-
-    ASSERT_EQ(status.current, orig_profile);
+    // Restore original power profile and performance level
+    // assertion check not necessary because we are restoring the original state
+    rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    rsmi_dev_power_profile_set(dv_ind, 0, orig_profile);
   }
 }

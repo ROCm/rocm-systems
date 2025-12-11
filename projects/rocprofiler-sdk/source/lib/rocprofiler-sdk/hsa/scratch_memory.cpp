@@ -473,8 +473,10 @@ impl(Args... args)
                     found_agent = true;
                 }
             });
-
-        ROCP_FATAL_IF(!found_agent) << fmt::format(
+        // Changed to debug due to rocprofiler attachment feature. In some cases, the queue map for
+        // the iterate queues function is empty since the rocprofiler wasn't present when the queue
+        // data was gathered
+        ROCP_DFATAL_IF(!found_agent) << fmt::format(
             "Scratch memory tracing: Could not find a valid agent for queue id {}", hsa_queue->id);
         return _agent_id;
     };
@@ -610,7 +612,9 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
 
 template <size_t TableIdx, size_t... OpIdx>
 void
-update_table(context_array_t ctxs, hsa_amd_tool_table_t* _orig, std::index_sequence<OpIdx...>)
+update_table(const context_array_t& ctxs,
+             hsa_amd_tool_table_t*  _orig,
+             std::index_sequence<OpIdx...>)
 {
     static_assert(
         std::is_same<hsa_amd_tool_table_t, typename hsa_table_lookup<TableIdx>::type>::value,

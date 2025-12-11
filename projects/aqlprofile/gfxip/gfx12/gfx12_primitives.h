@@ -70,6 +70,12 @@ class gfx12_cntx_prim {
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF0_BASE_HI);
   static constexpr Register SQ_THREAD_TRACE_BUF0_SIZE_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF0_SIZE);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_LO_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_BASE_LO);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_BASE_HI_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_BASE_HI);
+  static constexpr Register SQ_THREAD_TRACE_BUF1_SIZE_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_BUF1_SIZE);
   static constexpr Register SQ_THREAD_TRACE_BASE_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_BASE2_ADDR{};
   static constexpr Register SQ_THREAD_TRACE_SIZE_ADDR{};
@@ -79,6 +85,8 @@ class gfx12_cntx_prim {
   static const uint32_t SQ_THREAD_TRACE_HIWATER_VAL = 0x6;
   static constexpr Register SQ_THREAD_TRACE_STATUS_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
+  static constexpr Register SQ_THREAD_TRACE_STATUS2_ADDR =
+      REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS2);
   static constexpr Register SQ_THREAD_TRACE_CNTR_ADDR =
       REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_DROPPED_CNTR);
   static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
@@ -467,12 +475,7 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SIMD_SEL, simd) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WGP_SEL, wgp) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, SA_SEL, 0x0) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE,
-                           1 << 6) |  // SQ_TT_WTYPE_INCLUDE_CS_BIT
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, EXCLUDE_NONDETAIL_SHADERDATA, 1);
-    // sq_thread_trace_mask = SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK,
-    // EXCLUDE_NONDETAIL_WAVESTART_EXT, 1) |
-    //        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, EXCLUDE_NONDETAIL_ALLOC, 1);
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_MASK, WTYPE_INCLUDE, 0x40); // SQ_TT_WTYPE_INCLUDE_CS_BIT
     return sq_thread_trace_mask;
   }
   // not supported in gfx12
@@ -541,7 +544,7 @@ class gfx12_cntx_prim {
   // Thread trace mode OFF value
   static uint32_t sqtt_mode_off_value() { return 0; }
   // Thread trace mode ON value
-  static uint32_t sqtt_mode_on_value() { return 0; }
+  static uint32_t sqtt_mode_on_value(bool) { return 0; }
 
   // Base address of buffer to use for thread trace
   static uint32_t sqtt_base_value_lo(const uint64_t& base_addr) {
@@ -580,7 +583,7 @@ class gfx12_cntx_prim {
   static uint32_t sqtt_zero_size_value() { return 0; }
 
   // Thread trace ctrl register value
-  static uint32_t sqtt_ctrl_value(bool on) {
+  static uint32_t sqtt_ctrl_value(bool on, bool double_buffer) {
     uint32_t sq_thread_trace_ctrl{0};
     sq_thread_trace_ctrl =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, MODE, on ? SQ_TT_MODE_ON : SQ_TT_MODE_OFF) |
@@ -589,8 +592,10 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DRAW_EVENT_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SPI_STALL_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SQ_STALL_EN, 1) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 4) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1);
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 3) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, GL1X_PREFETCH_PAGE, 13) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DOUBLE_BUFFER, double_buffer ? 1 : 0);
     return sq_thread_trace_ctrl;
   }
 
@@ -599,10 +604,10 @@ class gfx12_cntx_prim {
 
   enum ESQTT_STATUS_MASK {
     // Mask to check if memory error was received
-    TT_CONTROL_UTC_ERR_MASK = 0x1000000,
-    // TODO: Navi has 2 full bits on status2, one for each buffer
-    TT_CONTROL_FULL_MASK = 0x0,
-    TT_WRITE_PTR_MASK = 0x1FFFFFFF
+    TT_CONTROL_UTC_ERR_MASK = SQ_THREAD_TRACE_STATUS__WRITE_ERROR_MASK,
+    TT_CONTROL_FULL_MASK = SQ_THREAD_TRACE_STATUS2__BUF0_FULL_MASK | SQ_THREAD_TRACE_STATUS2__BUF1_FULL_MASK,
+    TT_WRITE_PTR_MASK = SQ_THREAD_TRACE_WPTR__OFFSET_MASK,
+    TT_LOCKDOWN_FAIL = SQ_THREAD_TRACE_STATUS2__PACKET_LOST_BUF_NO_LOCKDOWN_MASK
   };
 
   static uint32_t sqtt_busy_mask() {

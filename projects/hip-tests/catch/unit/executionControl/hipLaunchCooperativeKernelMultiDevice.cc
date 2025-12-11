@@ -27,13 +27,18 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic") {
+TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic",
+          "[multigpu]") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
   }
 
   const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
+    return;
+  }
 
   std::vector<hipLaunchParams> params_list(device_count);
 
@@ -59,13 +64,18 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
+TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters",
+          "[multigpu]") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
   }
 
   const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
+    return;
+  }
 
   std::vector<hipLaunchParams> params_list(device_count);
 
@@ -91,8 +101,13 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
   }
 
   SECTION("numDevices > device count") {
+#if HT_AMD
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
+                    hipErrorInvalidDevice);
+#else
     HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
                     hipErrorInvalidValue);
+#endif
   }
 
   SECTION("invalid flags") {
@@ -134,6 +149,12 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
 TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
+  }
+
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
     return;
   }
 

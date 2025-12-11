@@ -30,8 +30,7 @@ OCLMapCount::OCLMapCount() { _numSubTests = 1; }
 
 OCLMapCount::~OCLMapCount() {}
 
-void OCLMapCount::open(unsigned int test, char* units, double& conversion,
-                       unsigned int deviceId) {
+void OCLMapCount::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
@@ -41,16 +40,14 @@ void OCLMapCount::open(unsigned int test, char* units, double& conversion,
   // Get the address alignment, so we can make sure the sub buffer test later
   // works properly
   cl_uint addressAlign;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_MEM_BASE_ADDR_ALIGN,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MEM_BASE_ADDR_ALIGN,
                                      sizeof(addressAlign), &addressAlign, NULL);
   if (addressAlign < 128) addressAlign = 128;
 
   void* void_buffer = malloc(addressAlign * 4);
 
   // Create a buffer to test against
-  memObject = _wrapper->clCreateBuffer(context_,
-                                       CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR,
+  memObject = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR,
                                        addressAlign * 4, void_buffer, &error_);
   if (error_) {
     free(void_buffer);
@@ -58,15 +55,14 @@ void OCLMapCount::open(unsigned int test, char* units, double& conversion,
   }
 
   // Map buffer
-  void* mapped = _wrapper->clEnqueueMapBuffer(
-      cmdQueues_[deviceId], memObject, true, CL_MAP_READ, 0, addressAlign * 4,
-      0, NULL, NULL, &error_);
+  void* mapped = _wrapper->clEnqueueMapBuffer(cmdQueues_[deviceId], memObject, true, CL_MAP_READ, 0,
+                                              addressAlign * 4, 0, NULL, NULL, &error_);
 
   cl_uint mapCount;
 
   // Find the number of mappings on buffer after map
-  error_ = _wrapper->clGetMemObjectInfo(memObject, CL_MEM_MAP_COUNT,
-                                        sizeof(mapCount), &mapCount, &size);
+  error_ =
+      _wrapper->clGetMemObjectInfo(memObject, CL_MEM_MAP_COUNT, sizeof(mapCount), &mapCount, &size);
   CHECK_RESULT((error_ != CL_SUCCESS), "Unable to get mem object map count");
   if (mapCount != 1) {
     printf(
@@ -77,12 +73,12 @@ void OCLMapCount::open(unsigned int test, char* units, double& conversion,
   }
 
   // Unmap buffer
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[deviceId], memObject,
-                                             mapped, 0, NULL, NULL);
+  error_ =
+      _wrapper->clEnqueueUnmapMemObject(cmdQueues_[deviceId], memObject, mapped, 0, NULL, NULL);
 
   // Find the number of mappings on buffer after unmap
-  error_ = _wrapper->clGetMemObjectInfo(memObject, CL_MEM_MAP_COUNT,
-                                        sizeof(mapCount), &mapCount, &size);
+  error_ =
+      _wrapper->clGetMemObjectInfo(memObject, CL_MEM_MAP_COUNT, sizeof(mapCount), &mapCount, &size);
   CHECK_RESULT((error_ != CL_SUCCESS), "Unable to get mem object map count");
   if (mapCount != 0) {
     printf(

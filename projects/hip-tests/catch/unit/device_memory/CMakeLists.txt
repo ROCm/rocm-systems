@@ -28,7 +28,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "nvidia")
   set(LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
-  set(LINKER_LIBS hiprtc)
+  set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -41,8 +41,7 @@ elseif (HIP_PLATFORM MATCHES "nvidia")
   hip_add_exe_to_target(NAME DeviceMemoryTest
                     TEST_SRC ${TEST_SRC}
                     TEST_TARGET_NAME build_tests
-                    LINKER_LIBS ${LINKER_LIBS}
-                    COMPILE_OPTIONS -std=c++17)
+                    LINKER_LIBS ${LINKER_LIBS})
 endif()
 
 if(UNIX)

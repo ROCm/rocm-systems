@@ -52,11 +52,7 @@ TEST_CASE("Unit_hipBindTexture2D_Positive") {
 
 TEST_CASE("Unit_hipBindTexture2D_Pitch") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
+  (void) hipGetLastError();  // Prevent negative tests affecting this
 
   float* b;
   float* a;
@@ -122,6 +118,8 @@ TEST_CASE("Unit_hipBindTexture2D_Negative") {
         hipBindTexture2D(&texture_offset, &tex, device_ptr, &tex.channelDesc, SIZE_W, SIZE_H, 0),
         hipErrorInvalidValue);
   }
+
+  HIP_CHECK(hipFree(device_ptr));
 }
 
 #endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000

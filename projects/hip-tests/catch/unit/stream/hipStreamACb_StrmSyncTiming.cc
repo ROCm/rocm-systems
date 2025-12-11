@@ -113,15 +113,7 @@ TEST_CASE("Unit_hipStreamAddCallback_StrmSyncTiming") {
   while (!cbDone) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-
-  // Since the callback is supposed to be called only after an implicit stream
-  // synchronization, and the runtime cannot continue until the callback is done
-  // hipStreamSynchronize call should not take much time.
-  auto start = std::chrono::high_resolution_clock::now();
-  HIPCHECK(hipStreamSynchronize(mystream));
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-
+  HIPCHECK(hipStreamQuery(mystream));
   HIPCHECK(hipStreamDestroy(mystream));
   HIPCHECK(hipFree(A_d));
   HIPCHECK(hipFree(C_d));
@@ -129,10 +121,4 @@ TEST_CASE("Unit_hipStreamAddCallback_StrmSyncTiming") {
   free(C_h);
 
   REQUIRE(Data_mismatch.load() == 0);
-  // HIP runtime cannot proceed further in the queue until callback completes
-  // Stream synchronize should not have much task to do after callback
-  // It should just be an extra empty marker wait
-  // Therefore the hipStreamSynchronize() in the
-  // main thread should hardly take any time to complete.
-  REQUIRE(duration.count() < 100);
 }

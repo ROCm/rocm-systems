@@ -190,8 +190,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       invalid_ptr.pitch = extent.width - 1;
       auto invalid_params =
           GetDrvMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
-      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params), hipErrorInvalidValue);
     }
 
     SECTION("srcPitch < width") {
@@ -199,8 +198,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       invalid_ptr.pitch = extent.width - 1;
       auto invalid_params =
           GetDrvMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
-      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params), hipErrorInvalidValue);
     }
 
     SECTION("dstPitch > max pitch") {
@@ -319,6 +317,6 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */
