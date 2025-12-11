@@ -1006,3 +1006,49 @@ free_out:
   free(req);
   return r;
 }
+
+static int vhsakmt_export_dmabuf(vhsakmt_device_handle dev, uint32_t bo_handle, int* dmabuf_fd) {
+  return drmPrimeHandleToFD(dev->vgdev->fd, bo_handle, DRM_CLOEXEC | DRM_RDWR, dmabuf_fd);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo =  vhsakmt_find_bo_by_addr(dev, MemoryAddress);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  int r;
+
+  r = vhsakmt_export_dmabuf(dev, bo->real.handle, DMABufFd);
+  if (r) {
+    vhsa_err("%s: export dmabuf failed for handle: %d\n",
+              __FUNCTION__, bo->real.handle);
+    return -HSAKMT_STATUS_ERROR;
+  }
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
+      .export_dmabuf_args =
+          {
+              .MemoryAddress = (uint64_t)MemoryAddress,
+              .MemorySizeInBytes = MemorySizeInBytes,
+          },
+      .res_id = bo->real.res_id,
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  *Offset = rsp->export_dmabuf_rsp.offset;
+
+  vhsa_debug("%s: gva: %p, size: %lx, dmabuf_fd: %d, offset: %lx, resid: %x \n", __FUNCTION__,
+             MemoryAddress, MemorySizeInBytes, *DMABufFd, *Offset, bo->real.res_id);
+
+  return r;
+}
