@@ -43,7 +43,9 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <regex>
 #include <string>
 #include <vector>
@@ -2397,6 +2399,21 @@ hsa_status_t Runtime::Load() {
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
   asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
+
+  // Register atexit handler to join async threads before static destruction.
+  // This prevents use-after-free when async callbacks access static objects
+  // (like kBlitKernelSource_) during program exit.
+  static std::once_flag atexit_flag;
+  std::call_once(atexit_flag, []() {
+      std::atexit([]() {
+          ScopedAcquire<KernelMutex> lock(&bootstrap_lock());
+          if (runtime_singleton_ != nullptr) {
+              // Join async threads before static destruction begins
+              runtime_singleton_->asyncSignals_.reset();
+              runtime_singleton_->asyncExceptions_.reset();
+          }
+      });
+  });
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
