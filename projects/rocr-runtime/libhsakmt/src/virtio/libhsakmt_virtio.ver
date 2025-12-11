@@ -43,6 +43,8 @@ vhsaKmtGetRuntimeCapabilities;
 vamdgpu_query_gpu_info;
 vamdgpu_device_initialize;
 vamdgpu_device_deinitialize;
+vamdgpu_device_get_fd;
+vdrmCommandWriteRead;
 local: *;
 };
 

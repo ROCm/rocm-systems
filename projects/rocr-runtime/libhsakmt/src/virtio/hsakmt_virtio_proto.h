@@ -109,6 +109,8 @@ enum vhsakmt_ccmd_query_type {
   VHSAKMT_CCMD_QUERY_TILE_CONFIG,
   VHSAKMT_CCMD_QUERY_NANO_TIME,
   VHSAKMT_CCMD_QUERY_GET_RUNTIME_CAPS,
+  VHSAKMT_CCMD_QUERY_AMDGPU_DEVICE_HANDLE,
+  VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ,
 };
 
 #define QUERY_PTR_INFO_MAX_MAPPED_NODES 3
@@ -164,6 +166,19 @@ typedef struct _query_nano_time_rsp {
 } query_nano_time_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_query_nano_time_rsp)
 
+typedef struct _query_drm_cmd_write_read_args {
+   uint64_t fd;
+   uint64_t drmCommandIndex;
+   uint64_t size;
+} query_drm_cmd_write_read_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_drm_cmd_write_read_args)
+
+typedef struct _query_device_handle_rsp {
+  uint64_t amdgpu_device_handle;
+  uint64_t fd;
+} query_device_handle_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_device_handle_rsp)
+
 struct vhsakmt_ccmd_query_info_req {
   struct vhsakmt_ccmd_req hdr;
   struct drm_amdgpu_info info;
@@ -178,6 +193,7 @@ struct vhsakmt_ccmd_query_info_req {
     query_req_node_io_link_args node_io_link_args;
     query_tile_config tile_config_args;
     query_open_kfd_args open_kfd_args;
+    query_drm_cmd_write_read_args drm_cmd_write_read_args;
   };
 
   uint8_t payload[];
@@ -186,8 +202,9 @@ VHSAKMT_DEFINE_CAST(vhsakmt_ccmd_req, vhsakmt_ccmd_query_info_req)
 VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_query_info_req)
 #define VHSAKMT_CCMD_QUERY_MAX_TILE_CONFIG 128
 #define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_MEM_PROP 128
-#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_CACHE_PROP 128
-#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_IO_LINK_PROP 128
+#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_CACHE_PROP 512
+#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_IO_LINK_PROP 512
+#define VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ_MAX_SIZE 128
 
 struct vhsakmt_ccmd_query_info_rsp {
   struct vhsakmt_ccmd_rsp hdr;
@@ -203,6 +220,7 @@ struct vhsakmt_ccmd_query_info_rsp {
     HsaNodeProperties node_props;
     int32_t xnack_mode;
     HsaClockCounters clock_counters;
+    query_device_handle_rsp device_handle_rsp;
     uint32_t caps;
     uint64_t pad[9];
   };
