@@ -109,6 +109,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtDestroyQueue(HSA_QUEUEID QueueId);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
