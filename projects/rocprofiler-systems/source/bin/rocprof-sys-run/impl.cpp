@@ -422,6 +422,7 @@ INSTRUMENTATION WORKFLOW:
                 _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_OMPT");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_KOKKOSP");
+                _parser_data.updated.emplace("ROCPROFSYS_USE_RCCL");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_MPIP");
                 _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
                 _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
@@ -433,6 +434,7 @@ INSTRUMENTATION WORKFLOW:
                 tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "100", 0);
                 tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_OMPT", "ON", 0);
+                tim::set_env("ROCPROFSYS_USE_RCCL", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_KOKKOSP", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_MPIP", "true", 0);
                 tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);

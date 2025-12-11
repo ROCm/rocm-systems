@@ -461,6 +461,9 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_OMPT", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_RCCL", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_KOKKOSP", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
