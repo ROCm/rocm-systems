@@ -488,7 +488,7 @@ def are_counters_similar(test_dfs, baseline_df, ignore_first=50):
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
         return False
 
-    single_valued_counter_patterns = list(
+    deterministic_counter_patterns = list(
         map(
             re.compile,
             [
@@ -523,7 +523,7 @@ def are_counters_similar(test_dfs, baseline_df, ignore_first=50):
         counter_name = group_key[4]
         if any(
             re.match(pattern, counter_name)
-            for pattern in single_valued_counter_patterns
+            for pattern in deterministic_counter_patterns
         ):
             if (
                 all([
