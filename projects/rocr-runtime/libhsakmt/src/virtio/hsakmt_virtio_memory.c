@@ -379,7 +379,7 @@ int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
 
   if (bo->event) free(bo->event);
 
-  if (bo->gl_meta_data) free(bo->gl_meta_data);
+  if (bo->amdgpu_bo.gl_meta_data) free(bo->amdgpu_bo.gl_meta_data);
 
   pthread_mutex_destroy(&bo->map_mutex);
 
@@ -802,7 +802,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtDeregisterMemory(void* MemoryAddress) {
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);
 
-  if (bo && (bo->bo_type & VHSA_BO_CLGL)) return vhsakmt_remove_clgl_bo(dev, bo);
+  if (bo && (bo->bo_type & VHSA_BO_AMDGPU)) return vhsakmt_remove_clgl_bo(dev, bo);
 
   if (!dev->use_svm) {
     return vhsakmt_deregister_userptr_non_svm(dev, MemoryAddress);
@@ -884,8 +884,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetTileConfig(HSAuint32 NodeId, HsaGpuTileConfig*
   return rsp->ret;
 }
 
-static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t size,
-                                  uint32_t res_id, uint32_t bo_handle, void* meta_data) {
+static int vhsakmt_create_amdgpu_bo(vhsakmt_device_handle dev, void* addr, size_t size,
+                                    uint32_t res_id, uint32_t bo_handle, void* meta_data) {
   vhsakmt_bo_handle out = calloc(1, sizeof(struct vhsakmt_bo));
   if (!out) return -ENOMEM;
 
@@ -902,8 +902,8 @@ static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t 
 
   /* GL bo handle from GL context*/
   out->real.handle = bo_handle;
-  out->bo_type |= VHSA_BO_CLGL;
-  if (meta_data) out->gl_meta_data = meta_data;
+  out->bo_type |= VHSA_BO_AMDGPU;
+  if (meta_data) out->amdgpu_bo.gl_meta_data = meta_data;
 
   out->host_addr = addr;
 
@@ -912,18 +912,18 @@ static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t 
   return 0;
 }
 
-static int vhsakmt_gfxhandle_to_resid(vhsakmt_device_handle dev, uint32_t gfx_handle,
-                                      uint32_t* res_id, uint32_t* bo_handle) {
-  int r = drmPrimeFDToHandle(dev->vgdev->fd, gfx_handle, bo_handle);
+int vhsakmt_handle_to_resid(vhsakmt_device_handle dev, uint32_t handle,
+                            uint32_t* res_id, uint32_t* bo_handle) {
+  int r = drmPrimeFDToHandle(dev->vgdev->fd, handle, bo_handle);
   if (r) {
-    vhsa_err("%s: drmPrimeFDToHandle failed for handle: %u\n", __FUNCTION__, gfx_handle);
+    vhsa_err("%s: drmPrimeFDToHandle failed for handle: %u\n", __FUNCTION__, handle);
     return r;
   }
 
   virtio_gpu_res_id(dev->vgdev, *bo_handle, res_id);
 
-  vhsa_debug("%s: register praphics handle: handle: %d, bo_handle: %d, res_id: %d\n", __FUNCTION__,
-             gfx_handle, *bo_handle, *res_id);
+  vhsa_debug("%s: drm handle: %d, bo_handle: %d, res_id: %d\n", __FUNCTION__,
+             handle, *bo_handle, *res_id);
 
   return 0;
 }
@@ -952,7 +952,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
 #ifdef CLGL_EXPORT_RESID
   req->reg_ghd_to_nodes.GraphicsResourceHandle = GraphicsResourceHandle;
 #else
-  r = vhsakmt_gfxhandle_to_resid(dev, GraphicsResourceHandle, &res_id, &bo_handle);
+  r = vhsakmt_handle_to_resid(dev, GraphicsResourceHandle, &res_id, &bo_handle);
   if (r) return r;
 
   req->reg_ghd_to_nodes.GraphicsResourceHandle = bo_handle;
@@ -988,9 +988,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
              GraphicsResourceHandle, GraphicsResourceInfo->MemoryAddress,
              GraphicsResourceInfo->SizeInBytes);
 
-  r = vhsakmt_create_clgl_bo(dev, GraphicsResourceInfo->MemoryAddress,
-                             GraphicsResourceInfo->SizeInBytes, res_id, bo_handle,
-                             VHSA_UINT64_TO_VPTR(GraphicsResourceInfo->Metadata));
+  r = vhsakmt_create_amdgpu_bo(dev, GraphicsResourceInfo->MemoryAddress,
+                               GraphicsResourceInfo->SizeInBytes, res_id, bo_handle,
+                               VHSA_UINT64_TO_VPTR(GraphicsResourceInfo->Metadata));
   if (r) goto free_out;
 
   r = rsp->ret;
