@@ -358,7 +358,7 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
 
     // Decrement ref_count before deleting data
-    auto  _dtor    = common::scope_destructor{[&_lk, &_data]() {
+    auto _dtor = common::scope_destructor{[&_lk, &_data]() {
         if(_data->correlation_id)
         {
             _data->correlation_id->sub_ref_count();

@@ -456,7 +456,7 @@ memory_allocation_impl(Args... args)
     constexpr auto operation        = memory_allocation_op<OpIdx>::operation_idx;
     constexpr auto rocprofiler_enum = memory_allocation_info<operation>::operation_idx;
 
-    auto&&                 _tied_args = std::tie(args...);
+    auto&& _tied_args = std::tie(args...);
 
     // if finalization is in progress or complete, skip correlation ID handling
     if(registration::get_fini_status() != 0)
@@ -597,7 +597,7 @@ memory_free_impl(Args... args)
 
     common::consume_args(arg_indices<OpIdx>::size_idx, arg_indices<OpIdx>::region_idx);
 
-    auto&&                 _tied_args = std::tie(args...);
+    auto&& _tied_args = std::tie(args...);
 
     // if finalization is in progress or complete, skip correlation ID handling
     if(registration::get_fini_status() != 0)
