@@ -98,9 +98,9 @@ struct ElfInfo
 
     std::string as_string() const;
 
-    std::ostream& operator<<(std::ostream& os) const
+    friend std::ostream& operator<<(std::ostream& os, const ElfInfo& info)
     {
-        os << as_string();
+        os << info.as_string();
         return os;
     }
 
