@@ -3794,8 +3794,13 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   // Import to target agent.
   status = targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent,
                                               shareable_handle);
+  if (!shareable_handle.IsValid()) {
+    shareable_handle.handle = _mappedHandle->shareable_handle.handle;
+  }
   assert(status == HSA_STATUS_SUCCESS);
-  close(dmabuf_fd);
+  if (dmabuf_fd != -1) {
+    close(dmabuf_fd);
+  }
   if (status != HSA_STATUS_SUCCESS)
     return;
 }
