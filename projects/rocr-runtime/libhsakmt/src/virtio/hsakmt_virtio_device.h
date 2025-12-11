@@ -94,6 +94,8 @@ struct vhsakmt_node {
   void* doorbell_base;
   uint64_t scratch_start;
   uint64_t scratch_size;
+  HsaAMDGPUDeviceHandle amdgpu_device_handle;
+  int amdgpu_fd;
 };
 
 struct vhsakmt_device {
