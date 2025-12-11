@@ -2,10 +2,6 @@
 Panel Config:
   id: 1800
   title: L2 Cache (per Channel)
-  metrics_description:
-    L2 Cache Hit Rate: The percent of total number of requests to the L2 from all
-      clients that hit in the cache. As noted in the Speed-of-Light section, this
-      includes hit-on-miss requests.
   data source:
   - metric_table:
       id: 1801
@@ -249,3 +245,7 @@ Panel Config:
           ::_1: $total_l2_chan
       cli_style: simple_box
       tui_style: simple_box
+  metrics_description:
+    L2 Cache Hit Rate: The percent of total number of requests to the L2 from all
+      clients that hit in the cache. As noted in the Speed-of-Light section, this
+      includes hit-on-miss requests.

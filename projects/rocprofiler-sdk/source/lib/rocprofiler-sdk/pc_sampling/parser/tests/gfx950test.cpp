@@ -24,7 +24,7 @@
 #    undef NDEBUG
 #endif
 
-#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/gfx9test.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/gfxtest.hpp"
 
 #include <gtest/gtest.h>
 #include <cstddef>
@@ -33,7 +33,7 @@
  * @brief This test verifies if the PC address is corrected properly on GFX950 when required.
  */
 template <typename PcSamplingRecordT>
-class MidMacroPCCorrectionGFX950 : public MidMacroPCCorrection<PcSamplingRecordT>
+class MidMacroPCCorrectionGFX950 : public MidMacroPCCorrection<GFX950, PcSamplingRecordT>
 {
 public:
     void genPCSample(uint64_t pc, bool mid_macro) override
@@ -47,19 +47,14 @@ public:
         }
 
         // invoking parent class
-        MidMacroPCCorrection<PcSamplingRecordT>::genPCSample(pc, mid_macro);
+        MidMacroPCCorrection<GFX950, PcSamplingRecordT>::genPCSample(pc, mid_macro);
     };
 
-    uint64_t calcaulteExpectedPC(uint64_t pc, bool mid_macro) override
+    uint64_t calculateExpectedPC(uint64_t pc, bool mid_macro) override
     {
         // According to the regspec, if mid_macro is true, we need to subtract 2 dwords from the PC
         // address.
         return mid_macro ? (pc - 2 * sizeof(uint32_t)) : pc;
-    }
-
-    std::vector<std::vector<PcSamplingRecordT>> get_parsed_data() override
-    {
-        return this->buffer->get_parsed_buffer(9, 5);  // GFX950
     }
 };
 

@@ -5683,6 +5683,23 @@ typedef enum {
 } hsa_code_symbol_info_t;
 
 /**
+ * @brief System dependent handle type.
+ */
+#if defined(_WIN32)
+typedef void* hsa_handle_t;
+#else
+typedef int hsa_handle_t;
+#endif
+
+/**
+ * @brief Platform-independent container for a Windows LUID.
+ */
+typedef struct hsa_luid_s {
+  uint32_t low;         //!< Luid low 4 bytes, valid only on Windows
+  uint32_t high;        //!< Luid high 4 bytes, valid only on Windows
+} hsa_luid_t;
+
+/**
  * @deprecated
  *
  * @brief Get the current value of an attribute for a given code symbol.

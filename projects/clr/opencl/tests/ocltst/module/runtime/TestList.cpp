@@ -70,13 +70,9 @@
 //
 //  Helper macro for adding tests
 //
-template <typename T>
-static void* dictionary_CreateTestFunc(void) {
-  return new T();
-}
+template <typename T> static void* dictionary_CreateTestFunc(void) { return new T(); }
 
-#define TEST(name) \
-  { #name, &dictionary_CreateTestFunc < name> }
+#define TEST(name) {#name, &dictionary_CreateTestFunc<name>}
 
 TestEntry TestList[] = {
     TEST(OCLCreateContext),
@@ -119,7 +115,7 @@ TestEntry TestList[] = {
     TEST(OCLReadWriteImage),
     TEST(OCLStablePState),
     TEST(OCLP2PBuffer),
-    
+
     // Disabled until new Windows driver release that contains the
     // clCreatePipe changes
     // TEST(OCLCreatePipe),

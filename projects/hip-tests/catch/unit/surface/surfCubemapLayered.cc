@@ -35,10 +35,10 @@ THE SOFTWARE.
 
 #define LOG_DATA 0
 
-template <typename T>
-__global__ void surfCubemapLayeredKernelR(hipSurfaceObject_t surfaceObject, T* outputData,
-                                          int width, int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapLayeredKernelR(hipSurfaceObject_t surfaceObject,
+                                                                T* outputData, int width,
+                                                                int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -47,10 +47,10 @@ __global__ void surfCubemapLayeredKernelR(hipSurfaceObject_t surfaceObject, T* o
 #endif
 }
 
-template <typename T>
-__global__ void surfCubemapLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width,
-                                          int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapLayeredKernelW(hipSurfaceObject_t surfaceObject,
+                                                                T* inputData, int width,
+                                                                int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -59,11 +59,10 @@ __global__ void surfCubemapLayeredKernelW(hipSurfaceObject_t surfaceObject, T* i
 #endif
 }
 
-template <typename T>
-__global__ void surfCubemapLayeredKernelRW(hipSurfaceObject_t surfaceObject,
-                                           hipSurfaceObject_t outputSurfObj, int width,
-                                           int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+template <typename T> __global__ void surfCubemapLayeredKernelRW(hipSurfaceObject_t surfaceObject,
+                                                                 hipSurfaceObject_t outputSurfObj,
+                                                                 int width, int height) {
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -340,6 +339,6 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapLayered_Positive_ReadWrite", "", char, uchar
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

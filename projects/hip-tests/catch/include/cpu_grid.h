@@ -122,8 +122,8 @@ inline dim3 GenerateThreadDimensions() {
       map([max = props.maxThreadsDim[2], warp_size = props.warpSize](
               double i) { return dim3(1, 1, std::min(static_cast<int>(i * warp_size), max)); },
           values(multipliers)),
-      dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3), dim3(props.warpSize - 1, 3, 3),
-      dim3(props.warpSize + 1, 3, 3));
+      dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3),
+      dim3(props.warpSize - 1, 3, 3), dim3(props.warpSize + 1, 3, 3));
 }
 
 /* Generate dimensions for 1D, 2D and 3D grids of blocks */
@@ -161,8 +161,8 @@ inline dim3 GenerateThreadDimensionsForShuffle() {
       map([max = props.maxThreadsDim[2], warp_size = props.warpSize](
               double i) { return dim3(1, 1, std::min(static_cast<int>(i * warp_size), max)); },
           values(multipliers)),
-      dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3), dim3(props.warpSize - 1, 3, 3),
-      dim3(props.warpSize + 1, 3, 3));
+      dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3),
+      dim3(props.warpSize - 1, 3, 3), dim3(props.warpSize + 1, 3, 3));
 }
 
 /* Generate dimensions for 1D, 2D and 3D grids of blocks - reduced set */

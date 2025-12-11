@@ -54,7 +54,7 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
   CHECK_IMAGE_SUPPORT
 
-  float *texBuf;
+  float* texBuf;
   hipError_t ret;
   constexpr int xsize = 32;
   hipResourceDesc resDesc;
@@ -74,8 +74,7 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
   SECTION("hipResourceTypeLinear and devPtr(nullptr)") {
     // Populate resource descriptor
     resDesc.res.linear.devPtr = nullptr;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                           hipChannelFormatKindFloat);
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
     resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
     // Populate texture descriptor
@@ -85,30 +84,21 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
   }
 
   SECTION("hipResourceTypeLinear and sizeInBytes(0)") {
-    if ((TestContext::get()).isAmd()) {
-      // Populate resource descriptor
-      resDesc.res.linear.devPtr = texBuf;
-      resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                                              hipChannelFormatKindFloat);
-      resDesc.res.linear.sizeInBytes = 0;
+    // Populate resource descriptor
+    resDesc.res.linear.devPtr = texBuf;
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
+    resDesc.res.linear.sizeInBytes = 0;
 
-      // Populate texture descriptor
-      texDesc.readMode = hipReadModeElementType;
-      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-      REQUIRE(ret != hipSuccess);
-    } else {
-      // API expected to return failure. Test skipped
-      // on nvidia as api returns success and would lead
-      // to unexpected behavior with app.
-      WARN("Resource type Linear/sizeInBytes(0) skipped on nvidia");
-    }
+    // Populate texture descriptor
+    texDesc.readMode = hipReadModeElementType;
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
+    HIP_CHECK(hipDestroyTextureObject(texObj));
   }
 
   SECTION("hipResourceTypeLinear and sizeInBytes(max(size_t))") {
     // Populate resource descriptor
     resDesc.res.linear.devPtr = texBuf;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                           hipChannelFormatKindFloat);
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
     resDesc.res.linear.sizeInBytes = std::numeric_limits<std::size_t>::max();
 
     // Populate texture descriptor
@@ -121,8 +111,7 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
 #if HT_AMD
     // Populate resource descriptor
     resDesc.res.linear.devPtr = texBuf;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                           hipChannelFormatKindFloat);
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
     resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
     // Populate texture descriptor
@@ -142,17 +131,15 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
 
   SECTION("hipResourceTypeLinear and devicePtr un-aligned") {
     if (devProp.textureAlignment > UNALIGN_OFFSET) {
-    // Populate resource descriptor
-    resDesc.res.linear.devPtr = reinterpret_cast<char *>(texBuf)
-                                                      + UNALIGN_OFFSET;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                                               hipChannelFormatKindFloat);
-    resDesc.res.linear.sizeInBytes = N * sizeof(float);
+      // Populate resource descriptor
+      resDesc.res.linear.devPtr = reinterpret_cast<char*>(texBuf) + UNALIGN_OFFSET;
+      resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
+      resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
-    // Populate texture descriptor
-    texDesc.readMode = hipReadModeElementType;
-    ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-    REQUIRE(ret != hipSuccess);
+      // Populate texture descriptor
+      texDesc.readMode = hipReadModeElementType;
+      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
+      REQUIRE(ret != hipSuccess);
     }
   }
 
@@ -161,6 +148,6 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

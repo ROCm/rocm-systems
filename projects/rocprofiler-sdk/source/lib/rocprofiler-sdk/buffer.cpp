@@ -219,7 +219,20 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
                     } catch(std::exception& e)
                     {
-                        ROCP_CI_LOG(ERROR) << "buffer callback threw an exception: " << e.what();
+                        ROCP_CI_LOG(ERROR) << fmt::format(
+                            "buffer callback threw an exception: {} [buffer_id={}, idx={}, "
+                            "offset={}, context_id={}, callback={}, callback_data={}, records={}, "
+                            "first_record_ptr={}, drop_count={}]",
+                            e.what(),
+                            buffer_id.handle,
+                            idx,
+                            offset,
+                            buff_v->context_id,
+                            reinterpret_cast<const void*>(buff_v->callback),
+                            buff_v->callback_data,
+                            _headers.size(),
+                            (!_headers.empty() ? static_cast<const void*>(&_headers[0]) : nullptr),
+                            buff_v->drop_count.load());
                     }
                 });
 

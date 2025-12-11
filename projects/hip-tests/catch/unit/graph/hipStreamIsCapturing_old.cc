@@ -56,9 +56,10 @@ Functional Testcase Scenarios :
      of s1 using hipStreamIsCapturing. Verify that it is in state hipStreamCaptureStatusActive
      in thread. Exit the thread and end the capture.
   11)Functional : Create a stream with default flag (hipStreamDefault). Start capturing
-     the stream. Invoke hipStreamIsCapturing() on the null stream. Verify hipErrorStreamCaptureImplicit
-     is returned by hipStreamIsCapturing(). Verify capture status of created stream. Do some operatoins.
-     End the capture on the created stream. Execute the graph and verify the output from the operations.
+     the stream. Invoke hipStreamIsCapturing() on the null stream. Verify
+hipErrorStreamCaptureImplicit is returned by hipStreamIsCapturing(). Verify capture status of
+created stream. Do some operatoins. End the capture on the created stream. Execute the graph and
+verify the output from the operations.
 */
 
 TEST_CASE("Unit_hipStreamIsCapturing_Negative") {
@@ -69,8 +70,9 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative") {
     ret = hipStreamIsCapturing(stream, nullptr);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  SECTION("Check capture status with hipStreamPerThread and"
-                 " nullptr as pCaptureStatus.") {
+  SECTION(
+      "Check capture status with hipStreamPerThread and"
+      " nullptr as pCaptureStatus.") {
     ret = hipStreamIsCapturing(hipStreamPerThread, nullptr);
     REQUIRE(hipErrorInvalidValue == ret);
   }
@@ -113,7 +115,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_Functional") {
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-      A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + i;
   }
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
@@ -137,8 +139,8 @@ TEST_CASE("Unit_hipStreamIsCapturing_Functional") {
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
 
   HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream));
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, stream, A_d, C_d, N);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
+                     C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -181,7 +183,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread") {
 
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-      A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + i;
   }
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
@@ -194,22 +196,19 @@ TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread") {
     REQUIRE(hipStreamCaptureStatusNone == cStatus);
   }
 
-  HIP_CHECK(hipStreamBeginCapture(hipStreamPerThread,
-                                  hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(hipStreamPerThread, hipStreamCaptureModeGlobal));
 
   SECTION("Start capturing a stream and check the status.") {
     HIP_CHECK(hipStreamIsCapturing(hipStreamPerThread, &cStatus));
     REQUIRE(hipStreamCaptureStatusActive == cStatus);
   }
 
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice,
-                                             hipStreamPerThread));
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, hipStreamPerThread));
 
   HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, hipStreamPerThread));
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-           dim3(threadsPerBlock), 0, hipStreamPerThread, A_d, C_d, N);
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost,
-                                             hipStreamPerThread));
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0,
+                     hipStreamPerThread, A_d, C_d, N);
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, hipStreamPerThread));
 
   HIP_CHECK(hipStreamEndCapture(hipStreamPerThread, &graph));
 
@@ -227,13 +226,13 @@ TEST_CASE("Unit_hipStreamIsCapturing_hipStreamPerThread") {
   HIP_CHECK(hipFree(C_d));
 }
 /*
-* Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and wait
-* for event e1 on s2. Queue some operations in s1 and s2. Invoke hipStreamIsCapturing
-* on both s1 and s2. Verify that the capture info (status) of both s1 and s2 are identical.
-* Record event e2 on s2 and wait for event e2 on s1. End the capture of stream s1.
-* Invoke hipStreamIsCapturing on both streams. Verify that the capture info(status)
-* of both s1 and s2 are identical.
-*/
+ * Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and wait
+ * for event e1 on s2. Queue some operations in s1 and s2. Invoke hipStreamIsCapturing
+ * on both s1 and s2. Verify that the capture info (status) of both s1 and s2 are identical.
+ * Record event e2 on s2 and wait for event e2 on s1. End the capture of stream s1.
+ * Invoke hipStreamIsCapturing on both streams. Verify that the capture info(status)
+ * of both s1 and s2 are identical.
+ */
 TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream") {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
@@ -279,18 +278,17 @@ TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream") {
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
   // Kernal Operations
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, stream1, A_d, C_d, N);
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, stream2, B_d, D_d, N);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream1, A_d,
+                     C_d, N);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream2, B_d,
+                     D_d, N);
   // Copy data back to the Host
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
   HIP_CHECK(hipMemcpyAsync(D_h, D_d, Nbytes, hipMemcpyDeviceToHost, stream2));
 
   hipStreamCaptureStatus captureStatus1{hipStreamCaptureStatusNone},
-                         captureStatus2{hipStreamCaptureStatusNone},
-                         captureStatus3{hipStreamCaptureStatusNone},
-                         captureStatus4{hipStreamCaptureStatusNone};
+      captureStatus2{hipStreamCaptureStatusNone}, captureStatus3{hipStreamCaptureStatusNone},
+      captureStatus4{hipStreamCaptureStatusNone};
   // Capturing info
   HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus1));
   HIP_CHECK(hipStreamIsCapturing(stream2, &captureStatus2));
@@ -326,11 +324,11 @@ TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream") {
   free(D_h);
 }
 /*
-* Create a stream s1. Start capturing s1. Get the capture info using hipStreamIsCapturing
-* of s1. Launch a thread. In the thread get the capture info of s1 using hipStreamIsCapturing.
-* Verify that it is in state hipStreamCaptureStatusActive in thread. Exit the thread and end
-* the capture.
-*/
+ * Create a stream s1. Start capturing s1. Get the capture info using hipStreamIsCapturing
+ * of s1. Launch a thread. In the thread get the capture info of s1 using hipStreamIsCapturing.
+ * Verify that it is in state hipStreamCaptureStatusActive in thread. Exit the thread and end
+ * the capture.
+ */
 // Thread Function
 static void thread_func(hipStream_t stream) {
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -360,11 +358,12 @@ TEST_CASE("Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread") {
 }
 
 /*
-* Create a stream with default flag (hipStreamDefault). Start capturing the stream.
-* Invoke hipStreamIsCapturing() on the null stream. Verify hipErrorStreamCaptureImplicit
-* is returned by hipStreamIsCapturing(). Verify capture status of created stream. Do some operatoins.
-* End the capture on the created stream. Execute the graph and verify the output from the operations.
-*/
+ * Create a stream with default flag (hipStreamDefault). Start capturing the stream.
+ * Invoke hipStreamIsCapturing() on the null stream. Verify hipErrorStreamCaptureImplicit
+ * is returned by hipStreamIsCapturing(). Verify capture status of created stream. Do some
+ * operatoins. End the capture on the created stream. Execute the graph and verify the output from
+ * the operations.
+ */
 TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
@@ -394,8 +393,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
   }
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone},
-                         captureStatus1{hipStreamCaptureStatusNone},
-                         captureStatus2{hipStreamCaptureStatusNone};
+      captureStatus1{hipStreamCaptureStatusNone}, captureStatus2{hipStreamCaptureStatusNone};
   // Verify the Error returned if null stream is passed.
   ret = hipStreamIsCapturing(0, &captureStatus);
   REQUIRE(ret == hipErrorStreamCaptureImplicit);
@@ -405,8 +403,8 @@ TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
   // Copy data to Device
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   // Kernal Operations
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, stream, A_d, C_d, N);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
+                     C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   // End the capture
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -423,7 +421,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
   // Verify Output
   for (size_t i = 0; i < N; i++) {
     D_h[i] = A_h[i] * A_h[i];
-    REQUIRE(C_h[i]  == D_h[i]);
+    REQUIRE(C_h[i] == D_h[i]);
   }
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));

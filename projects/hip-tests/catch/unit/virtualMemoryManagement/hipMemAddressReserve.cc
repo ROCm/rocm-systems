@@ -68,7 +68,7 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   size_t alignmnt = 1;
   hipMemGenericAllocationHandle_t handle;
   // Allocate physical memory
@@ -93,8 +93,8 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
     accessDesc.flags = hipMemAccessFlagsProtReadWrite;
     // Make the address accessible to GPU 0
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
     HIP_CHECK(hipMemUnmap(ptrA, size_mem));
     HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -131,7 +131,7 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   // Allocate virtual address range
-  hipDeviceptr_t ptrA;
+  void* ptrA;
 
   SECTION("Nullptr to ptr") {
     REQUIRE(hipMemAddressReserve(nullptr, size_mem, 0, 0, 0) == hipErrorInvalidValue);
@@ -152,7 +152,41 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemAddressReserve_Capture") {
+  hipMemGenericAllocationHandle_t allocation_handle;
+  size_t granularity = 0;
+  constexpr size_t kAlignment = 2;
+  constexpr int kDeviceId = 0;
+  hipDevice_t device = 0;
+  void* device_ptr = nullptr;
+
+  CTX_CREATE();
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+
+  hipMemAllocationProp allocation_prop{};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemCreate(&allocation_handle, granularity, &allocation_prop, 0));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, granularity, kAlignment, nullptr, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemAddressFree(device_ptr, granularity));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+  CTX_DESTROY();
+}
+
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

@@ -335,7 +335,7 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
   auto sec = diff.count();
   auto perf = static_cast<double>((sizeElements * NUM_ITER * (1e-09)) / sec);
 
-  CONSOLE_PRINT("hipPerf3DMemset%s[%d] (GB/s) for %5lu x %5lu x %lu bytes : %7.2f\n",
+  CONSOLE_PRINT("hipPerf3DMemset%s[%d] (GB/s) for %5zu x %5zu x %zu bytes : %7.2f\n",
                 (async ? "Async" : "     "), test, bufSize_, bufSize_, depth, perf);
   HIP_CHECK(hipFree(devPitchedPtr.ptr));
   free(A_h);

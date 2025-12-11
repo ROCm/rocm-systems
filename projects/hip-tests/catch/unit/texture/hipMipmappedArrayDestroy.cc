@@ -44,9 +44,9 @@ TEST_CASE("Unit_hipMipmappedArrayDestroy_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
 #ifdef __linux__
-    HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
-    return;
-#endif //__linux__
+  HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
+  return;
+#endif  //__linux__
 
   HIP_CHECK(hipFree(0));
 
@@ -78,6 +78,6 @@ TEST_CASE("Unit_hipMipmappedArrayDestroy_Negative_Parameters") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

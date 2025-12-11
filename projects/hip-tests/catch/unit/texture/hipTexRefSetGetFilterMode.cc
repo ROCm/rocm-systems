@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 // Test for hipTexRefSetFilterMode and hipTexRefGetFilterMode, including error handling
 TEST_CASE("Unit_hipTexRefSetGetFilterMode") {
@@ -63,3 +64,4 @@ TEST_CASE("Unit_hipTexRefSetGetFilterMode") {
     REQUIRE(errGetMode == hipErrorInvalidValue);
   }
 }
+#endif

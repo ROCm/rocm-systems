@@ -17,14 +17,13 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 #include "./defs.h"
 
 /**
  * This kernel writes to memory allocated in ker_Alloc_MultCodeObj<<<>>>.
  */
-extern "C"  __global__ void ker_Write_MultCodeObj(int **dev_mem,
-                                                  int value) {
+extern "C" __global__ void ker_Write_MultCodeObj(int** dev_mem, int value) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Check allocated memory in all threads in block before access
   if (*dev_mem == nullptr) {

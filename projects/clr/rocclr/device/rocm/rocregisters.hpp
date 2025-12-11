@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #if !defined(LITTLEENDIAN_CPU) && !defined(BIGENDIAN_CPU)
 #error "Must define LITTLEENDIAN_CPU or BIGENDIAN_CPU"
 #endif
@@ -201,6 +199,5 @@ union SQ_IMG_RSRC_WORD7 {
   signed int i32All;
   float f32All;
 };
-}
+}  // namespace amd::roc
 
-#endif

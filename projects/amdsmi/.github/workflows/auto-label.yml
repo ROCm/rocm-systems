@@ -1,0 +1,319 @@
+name: Auto Label PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_run:
+    workflows: ["ABI Compliance Check"]
+    types: [completed]
+
+jobs:
+  apply-labels:
+    runs-on: AMD-ROCm-Internal-dev1
+    permissions:
+      pull-requests: write
+      actions: read
+      contents: read
+    steps:
+      - name: Add/Remove labels based on branch names and ABI results
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            let prNumber, headSha, baseBranch, headBranch;
+            
+            // Handle different event types
+            if (context.eventName === 'pull_request') {
+              prNumber = pr.number;
+              headSha = pr.head.sha;
+              baseBranch = pr.base.ref;
+              headBranch = pr.head.ref;
+            } else if (context.eventName === 'workflow_run') {
+              // Find the associated PR for workflow_run events
+              const workflowRun = context.payload.workflow_run;
+              console.log(`Workflow run completed: ${workflowRun.name} with conclusion: ${workflowRun.conclusion}`);
+              
+              if (workflowRun.event !== 'pull_request') {
+                console.log('Workflow run was not triggered by a pull request, skipping');
+                return;
+              }
+              
+              const prs = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                head: `${context.repo.owner}:${workflowRun.head_branch}`
+              });
+              
+              const associatedPr = prs.data.find(p => p.head.sha === workflowRun.head_sha);
+              
+              if (!associatedPr) {
+                console.log('No associated PR found for this workflow run');
+                return;
+              }
+              
+              prNumber = associatedPr.number;
+              headSha = associatedPr.head.sha;
+              baseBranch = associatedPr.base.ref;
+              headBranch = associatedPr.head.ref;
+            } else {
+              console.log('Unsupported event type');
+              return;
+            }
+
+            let labelsApplied = false;
+
+            // Debug information
+            console.log(`Processing PR #${prNumber}: Head: ${headBranch}, Base: ${baseBranch}`);
+
+            // Get current PR data to check existing labels
+            const { data: currentPr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const existingLabels = currentPr.labels.map(label => label.name);
+
+            // Condition 1: PR targeting amd-mainline
+            if (baseBranch === 'amd-mainline' && context.eventName === 'pull_request') {
+              const labelToAdd = 'Merge amd-mainline';
+              try {
+                if (!existingLabels.includes(labelToAdd)) {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    labels: [labelToAdd]
+                  });
+                  console.log(`Added label "${labelToAdd}" to PR #${prNumber}`);
+                  labelsApplied = true;
+                }
+              } catch (error) {
+                console.error(`Error adding label "${labelToAdd}": ${error.message}`);
+              }
+            }
+
+            // Condition 2: Cherry-pick based on head branch name or release target
+            if (context.eventName === 'pull_request') {
+              const isCherryPickHead = /cherry.*pick/i.test(headBranch);
+              const isReleaseTargetBase = baseBranch.startsWith('release/');
+
+              if (isCherryPickHead || isReleaseTargetBase) {
+                const labelToAdd = 'cherry-pick';
+                try {
+                  if (!existingLabels.includes(labelToAdd)) {
+                    await github.rest.issues.addLabels({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: prNumber,
+                      labels: [labelToAdd]
+                    });
+                    console.log(`Added label "${labelToAdd}" to PR #${prNumber}`);
+                    labelsApplied = true;
+                  } else {
+                    console.log(`Label "${labelToAdd}" already exists on PR #${prNumber}`);
+                  }
+                } catch (error) {
+                  console.error(`Error adding label "${labelToAdd}": ${error.message}`);
+                }
+              }
+            }
+
+            // ABI BREAKAGE LOGIC: Check on both workflow_run AND pull_request events
+            let shouldCheckABI = false;
+            let hasMajorAbiBreakage = false;
+            let hasMinorAbiBreakage = false;
+
+            if (context.eventName === 'workflow_run') {
+              // Handle workflow_run events (existing logic)
+              const workflowRun = context.payload.workflow_run;
+              
+              if (workflowRun.name === 'ABI Compliance Check') {
+                shouldCheckABI = true;
+                console.log(`ABI Compliance Check completed with conclusion: ${workflowRun.conclusion}`);
+                
+                try {
+                  const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: workflowRun.id
+                  });
+                  
+                  // Check job conclusions for ABI breakage
+                  for (const job of jobs.jobs) {
+                    console.log(`Job: ${job.name}, Conclusion: ${job.conclusion}`);
+                    
+                    if (job.name.includes('Major ABI') && job.conclusion === 'failure') {
+                      hasMajorAbiBreakage = true;
+                      console.log('Major ABI breakage detected from job failure');
+                    }
+                    
+                    if (job.name.includes('Minor ABI') && job.conclusion === 'failure') {
+                      hasMinorAbiBreakage = true;
+                      console.log('Minor ABI breakage detected from job failure');
+                    }
+                  }
+                  
+                  // If workflow succeeded, no ABI breakage
+                  if (workflowRun.conclusion === 'success') {
+                    console.log('ABI Compliance Check succeeded - no ABI breakage');
+                    hasMajorAbiBreakage = false;
+                    hasMinorAbiBreakage = false;
+                  }
+                  
+                } catch (error) {
+                  console.log(`Could not fetch job details: ${error.message}`);
+                  return;
+                }
+              }
+            } else if (context.eventName === 'pull_request') {
+              // NEW: Check if amdsmi.h has been reverted on PR events
+              const hasAbiLabels = existingLabels.includes('MAJOR ABI BREAKAGE') || existingLabels.includes('MINOR ABI BREAKAGE');
+              
+              if (hasAbiLabels) {
+                console.log('PR has ABI labels, checking if amdsmi.h changes were reverted...');
+                shouldCheckABI = true;
+                
+                try {
+                  // Get the diff for amdsmi.h between base and head
+                  const { data: comparison } = await github.rest.repos.compareCommits({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    base: currentPr.base.sha,
+                    head: currentPr.head.sha
+                  });
+                  
+                  // Check if amdsmi.h has any changes
+                  const amdsmiFile = comparison.files?.find(file => file.filename === 'include/amd_smi/amdsmi.h');
+                  
+                  if (!amdsmiFile) {
+                    console.log('No changes to amdsmi.h found in this PR - removing ABI labels');
+                    hasMajorAbiBreakage = false;
+                    hasMinorAbiBreakage = false;
+                  } else if (amdsmiFile.changes === 0) {
+                    console.log('amdsmi.h file exists but has no changes - removing ABI labels');
+                    hasMajorAbiBreakage = false;
+                    hasMinorAbiBreakage = false;
+                  } else {
+                    console.log(`amdsmi.h has ${amdsmiFile.changes} changes - keeping existing ABI labels`);
+                    // Keep existing labels since we can't determine ABI status without running the check
+                    hasMajorAbiBreakage = existingLabels.includes('MAJOR ABI BREAKAGE');
+                    hasMinorAbiBreakage = existingLabels.includes('MINOR ABI BREAKAGE');
+                  }
+                  
+                } catch (error) {
+                  console.log(`Error checking file changes: ${error.message}`);
+                  // If we can't check, preserve existing labels
+                  hasMajorAbiBreakage = existingLabels.includes('MAJOR ABI BREAKAGE');
+                  hasMinorAbiBreakage = existingLabels.includes('MINOR ABI BREAKAGE');
+                }
+              }
+            }
+
+            // Manage ABI breakage labels (only if we determined ABI status)
+            if (shouldCheckABI) {
+              const abiLabels = {
+                'MAJOR ABI BREAKAGE': hasMajorAbiBreakage,
+                'MINOR ABI BREAKAGE': hasMinorAbiBreakage
+              };
+
+              const wasMajorAbiBreakage = existingLabels.includes('MAJOR ABI BREAKAGE');
+              const wasMinorAbiBreakage = existingLabels.includes('MINOR ABI BREAKAGE');
+
+              for (const [labelName, shouldHaveLabel] of Object.entries(abiLabels)) {
+                const hasLabel = existingLabels.includes(labelName);
+                
+                if (shouldHaveLabel && !hasLabel) {
+                  // Add label
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: prNumber,
+                      labels: [labelName]
+                    });
+                    console.log(`✅ Added label "${labelName}" to PR #${prNumber}`);
+                    labelsApplied = true;
+                  } catch (error) {
+                    console.error(`❌ Error adding label "${labelName}": ${error.message}`);
+                  }
+                } else if (!shouldHaveLabel && hasLabel) {
+                  // Remove label
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: prNumber,
+                      name: labelName
+                    });
+                    console.log(`🗑️ Removed label "${labelName}" from PR #${prNumber}`);
+                    labelsApplied = true;
+                  } catch (error) {
+                    console.error(`❌ Error removing label "${labelName}": ${error.message}`);
+                  }
+                }
+              }
+
+              // Add comments when ABI issues are detected or resolved
+              if (context.eventName === 'workflow_run') {
+                // Only add comments for workflow_run events (actual ABI check results)
+                if (hasMajorAbiBreakage && !wasMajorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '⚠️ **MAJOR ABI BREAKAGE detected** in the latest ABI compliance check. Please review the ABI compliance report and fix any breaking changes.'
+                  });
+                }
+                
+                if (hasMinorAbiBreakage && !wasMinorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '⚠️ **MINOR ABI BREAKAGE detected** in the latest ABI compliance check. Please review the ABI compliance report for details.'
+                  });
+                }
+                
+                if (!hasMajorAbiBreakage && wasMajorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '✅ **MAJOR ABI BREAKAGE resolved** - ABI compliance check is now passing!'
+                  });
+                }
+                
+                if (!hasMinorAbiBreakage && wasMinorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '✅ **MINOR ABI BREAKAGE resolved** - ABI compliance check is now passing!'
+                  });
+                }
+              } else if (context.eventName === 'pull_request') {
+                // Add comment when labels are removed due to file reversion
+                if (!hasMajorAbiBreakage && wasMajorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '✅ **MAJOR ABI BREAKAGE resolved** - `amdsmi.h` changes have been reverted.'
+                  });
+                }
+                
+                if (!hasMinorAbiBreakage && wasMinorAbiBreakage) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: '✅ **MINOR ABI BREAKAGE resolved** - `amdsmi.h` changes have been reverted.'
+                  });
+                }
+              }
+            }
+
+            if (!labelsApplied && context.eventName === 'pull_request') {
+              console.log(`PR #${prNumber} did not match criteria for automatic labeling by this workflow.`);
+            }

@@ -25,4 +25,4 @@ THE SOFTWARE.
 
 texture<float, 2> tex;
 
-#endif // defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
+#endif  // defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000

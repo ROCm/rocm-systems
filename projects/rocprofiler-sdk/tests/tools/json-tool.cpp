@@ -2349,13 +2349,22 @@ write_json(call_stack_t* _call_stack)
 void
 write_perfetto()
 {
+    bool disable_perfetto = []() {
+        // set ROCPROFILER_TOOL_DISABLE_PERFETTO=1 to disable for CTest
+        // set ROCPROFILER_TOOL_ENABLE_PERFETTO=1 to override interactively
+        return (getenv("ROCPROFILER_TOOL_DISABLE_PERFETTO") != nullptr &&
+                getenv("ROCPROFILER_TOOL_ENABLE_PERFETTO") == nullptr);
+    }();
+
+    if(disable_perfetto) return;
+
     auto args            = ::perfetto::TracingInitArgs{};
     auto track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
     auto cfg             = ::perfetto::TraceConfig{};
 
     // Enabled by default, set this env to any value to disable
     bool enable_debug_annotations = []() {
-        return getenv("ROCPROFILER_DISABLE_PERFETTO_ANNOTATIONS") == nullptr;
+        return getenv("ROCPROFILER_TOOL_DISABLE_PERFETTO_ANNOTATIONS") == nullptr;
     }();
 
     // environment settings

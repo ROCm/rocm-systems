@@ -73,6 +73,6 @@ TEST_CASE("Unit_hipDeviceGraphMemTrim_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

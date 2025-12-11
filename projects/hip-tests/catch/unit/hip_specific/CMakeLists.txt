@@ -22,11 +22,12 @@
 
 set(TEST_SRC
     hip_hc_8pk.cc
+    hip_check_VGPRs.cpp
 )
 hip_add_exe_to_target(NAME HipSpecificTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
-                      LINKER_LIBS hiprtc
+                      LINKER_LIBS hiprtc::hiprtc
                       PROPERTY CXX_STANDARD 17)
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC

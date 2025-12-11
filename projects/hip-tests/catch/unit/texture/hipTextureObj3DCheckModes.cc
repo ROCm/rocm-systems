@@ -123,8 +123,8 @@ static void runTest(const int width, const int height, const int depth, const fl
   // Resets any prior last error to hipSuccess, so that the hipGetLastError after the
   // kernel launch will not return the earlier errors
   res = hipGetLastError();
-  hipLaunchKernelGGL(tex3DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
-                     textureObject, width, height, depth, offsetX, offsetY, offsetZ);
+  hipLaunchKernelGGL(tex3DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData, textureObject,
+                     width, height, depth, offsetX, offsetY, offsetZ);
   HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -172,11 +172,6 @@ line1:
  */
 TEST_CASE("Unit_hipTextureObj3DCheckModes") {
   CHECK_IMAGE_SUPPORT
-
-#if __HIP_NO_IMAGE_SUPPORT
-  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
-  return;
-#endif
 
   int device = 0;
   hipDeviceProp_t props;
@@ -227,6 +222,6 @@ TEST_CASE("Unit_hipTextureObj3DCheckModes") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */
