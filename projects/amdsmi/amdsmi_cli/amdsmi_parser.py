@@ -1635,10 +1635,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
 
     def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self.helpers.is_virtual_os():
-            # This subparser is only available to Guest and Hypervisor systems
-            return
-
         # Subparser help text
         node_help = "Gets power information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\

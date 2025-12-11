@@ -2628,7 +2628,7 @@ void Runtime::CheckVirtualMemApiSupport() {
       virtual_mem_api_supported_ = true;
     }
   #else
-    virtual_mem_api_supported_ = false;
+    virtual_mem_api_supported_ = true;
   #endif
   }
 }
@@ -3672,11 +3672,21 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  close(dmabuf_fd);
+  if (dmabuf_fd != -1) {
+    close(dmabuf_fd);
+  }
 
   // Get address that memory is mapped to
-  ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
-  if (ret) return HSA_STATUS_ERROR;
+  if (shareable_handle.IsValid()) {
+    ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
+    if (ret) return HSA_STATUS_ERROR;
+  } else {
+    hsa_status_t status = agent_driver.GetShareableHandle(memoryHandleIt->first, size, &shareable_handle);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+    drm_cpu_addr = reinterpret_cast<uint64_t>(va);
+  }
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
@@ -3795,22 +3805,17 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-  #if defined(__linux__)
     if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-      void* mapped_ptr =
-        mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
-             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-      if (mapped_ptr != va)
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
         return HSA_STATUS_ERROR;
+      }
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
         shareable_handle, va, mappedHandle->offset, size, perms);
     if (status != HSA_STATUS_SUCCESS)
       return status;
-#else
-    assert(!"Unimplemented!");
-#endif
   }
   permissions = perms;
   return HSA_STATUS_SUCCESS;
@@ -3819,21 +3824,15 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-#if defined(__linux__)
-      if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
-
-      /* We need to keep the CPU mapping. So change it to PROT_NONE */
-      void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
-                mappedHandle->drm_fd,
-                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-      if (mapped_ptr != va)
+      hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+      if (!rocr::os::UnmapMemory(va, size)) {
         return HSA_STATUS_ERROR;
-
-      permissions = HSA_ACCESS_PERMISSION_NONE;
-#else
-      assert(!"Unimplemented!");
-#endif
-
+      }
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+        return HSA_STATUS_ERROR;
+      }
+      permissions = perms;
     }
   } else {
     return targetAgent->driver().Unmap(
@@ -3850,6 +3849,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
     shareable_handle(shareable_handle)
 {
   /* Create a CPU mapping with PROT_NONE */
+  #if defined(__linux__)
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                        std::forward_as_tuple(cpu_agent),
@@ -3860,6 +3860,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
   if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+  #endif
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held

@@ -26,11 +26,11 @@ jobs:
         id: generate_matrix
         run: |
           MATRIX='[{"os-release":"22.04","gpu":"mi355","arch":"gfx950","runner":"linux-mi355-1gpu-ossci-rocm","code-name":"jammy"},{"os-release":"24.04","gpu":"mi355","arch":"gfx950","runner":"linux-mi355-1gpu-ossci-rocm","code-name":"noble"},{"os-release":"22.04","gpu":"mi325","arch":"gfx94X","runner":"linux-mi325-1gpu-ossci-rocm","code-name":"jammy"},{"os-release":"24.04","gpu":"mi325","arch":"gfx94X","runner":"linux-mi325-1gpu-ossci-rocm","code-name":"noble"}]'
-          
+
           if [ -n "${{ github.event.inputs.runner_matrix }}" ]; then
             MATRIX='${{ github.event.inputs.runner_matrix }}'
           fi
-          
+
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
 
   coverage:
@@ -49,14 +49,14 @@ jobs:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
-      options: 
-        --privileged 
+      options:
+        --privileged
         --ipc host
         --group-add video
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
-        
+
     steps:
       - uses: actions/checkout@v5
         with:
