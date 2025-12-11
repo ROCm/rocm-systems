@@ -59,6 +59,11 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/include
 )
 
+# Define path to test fixtures (pre-generated trace databases)
+target_compile_definitions(rocstorage_unit_tests PRIVATE
+    ROCSTORAGE_TEST_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/tests/fixtures"
+)
+
 target_compile_features(rocstorage_unit_tests PRIVATE cxx_std_17)
 
 gtest_discover_tests(

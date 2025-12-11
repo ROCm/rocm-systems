@@ -21,50 +21,176 @@
 // SOFTWARE.
 
 #include <rocstorage/reader.hpp>
-#include <rocstorage/storage.hpp>
 
 #include <gtest/gtest.h>
 
-#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <string>
+#include <type_traits>
+
+// Path to the pre-generated trace fixture database
+// This was created by profiling a real HIP program with rocprofv3
+#ifndef ROCSTORAGE_TEST_FIXTURE_PATH
+#define ROCSTORAGE_TEST_FIXTURE_PATH ""
+#endif
 
 namespace {
 
-class reader_test : public ::testing::Test {
+class ReaderApiTest : public ::testing::Test {};
+
+TEST_F(ReaderApiTest, OpenReturnsNullptrForNonexistentFile) {
+  auto reader = rocstorage::reader::open("nonexistent_file.db");
+  EXPECT_EQ(reader, nullptr);
+}
+
+TEST_F(ReaderApiTest, OpenReturnsNullptrForInvalidPath) {
+  auto reader = rocstorage::reader::open("");
+  EXPECT_EQ(reader, nullptr);
+}
+
+TEST_F(ReaderApiTest, DatabaseTypeEnumValuesMatchCApi) {
+  EXPECT_EQ(static_cast<int>(rocstorage::database_type::autodetect), 0);
+  EXPECT_EQ(static_cast<int>(rocstorage::database_type::rocpd_sqlite), 1);
+  EXPECT_EQ(static_cast<int>(rocstorage::database_type::rocprof_sqlite), 2);
+}
+
+TEST_F(ReaderApiTest, TrackCategoryEnumValuesMatchCApi) {
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::not_a_track), 0);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::pmc), 1);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::region), 2);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::kernel_dispatch), 3);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::sqtt), 4);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::nic), 5);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::memory_allocation), 6);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::memory_copy), 7);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::stream), 8);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::region_main), 9);
+  EXPECT_EQ(static_cast<int>(rocstorage::track_category::region_sample), 10);
+}
+
+TEST_F(ReaderApiTest, ReaderIsMoveConstructible) {
+  EXPECT_TRUE(std::is_move_constructible<rocstorage::reader>::value);
+  EXPECT_TRUE(std::is_move_assignable<rocstorage::reader>::value);
+  EXPECT_FALSE(std::is_copy_constructible<rocstorage::reader>::value);
+  EXPECT_FALSE(std::is_copy_assignable<rocstorage::reader>::value);
+}
+
+TEST_F(ReaderApiTest, TrackIsMoveConstructible) {
+  EXPECT_TRUE(std::is_move_constructible<rocstorage::track>::value);
+  EXPECT_TRUE(std::is_move_assignable<rocstorage::track>::value);
+  EXPECT_FALSE(std::is_copy_constructible<rocstorage::track>::value);
+  EXPECT_FALSE(std::is_copy_assignable<rocstorage::track>::value);
+}
+
+class ReaderIntegrationTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    m_database_path =
-        "test_reader_" +
-        std::to_string(
-            ::testing::UnitTest::GetInstance()->current_test_info()->line()) +
-        ".db";
-    m_uuid = "12345";
-    m_storage = std::make_unique<rocm::storage>(m_database_path, m_uuid);
-    m_reader = m_storage->get_reader();
-  }
+    // Use the pre-generated trace fixture database created by rocprofv3
+    m_database_path = std::string(ROCSTORAGE_TEST_FIXTURE_PATH) + "/reader_test_trace.db";
 
-  void TearDown() override {
-    m_reader.reset();
-    m_storage.reset();
-    std::remove(m_database_path.c_str());
+    // Check if the fixture exists
+    std::ifstream f(m_database_path);
+    if (!f.good()) {
+      GTEST_SKIP() << "Test fixture not found: " << m_database_path
+                   << " (run 'make generate_test_fixtures' to create it)";
+    }
   }
 
   std::string m_database_path;
-  std::string m_uuid;
-  std::unique_ptr<rocm::storage> m_storage;
-  std::shared_ptr<rocstorage::reader> m_reader;
 };
 
-TEST_F(reader_test, reader_instance_is_valid) { ASSERT_NE(m_reader, nullptr); }
+TEST_F(ReaderIntegrationTest, OpenSucceedsForValidDatabase) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+}
 
-TEST_F(reader_test, reader_can_be_retrieved_multiple_times) {
-  auto reader1 = m_storage->get_reader();
-  auto reader2 = m_storage->get_reader();
+TEST_F(ReaderIntegrationTest, CHandlesAreAccessible) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
 
-  ASSERT_NE(reader1, nullptr);
-  ASSERT_NE(reader2, nullptr);
-  EXPECT_EQ(reader1.get(), reader2.get());
+  EXPECT_NE(reader->c_trace_handle(), nullptr);
+  EXPECT_NE(reader->c_database_handle(), nullptr);
+}
+
+TEST_F(ReaderIntegrationTest, ReadMetadataSucceeds) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+
+  bool success = reader->read_metadata();
+  EXPECT_TRUE(success);
+}
+
+TEST_F(ReaderIntegrationTest, NumTracksReturnsExpectedCount) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  uint64_t num_tracks = reader->num_tracks();
+  EXPECT_GE(num_tracks, 0u);
+}
+
+TEST_F(ReaderIntegrationTest, StartAndEndTimeAreValid) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  uint64_t start = reader->start_time();
+  uint64_t end = reader->end_time();
+
+  EXPECT_GE(end, start);
+}
+
+TEST_F(ReaderIntegrationTest, GetTracksReturnsVector) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  auto tracks = reader->get_tracks();
+  EXPECT_EQ(tracks.size(), reader->num_tracks());
+}
+
+TEST_F(ReaderIntegrationTest, GetTrackReturnsNullptrForInvalidIndex) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  auto track = reader->get_track(99999);
+  EXPECT_EQ(track, nullptr);
+}
+
+TEST_F(ReaderIntegrationTest, MemoryFootprintIsNonnegative) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  uint64_t footprint = reader->memory_footprint();
+  EXPECT_GE(footprint, 0u);
+}
+
+TEST_F(ReaderIntegrationTest, CancelDoesNotCrash) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+
+  reader->cancel();
+}
+
+TEST_F(ReaderIntegrationTest, WaitReturnsFalseWithoutPendingOperation) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+
+  bool result = reader->wait(1);
+  EXPECT_FALSE(result);
+}
+
+TEST_F(ReaderIntegrationTest, ReadSliceWithEmptyTrackIdsReturnsFalse) {
+  auto reader = rocstorage::reader::open(m_database_path);
+  ASSERT_NE(reader, nullptr);
+  ASSERT_TRUE(reader->read_metadata());
+
+  std::vector<uint32_t> empty_ids;
+  bool result = reader->read_slice(0, 1000000, empty_ids);
+  EXPECT_FALSE(result);
 }
 
 } // namespace
