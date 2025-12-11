@@ -29,6 +29,10 @@ set(UNIT_TEST_SOURCES
     insert_query_builders_test.cpp
     table_insert_query_test.cpp
     database_test.cpp
+    # Reader tests (from merged rocstorage-reader)
+    reader/trace_test.cpp
+    reader/database_test.cpp
+    reader/c_interface_test.cpp
 )
 
 add_executable(rocstorage_unit_tests ${UNIT_TEST_SOURCES})
@@ -47,7 +51,12 @@ target_link_libraries(
 
 target_include_directories(
     rocstorage_unit_tests
-    PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/source
+        ${CMAKE_SOURCE_DIR}/source/common
+        ${CMAKE_SOURCE_DIR}/source/reader/datamodel
+        ${CMAKE_SOURCE_DIR}/source/reader/database
+        ${CMAKE_SOURCE_DIR}/include
 )
 
 target_compile_features(rocstorage_unit_tests PRIVATE cxx_std_17)

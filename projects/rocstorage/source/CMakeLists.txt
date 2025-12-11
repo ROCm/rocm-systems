@@ -33,3 +33,4 @@ target_sources(rocstorage PRIVATE ${rocstorage_sources})
 target_include_directories(rocstorage PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common)
 
 add_subdirectory(data_storage)
+add_subdirectory(reader)

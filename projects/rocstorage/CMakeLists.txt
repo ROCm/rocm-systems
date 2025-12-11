@@ -61,6 +61,12 @@ set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    # C interface headers (from rocstorage-reader merge)
+    ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_interface.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_interface_types.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_c_interface.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_c_interface_types.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_reader_enums.h
 )
 
 foreach(HEADER_FILE ${rocstorage_public_headers})
@@ -82,6 +88,8 @@ target_include_directories(
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/shared
 )
 
 # ------------------------------------------------------------ #
@@ -224,12 +232,20 @@ set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
 export(PACKAGE ${PACKAGE_NAME})
 
 # ------------------------------------------------------------ #
-# rocstorage-reader (database reader library)
+# rocstorage-reader (DEPRECATED - now merged into rocstorage)
+# ------------------------------------------------------------ #
+# The rocstorage-reader functionality is now built into the main
+# rocstorage library. The C interface (rocprofvis_*) is available
+# directly from librocstorage.so.
+#
+# To use the legacy separate library (for backwards compatibility):
+#   cmake -DROCSTORAGE_BUILD_LEGACY_READER=ON ..
 # ------------------------------------------------------------ #
 
-option(ROCSTORAGE_BUILD_READER "Build rocstorage-reader library" ON)
+option(ROCSTORAGE_BUILD_LEGACY_READER "Build separate rocstorage-reader library (deprecated)" OFF)
 
-if(ROCSTORAGE_BUILD_READER)
+if(ROCSTORAGE_BUILD_LEGACY_READER)
+    message(WARNING "Building legacy rocstorage-reader separately. This is deprecated - use rocstorage directly.")
     add_subdirectory(rocstorage-reader)
 endif()
 
