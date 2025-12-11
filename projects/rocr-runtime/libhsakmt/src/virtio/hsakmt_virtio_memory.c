@@ -131,6 +131,7 @@ static vhsakmt_bo_handle vhsakmt_find_userptr(vhsakmt_device_handle dev, unsigne
 static void vhsakmt_destroy_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
   hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
   pthread_mutex_destroy(&bo->map_mutex);
+  pthread_mutex_destroy(&bo->amdgpu_bo.lock);
 
   struct drm_gem_close drm_req = {
       .handle = bo->real.handle,
@@ -224,6 +225,7 @@ int vhsakmt_init_host_blob(vhsakmt_device_handle dev, size_t size, uint32_t blob
   bo->bo_type = bo_type;
   bo->host_addr = va_handle;
   pthread_mutex_init(&bo->map_mutex, NULL);
+  pthread_mutex_init(&bo->amdgpu_bo.lock, NULL);
   atomic_store(&bo->real.map_count, 0);
   atomic_store(&bo->refcount, 1);
   bo->real.handle = args.bo_handle;
@@ -260,6 +262,7 @@ static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev, void* addr, size
   userptr->bo_type = VHSA_BO_USERPTR;
   userptr->cpu_addr = addr;
   pthread_mutex_init(&userptr->map_mutex, NULL);
+  pthread_mutex_init(&userptr->amdgpu_bo.lock, NULL);
   atomic_store(&userptr->real.map_count, 0);
   atomic_store(&userptr->refcount, 1);
   userptr->real.handle = args.bo_handle;
@@ -382,6 +385,7 @@ int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
   if (bo->amdgpu_bo.gl_meta_data) free(bo->amdgpu_bo.gl_meta_data);
 
   pthread_mutex_destroy(&bo->map_mutex);
+  pthread_mutex_destroy(&bo->amdgpu_bo.lock);
 
   r = vhsakmt_destroy_handle(dev, bo);
 
@@ -891,6 +895,7 @@ static int vhsakmt_create_amdgpu_bo(vhsakmt_device_handle dev, void* addr, size_
 
   out->dev = dev;
   out->size = size;
+  pthread_mutex_init(&out->amdgpu_bo.lock, NULL);
   atomic_store(&out->real.map_count, 0);
   atomic_store(&out->refcount, 1);
 

@@ -337,6 +337,9 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_REG_MEM_WITH_FLAG,
   VHSAKMT_CCMD_MEMORY_DEREG_MEM,
   VHSAKMT_CCMD_MEMORY_MAP_USERPTR,
+  VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_IMPORT,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_EXPORT,
   VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
 };
 
@@ -382,6 +385,26 @@ typedef struct _memory_reg_mem_with_flag {
 } memory_reg_mem_with_flag;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_reg_mem_with_flag)
 
+typedef struct _memory_amdgpu_import_args {
+  int64_t dev;
+  uint32_t type;
+  uint32_t shared_handle;
+} memory_amdgpu_import_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_import_args)
+
+typedef struct _memory_amdgpu_export_args {
+  uint64_t buf_handle;
+  uint32_t type;
+  uint32_t pad;
+} memory_amdgpu_export_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_export_args)
+
+typedef struct _memory_export_dmabuf_args {
+  uint64_t MemoryAddress;
+  uint64_t MemorySizeInBytes;
+} memory_export_dmabuf_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_export_dmabuf_args)
+
 struct vhsakmt_ccmd_memory_req {
   struct vhsakmt_ccmd_req hdr;
   union {
@@ -393,6 +416,9 @@ struct vhsakmt_ccmd_memory_req {
     memory_req_free_args free_args;
     memory_map_mem_to_gpu_args map_to_GPU_args;
     memory_reg_mem_with_flag reg_mem_with_flag;
+    memory_export_dmabuf_args export_dmabuf_args;
+    memory_amdgpu_import_args amdgpu_import_args;
+    memory_amdgpu_export_args amdgpu_export_args;
   };
   uint64_t blob_id;
   uint32_t type;
@@ -409,14 +435,29 @@ typedef struct _vhsakmt_ccmd_memory_map_userptr_rsp {
 } vhsakmt_ccmd_memory_map_userptr_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_map_userptr_rsp)
 
+typedef struct _vhsakmt_ccmd_memory_export_dmabuf_rsp {
+  int64_t dmabuf_fd;
+  uint64_t offset;
+} vhsakmt_ccmd_memory_export_dmabuf_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_export_dmabuf_rsp)
+
+typedef struct _vhsakmt_ccmd_memory_amdgpu_import_rsp
+{
+  struct amdgpu_bo_import_result output;
+}vhsakmt_ccmd_memory_amdgpu_import_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_amdgpu_import_rsp)
+
 struct vhsakmt_ccmd_memory_rsp {
   struct vhsakmt_ccmd_rsp hdr;
   int32_t ret;
   union {
     vhsakmt_ccmd_memory_map_userptr_rsp map_userptr_rsp;
+    vhsakmt_ccmd_memory_export_dmabuf_rsp export_dmabuf_rsp;
     uint64_t memory_handle;
     uint64_t alternate_vagpu;
     uint64_t available_bytes;
+    vhsakmt_ccmd_memory_amdgpu_import_rsp amdgpu_import_rsp;
+    uint32_t shared_handle;
   };
   uint8_t payload[];
 };

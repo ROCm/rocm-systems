@@ -172,14 +172,133 @@ int vamdgpu_bo_free(amdgpu_bo_handle buf_handle) {
 
   vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
 
+  pthread_mutex_lock(&vbo->amdgpu_bo.lock);
   if (vbo->amdgpu_bo.imported) {
     if (vhsakmt_atomic_dec_return(&vbo->amdgpu_bo.refcount) > 0) {
+      pthread_mutex_unlock(&vbo->amdgpu_bo.lock);
       return HSAKMT_STATUS_SUCCESS;
     }
     vbo->amdgpu_bo.import_size = 0;
     vbo->amdgpu_bo.imported = false;
     vbo->bo_type &= (uint32_t)~VHSA_BO_AMDGPU;
   }
+  pthread_mutex_unlock(&vbo->amdgpu_bo.lock);
+
+  return rsp->ret;
+}
+
+int vamdgpu_bo_export(amdgpu_bo_handle buf_handle, enum amdgpu_bo_handle_type type,
+                      uint32_t* shared_handle) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)buf_handle;
+
+  if (type != amdgpu_bo_handle_type_kms) {
+    vhsa_err("%s: unsupported export type: %u\n", __FUNCTION__, type);
+    return -EINVAL;
+  }
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_EXPORT,
+      .res_id = bo->real.res_id,
+      .amdgpu_export_args =
+          {
+              .buf_handle = (uint64_t)buf_handle,
+              .type = (uint32_t)type,
+          },
+  };
+
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  *shared_handle = rsp->shared_handle;
+
+  return rsp->ret;
+}
+
+static vhsakmt_bo_handle vhsakmt_bo_from_resid(vhsakmt_device_handle dev, uint32_t res_id) {
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_MAP_USERPTR,
+      .res_id = res_id,
+  };
+  struct vhsakmt_ccmd_memory_rsp* rsp =
+      vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return NULL;
+
+  rsp->map_userptr_rsp.userptr_handle = 0;
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  bo = vhsakmt_find_bo_by_addr(dev, (void*)rsp->map_userptr_rsp.userptr_handle);
+
+  return bo;
+}
+
+int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
+                      uint32_t shared_handle, struct amdgpu_bo_import_result* output) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle obj;
+  uint32_t bo_handle, res_id;
+  int r;
+
+  if (type != amdgpu_bo_handle_type_dma_buf_fd) {
+    vhsa_err("%s: unsupported import type: %u\n", __FUNCTION__, type);
+    return -EINVAL;
+  }
+
+  r = vhsakmt_handle_to_resid(vdev, shared_handle, &res_id, &bo_handle);
+  if (r) return r;
+
+  obj = vhsakmt_bo_from_resid(vdev, res_id);
+  if (!obj) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_IMPORT,
+      .res_id = res_id,
+      .amdgpu_import_args =
+          {
+              .dev = (int64_t)dev,
+              .type = (uint32_t)type,
+              .shared_handle = shared_handle,
+          },
+  };
+
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  pthread_mutex_lock(&obj->amdgpu_bo.lock);
+  if (obj->amdgpu_bo.imported) {
+    vhsa_debug("%s: bo already imported for shared_handle: %u\n", __FUNCTION__, shared_handle);
+    vhsakmt_atomic_inc(&obj->amdgpu_bo.refcount);
+    output->alloc_size = obj->amdgpu_bo.import_size;
+    output->buf_handle = (amdgpu_bo_handle)obj;
+    pthread_mutex_unlock(&obj->amdgpu_bo.lock);
+    return HSAKMT_STATUS_SUCCESS;
+  }
+
+  memcpy(output, &rsp->amdgpu_import_rsp.output, sizeof(struct amdgpu_bo_import_result));
+
+  obj->bo_type |= VHSA_BO_AMDGPU;
+  obj->amdgpu_bo.imported = true;
+  obj->amdgpu_bo.import_size = output->alloc_size;
+  atomic_store(&obj->amdgpu_bo.refcount, 1);
+  pthread_mutex_unlock(&obj->amdgpu_bo.lock);
+
+  output->buf_handle = (amdgpu_bo_handle)obj;
 
   return rsp->ret;
 }

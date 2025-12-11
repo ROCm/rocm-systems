@@ -47,6 +47,8 @@ vamdgpu_device_get_fd;
 vdrmCommandWriteRead;
 vamdgpu_bo_cpu_map;
 vamdgpu_bo_free;
+vamdgpu_bo_export;
+vamdgpu_bo_import;
 local: *;
 };
 

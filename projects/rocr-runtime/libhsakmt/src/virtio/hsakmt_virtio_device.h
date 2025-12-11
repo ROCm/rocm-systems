@@ -153,6 +153,7 @@ struct vhsakmt_bo {
     uint64_t import_size;
     bool imported : 1;
     int refcount;
+    pthread_mutex_t lock;  /* protects imported, import_size and refcount operations */
   } amdgpu_bo;
 };
 
