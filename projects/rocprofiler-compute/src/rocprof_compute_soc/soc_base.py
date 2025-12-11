@@ -36,7 +36,6 @@ import yaml
 
 import config
 from roofline import Roofline
-from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -343,10 +342,6 @@ class OmniSoC_Base:
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
-
-        # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
-        if self.__arch in ("gfx940", "gfx941", "gfx942"):
-            counters = counters - {"TCP_TCP_LATENCY_sum"}
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
@@ -655,7 +650,6 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
@@ -670,6 +664,9 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
+            # Dynamic import to isolate hip dependency during profile time only
+            from utils import benchmark
+
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
                 console_warning(

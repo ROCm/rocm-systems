@@ -80,36 +80,65 @@ def check_file_pattern(pattern, file_path):
     return len(re.findall(pattern, content)) != 0
 
 
-def get_output_dir(suffix="_output", clean_existing=True):
+def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     """
     Provides a unique output directory based on the name of the calling test function
-    with a suffix applied.
+    with a suffix applied. For parametrized tests, pass param_id to ensure unique
+    directory names and avoid NFS conflicts.
 
     Args:
         suffix (str, optional): suffix to append to output_dir.
             Defaults to "_output".
         clean_existing (bool, optional): Whether to remove existing directory if exists.
             Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    param_suffix = ""
+    if param_id:
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
 
 
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True):
-    """Provides a unique input workoad directory with contents of input_dir
-    based on the name of the calling test function.
+def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
+    """Provides a unique input workload directory with contents of input_dir
+    based on the name of the calling test function. For parametrized tests,
+    pass param_id to ensure unique directory names and avoid NFS conflicts.
 
     Setup is a NOOP when tests run serially.
+
+    Args:
+        input_dir (str): Source directory to copy from.
+        suffix (str, optional): suffix to append to output_dir.
+            Defaults to "_tmp".
+        clean_existing (bool, optional): Whether to remove existing directory if exists.
+            Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
     if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
         return input_dir
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    # Include param_id in directory name if provided
+    param_suffix = ""
+    if param_id:
+        # Sanitize param_id: replace special chars that may not be valid in paths
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)

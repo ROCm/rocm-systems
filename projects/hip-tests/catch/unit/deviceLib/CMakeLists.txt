@@ -66,7 +66,7 @@ endif()
 
 # AMD only tests
 set(AMD_TEST_SRC
-    unsafeAtomicAdd.cc
+    unsafeAtomicAddDevice.cc
     mbcnt.cc
     bitExtract.cc
     bitInsert.cc
