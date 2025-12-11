@@ -365,8 +365,17 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
     cmd_buffer_mgr.Finalize(commands.Size());
     const uint32_t cmd_size = (cmd_buffer_mgr.GetSize() + 0x1800) & ~0xFFF;
     if (profile->command_buffer.size < cmd_size) {
+      uint32_t old_size = profile->command_buffer.size;
       profile->command_buffer.size = cmd_size;
-      if (profile->command_buffer.ptr != NULL) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+      if (profile->command_buffer.ptr != NULL) {
+        std::cerr << "ERROR: command_buffer too small: "
+              << "provided=" << old_size
+              << " required=" << cmd_size
+              << " (profile type=" << profile->type << ")"
+              << std::endl;
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
     }
     if (profile->command_buffer.ptr != NULL) {
       // Copy generated commands
@@ -457,7 +466,9 @@ hsa_ven_amd_aqlprofile_get_info(const hsa_ven_amd_aqlprofile_profile_t* profile,
     aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(profile);
     switch (attribute) {
       case HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE:
-        *(uint32_t*)value = 0x2000;  // a current approximation as 4K is big enough
+        // Approximation: 0x4000 (16KB) is currently enough for PMC and SQTT,
+        // including newer SQTT double-buffer PM4 sequences.
+        *(uint32_t*)value = 0x4000;
         break;
       case HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE:
         *(uint32_t*)value = 0x1800;  // a current approximation as 4K is big enough
