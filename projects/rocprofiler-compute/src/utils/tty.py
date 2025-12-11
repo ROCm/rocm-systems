@@ -157,12 +157,10 @@ def is_roofline_shown(
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
     # This check determines whether to display roofline section in the output report
-    has_valid_roofline_data = any(
+    if not any(
         hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
         for workload in runs.values()
-    )
-
-    if not has_valid_roofline_data:
+    ):
         # roofline_peaks is empty, meaning CSV validation failed earlier.
         # Skip displaying this section entirely (error already logged).
         return False
