@@ -42,6 +42,7 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/process_watcher.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -118,6 +119,13 @@ namespace
 {
 auto _timemory_manager  = tim::manager::instance();
 auto _timemory_settings = tim::settings::shared_instance();
+
+rocprofsys::process_watcher&
+get_process_watcher()
+{
+    static process_watcher _process_watcher{ getpid() };
+    return _process_watcher;
+}
 
 void
 set_metadata_process_start_timestamp(int64_t _ts)
@@ -427,6 +435,19 @@ rocprofsys_init_library_hidden()
 
     static bool _once       = false;
     auto        _debug_init = get_debug_init();
+
+    bool _is_root_process = !is_child_process();
+
+    if(_is_root_process)
+    {
+        get_process_watcher().start();
+        get_process_watcher().register_callback(
+            [](process_event event, const process_info& info) {
+                ROCPROFSYS_VERBOSE_F(0, "process_watcher callback: event=%s, info=%s\n",
+                                     process_event_to_string(event),
+                                     info.to_string().c_str());
+            });
+    }
 
     int _selinux_mode = 0;
     {
@@ -774,6 +795,10 @@ rocprofsys_finalize_hidden(void)
     threading::remove_callback(&ensure_initialization);
 
     bool _is_child = is_child_process();
+    if(_is_child)
+    {
+        get_process_watcher().stop();
+    }
     set_thread_state(ThreadState::Completed);
 
     // return if not active
