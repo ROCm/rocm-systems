@@ -3292,6 +3292,19 @@ typedef union rocprofiler_hip_api_args_t
     } hipStreamGetId;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 15
+    // HIP changed the option pointer types for hipLibraryLoad* APIs:
+    //
+    //   • ROCm 7.1.0 (HIP runtime API table step 15):
+    //        jitOptions        : hipJitOption**     (double pointer)
+    //        libraryOptions    : hipLibraryOption** (double pointer)
+    //
+    //   • Newer HIP versions:
+    //        jitOptions        : hipJitOption*      (single pointer)
+    //        libraryOptions    : hipLibraryOption*  (single pointer)
+    //
+    // Switch types at compile time to have backward compatibility across ROCm
+    // versions. HIP_RUNTIME_API_TABLE_STEP_VERSION is included to correctly
+    // detect a newer HIP runtime even when installed on a 7.1.0 ROCm stack.
     struct
     {
         hipLibrary_t* library;
@@ -3311,6 +3324,7 @@ typedef union rocprofiler_hip_api_args_t
         void**       libraryOptionValues;
         unsigned int numLibraryOptions;
     } hipLibraryLoadData;
+    // Same compatibility logic for hipLibraryLoadFromFile().
     struct
     {
         hipLibrary_t* library;
