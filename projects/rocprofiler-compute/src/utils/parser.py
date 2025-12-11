@@ -1101,6 +1101,7 @@ def validate_dual_issue_metrics(
                 # Skip if the value or peak cannot be converted to a float
                 continue
 
+
 def debug_evaluate_metrics(
     expr: str,
     row_expr: str,
