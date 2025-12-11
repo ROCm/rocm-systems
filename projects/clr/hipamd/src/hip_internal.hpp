@@ -297,7 +297,7 @@ public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
   private:
-    mutable amd::Monitor lock_;
+    mutable amd::RecursiveMonitor lock_;
     Device* device_;
     Priority priority_;
     unsigned int flags_;
@@ -354,7 +354,7 @@ public:
     /// Returns if stream is null stream
     bool Null() const { return null_; }
     /// Returns the lock object for the current stream
-    amd::Monitor& Lock() const { return lock_; }
+    amd::RecursiveMonitor& Lock() const { return lock_; }
     /// Returns the creation flags for the current stream
     unsigned int Flags() const { return flags_; }
     /// Returns the priority for the current stream
@@ -481,7 +481,7 @@ public:
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
     // Device lock
-    amd::Monitor lock_{true};
+    amd::RecursiveMonitor lock_{};
     // Guards device stream set
     std::shared_mutex streamSetLock;
     std::unordered_set<hip::Stream*> streamSet;

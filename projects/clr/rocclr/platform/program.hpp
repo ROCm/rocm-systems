@@ -114,7 +114,7 @@ class Program : public RuntimeObject {
 
   std::string programLog_;  //!< Log for parsing options, etc.
 
-  Monitor programLock_;  //!< Lock to protect program data structure
+  RecursiveMonitor programLock_;  //!< Lock to protect program data structure
 
  protected:
   //! Destroy this program.
@@ -132,7 +132,7 @@ class Program : public RuntimeObject {
         language_(language),
         symbolTable_(NULL),
         programLog_(),
-        programLock_(true) /* Program lock */ {
+        programLock_() /* Program lock */ {
     for (auto i = 0; i != numHeaders; ++i) {
       headers_.emplace_back(headers[i]);
       headerNames_.emplace_back(headerNames[i]);
@@ -144,7 +144,7 @@ class Program : public RuntimeObject {
       : context_(context),
         language_(language),
         symbolTable_(NULL),
-        programLock_(true) /* Program lock */ {}
+        programLock_() /* Program lock */ {}
 
   //! Returns context, associated with the current program.
   const Context& context() const { return context_(); }

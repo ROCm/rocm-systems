@@ -99,7 +99,6 @@ bool VmHeap::UncommitMemory(void* addr, size_t size) {
 VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc get_queue)
     : block_alignment_(kMinBlockAlignment),
       chunk_size_(chunk_size),
-      lock_(true),
       device_(device),
       get_vm_queue_(get_queue) {
   va_size_ = alignUp(va_size, chunk_size);

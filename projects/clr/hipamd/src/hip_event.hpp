@@ -113,7 +113,7 @@ class Event {
   constexpr static bool kBatchFlush = true;  //!< Flushes CPU command batch in direct dispatch mode
 
   Event(uint32_t flags)
-      : flags_(flags), lock_(true) /* hipEvent_t lock*/, event_(nullptr), stream_(nullptr) {
+      : flags_(flags), event_(nullptr), stream_(nullptr) {
     device_id_ = hip::getCurrentDevice()->deviceId();  // Created in current device ctx
   }
 
@@ -145,7 +145,7 @@ class Event {
     command.retain();
   }
 
-  amd::Monitor& lock() { return lock_; }
+  amd::RecursiveMonitor& lock() { return lock_; }
   const int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
@@ -170,7 +170,7 @@ class Event {
   virtual int64_t time(bool getStartTs) const;
 
  protected:
-  amd::Monitor lock_;
+  amd::RecursiveMonitor lock_;
   hip::Stream* stream_;
   amd::Event* event_;
   int device_id_;
