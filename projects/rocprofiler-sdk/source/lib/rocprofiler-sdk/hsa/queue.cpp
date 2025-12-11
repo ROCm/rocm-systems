@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/system_event.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
@@ -651,8 +652,11 @@ Queue::Queue(
 
 Queue::~Queue()
 {
+    ROCP_ERROR << "Queue::~Queue() called, fini_status=" << registration::get_fini_status();
     sync();
+    ROCP_ERROR << "Queue::~Queue() sync() completed, calling hsa_signal_destroy";
     _core_api.hsa_signal_destroy_fn(_active_kernels);
+    ROCP_ERROR << "Queue::~Queue() completed";
 }
 
 void
@@ -682,10 +686,32 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 void
 Queue::sync() const
 {
+    ROCP_ERROR << "Queue::sync() called, fini_status=" << registration::get_fini_status()
+               << ", is_hsa_shutting_down=" << is_hsa_shutting_down();
+
     if(_active_kernels.handle != 0u)
     {
+        // If HSA is shutting down OR rocprofiler is finalizing, skip waiting on signals
+        // because the async threads that service these signals may be destroyed by HSA
+        // runtime's atexit handler (which runs before rocprofiler's atexit handler in LIFO order)
+        if(is_hsa_shutting_down() || registration::get_fini_status() != 0)
+        {
+            auto _cnt = _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+            ROCP_ERROR << "Queue::sync() skipping wait: HSA shutting down or finalizing, count=" << _cnt;
+            ROCP_CI_LOG_IF(WARNING, _cnt > 0)
+                << "HSA is shutting down or rocprofiler is finalizing with " << _cnt
+                << " active kernel dispatches on queue. Skipping signal wait to avoid deadlock.";
+            return;
+        }
+
+        ROCP_ERROR << "Queue::sync() proceeding to wait on signal";
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+        ROCP_ERROR << "Queue::sync() signal wait completed";
+    }
+    else
+    {
+        ROCP_ERROR << "Queue::sync() returning early: _active_kernels.handle == 0";
     }
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()

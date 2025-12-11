@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/system_event.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
@@ -269,7 +270,29 @@ active_signals::destroy()
 void
 active_signals::sync()
 {
-    if(m_signal.handle == 0) return;
+    ROCP_ERROR << "active_signals::sync() called, fini_status=" << registration::get_fini_status()
+               << ", is_hsa_shutting_down=" << is_hsa_shutting_down();
+
+    if(m_signal.handle == 0)
+    {
+        ROCP_ERROR << "active_signals::sync() returning early: m_signal.handle == 0";
+        return;
+    }
+
+    // If HSA is shutting down OR rocprofiler is finalizing, skip waiting on signals
+    // because the async threads that service these signals may be destroyed by HSA
+    // runtime's atexit handler (which runs before rocprofiler's atexit handler in LIFO order)
+    if(is_hsa_shutting_down() || registration::get_fini_status() != 0)
+    {
+        auto _cnt = m_count.load();
+        ROCP_ERROR << "active_signals::sync() skipping wait: HSA shutting down or finalizing, count=" << _cnt;
+        ROCP_CI_LOG_IF(WARNING, _cnt > 0)
+            << "HSA is shutting down or rocprofiler is finalizing with " << _cnt
+            << " outstanding async copy operations. Skipping signal wait to avoid deadlock.";
+        return;
+    }
+
+    ROCP_ERROR << "active_signals::sync() proceeding to wait on signal";
 
 #if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
     constexpr auto timeout_sec = std::chrono::seconds{5};
@@ -877,18 +900,31 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
 void
 async_copy_sync()
 {
-    if(!async_copy::get_active_signals()) return;
+    ROCP_ERROR << "async_copy_sync() called";
+    if(!async_copy::get_active_signals())
+    {
+        ROCP_ERROR << "async_copy_sync() returning: no active signals";
+        return;
+    }
 
     async_copy::get_active_signals()->sync();
+    ROCP_ERROR << "async_copy_sync() completed";
 }
 
 void
 async_copy_fini()
 {
-    if(!async_copy::get_active_signals()) return;
+    ROCP_ERROR << "async_copy_fini() called";
+    if(!async_copy::get_active_signals())
+    {
+        ROCP_ERROR << "async_copy_fini() returning: no active signals";
+        return;
+    }
 
     async_copy_sync();
+    ROCP_ERROR << "async_copy_fini() destroying signals";
     async_copy::get_active_signals()->destroy();
+    ROCP_ERROR << "async_copy_fini() completed";
 }
 }  // namespace hsa
 }  // namespace rocprofiler

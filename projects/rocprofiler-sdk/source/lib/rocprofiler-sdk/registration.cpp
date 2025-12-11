@@ -41,6 +41,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#include "lib/rocprofiler-sdk/hsa/system_event.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd.hpp"
@@ -692,12 +693,17 @@ invoke_client_detaches()
         {
             context::stop_client_contexts(itr->internal_client_id);
 
+            // Set fini_status BEFORE calling sync functions to avoid deadlock
+            // The sync functions check fini_status to skip waiting on HSA signals
+            // if HSA is shutting down (HSA's atexit handler may have already destroyed
+            // the async threads that service signal waits)
+            auto _fini_status = get_fini_status();
+            if(_fini_status == 0) set_fini_status(-1);
+
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
             pc_sampling::service_sync();
 
-            auto _fini_status = get_fini_status();
-            if(_fini_status == 0) set_fini_status(-1);
             itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
             if(_fini_status == 0) set_fini_status(_fini_status);
             context::deactivate_client_contexts(itr->internal_client_id);
@@ -734,12 +740,21 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
 
-                hsa::async_copy_sync();
-                hsa::queue_controller_sync();
-                pc_sampling::service_sync();
-
+                // Set fini_status BEFORE calling sync functions to avoid deadlock
+                // The sync functions check fini_status to skip waiting on HSA signals
+                // if HSA is shutting down (HSA's atexit handler may have already destroyed
+                // the async threads that service signal waits)
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
+
+                ROCP_INFO << "invoke_client_finalizer: calling async_copy_sync()";
+                hsa::async_copy_sync();
+                ROCP_INFO << "invoke_client_finalizer: calling queue_controller_sync()";
+                hsa::queue_controller_sync();
+                ROCP_INFO << "invoke_client_finalizer: calling pc_sampling::service_sync()";
+                pc_sampling::service_sync();
+                ROCP_INFO << "invoke_client_finalizer: all sync functions completed";
+
                 _finalize_func(itr->configure_result->tool_data);
                 if(_fini_status == 0) set_fini_status(_fini_status);
             }
@@ -821,9 +836,13 @@ initialize()
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
+            ROCP_ERROR << "atexit handler in registration.cpp starting";
             finalize();
+            ROCP_ERROR << "atexit handler: finalize() completed, calling destroy_static_tl_objects()";
             common::destroy_static_tl_objects();
+            ROCP_ERROR << "atexit handler: destroy_static_tl_objects() completed, calling destroy_static_objects()";
             common::destroy_static_objects();
+            ROCP_ERROR << "atexit handler in registration.cpp completed";
         });
         invoke_client_configures();
         invoke_client_initializers();
@@ -886,11 +905,16 @@ finalize()
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        ROCP_ERROR << "finalize() starting, setting fini_status to -1";
         auto num_clients = get_num_clients();
         set_fini_status(-1);
+        ROCP_ERROR << "finalize() calling async_copy_fini()";
         hsa::async_copy_fini();
+        ROCP_ERROR << "finalize() async_copy_fini() completed, calling device_counting_service_finalize()";
         counters::device_counting_service_finalize();
+        ROCP_ERROR << "finalize() calling queue_controller_fini()";
         hsa::queue_controller_fini();
+        ROCP_ERROR << "finalize() queue_controller_fini() completed";
         thread_trace::finalize();
         ompt::finalize_ompt();
         kfd::finalize();
@@ -907,7 +931,9 @@ finalize()
             invoke_client_finalizers();
         }
         if(num_clients > 0) internal_threading::finalize();
+        ROCP_ERROR << "finalize() setting fini_status to 1";
         set_fini_status(1);
+        ROCP_ERROR << "finalize() completed";
     });
 
 #if defined(CODECOV) && CODECOV > 0
@@ -1098,6 +1124,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::counters::device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        rocprofiler::hsa::system_event_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::code_object::initialize(hsa_api_table);
