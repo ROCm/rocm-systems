@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -16,124 +16,118 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-
 #include <string.h>
-
 #include <cstring>
 #include <vector>
-
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
-
 static bool testPassed1D = false;
 static bool testPassed2D = false;
 static constexpr auto NUM_ELM{1024};
 /**
- * @addtogroup hipArrayGetDescriptor
- * @{
- * @ingroup MemoryTest
- * hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray* array) -
- * Gets a 1D or 2D array descriptor
- */
-
+* @addtogroup hipArrayGetDescriptor
+* @{
+* @ingroup MemoryTest
+* hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray* array) -
+* Gets a 1D or 2D array descriptor
+*/
 // Create 1D array
 hipArray_t arrayCreate1D(int format, int channel) {
   hipArray_t array;
   HIP_ARRAY_DESCRIPTOR desc;
   // Number of channels would be 1, 2, 4.
   switch (channel) {
-    case 1:
-      desc.NumChannels = channel;
-      break;
-    case 2:
-      desc.NumChannels = channel;
-      break;
-    case 4:
-      desc.NumChannels = channel;
-      break;
+      case 1:
+        desc.NumChannels = channel;
+        break;
+      case 2:
+        desc.NumChannels = channel;
+        break;
+      case 4:
+        desc.NumChannels = channel;
+        break;
   }
   desc.Width = 16;
   desc.Height = 0;
   // Number of Formats would be 8 as per enum format
   switch (format) {
-    case 1:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
-      break;
-    case 2:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT16;
-      break;
-    case 3:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT32;
-      break;
-    case 8:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT8;
-      break;
-    case 9:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT16;
-      break;
-    case 10:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT32;
-      break;
-    case 16:
-      desc.Format = HIP_AD_FORMAT_HALF;
-      break;
-    case 32:
-      desc.Format = HIP_AD_FORMAT_FLOAT;
-      break;
-    default:
-      desc.Format = HIP_AD_FORMAT_FLOAT;
+      case 1:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
+        break;
+      case 2:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT16;
+        break;
+      case 3:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT32;
+        break;
+      case 8:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT8;
+        break;
+      case 9:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT16;
+        break;
+      case 10:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT32;
+        break;
+      case 16:
+        desc.Format = HIP_AD_FORMAT_HALF;
+        break;
+      case 32:
+        desc.Format = HIP_AD_FORMAT_FLOAT;
+        break;
+      default:
+        desc.Format = HIP_AD_FORMAT_FLOAT;
   }
   HIP_CHECK(hipArrayCreate(&array, &desc));
   return array;
 }
-
 // Create 2D array
 hipArray_t arrayCreate2D(int format, int channel) {
   hipArray_t array;
   HIP_ARRAY_DESCRIPTOR desc;
   // Number of channels would be 1, 2, 4.
   switch (channel) {
-    case 1:
-      desc.NumChannels = channel;
-      break;
-    case 2:
-      desc.NumChannels = channel;
-      break;
-    case 4:
-      desc.NumChannels = channel;
-      break;
+      case 1:
+        desc.NumChannels = channel;
+        break;
+      case 2:
+        desc.NumChannels = channel;
+        break;
+      case 4:
+        desc.NumChannels = channel;
+        break;
   }
   desc.Width = 4;
   desc.Height = 4;
   // Number of Formats would be 8 as per enum format
   switch (format) {
-    case 1:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
-      break;
-    case 2:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT16;
-      break;
-    case 3:
-      desc.Format = HIP_AD_FORMAT_UNSIGNED_INT32;
-      break;
-    case 8:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT8;
-      break;
-    case 9:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT16;
-      break;
-    case 10:
-      desc.Format = HIP_AD_FORMAT_SIGNED_INT32;
-      break;
-    case 16:
-      desc.Format = HIP_AD_FORMAT_HALF;
-      break;
-    case 32:
-      desc.Format = HIP_AD_FORMAT_FLOAT;
-      break;
-    default:
-      desc.Format = HIP_AD_FORMAT_FLOAT;
+      case 1:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
+        break;
+      case 2:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT16;
+        break;
+      case 3:
+        desc.Format = HIP_AD_FORMAT_UNSIGNED_INT32;
+        break;
+      case 8:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT8;
+        break;
+      case 9:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT16;
+        break;
+      case 10:
+        desc.Format = HIP_AD_FORMAT_SIGNED_INT32;
+        break;
+      case 16:
+        desc.Format = HIP_AD_FORMAT_HALF;
+        break;
+      case 32:
+        desc.Format = HIP_AD_FORMAT_FLOAT;
+        break;
+      default:
+        desc.Format = HIP_AD_FORMAT_FLOAT;
   }
   HIP_CHECK(hipArrayCreate(&array, &desc));
   return array;
@@ -165,9 +159,9 @@ void thread_funct1D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
-  if ((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0) &&
-      (desc.Format == HIP_AD_FORMAT_HALF)) {
-    testPassed1D = true;
+  if ((desc.NumChannels == 2) && (desc.Width == 16) && (desc.Height == 0)
+      && (desc.Format == HIP_AD_FORMAT_HALF) ) {
+      testPassed1D = true;
   } else {
     testPassed1D = false;
   }
@@ -177,9 +171,9 @@ void thread_funct2D(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
   // Verify array parameters
-  if ((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4) &&
-      (desc.Format == HIP_AD_FORMAT_FLOAT)) {
-    testPassed2D = true;
+  if ((desc.NumChannels == 1) && (desc.Width == 4) && (desc.Height == 4)
+      && (desc.Format == HIP_AD_FORMAT_FLOAT) ) {
+      testPassed2D = true;
   } else {
     testPassed2D = false;
   }
@@ -210,7 +204,7 @@ static hipArray_t arrayCreateSimple2D() {
 float* funcToChkArray(hipArray_t array) {
   HIP_ARRAY_DESCRIPTOR desc;
   HIP_CHECK(hipArrayGetDescriptor(&desc, array));
-  float* A_h = nullptr;
+  float *A_h = nullptr;
   static constexpr auto NUM_ELM{1024};
   size_t mem_size = NUM_ELM * sizeof(float);
   if (desc.Format == HIP_AD_FORMAT_FLOAT) {
@@ -235,17 +229,16 @@ float* funcToChkArray(hipArray_t array) {
  */
 TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
-
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
     CHECK_IMAGE_SUPPORT
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipInit(0));
     hipCtx_t ctx;
     HIP_CHECK(hipCtxCreate(&ctx, 0, i));
-#endif
+    #endif
     // 1D array parameters verification
     SECTION("1D Array parameters verification") {
       hipArray_t array1D = arrayCreate1D(1, 1);
@@ -261,20 +254,22 @@ TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk", "[multigpu]") {
           hipArray_t array1D1 = arrayCreate1D(i, j);
           HIP_ARRAY_DESCRIPTOR desc1;
           HIP_CHECK(hipArrayGetDescriptor(&desc1, array1D1));
-
           // Verify Num Of Channels
           REQUIRE(desc1.NumChannels == j);
           // Verify format of Array
           REQUIRE(desc1.Format == i);
-          if (i == 3) i = 7;
-          if (i == 10) i = 15;
-          if (i == 16) i = 31;
+          if (i == 3)
+            i = 7;
+          if (i == 10)
+            i = 15;
+          if (i == 16)
+            i = 31;
           HIP_CHECK(hipArrayDestroy(array1D1));
         }
-        if (j == 2) j = 3;
+        if (j == 2)
+          j = 3;
       }
     }
-
     SECTION("2D Array parameters verification") {
       hipArray_t array2D = arrayCreate2D(1, 1);
       HIP_ARRAY_DESCRIPTOR desc;
@@ -293,17 +288,21 @@ TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk", "[multigpu]") {
           REQUIRE(desc.NumChannels == j);
           // Verify format of Array
           REQUIRE(desc.Format == i);
-          if (i == 3) i = 7;
-          if (i == 10) i = 15;
-          if (i == 16) i = 31;
+          if (i == 3)
+            i = 7;
+          if (i == 10)
+            i = 15;
+          if (i == 16)
+            i = 31;
           HIP_CHECK(hipArrayDestroy(array2D1));
         }
-        if (j == 2) j = 3;
+        if (j == 2)
+          j = 3;
       }
     }
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipCtxDestroy(ctx));
-#endif
+    #endif
   }
 }
 /**
@@ -321,29 +320,27 @@ TEST_CASE("Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk", "[multigpu]") {
 TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
           "[multigpu]") {
   CHECK_IMAGE_SUPPORT
-
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
     CHECK_IMAGE_SUPPORT
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipInit(0));
     hipCtx_t ctx;
     HIP_CHECK(hipCtxCreate(&ctx, 0, i));
-#endif
+    #endif
     hipArray_t array_t1 = arrayCreate1D_Thread();
     hipArray_t array_t2 = arrayCreate2D_Thread();
     std::vector<std::thread> ThreadVector1D;
     std::vector<std::thread> ThreadVector2D;
     for (int j = 0; j < 10; j++) {
-      ThreadVector1D.emplace_back([&]() { thread_funct1D(array_t1); });
-      ThreadVector2D.emplace_back([&]() { thread_funct2D(array_t2); });
-    }
-    for (auto& t : ThreadVector1D) {
+      ThreadVector1D.emplace_back([&](){thread_funct1D(array_t1);});
+      ThreadVector2D.emplace_back([&](){thread_funct2D(array_t2);});}
+    for (auto &t : ThreadVector1D) {
       t.join();
     }
-    for (auto& t : ThreadVector2D) {
+    for (auto &t : ThreadVector2D) {
       t.join();
     }
     // Validation
@@ -351,9 +348,9 @@ TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
     REQUIRE(testPassed2D);
     HIP_CHECK(hipArrayDestroy(array_t1));
     HIP_CHECK(hipArrayDestroy(array_t2));
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipCtxDestroy(ctx));
-#endif
+    #endif
   }
 }
 /**
@@ -371,27 +368,25 @@ TEST_CASE("Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array",
  */
 TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
-
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int k = 0; k < numDevices; k++) {
     HIP_CHECK(hipSetDevice(k));
     CHECK_IMAGE_SUPPORT
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipInit(0));
     hipCtx_t ctx;
     HIP_CHECK(hipCtxCreate(&ctx, 0, k));
-#endif
+    #endif
     int count_1D = 0;
     size_t mem_size = NUM_ELM * sizeof(float);
-    float* A_h;
+    float *A_h;
     A_h = reinterpret_cast<float*>(malloc(mem_size));
     for (int i = 0; i < NUM_ELM; i++) {
-      A_h[i] = 2.0;
-    }
+    A_h[i] = 2.0;}
     hipArray_t arraySimple1D = arrayCreateSimple1D();
     HIP_CHECK(hipMemcpyHtoA(arraySimple1D, 0, A_h, mem_size));
-    float* A_h1 = funcToChkArray(arraySimple1D);
+    float *A_h1 = funcToChkArray(arraySimple1D);
     for (int i = 0; i < NUM_ELM; i++) {
       if (A_h[i] == A_h1[i]) {
         count_1D += 1;
@@ -404,15 +399,13 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host", "[multigpu]") {
     SECTION("2D Array Verification") {
       int count_2D = 0;
       size_t mem_size1 = NUM_ELM * sizeof(float);
-      float* A_h2;
+      float *A_h2;
       A_h2 = reinterpret_cast<float*>(malloc(mem_size1));
       for (int i = 0; i < NUM_ELM; i++) {
-        A_h2[i] = 2.0;
-      }
-
+        A_h2[i] = 2.0;}
       hipArray_t arraySimple2D = arrayCreateSimple2D();
       HIP_CHECK(hipMemcpyHtoA(arraySimple2D, 0, A_h2, mem_size1));
-      float* A_h3 = funcToChkArray(arraySimple2D);
+      float *A_h3 = funcToChkArray(arraySimple2D);
       for (int i = 0; i < NUM_ELM; i++) {
         if (A_h2[i] == A_h3[i]) {
           count_2D += 1;
@@ -423,9 +416,9 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Host2Array_Array2Host", "[multigpu]") {
       free(A_h2);
       HIP_CHECK(hipArrayDestroy(arraySimple2D));
     }
-#if HT_NVIDIA
+    #if HT_NVIDIA
     HIP_CHECK(hipCtxDestroy(ctx));
-#endif
+    #endif
   }
 }
 /**
@@ -446,18 +439,18 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Negative_Scenarios") {
     error = hipArrayGetDescriptor(&desc_Neg, nullptr);
     REQUIRE(error != hipSuccess);
   }
-// Enable it for AMD only as it is failing on NVIDIA
-#if HT_AMD
-  void* dptr;
+  // Enable it for AMD only as it is failing on NVIDIA
+  #if HT_AMD
+  void *dptr;
   SECTION("Invalid Array Address") {
     HIP_CHECK(hipMalloc(&dptr, 1024));
-    error = hipArrayGetDescriptor(&desc_Neg, reinterpret_cast<hipArray_t>(dptr));
+    error = hipArrayGetDescriptor(&desc_Neg,
+            reinterpret_cast<hipArray_t> (dptr));
     REQUIRE(error != hipSuccess);
     HIP_CHECK(hipFree(dptr));
   }
-#endif
+  #endif
 }
-
 /**
  * @addtogroup hipArrayGetDescriptor hipArrayGetDescriptor
  * @{
@@ -465,7 +458,6 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Negative_Scenarios") {
  * `hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray* array)` -
  * Gets a 1D or 2D array descriptor.
  */
-
 /**
  * Test Description
  * ------------------------
@@ -479,28 +471,27 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Negative_Scenarios") {
  */
 TEST_CASE("Unit_hipArrayGetDescriptor_Positive_Basic") {
   CHECK_IMAGE_SUPPORT
-
   HIP_ARRAY_DESCRIPTOR expected_desc{};
   using vec_info = vector_info<float>;
   expected_desc.Format = vec_info::format;
   expected_desc.NumChannels = vec_info::size;
   expected_desc.Width = 1024 / sizeof(float);
   expected_desc.Height = 4;
-
   hipArray_t ptr;
   HIP_CHECK(hipArrayCreate(&ptr, &expected_desc));
-
   HIP_ARRAY_DESCRIPTOR desc;
-  HIP_CHECK(hipArrayGetDescriptor(&desc, ptr));
-
-  REQUIRE(desc.Format == expected_desc.Format);
-  REQUIRE(desc.NumChannels == expected_desc.NumChannels);
-  REQUIRE(desc.Width == expected_desc.Width);
-  REQUIRE(desc.Height == expected_desc.Height);
-
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipArrayGetDescriptor(&desc, ptr), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+  if (memcpy_err == hipSuccess) {
+    REQUIRE(desc.Format == expected_desc.Format);
+    REQUIRE(desc.NumChannels == expected_desc.NumChannels);
+    REQUIRE(desc.Width == expected_desc.Width);
+    REQUIRE(desc.Height == expected_desc.Height);
+  }
   HIP_CHECK(hipArrayDestroy(ptr));
 }
-
 /**
  * Test Description
  * ------------------------
@@ -514,36 +505,28 @@ TEST_CASE("Unit_hipArrayGetDescriptor_Positive_Basic") {
  */
 TEST_CASE("Unit_hipArrayGetDescriptor_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT
-
   HIP_ARRAY_DESCRIPTOR expected_desc{};
   using vec_info = vector_info<float>;
   expected_desc.Format = vec_info::format;
   expected_desc.NumChannels = vec_info::size;
   expected_desc.Width = 1024 / sizeof(float);
   expected_desc.Height = 4;
-
   hipArray_t ptr;
   HIP_CHECK(hipArrayCreate(&ptr, &expected_desc));
-
   HIP_ARRAY_DESCRIPTOR desc;
-
   SECTION("desc is nullptr") {
     HIP_CHECK_ERROR(hipArrayGetDescriptor(nullptr, ptr), hipErrorInvalidValue);
   }
-
   SECTION("array is nullptr") {
     HIP_CHECK_ERROR(hipArrayGetDescriptor(&desc, nullptr), hipErrorInvalidHandle);
   }
-
   SECTION("array is freed") {
     HIP_CHECK(hipArrayDestroy(ptr));
     HIP_CHECK_ERROR(hipArrayGetDescriptor(&desc, ptr), hipErrorInvalidHandle);
   }
-
   static_cast<void>(hipArrayDestroy(ptr));
 }
-
 /**
- * End doxygen group MemoryTest.
- * @}
- */
+* End doxygen group MemoryTest.
+* @}
+*/

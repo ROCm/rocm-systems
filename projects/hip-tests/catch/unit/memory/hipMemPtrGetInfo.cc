@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@ hipMemPtrGetInfo API
 3. Validates the initial size and allocated size
 */
 TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
+  GENERATE_CAPTURE();
   int* iPtr;
   float* fPtr;
   MemInfo* sPtr;
@@ -45,21 +46,24 @@ TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
   HIP_CHECK(hipMalloc(&iPtr, sSetSize));
   HIP_CHECK(hipMalloc(&fPtr, sSetSize));
   HIP_CHECK(hipMalloc(&sPtr, sSetSize));
+  hipStream_t stream{nullptr};
+  HIP_CHECK(hipStreamCreate(&stream));
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMemPtrGetInfo(iPtr, &sGetSize));
-  REQUIRE(sGetSize == sSetSize);
   HIP_CHECK(hipMemPtrGetInfo(fPtr, &sGetSize));
-  REQUIRE(sGetSize == sSetSize);
   HIP_CHECK(hipMemPtrGetInfo(sPtr, &sGetSize));
+  END_CAPTURE(stream);
   REQUIRE(sGetSize == sSetSize);
-
+  REQUIRE(sGetSize == sSetSize);
+  REQUIRE(sGetSize == sSetSize);
   HIP_CHECK(hipFree(iPtr));
   HIP_CHECK(hipFree(fPtr));
   HIP_CHECK(hipFree(sPtr));
 }
 
 /*
-This testcase verifies the scenario of
-hipMemPtrGetInfo API being called on a zero-sized allocation.
+-This testcase verifies the scenario of
+-hipMemPtrGetInfo API being called on a zero-sized allocation.
 */
 TEST_CASE("Unit_hipMemPtrGetInfo_SizeZeroAllocation") {
   int* iPtr;

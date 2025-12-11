@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -82,9 +82,15 @@ TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_happy", "", char, uchar2, uint2, int4,
     CAPTURE(desc.Width, desc.Height, desc.Depth);
 
     hipArray_t array;
-    HIP_CHECK(hipArray3DCreate(&array, &desc));
-    checkArrayIsExpected(array, desc);
-    HIP_CHECK(hipArrayDestroy(array));
+    hipError_t memcpy_err = hipSuccess;
+    BEGIN_CAPTURE_SYNC(memcpy_err, true);
+    HIP_CHECK_ERROR(hipArray3DCreate(&array, &desc), memcpy_err);
+    END_CAPTURE_SYNC(memcpy_err);
+
+    if (memcpy_err == hipSuccess) {
+      checkArrayIsExpected(array, desc);
+      HIP_CHECK(hipArrayDestroy(array));
+    }
   }
 }
 
@@ -146,20 +152,20 @@ TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_MaxTexture", "", int, uint4, short, us
     HIP_CHECK(hipArrayDestroy(array));
   }
   SECTION("Negative") {
-    std::vector<hipExtent> extentsToTest{
-        make_hipExtent(sizes.max1D + 1, 0, 0),                      // 1D max
-        make_hipExtent(sizes.max2D[0] + 1, s, 0),                   // 2D max width
-        make_hipExtent(s, sizes.max2D[1] + 1, 0),                   // 2D max height
-        make_hipExtent(sizes.max2D[0] + 1, sizes.max2D[1] + 1, 0),  // 2D max
-        make_hipExtent(sizes.max3D[0] + 1, s, s),                   // 3D max width
-        make_hipExtent(s, sizes.max3D[1] + 1, s),                   // 3D max height
-#if !HT_NVIDIA                                                      // leads to hipSuccess on NVIDIA
-        make_hipExtent(s, s, sizes.max3D[2] + 1),                   // 3D max depth
+    std::vector<hipExtent> extentsToTest {
+      make_hipExtent(sizes.max1D + 1, 0, 0),                          // 1D max
+          make_hipExtent(sizes.max2D[0] + 1, s, 0),                   // 2D max width
+          make_hipExtent(s, sizes.max2D[1] + 1, 0),                   // 2D max height
+          make_hipExtent(sizes.max2D[0] + 1, sizes.max2D[1] + 1, 0),  // 2D max
+          make_hipExtent(sizes.max3D[0] + 1, s, s),                   // 3D max width
+          make_hipExtent(s, sizes.max3D[1] + 1, s),                   // 3D max height
+#if !HT_NVIDIA                                       // leads to hipSuccess on NVIDIA
+          make_hipExtent(s, s, sizes.max3D[2] + 1),  // 3D max depth
 #endif
-        make_hipExtent(s, sizes.max3D[1] + 1, sizes.max3D[2] + 1),  // 3D max height and depth
-        make_hipExtent(sizes.max3D[0] + 1, s, sizes.max3D[2] + 1),  // 3D max width and depth
-        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
-        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
+          make_hipExtent(s, sizes.max3D[1] + 1, sizes.max3D[2] + 1),  // 3D max height and depth
+          make_hipExtent(sizes.max3D[0] + 1, s, sizes.max3D[2] + 1),  // 3D max width and depth
+          make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
+          make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
     };
     const auto extent =
         GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));

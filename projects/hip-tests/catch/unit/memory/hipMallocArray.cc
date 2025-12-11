@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -16,7 +16,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-
 /*
 hipMallocArray API test scenarios
 1. Basic Functionality
@@ -24,19 +23,16 @@ hipMallocArray API test scenarios
 3. Allocating Small and big chunk data
 4. Multithreaded scenario
 */
-
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
 #include <limits>
 #include <numeric>
 #include "hipArrayCommon.hh"
-
 static constexpr size_t NUM_W{4};
 static constexpr size_t NUM_H{4};
 static constexpr size_t BIGNUM_W{100};
 static constexpr size_t BIGNUM_H{100};
 static constexpr int ARRAY_LOOP{100};
-
 /*
  * This API verifies  memory allocations for small and
  * bigger chunks of data.
@@ -67,14 +63,11 @@ static void MallocArray_DiffSizes(int gpu) {
     }
   }
 }
-
 TEST_CASE("Unit_hipMallocArray_DiffSizes") {
   CHECK_IMAGE_SUPPORT
-
   MallocArray_DiffSizes(0);
   HIP_CHECK_THREAD_FINALIZE();
 }
-
 /*
 This testcase verifies the hipMallocArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
@@ -82,22 +75,18 @@ and verifies the hipMallocArray API with small and big chunks data
 */
 TEST_CASE("Unit_hipMallocArray_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
-
   std::vector<std::thread> threadlist;
   int devCnt = 0;
   devCnt = HipTest::getDeviceCount();
   for (int i = 0; i < devCnt; i++) {
     threadlist.push_back(std::thread(MallocArray_DiffSizes, i));
   }
-
   for (auto& t : threadlist) {
     t.join();
   }
   HIP_CHECK_THREAD_FINALIZE();
 }
-
 // Kernels ///////////////////////////////////////
-
 template <typename T> __device__ void addOne(T* a) {
   using scalar_type = typename vector_info<T>::type;
   auto as = reinterpret_cast<scalar_type*>(a);
@@ -105,7 +94,6 @@ template <typename T> __device__ void addOne(T* a) {
     as[i] = as[i] + static_cast<scalar_type>(1);
   }
 }
-
 // read from a surface and write to another
 template <typename T> __global__ void incSurface(hipSurfaceObject_t surf, size_t height) {
   // Calculate surface coordinates
@@ -123,36 +111,27 @@ template <typename T> __global__ void incSurface(hipSurfaceObject_t surf, size_t
     surf2Dwrite(data, surf, x * sizeof(T), y);
   }
 }
-
 // Helpers ///////////////////////////////////////
-
 template <typename T> size_t getAllocSize(const size_t width, const size_t height) noexcept {
   return sizeof(T) * width * (height ? height : 1);
 }
-
 // Tests /////////////////////////////////////////
-
 // Test the default array by generating a texture from it then reading from that texture.
 // Textures are read-only so write to the array then copy from the texture into normal device memory
 template <typename T>
 void testArrayAsTexture(hipArray_t arrayPtr, const size_t width, const size_t height) {
   using scalar_type = typename vector_info<T>::type;
   constexpr auto vec_size = vector_info<T>::size;
-
   const auto h = height ? height : 1;
   const size_t pitch = width * sizeof(T);  // no padding
   const auto size = pitch * h;
-
   // create an array to initialize the hip array, then later use it to hold the result
   std::vector<scalar_type> hostData(width * h * vec_size);
-
   // Setup backing array
   // assign ascending values to the data array to show indexing is working.
   std::iota(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(
       hipMemcpy2DToArray(arrayPtr, 0, 0, hostData.data(), pitch, pitch, h, hipMemcpyHostToDevice));
-
-
   // create texture
   hipTextureObject_t textObj{};
   hipResourceDesc resDesc{};
@@ -160,17 +139,13 @@ void testArrayAsTexture(hipArray_t arrayPtr, const size_t width, const size_t he
   // enum to store how to resDesc.res union is being used
   resDesc.resType = hipResourceTypeArray;
   resDesc.res.array.array = arrayPtr;
-
   hipTextureDesc textDesc{};
   memset(&textDesc, 0, sizeof(hipTextureDesc));
   textDesc.filterMode =
       hipFilterModePoint;  // use the actual values in the texture, not normalized data
   textDesc.readMode = hipReadModeElementType;  // don't convert the data to floats
   textDesc.normalizedCoords = 1;               // use normalized coordinates (0.0-1.0)
-
   HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr));
-
-
   // run kernel
   T* device_data{};
   HIP_CHECK(hipMalloc(&device_data, size));
@@ -178,18 +153,14 @@ void testArrayAsTexture(hipArray_t arrayPtr, const size_t width, const size_t he
                     dim3(BlockSize, height ? BlockSize : 1, 1)>>>(device_data, textObj, width,
                                                                   height, false);
   HIP_CHECK(hipGetLastError());  // check for errors when running the kernel
-
   // copy data back and then test it
   std::fill(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
-
   checkDataIsAscending(hostData);
-
   // clean up
   HIP_CHECK(hipDestroyTextureObject(textObj));
   HIP_CHECK(hipFree(device_data));
 }
-
 // Test an array created with the TextureGather flag.
 // First generating a texture from the array then reading from that texture.
 // Textures are read-only so first write to the array then copy from the texture into normal device
@@ -214,25 +185,20 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
   REQUIRE(height != 0);  // 1D TextureGather isn't allowed
   using scalar_type = typename vector_info<T>::type;
   constexpr auto vec_size = vector_info<T>::size;
-
   const size_t pitch = width * sizeof(T);  // no padding
   const auto size = pitch * height;
-
   std::vector<scalar_type> hostData(width * height * vec_size);
-
   // Setup backing array
   // assign ascending values to the data array to show indexing is working.
   std::iota(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(hipMemcpy2DToArray(arrayPtr, 0, 0, hostData.data(), pitch, pitch, height,
                                hipMemcpyHostToDevice));
-
   // create texture
   hipTextureObject_t textObj{};
   hipResourceDesc resDesc{};
   memset(&resDesc, 0, sizeof(hipResourceDesc));
   resDesc.resType = hipResourceTypeArray;
   resDesc.res.array.array = arrayPtr;
-
   hipTextureDesc textDesc{};
   memset(&textDesc, 0, sizeof(hipTextureDesc));
   textDesc.filterMode =
@@ -242,9 +208,7 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
   textDesc.addressMode[1] = hipAddressModeWrap;  // wrap around in all dimensions
   textDesc.addressMode[2] = hipAddressModeWrap;
   textDesc.normalizedCoords = 1;  // use normalized coordinates (0.0 - 1.0)
-
   HIP_CHECK(hipCreateTextureObject(&textObj, &resDesc, &textDesc, nullptr));
-
   // run kernel
   T* device_data{};
   HIP_CHECK(hipMalloc(&device_data, size));
@@ -252,11 +216,9 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
       <<<dim3(width / BlockSize, height / BlockSize, 1), dim3(BlockSize, BlockSize, 1)>>>(
           device_data, textObj, width, height, true);
   HIP_CHECK(hipGetLastError());
-
   // copy data back
   std::fill(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
-
   if (ChannelToRead >= vec_size) {
     // we expect all the values to be zero
     auto not_zero_idx = std::find_if(std::begin(hostData), std::end(hostData), [](scalar_type& x) {
@@ -277,7 +239,6 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
       const auto r = wrap(row, height);
       return vec_size * (width * r + c);
     };
-
     // calculate the index of the values that would have been used for bilinear filtering
     // then check that the values in the element are those indexes
     bool allMatch = true;
@@ -291,14 +252,11 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
             static_cast<scalar_type>(toIndex(static_cast<int>(row) - 1, col)),
             static_cast<scalar_type>(
                 toIndex(static_cast<int>(row) - 1, static_cast<int>(col) - 1))};
-
         // add offset for the channel that is selected
         std::for_each(std::begin(elementIndexes), std::end(elementIndexes),
                       [](scalar_type& x) { x += static_cast<scalar_type>(ChannelToRead); });
-
         // calculate the output we are looking at
         dataIdx = vec_size * (width * row + col);
-
         // test each value sampled
         for (int channel = 0; channel < vec_size; ++channel) {
           allMatch = allMatch && hostData[dataIdx + channel] == elementIndexes[channel];
@@ -313,42 +271,32 @@ void testArrayAsTextureWithGather(hipArray_t arrayPtr, const size_t width, const
             static_cast<scalar_type>(toIndex(-1, -1)) + static_cast<scalar_type>(ChannelToRead));
     REQUIRE(allMatch);
   }
-
   // clean up
   HIP_CHECK(hipDestroyTextureObject(textObj));
   HIP_CHECK(hipFree(device_data));
 }
-
 // Test the an array created with the SurfaceLoadStore flag by generating a surface and reading from
 // it and writing to it.
 template <typename T>
 void testArrayAsSurface(hipArray_t arrayPtr, const size_t width, const size_t height) {
   using scalar_type = typename vector_info<T>::type;
   constexpr auto vec_size = vector_info<T>::size;
-
   const auto h = height ? height : 1;
   const size_t pitch = width * sizeof(T);  // no padding
   const auto size = pitch * h;
-
   std::vector<scalar_type> hostData(width * h * vec_size);
-
   // Setup backing array
   // assign ascending values to the data array to show indexing is working.
   std::iota(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(
       hipMemcpy2DToArray(arrayPtr, 0, 0, hostData.data(), pitch, pitch, h, hipMemcpyHostToDevice));
-
-
   // create surface
   hipSurfaceObject_t surfObj{};
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(hipResourceDesc));
   resDesc.resType = hipResourceTypeArray;
-
   resDesc.res.array.array = arrayPtr;
   HIP_CHECK(hipCreateSurfaceObject(&surfObj, &resDesc));
-
-
   // run kernel
   T* device_data{};
   HIP_CHECK(hipMalloc(&device_data, size));
@@ -356,42 +304,32 @@ void testArrayAsSurface(hipArray_t arrayPtr, const size_t width, const size_t he
   incSurface<T><<<dim3(width / BlockSize, height ? height / BlockSize : 1, 1),
                   dim3(BlockSize, height ? BlockSize : 1, 1)>>>(surfObj, height);
   HIP_CHECK(hipGetLastError());  // check for errors when running the kernel
-
-
   // copy data back and then test it
   std::fill(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(hipMemcpy2DFromArray(hostData.data(), pitch, arrayPtr, 0, 0, pitch, h,
                                  hipMemcpyDeviceToHost));
-
-
   // undo the increment
   std::for_each(std::begin(hostData), std::end(hostData),
                 [](scalar_type& x) { x -= static_cast<scalar_type>(1); });
   checkDataIsAscending(hostData);
-
   // clean up
   HIP_CHECK(hipDestroySurfaceObject(surfObj));
   HIP_CHECK(hipFree(device_data));
 }
-
 // The happy path of a default array and a SurfaceLoadStore array should work
 // Selection of types chosen to reduce compile times
 TEMPLATE_TEST_CASE("Unit_hipMallocArray_happy", "", uint, int, int4, ushort, short2, char, uchar2,
                    char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
-
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
-
   // pointer to the array in device memory
   hipArray_t arrayPtr{};
   size_t width = 1024;
   size_t height{};
-
   SECTION("hipArrayDefault") {
     height = GENERATE(0, 1024);
     INFO("flag is hipArrayDefault");
     INFO("height: " << height);
-
     HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault));
     testArrayAsTexture<TestType>(arrayPtr, width, height);
   }
@@ -400,7 +338,6 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_happy", "", uint, int, int4, ushort, sho
     height = GENERATE(0, 1024);
     INFO("flag is hipArraySurfaceLoadStore");
     INFO("height: " << height);
-
     HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArraySurfaceLoadStore));
     testArrayAsSurface<TestType>(arrayPtr, width, height);
   }
@@ -414,7 +351,6 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_happy", "", uint, int, int4, ushort, sho
       height = 1024;
       INFO("flag is hipArrayTextureGather");
       INFO("height: " << height);
-
       HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather));
       testArrayAsTextureWithGather<TestType>(arrayPtr, width, height);
     } else {
@@ -425,26 +361,36 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_happy", "", uint, int, int4, ushort, sho
     }
   }
 #endif
-
   HIP_CHECK(hipFreeArray(arrayPtr));
 }
-
+// Stream capture of hipMallocArray.
+TEST_CASE("Unit_hipMallocArray_capture_neg") {
+  CHECK_IMAGE_SUPPORT
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  // pointer to the array in device memory
+  hipArray_t arrayPtr{};
+  size_t width = 1024;
+  size_t height = 1;
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, true);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+  if (memcpy_err == hipSuccess) {
+    HIP_CHECK(hipFreeArray(arrayPtr));
+  }
+}
 // Arrays can be up to the size of maxTexture* but no bigger
 // EXSWCPHIPT-71 - no equivalent value for maxSurface and maxTexture2DGather.
 TEMPLATE_TEST_CASE("Unit_hipMallocArray_MaxTexture_Default", "", uint, int4, ushort, short2, char,
                    char4, float2, float4) {
   CHECK_IMAGE_SUPPORT
-
   size_t width, height;
   hipArray_t array{};
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
   const unsigned int flag = hipArrayDefault;
-
   const Sizes sizes(flag);
   CAPTURE(sizes.max1D, sizes.max2D, sizes.max3D);
-
   const size_t s = 64;
-
   SECTION("Happy") {
     SECTION("1D - Max") {
       width = sizes.max1D;
@@ -488,39 +434,29 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_MaxTexture_Default", "", uint, int4, ush
     HIP_CHECK_ERROR(hipMallocArray(&array, &desc, width, height, flag), hipErrorInvalidValue);
   }
 }
-
-
 // Arrays with channels of different size are not allowed.
 TEST_CASE("Unit_hipMallocArray_Negative_DifferentChannelSizes") {
   CHECK_IMAGE_SUPPORT
-
   const int bitsX = GENERATE(8, 16, 32);
   const int bitsY = GENERATE(8, 16, 32);
   const int bitsZ = GENERATE(8, 16, 32);
   const int bitsW = GENERATE(8, 16, 32);
   if (bitsX == bitsY && bitsY == bitsZ && bitsZ == bitsW) return;  // skip when they are equal
-
   const hipChannelFormatKind channelFormat =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
-
   if (channelFormat == hipChannelFormatKindFloat &&
       (bitsX == 8 || bitsY == 8 || bitsZ == 8 || bitsW == 8))
     return;  // 8 bit floats aren't allowed
-
-
   hipChannelFormatDesc desc = hipCreateChannelDesc(bitsX, bitsY, bitsZ, bitsW, channelFormat);
   REQUIRE(desc.x == bitsX);
   REQUIRE(desc.y == bitsY);
   REQUIRE(desc.z == bitsZ);
   REQUIRE(desc.w == bitsW);
-
   hipArray_t arrayPtr{};
   size_t width = 1024;
   size_t height = 1024;
-
   INFO("format: " << channelFormatString(channelFormat) << ", x bits: " << bitsX
                   << ", y bits: " << bitsY << ", z bits: " << bitsZ << ", w bits: " << bitsW);
-
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, flag), hipErrorInvalidValue);
@@ -530,47 +466,34 @@ TEST_CASE("Unit_hipMallocArray_Negative_DifferentChannelSizes") {
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
 // Zero-width array is not supported
 TEST_CASE("Unit_hipMallocArray_Negative_ZeroWidth") {
   CHECK_IMAGE_SUPPORT
-
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
-
   // pointer to the array in device memory
   hipArray_t arrayPtr;
-
   size_t width = 0;
   size_t height = GENERATE(0, 32);
-
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayDefault),
                   hipErrorInvalidValue);
 }
-
 // Providing the array pointer as nullptr should return an error
 TEST_CASE("Unit_hipMallocArray_Negative_NullArrayPtr") {
   CHECK_IMAGE_SUPPORT
-
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
-
   HIP_CHECK_ERROR(hipMallocArray(nullptr, &desc, 1024, 0, hipArrayDefault), hipErrorInvalidValue);
 }
-
 // Providing the desc pointer as nullptr should return an error
 TEST_CASE("Unit_hipMallocArray_Negative_NullDescPtr") {
   CHECK_IMAGE_SUPPORT
-
   hipArray_t arrayPtr;
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, nullptr, 1024, 0, hipArrayDefault),
                   hipErrorInvalidValue);
 }
-
 // Inappropriate but related flags should still return an error
 TEST_CASE("Unit_hipMallocArray_Negative_BadFlags") {
   CHECK_IMAGE_SUPPORT
-
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
-
   hipArray_t arrayPtr;
   SECTION("Flags that dont work with 1D") {
 #if HT_AMD
@@ -592,18 +515,14 @@ TEST_CASE("Unit_hipMallocArray_Negative_BadFlags") {
     HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
   }
 }
-
 // 8-bit float channels are not supported
 TEMPLATE_TEST_CASE("Unit_hipMallocArray_Negative_8bitFloat", "", float, float2, float4) {
   CHECK_IMAGE_SUPPORT
-
   hipChannelFormatDesc desc = GENERATE(hipCreateChannelDesc(8, 0, 0, 0, hipChannelFormatKindFloat),
                                        hipCreateChannelDesc(8, 8, 0, 0, hipChannelFormatKindFloat),
                                        hipCreateChannelDesc(8, 8, 8, 8, hipChannelFormatKindFloat));
-
   // pointer to the array in device memory
   hipArray_t arrayPtr;
-
 #if HT_AMD
   unsigned int flags = hipArrayDefault;
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flags), hipErrorInvalidValue);
@@ -613,24 +532,19 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_Negative_8bitFloat", "", float, float2, 
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
 // Only 8, 16, and 32 bit channels are supported
 TEST_CASE("Unit_hipMallocArray_Negative_BadNumberOfBits") {
   CHECK_IMAGE_SUPPORT
-
   const int badBits = GENERATE(-1, 0, 10, 100);
   const hipChannelFormatKind formatKind =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
   hipChannelFormatDesc desc = hipCreateChannelDesc(badBits, badBits, badBits, badBits, formatKind);
-
   REQUIRE(desc.x == badBits);
   REQUIRE(desc.y == badBits);
   REQUIRE(desc.z == badBits);
   REQUIRE(desc.w == badBits);
-
   // pointer to the array in device memory
   hipArray_t arrayPtr;
-
   INFO("Number of bits: " << badBits);
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
@@ -642,26 +556,20 @@ TEST_CASE("Unit_hipMallocArray_Negative_BadNumberOfBits") {
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
 // creating elements with 3 channels is not supported.
 TEST_CASE("Unit_hipMallocArray_Negative_3ChannelElement") {
   CHECK_IMAGE_SUPPORT
-
   const int bits = GENERATE(8, 16, 32);
   hipChannelFormatKind formatKind =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
   if (bits == 8 && formatKind == hipChannelFormatKindFloat) return;
-
   hipChannelFormatDesc desc = hipCreateChannelDesc(bits, bits, bits, 0, formatKind);
-
   REQUIRE(desc.x == bits);
   REQUIRE(desc.y == bits);
   REQUIRE(desc.z == bits);
   REQUIRE(desc.w == 0);
-
   // pointer to the array in device memory
   hipArray_t arrayPtr;
-
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
@@ -671,26 +579,21 @@ TEST_CASE("Unit_hipMallocArray_Negative_3ChannelElement") {
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
 // The bit channel description should not allow any channels after a zero channel
 TEST_CASE("Unit_hipMallocArray_Negative_ChannelAfterZeroChannel") {
   CHECK_IMAGE_SUPPORT
-
   const int bits = GENERATE(8, 16, 32);
   const hipChannelFormatKind formatKind =
       GENERATE(hipChannelFormatKindSigned, hipChannelFormatKindUnsigned, hipChannelFormatKindFloat);
   if (bits == 8 && formatKind == hipChannelFormatKindFloat) return;
-
   hipChannelFormatDesc desc = GENERATE_COPY(hipCreateChannelDesc(0, bits, bits, 0, formatKind),
                                             hipCreateChannelDesc(0, bits, bits, bits, formatKind),
                                             hipCreateChannelDesc(bits, 0, bits, 0, formatKind),
                                             hipCreateChannelDesc(bits, bits, 0, bits, formatKind),
                                             hipCreateChannelDesc(0, 0, bits, 0, formatKind),
                                             hipCreateChannelDesc(0, 0, bits, bits, formatKind));
-
   INFO("kind: " << channelFormatString(formatKind));
   INFO("x: " << desc.x << ", y: " << desc.y << ", z: " << desc.z << ", w: " << desc.w);
-
   hipArray_t arrayPtr;
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
@@ -701,23 +604,17 @@ TEST_CASE("Unit_hipMallocArray_Negative_ChannelAfterZeroChannel") {
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
 // The channel format should be one of the defined formats
 TEST_CASE("Unit_hipMallocArray_Negative_InvalidChannelFormat") {
   CHECK_IMAGE_SUPPORT
-
   const int bits = 32;
   hipChannelFormatKind formatKind = static_cast<hipChannelFormatKind>(0xFF);
   hipChannelFormatDesc desc = hipCreateChannelDesc(bits, bits, bits, bits, formatKind);
-
   REQUIRE(desc.f != hipChannelFormatKindFloat);
   REQUIRE(desc.f != hipChannelFormatKindUnsigned);
   REQUIRE(desc.f != hipChannelFormatKindSigned);
-
   hipArray_t arrayPtr;
-
   CAPTURE(formatKind);
-
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
@@ -727,15 +624,11 @@ TEST_CASE("Unit_hipMallocArray_Negative_InvalidChannelFormat") {
                   hipErrorInvalidChannelDescriptor);
 #endif
 }
-
-
 // hipMallocArray should handle the max numeric value gracefully.
 TEST_CASE("Unit_hipMallocArray_Negative_NumericLimit") {
   CHECK_IMAGE_SUPPORT
-
   hipArray_t arrayPtr;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-
   size_t size = std::numeric_limits<size_t>::max();
 #if HT_AMD
   unsigned int flag = hipArrayDefault;
