@@ -538,11 +538,10 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   HIP_INIT_API(hipModuleLaunchKernel, f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY,
                blockDimZ, sharedMemBytes, hStream, kernelParams, extra);
 
-  if (!hip::isValid(hStream)) {
+  int deviceId = hip::Stream::DeviceId(hStream);
+  if (deviceId == -1) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
-
-  int deviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
   STREAM_CAPTURE(hipModuleLaunchKernel, hStream, f, gridDimX, gridDimY, gridDimZ, blockDimX,
@@ -629,11 +628,10 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
   HIP_INIT_API(hipModuleLaunchCooperativeKernel, f, gridDimX, gridDimY, gridDimZ, blockDimX,
                blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams);
 
-  if (!hip::isValid(stream)) {
+  int deviceId = hip::Stream::DeviceId(stream);
+  if (deviceId == -1) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
-
-  int deviceId = hip::Stream::DeviceId(stream);
   const amd::Device* device = g_devices[deviceId]->devices()[0];
 
   STREAM_CAPTURE(hipModuleLaunchCooperativeKernel, stream, f, gridDimX, gridDimY, gridDimZ,
@@ -853,7 +851,9 @@ hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 block
 hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 blockDim,
                                              void** kernelParams, uint32_t sharedMemBytes,
                                              hipStream_t hStream) {
-  if (!hip::isValid(hStream)) {
+  // Validate stream and get device ID in one call (DeviceId internally calls isValid)
+  int deviceId = hip::Stream::DeviceId(hStream);
+  if (deviceId == -1) {
     return hipErrorInvalidHandle;
   }
 
@@ -865,7 +865,6 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
   }
 
   hipFunction_t func = nullptr;
-  int deviceId = hip::Stream::DeviceId(hStream);
   hipError_t getStatFuncError = PlatformState::instance().getStatFunc(&func, f, deviceId);
   if (getStatFuncError != hipSuccess) {
     return getStatFuncError;
