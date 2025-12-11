@@ -3768,8 +3768,36 @@ amdsmi_status_t amdsmi_get_soc_pstate(amdsmi_processor_handle processor_handle,
                          amdsmi_dpm_policy_t* policy) {
     AMDSMI_CHECK_INIT();
 
-    return rsmi_wrapper(rsmi_dev_soc_pstate_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+    if (policy == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Initialize output structure to zero
+    memset(policy, 0, sizeof(*policy));
+
+    // Use rsmi structure with correct size (32-byte description fields)
+    rsmi_dpm_policy_t rsmi_policy = {};
+    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_soc_pstate_get, processor_handle, 0,
+                    &rsmi_policy);
+    
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    // Copy data from rsmi structure to amdsmi structure field-by-field
+    // to handle the different structure sizes properly
+    policy->num_supported = rsmi_policy.num_supported;
+    policy->current = rsmi_policy.current;
+    
+    for (uint32_t i = 0; i < rsmi_policy.num_supported && i < AMDSMI_MAX_NUM_PM_POLICIES; i++) {
+        policy->policies[i].policy_id = rsmi_policy.policies[i].policy_id;
+        strncpy(policy->policies[i].policy_description, 
+                rsmi_policy.policies[i].policy_description,
+                AMDSMI_MAX_STRING_LENGTH - 1);
+        policy->policies[i].policy_description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
@@ -3784,8 +3812,36 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
                          amdsmi_dpm_policy_t* policy) {
     AMDSMI_CHECK_INIT();
 
-    return rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+    if (policy == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Initialize output structure to zero
+    memset(policy, 0, sizeof(*policy));
+
+    // Use rsmi structure with correct size (32-byte description fields)
+    rsmi_dpm_policy_t rsmi_policy = {};
+    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle, 0,
+                    &rsmi_policy);
+    
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    // Copy data from rsmi structure to amdsmi structure field-by-field
+    // to handle the different structure sizes properly
+    policy->num_supported = rsmi_policy.num_supported;
+    policy->current = rsmi_policy.current;
+    
+    for (uint32_t i = 0; i < rsmi_policy.num_supported && i < AMDSMI_MAX_NUM_PM_POLICIES; i++) {
+        policy->policies[i].policy_id = rsmi_policy.policies[i].policy_id;
+        strncpy(policy->policies[i].policy_description, 
+                rsmi_policy.policies[i].policy_description,
+                AMDSMI_MAX_STRING_LENGTH - 1);
+        policy->policies[i].policy_description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle processor_handle,
