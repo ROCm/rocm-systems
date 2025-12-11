@@ -21,10 +21,10 @@ THE SOFTWARE.
 
 #include <vector>
 
-#include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
-#include <utils.hh>
+#include <hip_test_common.hh>
 #include <resource_guards.hh>
+#include <utils.hh>
 
 std::vector<int> GetDevicesWithPrefetchSupport() {
   const auto device_count = HipTest::getDeviceCount();
@@ -39,7 +39,7 @@ std::vector<int> GetDevicesWithPrefetchSupport() {
   return supported_devices;
 }
 
-__global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
+__global__ void MemPrefetchAsyncKernel(int *C_d, const int *A_d, size_t N) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = offset; i < N; i += stride) {
@@ -51,7 +51,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
   GENERATE_CAPTURE();
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
 
   LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize);
@@ -64,9 +65,10 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
     LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize);
     StreamGuard sg(Streams::created);
     BEGIN_CAPTURE(sg.stream());
-    HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()));
-    MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(alloc2.ptr(), alloc1.ptr(),
-                                                                       count);
+    HIP_CHECK(
+        hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()));
+    MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(
+        alloc2.ptr(), alloc1.ptr(), count);
     END_CAPTURE(sg.stream());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamSynchronize(sg.stream()));
@@ -83,10 +85,12 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
   GENERATE_CAPTURE();
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
   const auto device = supported_devices.front();
-  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type =
+      GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
 
   StreamGuard sg(stream_type);
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
@@ -101,31 +105,35 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
 TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
   const auto device = supported_devices.front();
-  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged, 3 * kPageSize);
+  LinearAllocGuard<uint8_t> alloc(LinearAllocs::hipMallocManaged,
+                                  3 * kPageSize);
   REQUIRE_FALSE(reinterpret_cast<intptr_t>(alloc.ptr()) % kPageSize);
-  const auto [offset, width] =
-      GENERATE_COPY(std::make_pair(kPageSize / 4, kPageSize / 2),   // Withing page
-                    std::make_pair(kPageSize / 2, kPageSize),       // Across page border
-                    std::make_pair(kPageSize / 2, kPageSize * 2));  // Across two page borders
+  const auto [offset, width] = GENERATE_COPY(
+      std::make_pair(kPageSize / 4, kPageSize / 2),  // Withing page
+      std::make_pair(kPageSize / 2, kPageSize),      // Across page border
+      std::make_pair(kPageSize / 2, kPageSize * 2)); // Across two page borders
   HIP_CHECK(hipMemPrefetchAsync(alloc.ptr() + offset, width, device));
   HIP_CHECK(hipStreamSynchronize(nullptr));
-  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) { return a - a % n; };
+  constexpr auto RoundDown = [](const intptr_t a, const intptr_t n) {
+    return a - a % n;
+  };
   constexpr auto RoundUp = [RoundDown](const intptr_t a, const intptr_t n) {
     return RoundDown(a + n - 1, n);
   };
   const auto base = alloc.ptr();
   const auto rounded_up = RoundUp(offset + width, kPageSize);
   unsigned int attribute = 0;
-  HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                    hipMemRangeAttributeLastPrefetchLocation,
-                                    reinterpret_cast<void*>(base), rounded_up));
+  HIP_CHECK(hipMemRangeGetAttribute(
+      &attribute, sizeof(attribute), hipMemRangeAttributeLastPrefetchLocation,
+      reinterpret_cast<void *>(base), rounded_up));
   REQUIRE(device == static_cast<int>(attribute));
   HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
-                                    hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
-                                    3 * kPageSize));
+                                    hipMemRangeAttributeLastPrefetchLocation,
+                                    alloc.ptr(), 3 * kPageSize));
   REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
           static_cast<int>(attribute));
 }
@@ -133,33 +141,39 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
 TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+    HipTest::HIP_SKIP_TEST(
+        "Test need at least one device with managed memory support");
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));
 
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   SECTION("dev_ptr == nullptr") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, kPageSize, device), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, kPageSize, device),
+                    hipErrorInvalidValue);
   }
 
 #if HT_NVIDIA
   SECTION("dev_ptr points to non-managed memory") {
     LinearAllocGuard<void> alloc(LinearAllocs::hipMalloc, kPageSize);
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device),
+                    hipErrorInvalidValue);
   }
 #endif
 
   SECTION("count == 0") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), 0, device), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), 0, device),
+                    hipErrorInvalidValue);
   }
 
   SECTION("count larger than allocation size") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize + 1, device), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize + 1, device),
+                    hipErrorInvalidValue);
   }
 
   SECTION("Invalid device") {
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipInvalidDeviceId),
-                    hipErrorInvalidDevice);
+    HIP_CHECK_ERROR(
+        hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipInvalidDeviceId),
+        hipErrorInvalidDevice);
   }
 }
