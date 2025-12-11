@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocstorage/reader.hpp>
 #include <rocstorage/storage.hpp>
 #include <rocstorage/writer.hpp>
 
@@ -32,8 +31,7 @@ struct storage::impl {
   explicit impl(std::string database_path, const std::string &uuid)
       : m_database(std::make_shared<rocstorage::data_storage::database>(
             database_path, uuid)),
-        m_uuid(uuid), m_writer(new rocstorage::writer(m_database, m_uuid)),
-        m_reader(new rocstorage::reader(m_database, m_uuid)) {
+        m_uuid(uuid), m_writer(new rocstorage::writer(m_database, m_uuid)) {
     if (!m_database) {
       throw std::invalid_argument("Unable to create database!");
     }
@@ -42,7 +40,6 @@ struct storage::impl {
   std::shared_ptr<rocstorage::data_storage::database> m_database;
   std::string m_uuid;
   std::shared_ptr<rocstorage::writer> m_writer;
-  std::shared_ptr<rocstorage::reader> m_reader;
 };
 
 storage::storage(std::string database_path, std::string uuid)
@@ -56,7 +53,9 @@ std::shared_ptr<rocstorage::writer> storage::get_writer() const {
 }
 
 std::shared_ptr<rocstorage::reader> storage::get_reader() const {
-  return m_impl->m_reader;
+  // Reader facade not yet implemented.
+  // Use rocstorage::reader::open() directly for now.
+  return nullptr;
 }
 
 } // namespace rocm
