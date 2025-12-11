@@ -464,7 +464,7 @@ def validate(test_name, workload_dir, file_dict, args=[]):
         baseline_compare_metric(test_name, workload_dir, args)
 
 
-def are_counters_similar(test_dfs, baseline_df, ignore_first=50):
+def are_counters_similar(test_dfs, baseline_df):
     """
     Compares multiple test dataframes against a baseline dataframe to check
     if their counters are similar. Returns True if all test dataframes have
@@ -540,9 +540,13 @@ def are_counters_similar(test_dfs, baseline_df, ignore_first=50):
 
             return False
 
+        # Warmup values aren't ignored as they do not significantly impact
+        # the analysis for stochastic counters and leaves too few data points
+        # for baseline.
         if any(
             re.match(pattern, counter_name) for pattern in stochastic_counter_patterns
         ):
+            # Remove outliers using Z-score method
             z_score_threshold = 2.0
 
             test_z_scores_list = [
