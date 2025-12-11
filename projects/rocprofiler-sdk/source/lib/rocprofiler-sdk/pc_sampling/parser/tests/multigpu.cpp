@@ -79,11 +79,11 @@ multithread_queue_hammer(size_t tid, Latch* latch)
         active_dispatches;
 
     // TODO: remove unused variable suppression and use these stats or remove them
-    [[maybe_unused]] int    num_reset_queues         = 0;
-    [[maybe_unused]] int    num_samples_generated    = 0;
-    [[maybe_unused]] int    num_dispatches_generated = 0;
-    double avg_q_occupancy          = 0;
-    size_t max_q_occupancy          = 0;
+    [[maybe_unused]] int num_reset_queues         = 0;
+    [[maybe_unused]] int num_samples_generated    = 0;
+    [[maybe_unused]] int num_dispatches_generated = 0;
+    double               avg_q_occupancy          = 0;
+    size_t               max_q_occupancy          = 0;
 
     for(int i = 0; i < NUM_QUEUES; i++)
         queues[i] = std::make_shared<MockQueue<PcSamplingRecordT>>(QSIZE, buffer);
