@@ -39,7 +39,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
-#include <rocprofiler-sdk/cxx/constants.hpp>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
@@ -325,6 +324,8 @@ get_next_dispatch()
     return _v;
 }
 
+constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
+
 struct memory_allocation_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -332,7 +333,7 @@ struct memory_allocation_data
     using buffered_data_t = rocprofiler_buffer_tracing_memory_allocation_record_t;
 
     rocprofiler_thread_id_t                   tid            = common::get_tid();
-    rocprofiler_agent_id_t                    agent          = sdk::null_agent_id;
+    rocprofiler_agent_id_t                    agent          = null_rocp_agent_id;
     uint64_t                                  size_allocated = 0;
     rocprofiler_address_t                     address        = {.handle = 0};
     uint64_t                                  start_ts       = 0;
@@ -413,7 +414,7 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
             }
         }
     }
-    return existing.count(val) == 0 ? sdk::null_agent_id : existing.at(val);
+    return existing.count(val) == 0 ? null_rocp_agent_id : existing.at(val);
 }
 
 rocprofiler_address_t
@@ -456,16 +457,7 @@ memory_allocation_impl(Args... args)
     constexpr auto operation        = memory_allocation_op<OpIdx>::operation_idx;
     constexpr auto rocprofiler_enum = memory_allocation_info<operation>::operation_idx;
 
-    auto&& _tied_args = std::tie(args...);
-
-    // if finalization is in progress or complete, skip correlation ID handling
-    if(registration::get_fini_status() != 0)
-    {
-        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                      std::move(_tied_args),
-                      std::make_index_sequence<N>{});
-    }
-
+    auto&&                 _tied_args = std::tie(args...);
     memory_allocation_data _data{};
 
     {
@@ -597,16 +589,7 @@ memory_free_impl(Args... args)
 
     common::consume_args(arg_indices<OpIdx>::size_idx, arg_indices<OpIdx>::region_idx);
 
-    auto&& _tied_args = std::tie(args...);
-
-    // if finalization is in progress or complete, skip correlation ID handling
-    if(registration::get_fini_status() != 0)
-    {
-        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                      std::move(_tied_args),
-                      std::make_index_sequence<N>{});
-    }
-
+    auto&&                 _tied_args = std::tie(args...);
     memory_allocation_data _data{};
 
     {

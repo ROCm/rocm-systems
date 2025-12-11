@@ -40,7 +40,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
-#include <rocprofiler-sdk/cxx/constants.hpp>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
@@ -143,6 +142,8 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
+constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
+
 struct async_copy_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -152,8 +153,8 @@ struct async_copy_data
     hsa_signal_t                        orig_signal    = {};
     hsa_signal_t                        rocp_signal    = {};
     rocprofiler_thread_id_t             tid            = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent      = sdk::null_agent_id;
-    rocprofiler_agent_id_t              src_agent      = sdk::null_agent_id;
+    rocprofiler_agent_id_t              dst_agent      = null_rocp_agent_id;
+    rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
     rocprofiler_address_t               dst_address    = {.value = 0};
     rocprofiler_address_t               src_address    = {.value = 0};
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
@@ -357,14 +358,13 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
 
-    // Decrement ref_count before deleting data
-    auto _dtor = common::scope_destructor{[&_lk, &_data]() {
-        if(_data->correlation_id)
-        {
-            _data->correlation_id->sub_ref_count();
-        }
+    // we need to decrement this reference count at the end of the functions
+    auto* _corr_id = _data->correlation_id;
+    auto  _dtor    = common::scope_destructor{[&_lk, &_data, &_corr_id]() {
         _lk.reset();  // reset the unique_ptr so the lock is released
         delete _data;
+
+        if(_corr_id) _corr_id->sub_ref_count();
     }};
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
@@ -703,7 +703,7 @@ async_copy_impl(Args... args)
         if(_corr_id_pop)
         {
             context::pop_latest_correlation_id(_corr_id_pop);
-            _data->correlation_id->sub_ref_count();
+            _corr_id_pop->sub_ref_count();
         }
         _data->start_ts = common::timestamp_ns();
     }};
