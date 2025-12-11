@@ -649,11 +649,7 @@ class OmniSoC_Base:
     @abstractmethod
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
-        # Dynamic import to isolate hip dependency during profile time only
-        from utils import benchmark
-
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
@@ -668,6 +664,9 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
+            # Dynamic import to isolate hip dependency during profile time only
+            from utils import benchmark
+
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
                 console_warning(
