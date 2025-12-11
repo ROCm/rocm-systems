@@ -64,6 +64,7 @@ jobs:
       INSTALL_PREFIX: /opt/rocprofiler-register
       PACKAGING_INSTALL_PREFIX: /opt/rocm
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      PATH: /usr/bin:$PATH
 
     steps:
       - name: Clone ROCProfiler Register
@@ -133,7 +134,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-register
         run:
-          cmake --version &&
           python3 ./scripts/run-ci.py -B build
             --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
             --build-jobs 2
@@ -161,8 +161,14 @@ jobs:
         run: |
           cd build
           cpack -G STGZ
+          rm -rf ${{ env.PACKAGING_INSTALL_PREFIX }}/lib/*rocprofiler-register* \
+            ${{ env.PACKAGING_INSTALL_PREFIX }}/lib/cmake/*rocprofiler-register* \
+            ${{ env.PACKAGING_INSTALL_PREFIX }}/share/*rocprofiler-register* \
+            ${{ env.PACKAGING_INSTALL_PREFIX }}/libexec/*rocprofiler-register* \
+            ${{ env.PACKAGING_INSTALL_PREFIX }}/include/rocprofiler-register
           mkdir -p ${{ env.PACKAGING_INSTALL_PREFIX }}
           ./rocprofiler-register-*-Linux.sh --prefix=${{ env.PACKAGING_INSTALL_PREFIX }} --exclude-subdir --skip-license
+          ls -lah ${{ env.PACKAGING_INSTALL_PREFIX }}/lib
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.compiler, 'clang-15') }}
@@ -170,8 +176,10 @@ jobs:
         shell: bash
         run: |
           cd projects/rocprofiler-register
-          CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
+          CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb
           cmake --build build-tests-deb --target all --parallel 16
+          export PATH=${{ env.PACKAGING_INSTALL_PREFIX }}/bin:$PATH
+          export LD_LIBRARY_PATH=${{ env.PACKAGING_INSTALL_PREFIX }}/lib:$LD_LIBRARY_PATH
           ctest --test-dir build-tests-deb --output-on-failure
 
       - name: Test Install Modulefile
