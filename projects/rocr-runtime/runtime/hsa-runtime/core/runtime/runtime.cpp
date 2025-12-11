@@ -3791,8 +3791,13 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   // Import to target agent.
   status = targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent,
                                               shareable_handle);
+  if (!shareable_handle.IsValid()) {
+    shareable_handle.handle = _mappedHandle->shareable_handle.handle;
+  }
   assert(status == HSA_STATUS_SUCCESS);
-  close(dmabuf_fd);
+  if (dmabuf_fd != -1) {
+    close(dmabuf_fd);
+  }
   if (status != HSA_STATUS_SUCCESS)
     return;
 }
@@ -3807,11 +3812,9 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
                              reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
-        return HSA_STATUS_ERROR;
-      }
+      return HSA_STATUS_ERROR;
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
