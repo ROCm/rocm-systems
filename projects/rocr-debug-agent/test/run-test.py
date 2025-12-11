@@ -588,11 +588,19 @@ def check_test_10():
     found_in_debug = False
     found_in_no_debug = False
     for check_str in check_list:
-        pattern = re.compile(check_str)
-        if pattern.search(err_str_debug):
+        if check_str.search(err_str_debug):
             found_in_debug = True
-        if pattern.search(err_str_no_debug):
+        else:
+            print(f'"{check_str.pattern}" Not Found in debug info dump.')
+        if check_str.search(err_str_no_debug):
             found_in_no_debug = True
+            print(f'"{check_str.pattern}" Found in no debug info dump.')
+
+    if not found_in_debug or found_in_no_debug:
+        print("rocr-debug-agent output with debug info:")
+        print(err_str_debug)
+        print("rocr-debug-agent output with no debug info:")
+        print(err_str_no_debug)
 
     return found_in_debug and not found_in_no_debug
 
