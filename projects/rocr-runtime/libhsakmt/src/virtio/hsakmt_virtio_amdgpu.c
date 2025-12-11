@@ -23,6 +23,17 @@
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
 
+/* amdgpu device initialize/deinitialize will be called in vhsakmtopen 
+ * so just return ENOSYS here to avoid duplicate implementation
+ */
+int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
+                              amdgpu_device_handle* device_handle) {
+  return -ENOSYS;
+}
+int vamdgpu_device_deinitialize(amdgpu_device_handle device_handle) {
+  return -ENOSYS;
+}
+
 int vamdgpu_query_gpu_info(amdgpu_device_handle handle, void* out) {
   CHECK_VIRTIO_KFD_OPEN();
 
