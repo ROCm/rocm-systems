@@ -31,11 +31,7 @@ Provides reusable components for testing rocprofiler-systems:
 """
 
 
-from .config import RocprofsysConfig, discover_install_config
-
-# TODO: Implement actual discover_build_config for build directory testing
-# For now, alias to install config
-discover_build_config = discover_install_config
+from .config import RocprofsysConfig, discover_install_config, discover_build_config
 
 from .runners import (
     TestResult,
@@ -80,4 +76,5 @@ __all__ = [
     "GPUInfo",
     "detect_gpu",
     "is_navi_architecture",
+    "is_mi300_architecture",
 ]

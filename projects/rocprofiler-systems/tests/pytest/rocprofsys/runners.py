@@ -81,11 +81,11 @@ class TestResult:
     _instrumented_files: list[Path] = field(default_factory=list)
 
     @property
-    def has_succeeded(self) -> bool:
+    def success(self) -> bool:
         return self.returncode == 0
 
     @property
-    def get_perfetto_file(self) -> Optional[Path]:
+    def perfetto_file(self) -> Optional[Path]:
         candidates = [
             self.output_dir / "perfetto-trace.proto",
             self.output_dir / "perfetto-trace-0.proto",
@@ -97,7 +97,7 @@ class TestResult:
         return protos[0] if protos else None
 
     @property
-    def get_rocpd_file(self) -> Optional[Path]:
+    def rocpd_file(self) -> Optional[Path]:
         candidate = self.output_dir / "rocpd.db"
         if candidate.exists():
             return candidate
@@ -124,6 +124,22 @@ class TestResult:
         matches = list(self.output_dir.glob(pattern))
         return matches[0] if matches else None
 
+    def assert_file_exists(self, filename: str) -> Path:
+        """Assert that an output file exists and return its path.
+
+        Args:
+            filename: Name of the file to check
+
+        Returns:
+            Path to the file
+
+        Raises:
+            AssertionError: If file doesn't exist
+        """
+        path = self.output_dir / filename
+        assert path.exists(), f"Expected output file not found: {path}"
+        return path
+
     def cleanup(self, keep_on_failure: bool = True) -> None:
         """Clean up test output files.
 
@@ -133,7 +149,7 @@ class TestResult:
         if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
             return
 
-        if keep_on_failure and not self.has_succeeded:
+        if keep_on_failure and not self.success:
             return
 
         # Clean up instrumented binaries
@@ -168,6 +184,7 @@ class BaseRunner(ABC):
         run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
+        mpi_ranks: int = 0,
     ):
 
         self.config = config
@@ -176,6 +193,7 @@ class BaseRunner(ABC):
         self.output_dir = Path(output_dir)
         self.run_args = run_args or []
         self.timeout = timeout
+        self.mpi_ranks = mpi_ranks
 
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
@@ -184,8 +202,43 @@ class BaseRunner(ABC):
 
     @abstractmethod
     def build_command(self) -> list[str]:
-        """Build the command to execute."""
+        """Build the command to execute.
+
+        Returns:
+            List of command components
+        """
         pass
+
+    def _wrap_with_mpi(self, command: list[str]) -> list[str]:
+        """Wrap command with MPI launcher if needed.
+
+        Args:
+            command: Base command
+
+        Returns:
+            Command wrapped with mpiexec if MPI is enabled
+        """
+        if self.mpi_ranks > 0 and self.config.mpiexec:
+            mpi_cmd = [
+                str(self.config.mpiexec),
+                "-n",
+                str(self.mpi_ranks),
+            ]
+
+            try:
+                result = subprocess.run(
+                    [str(self.config.mpiexec), "--oversubscribe", "-n", "1", "true"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    mpi_cmd.insert(1, "--oversubscribe")
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+            return mpi_cmd + command
+
+        return command
 
     def run(self) -> TestResult:
         """Execute the test.
@@ -198,6 +251,7 @@ class BaseRunner(ABC):
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         command = self.build_command()
+        command = self._wrap_with_mpi(command)
         full_env = os.environ.copy()
         full_env.update(self.env)
 
@@ -210,7 +264,7 @@ class BaseRunner(ABC):
                 text=True,
                 timeout=self.timeout,
                 env=full_env,
-                cwd=self.config.build_dir,
+                cwd=self.config.rocprofsys_root_dir,
             )
 
             duration = time.time() - start_time
@@ -329,7 +383,7 @@ class BinaryRewriteRunner(BaseRunner):
             text=True,
             timeout=self.timeout,
             env=full_env,
-            cwd=self.config.build_dir,
+            cwd=self.config.rocprofsys_root_dir,
         )
 
         # Track instrumented files for cleanup
@@ -367,7 +421,7 @@ class BinaryRewriteRunner(BaseRunner):
         """
         # First, perform rewrite
         rewrite_result = self.rewrite()
-        if not rewrite_result.has_succeeded:
+        if not rewrite_result.success:
             return rewrite_result
 
         # Then run the instrumented binary

@@ -106,7 +106,6 @@ def pytest_collection_modifyitems(
 # Session-scoped Fixtures
 # ============================================================================
 
-
 @pytest.fixture(scope="session")
 def rocprof_config() -> RocprofsysConfig:
     """Session-wide rocprofiler-systems configuration.
@@ -126,21 +125,38 @@ def gpu_info() -> GPUInfo:
     return detect_gpu()
 
 @pytest.fixture(scope="session")
+def root_dir(rocprof_config: RocprofsysConfig) -> Path:
+    """Path to the rocprofiler-systems root directory (or install directory)."""
+    return rocprof_config.rocprofsys_root_dir
+
+@pytest.fixture(scope="session")
 def build_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to rocprofiler-systems build directory (or install directory)."""
-    return rocprof_config.build_dir
+    return rocprof_config.rocprofsys_build_dir
 
 
 @pytest.fixture(scope="session")
 def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to tests directory."""
-    return rocprof_config.installed_tests_dir
+    return rocprof_config.rocprofsys_tests_dir
 
 @pytest.fixture(scope="session")
 def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to validation rules directory."""
     return rocprof_config.rocpd_validation_rules
 
+# Debug helper, use -s to see
+@pytest.fixture(scope="session", autouse=True)
+def print_test_directories(rocprof_config: RocprofsysConfig) -> None:
+    """Print test directories at the start of the session."""
+    print("\n" + "=" * 70)
+    print("Test Configuration Directories:")
+    print("=" * 70)
+    print(f"  Root dir:       {rocprof_config.rocprofsys_root_dir}")
+    print(f"  Build dir:      {rocprof_config.rocprofsys_build_dir}")
+    print(f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}")
+    print(f"  Validation dir: {rocprof_config.rocpd_validation_rules}")
+    print("=" * 70 + "\n")
 
 # ============================================================================
 # Module-scoped Fixtures
@@ -153,7 +169,7 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 
     All test outputs for a module are stored under this directory.
     """
-    output_dir = rocprof_config.build_dir / "rocprof-sys-pytest-output"
+    output_dir = rocprof_config.rocprofsys_build_dir / "rocprof-sys-pytest-output"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -383,7 +399,7 @@ def cleanup_temp_files(rocprof_config: RocprofsysConfig):
             _safe_remove_file(Path(filepath))
 
     # Clean up empty directories in test output areas
-    for dir_path in _cleanup_directory_patterns(rocprof_config.build_dir):
+    for dir_path in _cleanup_directory_patterns(rocprof_config.rocprofsys_build_dir):
         if dir_path.exists():
             # First pass: remove empty subdirectories
             for child in list(dir_path.iterdir()):
@@ -417,7 +433,7 @@ def cleanup_module_temp_files(rocprof_config: RocprofsysConfig, request: pytest.
 
     # Clean up instrumented binaries in build directory
     for pattern in ["*.inst", "*.inst.orig"]:
-        for filepath in glob.glob(str(rocprof_config.build_dir / pattern)):
+        for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
             _safe_remove_file(Path(filepath))
 
     # Clean up any temp files in /tmp that match session patterns
@@ -455,7 +471,7 @@ def cleanup_instrumented_binary(
                 _safe_remove_file(inst_file)
 
     # Also clean from build directory
-    for inst_file in rocprof_config.build_dir.glob("*.inst"):
+    for inst_file in rocprof_config.rocprofsys_build_dir.glob("*.inst"):
         _safe_remove_file(inst_file)
 
 

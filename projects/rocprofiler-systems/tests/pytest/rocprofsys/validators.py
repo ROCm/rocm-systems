@@ -45,12 +45,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-# For now, pytests are only run as a solution for theRock
-# The scripts will thus be located in:
-TEST_SCRIPT_DIR = Path("/opt/rocprofiler-systems/share/rocprofiler-systems/tests/scripts")
-
-
-
 @dataclass
 class ValidationResult:
     """Result of a validation operation.
@@ -101,6 +95,7 @@ def validate_file_exists(path: Path, description: str = "File") -> ValidationRes
 def _run_validation_script(
     script_name: str,
     args: list[str],
+    tests_dir: Path,
     timeout: int = 60,
 ) -> ValidationResult:
     """Run an existing validation script from the tests directory.
@@ -108,12 +103,13 @@ def _run_validation_script(
     Args:
         script_name: Name of the script (e.g., 'validate-perfetto-proto.py')
         args: Arguments to pass to the script
+        tests_dir: Path to directory containing validation scripts
         timeout: Timeout in seconds
 
     Returns:
         ValidationResult with script output
     """
-    script_path = TEST_SCRIPT_DIR / script_name
+    script_path = tests_dir / script_name
 
     if not script_path.exists():
         return ValidationResult(
@@ -152,6 +148,7 @@ def _run_validation_script(
 
 def validate_perfetto_trace(
     trace_path: Path,
+    tests_dir: Path,
     categories: Optional[list[str]] = None,
     labels: Optional[list[str]] = None,
     counts: Optional[list[int]] = None,
@@ -168,6 +165,7 @@ def validate_perfetto_trace(
 
     Args:
         trace_path: Path to perfetto-trace.proto file
+        tests_dir: Path to directory containing validation scripts
         categories: List of categories to filter by (-m flag)
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
@@ -217,7 +215,7 @@ def validate_perfetto_trace(
     if print_output:
         args.append("-p")
 
-    return _run_validation_script("validate-perfetto-proto.py", args, timeout)
+    return _run_validation_script("validate-perfetto-proto.py", args, tests_dir, timeout)
 
 
 # ============================================================================
@@ -227,6 +225,7 @@ def validate_perfetto_trace(
 
 def validate_rocpd_database(
     db_path: Path,
+    tests_dir: Path,
     rules_files: Optional[list[Path]] = None,
     timeout: int = 60,
 ) -> ValidationResult:
@@ -234,6 +233,7 @@ def validate_rocpd_database(
 
     Args:
         db_path: Path to rocpd.db file
+        tests_dir: Path to directory containing validation scripts
         rules_files: List of JSON rules files to use for validation
         timeout: Validation timeout in seconds
 
@@ -250,7 +250,7 @@ def validate_rocpd_database(
         if existing_rules:
             args.extend(["-r"] + existing_rules)
 
-    return _run_validation_script("validate-rocpd.py", args, timeout)
+    return _run_validation_script("validate-rocpd.py", args, tests_dir, timeout)
 
 
 # ============================================================================
@@ -261,6 +261,7 @@ def validate_rocpd_database(
 def validate_timemory_json(
     json_path: Path,
     metric: str,
+    tests_dir: Path,
     labels: Optional[list[str]] = None,
     counts: Optional[list[int]] = None,
     depths: Optional[list[int]] = None,
@@ -272,6 +273,7 @@ def validate_timemory_json(
     Args:
         json_path: Path to JSON file
         metric: Metric name to validate (-m flag)
+        tests_dir: Path to directory containing validation scripts
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
         depths: Expected depths (-d flag)
@@ -298,7 +300,7 @@ def validate_timemory_json(
     if print_output:
         args.append("-p")
 
-    return _run_validation_script("validate-timemory-json.py", args, timeout)
+    return _run_validation_script("validate-timemory-json.py", args, tests_dir, timeout)
 
 
 # ============================================================================
@@ -308,6 +310,7 @@ def validate_timemory_json(
 
 def validate_causal_json(
     json_path: Path,
+    tests_dir: Path,
     ci_mode: bool = False,
     additional_args: Optional[list[str]] = None,
     timeout: int = 60,
@@ -316,6 +319,7 @@ def validate_causal_json(
 
     Args:
         json_path: Path to causal JSON file
+        tests_dir: Path to directory containing validation scripts
         ci_mode: Whether running in CI mode (--ci flag)
         additional_args: Additional arguments to pass to the script
         timeout: Validation timeout in seconds
@@ -334,7 +338,7 @@ def validate_causal_json(
     if additional_args:
         args.extend(additional_args)
 
-    return _run_validation_script("validate-causal-json.py", args, timeout)
+    return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
 
 
 # ============================================================================
