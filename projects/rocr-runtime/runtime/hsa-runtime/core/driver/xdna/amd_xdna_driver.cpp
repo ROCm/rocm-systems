@@ -1029,7 +1029,7 @@ hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
 
-hsa_status_t XdnaDriver::GetShareableHandle(void* mem, size_t size, core::ShareableHandle* handle) {
+hsa_status_t XdnaDriver::GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) {
   return HSA_STATUS_ERROR;
 }
 

@@ -16,17 +16,17 @@ For example,
 .. code-block::
 
     $ git fetch --tags origin
-    
+
     Building from the CMakeLists.txt directory might look like this:
-    
+
     mkdir -p build
-    
+
     cd build
-    
+
     cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
-    
+
     make
-    
+
     cd ..
 
 Upon a successful build, the binary, ROCmInfo, and the Python script, rocm_agent_enumerator, will be in the `build` folder.
