@@ -47,7 +47,7 @@ jobs:
         python: ['ON']
         build-type: ['Release']
         build-dyninst: ['ON']
-        rocm-version: ['0.0', '6.3', '6.4', '7.0']
+        rocm-version: ['0.0', '6.3', '6.4', '7.0', '7.1']
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1

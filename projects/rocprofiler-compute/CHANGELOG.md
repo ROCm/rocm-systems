@@ -41,6 +41,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+### Removed
+
+* Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
