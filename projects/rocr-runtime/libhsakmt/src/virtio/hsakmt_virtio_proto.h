@@ -337,6 +337,7 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_REG_MEM_WITH_FLAG,
   VHSAKMT_CCMD_MEMORY_DEREG_MEM,
   VHSAKMT_CCMD_MEMORY_MAP_USERPTR,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
 };
 
 typedef struct _memory_req_alloc_args {
@@ -385,6 +386,7 @@ struct vhsakmt_ccmd_memory_req {
   struct vhsakmt_ccmd_req hdr;
   union {
     uint64_t MemoryAddress;
+    uint64_t buf_handle;
     uint32_t Node;
     memory_req_alloc_args alloc_args;
     memory_req_map_to_GPU_nodes_args map_to_GPU_nodes_args;
