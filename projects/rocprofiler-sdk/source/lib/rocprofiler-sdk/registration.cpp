@@ -27,7 +27,6 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/common/simple_timer.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
