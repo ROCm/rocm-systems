@@ -81,7 +81,7 @@ class FatBinaryInfo {
   }
 
   //! Returns the lock for this fatbinary access
-  amd::Monitor& FatBinaryLock() { return fb_lock_; }
+  amd::RecursiveMonitor& FatBinaryLock() { return fb_lock_; }
 
  private:
   void ReleaseImageAndFile();
@@ -102,7 +102,7 @@ class FatBinaryInfo {
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
   std::shared_ptr<UniqueFD> ufd_;                         //!< Unique file descriptor
-  amd::Monitor fb_lock_{true};                            //!< Lock for the fat binary access
+  amd::RecursiveMonitor fb_lock_;                         //!< Lock for the fat binary access
   std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };
 

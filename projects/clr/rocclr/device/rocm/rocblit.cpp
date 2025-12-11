@@ -833,8 +833,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
 KernelBlitManager::KernelBlitManager(VirtualGPU& gpu, Setup setup)
     : DmaBlitManager(gpu, setup),
       program_(nullptr),
-      xferBufferSize_(0),
-      lockXferOps_(true) /* Transfer Ops Lock*/ {
+      xferBufferSize_(0) {
   for (uint i = 0; i < BlitTotal; ++i) {
     kernels_[i] = nullptr;
   }

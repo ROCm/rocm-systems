@@ -221,7 +221,7 @@ struct Coord3D {
 
 template <class T> class SysmemPool {
  public:
-  SysmemPool() : chunk_access_(true) /* Sysmem Pool Lock */ {}
+  SysmemPool() {}
   ~SysmemPool() {
     if (free_chunk_num_ != max_chunk_idx_) {
       for (int i = 0; i < kActiveAllocSize; ++i) {
@@ -332,7 +332,7 @@ template <class T> class SysmemPool {
   std::atomic<uint64_t> current_alloc_ = 0;             //!< Current allocation, global index
   std::atomic<size_t> max_chunk_idx_ = 0;               //!< Current max chunk index
   size_t free_chunk_num_ = 0;                           //!< The number of freed chunks
-  amd::Monitor chunk_access_;                           //!< Lock for the chunk list access
+  amd::RecursiveMonitor chunk_access_;                           //!< Lock for the chunk list access
   MemoryObject* active_allocs_[kActiveAllocSize] = {};  //!< Active chunks for fast access
 };
 

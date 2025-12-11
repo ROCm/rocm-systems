@@ -61,7 +61,7 @@ class DeviceFunc {
   DeviceFunc(std::string name, hipModule_t hmod);
   ~DeviceFunc();
 
-  amd::Monitor dflock_;
+  amd::RecursiveMonitor dflock_;
 
   // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
   hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }

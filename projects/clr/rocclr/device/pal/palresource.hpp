@@ -584,8 +584,7 @@ class ResourceCache : public amd::HeapObject {
  public:
   //! Default constructor
   ResourceCache(Device* device, size_t cacheSizeLimit)
-      : lockCacheOps_(true), /* PAL resource cache */
-        cacheSize_(0),
+      : cacheSize_(0),
         lclCacheSize_(0),
         persistentCacheSize_(0),
         cacheSizeLimit_(cacheSizeLimit),
@@ -633,7 +632,7 @@ class ResourceCache : public amd::HeapObject {
   //! Removes one last entry from the cache
   void removeLast();
 
-  amd::Monitor lockCacheOps_;  //!< Lock to serialise cache access
+  amd::RecursiveMonitor lockCacheOps_;  //!< Lock to serialise cache access
 
   size_t cacheSize_;             //!< Current cache size in bytes
   size_t lclCacheSize_;          //!< Local memory stored in the cache

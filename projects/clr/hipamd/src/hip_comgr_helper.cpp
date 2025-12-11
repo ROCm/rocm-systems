@@ -871,7 +871,7 @@ void RTCProgram::AppendOptions(const std::string app_env_var, std::vector<std::s
 }
 
 // HIPRTC Program lock
-amd::Monitor RTCProgram::lock_(true);
+amd::RecursiveMonitor RTCProgram::lock_;
 
 LinkProgram::LinkProgram(std::string name) : RTCProgram(name) {
   if (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {

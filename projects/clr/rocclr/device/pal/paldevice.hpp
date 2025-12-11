@@ -248,13 +248,12 @@ class Device : public NullDevice {
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
-    amd::Monitor queue_lock_;        //!< Queue lock for access
+    amd::RecursiveMonitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
         : counter_(1),
           engineType_(Pal::EngineTypeCompute),
           index_(0),
-          queue_lock_(true) /* Queue lock for sharing */,
           aql_packet_mgmt_(dev) {}
 
     //! Returns the MQD's read_dispatch_id's address.
@@ -475,7 +474,7 @@ class Device : public NullDevice {
   amd::Monitor& lockAsyncOps() const { return lockAsyncOps_; }
 
   //! Returns the lock object for the virtual gpus list
-  amd::Monitor& vgpusAccess() const { return vgpusAccess_; }
+  amd::RecursiveMonitor& vgpusAccess() const { return vgpusAccess_; }
 
   //! Returns the monitor object for PAL
   amd::Monitor& lockPAL() const { return lockPAL_; }
@@ -749,9 +748,9 @@ class Device : public NullDevice {
   //! Lock to serialise all async ops on initialization heap operation
   mutable amd::Monitor lockForInitHeap_;
   mutable amd::Monitor lockPAL_;          //!< Lock to serialise PAL access
-  mutable amd::Monitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
+  mutable amd::RecursiveMonitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
   mutable amd::Monitor scratchAlloc_;     //!< Lock to serialise scratch allocation
-  mutable amd::Monitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
+  mutable amd::RecursiveMonitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
   mutable amd::Monitor lockResourceOps_;  //!< Lock to serialise resource access
   mutable std::mutex lockAllowAccess_;    //!< To serialize allow_access calls
   XferBuffers* xferRead_;                 //!< Transfer buffers read

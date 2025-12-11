@@ -119,9 +119,9 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
-  amd::Monitor lock_{true};         //!< Guards PlatformState globals
-  amd::Monitor ufd_lock_{true};     //!< Unique FD Store Lock
-  amd::Monitor lg_lock_{true};      //!< Lock for logging operations
+  amd::RecursiveMonitor lock_;         //!< Guards PlatformState globals
+  amd::RecursiveMonitor ufd_lock_;     //!< Unique FD Store Lock
+  amd::RecursiveMonitor lg_lock_;      //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
