@@ -117,6 +117,8 @@ int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_v
 int vamdgpu_device_deinitialize(amdgpu_device_handle device_handle);
 int vamdgpu_device_get_fd(amdgpu_device_handle device_handle);
 int vdrmCommandWriteRead(int fd, unsigned long drmCommandIndex, void* data, unsigned long size);
+int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu);
+int vamdgpu_bo_free(amdgpu_bo_handle buf_handle);
 
 #ifdef __cplusplus
 }
