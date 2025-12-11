@@ -45,6 +45,8 @@ vamdgpu_device_initialize;
 vamdgpu_device_deinitialize;
 vamdgpu_device_get_fd;
 vdrmCommandWriteRead;
+vamdgpu_bo_cpu_map;
+vamdgpu_bo_free;
 local: *;
 };
 

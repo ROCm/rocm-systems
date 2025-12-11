@@ -148,3 +148,38 @@ HSAKMT_STATUS vhsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId, HsaAMDGPUDeviceHand
   *DeviceHandle = node->amdgpu_device_handle;
   return rsp->ret;
 }
+
+int vamdgpu_bo_cpu_map(amdgpu_bo_handle buf_handle, void** cpu) {
+  return 0;
+}
+
+int vamdgpu_bo_free(amdgpu_bo_handle buf_handle) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle vbo = (vhsakmt_bo_handle)buf_handle;
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
+      .buf_handle = (uint64_t)buf_handle,
+      .res_id = vbo->real.res_id,
+  };
+
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+
+  if (vbo->amdgpu_bo.imported) {
+    if (vhsakmt_atomic_dec_return(&vbo->amdgpu_bo.refcount) > 0) {
+      return HSAKMT_STATUS_SUCCESS;
+    }
+    vbo->amdgpu_bo.import_size = 0;
+    vbo->amdgpu_bo.imported = false;
+    vbo->bo_type &= (uint32_t)~VHSA_BO_AMDGPU;
+  }
+
+  return rsp->ret;
+}
