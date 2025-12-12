@@ -80,36 +80,65 @@ def check_file_pattern(pattern, file_path):
     return len(re.findall(pattern, content)) != 0
 
 
-def get_output_dir(suffix="_output", clean_existing=True):
+def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     """
     Provides a unique output directory based on the name of the calling test function
-    with a suffix applied.
+    with a suffix applied. For parametrized tests, pass param_id to ensure unique
+    directory names and avoid NFS conflicts.
 
     Args:
         suffix (str, optional): suffix to append to output_dir.
             Defaults to "_output".
         clean_existing (bool, optional): Whether to remove existing directory if exists.
             Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    param_suffix = ""
+    if param_id:
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
 
 
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True):
-    """Provides a unique input workoad directory with contents of input_dir
-    based on the name of the calling test function.
+def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
+    """Provides a unique input workload directory with contents of input_dir
+    based on the name of the calling test function. For parametrized tests,
+    pass param_id to ensure unique directory names and avoid NFS conflicts.
 
     Setup is a NOOP when tests run serially.
+
+    Args:
+        input_dir (str): Source directory to copy from.
+        suffix (str, optional): suffix to append to output_dir.
+            Defaults to "_tmp".
+        clean_existing (bool, optional): Whether to remove existing directory if exists.
+            Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
     if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
         return input_dir
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    # Include param_id in directory name if provided
+    param_suffix = ""
+    if param_id:
+        # Sanitize param_id: replace special chars that may not be valid in paths
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
@@ -7690,21 +7719,22 @@ def test_amdsmi_ctx():
             amdsmi_shutdown_mock.assert_called_once()
 
 
-def test_amdsmi_get_device_handle():
-    from utils.amdsmi_interface import get_device_handle, import_amdsmi_module
+def test_amdsmi_get_device_handles():
+    from utils.amdsmi_interface import get_device_handles, import_amdsmi_module
 
     _ = import_amdsmi_module()
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
-        get_device_handle()
+        handles = get_device_handles()
+        assert handles[0] == 12345
         device_handles_mock.assert_called_once()
 
     with mock.patch(
         "amdsmi.amdsmi_get_processor_handles", side_effect=Exception("Mock exception")
     ) as device_handles_mock:
-        handle = get_device_handle()
-        assert handle is None
+        handle = get_device_handles()
+        assert len(handle) == 0
 
 
 def test_amdsmi_get_mem_max_clock():
@@ -7712,12 +7742,18 @@ def test_amdsmi_get_mem_max_clock():
 
     _ = import_amdsmi_module()
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
-        device_handles_mock.return_value = [12345]
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [0, 4567]
         with mock.patch("amdsmi.amdsmi_get_clock_info") as mem_max_clock_mock:
-            mem_max_clock_mock.return_value = {"max_clk": 100}
+
+            def side_effect(handle, *args, **kwargs):
+                if handle == 0:
+                    raise Exception("Invalid handle: 0")
+                return {"max_clk": 100}
+
+            mem_max_clock_mock.side_effect = side_effect
             clk = get_mem_max_clock()
-            mem_max_clock_mock.assert_called_once()
+            assert mem_max_clock_mock.call_count == 2
             assert clk == 100
 
 
@@ -7726,7 +7762,7 @@ def test_amdsmi_get_gpu_model():
 
     _ = import_amdsmi_module()
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_board_info") as device_name_mock:
             with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as asic_name_mock:
@@ -7742,7 +7778,7 @@ def test_amdsmi_get_gpu_model():
             "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")
         ):
             model = get_gpu_model()
-            assert model == "N/A"
+            assert model == ("N/A", "N/A", "N/A")
 
 
 def test_amdsmi_get_gpu_vbios_part_number():
@@ -7750,7 +7786,7 @@ def test_amdsmi_get_gpu_vbios_part_number():
 
     _ = import_amdsmi_module()
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_part_number_mock:
             vbios_part_number_mock.return_value = {
@@ -7772,7 +7808,7 @@ def test_amdsmi_get_gpu_compute_partition():
 
     _ = import_amdsmi_module()
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_compute_partition"
@@ -7795,7 +7831,7 @@ def test_amdsmi_get_gpu_memory_partition():
 
     _ = import_amdsmi_module()
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_memory_partition"

@@ -459,6 +459,17 @@ uint64_t HostTotalPhysicalMemory() {
   return totalPhys;
 }
 
+bool UnmapMemory(void* addr, size_t size) { return UncommitMemory(addr, size); }
+
+bool MapMemory(void* addr, size_t size, MemProt perms, int fd [[maybe_unused]],
+               uint64_t cpu_addr [[maybe_unused]]) {
+  if (perms == MEM_PROT_NONE) {
+    return true;
+  }
+  DWORD OldProtect;
+  return VirtualProtect(addr, size, memProtToOsProt(perms), &OldProtect) != 0;
+}
+
 int Ffs(int i) {
   int res = 0;
   unsigned long index;
