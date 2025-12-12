@@ -564,11 +564,11 @@ using kfd_pmc_event_data_t = struct kfd_pmc_event_data
 
 // trait mapping from KFD record type to its corresponding rocpd type
 template <typename T>
-struct json_wrapper_for;
+struct rocpd_wrapper_for;
 
 #define GENERATE_KFD_TRAIT_MAPPING(KFD_TYPE)                                                       \
     template <>                                                                                    \
-    struct json_wrapper_for<rocprofiler_buffer_tracing_##KFD_TYPE>                                 \
+    struct rocpd_wrapper_for<rocprofiler_buffer_tracing_##KFD_TYPE>                                \
     {                                                                                              \
         using type = rocpd_##KFD_TYPE;                                                             \
     };
@@ -583,55 +583,65 @@ GENERATE_KFD_TRAIT_MAPPING(kfd_page_fault_record_t)
 GENERATE_KFD_TRAIT_MAPPING(kfd_queue_record_t)
 
 template <typename T>
-using json_wrapper_t = typename json_wrapper_for<T>::type;
+using rocpd_wrapper_t = typename rocpd_wrapper_for<T>::type;
+
+// helpers to determine timestamp variables for templated KFD records
+template <typename, typename = void>
+struct has_member_timestamp : std::false_type
+{};
+
+template <typename T>
+struct has_member_timestamp<T, std::void_t<decltype(std::declval<T>().timestamp)>> : std::true_type
+{};
+
+template <typename T>
+constexpr bool has_member_timestamp_v = has_member_timestamp<T>::value;
 
 template <typename RecordT>
-static void
-fill_kfd_common(kfd_pmc_event_data_t& data, const metadata& tool_metadata, const RecordT& record)
+auto
+get_start(const RecordT& record)
 {
-    data.kind = record.kind;
-    data.name = tool_metadata.buffer_names.at(data.kind, record.operation);
-    data.tid  = record.pid;  // KFD attributes all events to the lead thread
-
-    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-        cereal::save(ar, json_wrapper_t<RecordT>(record, tool_metadata));
-    });
+    if constexpr(has_member_timestamp_v<RecordT>)
+    {
+        return record.timestamp;
+    }
+    else
+    {
+        return record.start_timestamp;
+    }
 }
 
-// instantaneous events have single timestamp
+template <typename RecordT>
+auto
+get_end(const RecordT& record)
+{
+    if constexpr(has_member_timestamp_v<RecordT>)
+    {
+        return record.timestamp;
+    }
+    else
+    {
+        return record.end_timestamp;
+    }
+}
+
 template <typename RecordT>
 void
-fill_kfd_common_event(kfd_pmc_event_data_t& data,
-                      const metadata&       tool_metadata,
-                      const RecordT&        record)
+fill_kfd_data(kfd_pmc_event_data_t& data, const metadata& tool_metadata, const RecordT& record)
 {
-    fill_kfd_common(data, tool_metadata, record);
-    data.start = record.timestamp;
-    data.end   = record.timestamp;
+    data.kind  = record.kind;
+    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
+    data.tid   = record.pid;  // KFD attributes all events to the lead thread
+    data.start = get_start(record);
+    data.end   = get_end(record);
+
+    rocpd_wrapper_t<RecordT> wrapper = rocpd_wrapper_t<RecordT>(record, tool_metadata);
+    data.value                       = wrapper.value();
+    data.json_data                   = get_json_string(
+        [&record, &tool_metadata, &wrapper](auto& ar) { cereal::save(ar, wrapper); });
 }
-
-// paired events have start and end timestamps
-template <typename RecordT>
-void
-fill_kfd_common_paired(kfd_pmc_event_data_t& data,
-                       const metadata&       tool_metadata,
-                       const RecordT&        record)
-{
-    fill_kfd_common(data, tool_metadata, record);
-    data.start = record.start_timestamp;
-    data.end   = record.end_timestamp;
-}
-
-// helper to build an overload set of lambdas
-template <typename... Ts>
-struct overloaded : Ts...
-{
-    using Ts::operator()...;
-};
-template <typename... Ts>
-overloaded(Ts...) -> overloaded<Ts...>;
-
 }  // namespace
+
 void
 write_rocpd(
     const output_config&                                                    cfg,
@@ -1580,47 +1590,8 @@ write_rocpd(
                 auto data = kfd_pmc_event_data_t{};
 
                 std::visit(
-                    overloaded{
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t record) {
-                            fill_kfd_common_event(data, tool_metadata, record);
-                            data.value = record.end_address.value - record.start_address.value;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_event_page_fault_record_t record) {
-                            fill_kfd_common_event(data, tool_metadata, record);
-                            data.value = record.address.value;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_event_queue_record_t record) {
-                            fill_kfd_common_event(data, tool_metadata, record);
-                            data.value = 1;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t record) {
-                            fill_kfd_common_event(data, tool_metadata, record);
-                            data.value = record.end_address.value - record.start_address.value;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t record) {
-                            fill_kfd_common_event(data, tool_metadata, record);
-                            data.value = record.count;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_page_migrate_record_t record) {
-                            fill_kfd_common_paired(data, tool_metadata, record);
-                            data.value = record.end_address.value - record.start_address.value;
-                        },
-                        [&data, &tool_metadata](
-                            rocprofiler_buffer_tracing_kfd_page_fault_record_t record) {
-                            fill_kfd_common_paired(data, tool_metadata, record);
-                            data.value = record.address.value;
-                        },
-                        [&data,
-                         &tool_metadata](rocprofiler_buffer_tracing_kfd_queue_record_t record) {
-                            fill_kfd_common_paired(data, tool_metadata, record);
-                            data.value = 1;
-                        },
+                    [&data, &tool_metadata](const auto& record) {
+                        fill_kfd_data(data, tool_metadata, record);
                     },
                     itr.record);
 

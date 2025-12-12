@@ -67,6 +67,8 @@ struct rocpd_kfd_event_page_migrate_record_t
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
     }
 
+    uint64_t value() { return end_address - start_address; }
+
     uint64_t start_address;
     uint64_t end_address;
     int64_t  src_agent_id;
@@ -87,6 +89,8 @@ struct rocpd_kfd_event_page_fault_record_t
         address  = _base.address.value;
     }
 
+    uint64_t value() { return address; }
+
     int64_t  agent_id;
     uint64_t address;
 };
@@ -100,6 +104,8 @@ struct rocpd_kfd_event_queue_record_t : rocprofiler_buffer_tracing_kfd_event_que
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
     }
+
+    uint64_t value() { return 1; }
 
     int64_t agent_id;
 };
@@ -117,6 +123,8 @@ struct rocpd_kfd_event_unmap_from_gpu_record_t
         end_address   = _base.end_address.value;
     }
 
+    uint64_t value() { return end_address - start_address; }
+
     int64_t  agent_id;
     uint64_t start_address;
     uint64_t end_address;
@@ -130,6 +138,8 @@ struct rocpd_kfd_event_dropped_events_record_t
     rocpd_kfd_event_dropped_events_record_t(const base_type& _base, const metadata& /*_metadata*/)
     : base_type(_base)
     {}
+
+    uint64_t value() { return count; }
 };
 
 struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_migrate_record_t
@@ -146,6 +156,8 @@ struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_mig
         prefetch_agent_id  = agent_node_id(_metadata, _base.prefetch_agent);
         preferred_agent_id = agent_node_id(_metadata, _base.preferred_agent);
     }
+
+    uint64_t value() { return end_address - start_address; }
 
     uint64_t start_address;
     uint64_t end_address;
@@ -166,6 +178,8 @@ struct rocpd_kfd_page_fault_record_t : rocprofiler_buffer_tracing_kfd_page_fault
         address  = _base.address.value;
     }
 
+    uint64_t value() { return address; }
+
     int64_t  agent_id;
     uint64_t address;
 };
@@ -179,6 +193,8 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
     {
         agent_id = agent_node_id(_metadata, _base.agent_id);
     }
+
+    uint64_t value() { return 1; }
 
     int64_t agent_id;
 };
