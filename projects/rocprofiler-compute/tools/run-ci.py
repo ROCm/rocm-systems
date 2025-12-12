@@ -299,26 +299,34 @@ if __name__ == "__main__":
     for itr in args.stages:
         dashboard_args.append(f"{args.mode}{itr}")
 
-    result = run(
-        [CTEST_CMD]
-        + dashboard_args
-        + [
-            "-S",
-            os.path.join(args.binary_dir, "dashboard.cmake"),
-            "--output-on-failure",
-        ]
-        + ctest_args,
-    )
-
-    # On failure, print the relevant logs for debugging
-    if result.returncode != 0:
-        for log_name in ["LastTestsFailed", "LastTest", "LastConfigure"]:
+    try:
+        run(
+            [CTEST_CMD]
+            + dashboard_args
+            + [
+                "-S",
+                os.path.join(args.binary_dir, "dashboard.cmake"),
+                "--output-on-failure",
+                "-V",
+            ]
+            + ctest_args,
+            check=True,
+        )
+    finally:
+        if "-VV" not in ctest_args:
             for file in glob.glob(
-                os.path.join(args.binary_dir, f"Testing/**/{log_name}*.log"),
-                recursive=True,
+                os.path.join(args.binary_dir, "Testing/**"), recursive=True
             ):
-                print(f"\n###### {os.path.basename(file)} ######\n")
-                with open(file, "r") as f:
-                    print(f.read())
-
-    sys.exit(result.returncode)
+                if not os.path.isfile(file):
+                    continue
+                print(f"\n\n\n###### Reading {file}... ######\n\n\n")
+                with open(file, "r") as inpf:
+                    fdata = inpf.read()
+                    if "LastTest" not in file and "Coverage" not in file:
+                        print(fdata)
+                    oname = os.path.basename(file)
+                    if oname.endswith(".log"):
+                        oname += ".log"
+                    with open(os.path.join(args.binary_dir, oname), "w") as outf:
+                        print(f"\n\n###### Writing {oname}... ######\n\n")
+                        outf.write(fdata)
