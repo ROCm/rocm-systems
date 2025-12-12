@@ -39,8 +39,7 @@ from rocprof_compute_tui.utils.tui_utils import (
 )
 from utils import file_io, parser, schema
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, console_warning, demarcate
-from utils.roofline_calc import validate_roofline_csv
+from utils.logger import console_error, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
@@ -139,18 +138,10 @@ class tui_analysis(OmniAnalyze_Base):
             else sys_info
         )
 
-        roofline_path = Path(self.path) / "roofline.csv"
-        if roofline_path.is_file() and not getattr(self.args, "no_roof", False):
-            is_valid, error_msg = validate_roofline_csv(self.path)
-            if is_valid:
-                try:
-                    w.roofline_peaks = pd.read_csv(roofline_path)
-                except Exception as e:
-                    console_warning(f"Failed to load roofline.csv: {e}")
-                    w.roofline_peaks = pd.DataFrame()
-            else:
-                console_warning(f"Roofline analysis skipped: {error_msg}")
-                w.roofline_peaks = pd.DataFrame()
+        # NOTE: Roofline is not yet supported in TUI. Keep roofline_peaks empty.
+        # When roofline support is added to TUI, this should use validate_roofline_csv()
+        # similar to analysis_base.py.
+        w.roofline_peaks = pd.DataFrame()
 
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
