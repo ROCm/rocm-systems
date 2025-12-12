@@ -192,7 +192,7 @@ execute_process(
     OUTPUT_VARIABLE AMDFLANG_VERSION_CMD_OUTPUT
     RESULT_VARIABLE AMDFLANG_VERSION_CMD_RESULT
 )
-# Comment for Azure 2^2
+
 set(AMDFLANG_FULL_VERSION "")
 
 if(AMDFLANG_VERSION_CMD_RESULT EQUAL 0)
@@ -237,8 +237,8 @@ set(OMPVV_HOST_TESTS_TO_COMPILE
 
 # Set of offloading tests to be compiled (excluding reduction and simd_atomic
 # tests due to OMPVV test failure)
+# Compile for 20 and above
 set(OMPVV_OFFLOAD_TESTS_TO_COMPILE "")
-# These tests fail to compile with amdflang 19 and below. SIMDLEN was not implemented at that time.
 if(OMPVV_USE_OFFLOAD_TESTS AND AMDFLANG_VERSION_MAJOR GREATER_EQUAL 20)
     set(OMPVV_OFFLOAD_TESTS_TO_COMPILE
         "${OMPVV_TDIR}/target_simd/test_target_simd_if.F90"
