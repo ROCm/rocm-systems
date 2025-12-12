@@ -1,6 +1,6 @@
 # Contributing to ROCm SMI #
 
-We welcome contributions to ROCm SMI.  
+We welcome contributions to ROCm SMI.
 Please follow these details to help ensure your contributions will be successfully accepted.
 
 ## Issue Discussion ##
