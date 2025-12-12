@@ -56,7 +56,10 @@ cmd_options:
 
 tests:
   assertion:
-    Unit_StaticAssert_Positive_Basic_RTC: *level_2
+    Unit_StaticAssert_Positive_Basic_RTC:
+      <<: *level_2
+      # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
+      disabled: [amd_windows]
     Unit_StaticAssert_Negative_Basic_RTC: *level_2
     Unit_Assert_Positive_Basic_KernelPass: *level_2
     Unit_Assert_Positive_Basic_KernelFail:
@@ -363,6 +366,12 @@ tests:
     Unit_hipClassKernel_Size: *level_2
     Unit_hipClassKernel_Virtual: *level_2
     Unit_hipClassKernel_Value: *level_2
+    Unit_test_spirv_mode: *level_2
+    Unit_test_compressed_codeobject: *level_2
+    Unit_test_generic_target_in_compressed_fatbin: *level_2
+    Unit_test_generic_target_in_regular_fatbin: *level_2
+    Unit_test_generic_target_only_in_compressed_fatbin: *level_2
+    Unit_test_generic_target_only_in_regular_fatbin: *level_2
   complex:
     Unit_Device_Complex_Unary_Device_Sanity_Positive: *level_2
     Unit_Device_Complex_Unary_Host_Sanity_Positive: *level_2
@@ -1209,6 +1218,30 @@ tests:
     Unit_hipGetProcAddress_KernelLaunchApis: *level_2
     Unit_hipGetProcAddress_CallbackActivityAPIs: *level_2
     Unit_hipGetProcAddress_ExecutionControlAPIs: *level_2
+    Unit_hipFuncSetCacheConfig_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipFuncSetCacheConfig_Negative_Parameters:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipFuncSetCacheConfig_Negative_Not_Supported: *level_2
+    Unit_hipFuncSetSharedMemConfig_Positive_Basic:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipFuncSetSharedMemConfig_Negative_Parameters: *level_2
+    Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported: *level_2
+    Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize: *level_2
+    Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipFuncSetAttribute_Positive_Parameters: *level_2
+    Unit_hipFuncSetAttribute_Negative_Parameters: *level_2
+    Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported: *level_2
+    Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported: *level_2
   g++:
     Unit_hipMalloc_gpptest: *level_2
   gcc:
@@ -2100,6 +2133,7 @@ tests:
     Unit_Device__hip_hc_sub8pk_Sanity_Positive: *level_2
     Unit_Device__hip_hc_mul8pk_Sanity_Positive: *level_2
     Unit_Device__hip_hc_8pk_Negative_Parameters_RTC: *level_2
+    Unit_Device__hip_check_VGPRs: *level_2
   kernel:
     Unit_hipMemFaultStackAllocation_Check: *level_2
     Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check: *level_2
@@ -2148,6 +2182,11 @@ tests:
       # (amd_linux) SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
       # (amd_windows) Below tests are failing PSDB
       disabled: [amd_linux, amd_windows]
+  library:
+    Unit_library_negative: *level_2
+    Unit_hip_library_load_co: *level_2
+    Unit_hipKernelGetParamInfo_Negative: *level_2
+    Unit_hip_library_load_rtc: *level_2
   math:
     Unit_Device_sin_Accuracy_Positive_float: *level_2
     Unit_Device_sin_Accuracy_Positive_double: *level_2
@@ -3796,11 +3835,11 @@ tests:
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic:
       <<: *level_2
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
-      disabled: [amd_linux]
+      disabled: [amd_linux, amd_wsl]
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
       <<: *level_2
       # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
-      disabled: [amd_linux]
+      disabled: [amd_linux, amd_wsl]
     Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice: *level_2
     Unit_hipMemRangeGetAttribute_Negative_Parameters: *level_2
     Unit_hipMemRangeGetAttribute_TstCountParam: *level_2
@@ -4910,15 +4949,39 @@ tests:
     Unit_hipOccupancyMaxPotentialBlockSize_Negative: *level_2
     Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation: *level_2
     Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation: *level_2
-    Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters: *level_2
-    Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation: *level_2
-    Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters: *level_2
-    Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation: *level_2
-    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters: *level_2
-    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation: *level_2
+    Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
     Unit_OccupancyAPIs_StreamCapture: *level_2
-    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters: *level_2
-    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation: *level_2
+    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters:
+      <<: *level_2
+      # Note: intermittent Seg fault failure
+      disabled: [amd_windows, amd_wsl]
+    Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation:
+      <<: *level_2
+      # SWDEV-434878: Below tests failed in stress test on 24/11/23
+      disabled: [amd_windows, amd_wsl]
     Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange: *level_2
     Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu:
       <<: *level_2
@@ -5880,6 +5943,10 @@ tests:
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
       disabled: [amd_wsl]
     Unit_hipMemUnmap_Capture: *level_2
+    Unit_hipMemMapArrayAsync_Positive_Basic:
+      <<: *level_2
+      # Below tests are failing PSDB
+      <<: *disabled_nvidia
   vulkan_interop:
     Unit_hipDestroyExternalMemory_Vulkan_Negative_Parameters: *level_2
     Unit_hipDestroyExternalMemory_Vulkan_Capture: *level_2

@@ -1265,6 +1265,6 @@ TEST_CASE(Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads) {
   HIP_CHECK(hipFree(A2_d));
   HIP_CHECK(hipFree(B2_d));
   HIP_CHECK(hipFree(C2_d));
-  fprintf(stderr, "Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads\n");
+  fprintf(stderr, "hipStreamBeginCaptureToGraph_IndepGraphsThreads\n");
 }
 #endif
