@@ -155,7 +155,7 @@ jobs:
       
       - name: Configure, Build, and Test
         id: test
-        timeout-minutes: 90
+        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
         working-directory: projects/rocprofiler-compute
         run: |
           set -e
@@ -180,8 +180,14 @@ jobs:
             -E "${{ steps.setup_env.outputs.excluded_tests }}"
       
       - name: Output Logs
-        if: failure() && steps.test.outcome == 'failure'
+        if: failure()
         working-directory: projects/rocprofiler-compute
         run: |
-          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
-          cat build/Testing/Temporary/LastTest*.log
+          echo "❌ Run Failed: Outputting available log files..."
+          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
+            if [ -f "$log" ]; then
+              echo "=== $log ==="
+              cat "$log"
+            fi
+          done
+
