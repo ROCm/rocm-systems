@@ -83,7 +83,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
             ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
             ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
             ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
-        DESTINATION share/rocprofiler-systems/tests/scripts
+        DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )
     install(

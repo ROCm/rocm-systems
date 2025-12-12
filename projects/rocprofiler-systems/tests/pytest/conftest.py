@@ -169,7 +169,7 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 
     All test outputs for a module are stored under this directory.
     """
-    output_dir = rocprof_config.rocprofsys_build_dir / "rocprof-sys-pytest-output"
+    output_dir = rocprof_config.test_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
