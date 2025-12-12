@@ -2,7 +2,7 @@
 FROM rocm/dev-ubuntu-22.04
 
 # Set environment variables for build directories and package patterns
-ENV BUILD_FOLDER=/home/amdsmi/build
+ENV BUILD_FOLDER=/home/rocm-systems/projects/amdsmi/build
 ENV DEB_BUILD="amd-smi-lib*99999-local_amd64.deb"
 ENV DEB_BUILD_TEST="amd-smi-lib-tests*99999-local_amd64.deb"
 
@@ -17,10 +17,10 @@ RUN python3 -m pip install --upgrade pip setuptools && \
     python3 -m pip install cmake virtualenv
 
 # Clone the AMD SMI repository from GitHub
-RUN git clone -b amd-mainline https://github.com/ROCm/amdsmi.git
+RUN git clone -b develop https://github.com/ROCm/rocm-systems.git
 
 # Navigate to the amdsmi directory
-WORKDIR /home/amdsmi
+WORKDIR /home/rocm-systems/projects/amdsmi
 
 # Build and Install AMDSMI
 RUN rm -rf ${BUILD_FOLDER} && \
