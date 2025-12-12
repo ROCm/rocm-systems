@@ -113,8 +113,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-otf2-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -150,8 +150,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-perfetto-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 #########################################################################################
@@ -206,8 +206,8 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd
+    FIXTURES_SETUP rocprofv3-test-rocpd-summary-generation-multiproc
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
