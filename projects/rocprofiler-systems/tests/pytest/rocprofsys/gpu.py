@@ -58,10 +58,11 @@ class GPUInfo:
         if self.is_navi:
             return ["SQ_WAVES"]
         return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
-
-
-# def is_navi_architecture(arch: str) -> bool:
-
+    
+    @property
+    def expected_counter_files(self) -> list[str]:
+        """Get expected counter output files based on architecture."""
+        return [f"rocprof-device-0-{name}.txt" for name in self.counter_names]
 
 @lru_cache(maxsize=1)
 def detect_gpu() -> GPUInfo:

@@ -260,8 +260,8 @@ def validate_rocpd_database(
 
 def validate_timemory_json(
     json_path: Path,
-    metric: str,
     tests_dir: Path,
+    metric: str,
     labels: Optional[list[str]] = None,
     counts: Optional[list[int]] = None,
     depths: Optional[list[int]] = None,
