@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -58,7 +44,7 @@ Settings::Settings() {
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
   pinnedMinXferSize_ =
-      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -79,21 +65,24 @@ Settings::Settings() {
 
   rocr_backend_ = true;
 
-  cpu_wait_for_signal_ = !AMD_DIRECT_DISPATCH;
-  cpu_wait_for_signal_ =
-      (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ? ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
+  cpu_wait_for_signal_ = ROC_CPU_WAIT_FOR_SIGNAL;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
   fgs_kernel_arg_ = false;
   barrier_value_packet_ = false;
+  ext_dispatch_packet_ = false;
   kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
-  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
-  blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+  blocking_blit_ = amd::IS_HIP;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
+
+  queue_pipe_dist_ = false;
 }
 
 // ================================================================================================
@@ -127,10 +116,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   enableExtension(ClAmdMediaOps);
   enableExtension(ClAmdMediaOps2);
   enableExtension(ClKhrImage2dFromBuffer);
-
-  if (MesaInterop::Supported()) {
-    enableExtension(ClKhrGlSharing);
-  }
+  enableExtension(ClKhrGlSharing);
 
   // Enable platform extension
   enableExtension(ClAmdDeviceAttributeQuery);
@@ -156,18 +142,29 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
+    queue_pipe_dist_ = dynamic_queues_ >= 1;
+  }
+
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
+    sdma_swap_supported_ = true;
   }
 
   setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
 
   if (gfxipMajor >= 10) {
-    enableWave32Mode_ = true;
-    enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-    if (gfxipMinor == 1) {
-      // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
-      // TODO: This should be updated when ROCr support custom pitch
-      imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
-    }
+     enableWave32Mode_ = true;
+     // Disable wgp mode for gfx1250 and later
+     if (gfxipMajor == 12 && gfxipMinor >= 5) {
+        enableWgpMode_ = false;
+     } else {
+        enableWgpMode_ = GPU_ENABLE_WGP_MODE;
+     }
+     if (gfxipMajor == 10 && gfxipMinor == 1) {
+       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
+       // TODO: This should be updated when ROCr support custom pitch
+       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
+     }
   }
 
   if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
@@ -179,6 +176,34 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor > 10 || (gfxipMajor == 9 && gfxipMinor >= 4)) {
     gwsInitSupported_ = false;
   }
+
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
+
+  if (gfxipMajor == 12 && gfxipMinor >= 5) {
+    ext_dispatch_packet_ = true;
+    groupMemCarveout_ = true;
+  }
+
+  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
+  // packet that dereferences a pointer-to-pointer slot before issuing the
+  // copy.
+  if (gfxipMajor == 12 && gfxipMinor == 5) {
+    sdma_indirect_supported_ = true;
+  }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClAmdPlanarYuv);
+  }
+#endif
 
   // Override current device settings
   override();
@@ -235,6 +260,8 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   const bool isPreGfx908 =
       (gfxipMajor < 9) || ((gfxipMajor == 9) && (gfxipMinor == 0) && (gfxStepping < 8));
   const bool isGfx101x = (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
+  const bool isGfx125x =
+      (gfxipMajor == 12) && ((gfxipMinor >= 5));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
 
@@ -250,14 +277,14 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
     if (!(isPreGfx908 || isGfx101x)) {
       kernelArgImpl = KernelArgImpl::DeviceKernelArgsHDP;
     }
-  } else if (isGfx94x || isGfx90a) {
+  } else if (isGfx94x || isGfx90a || isGfx125x) {
     // Implement the kernel argument readback workaround
     // (write all args -> sfence -> write last byte -> mfence -> read last byte)
     kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
   }
 
   // Enable device kernel args for gfx94x for now
-  if (isGfx94x) {
+  if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
   }
@@ -265,7 +292,5 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc

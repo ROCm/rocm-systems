@@ -48,6 +48,8 @@
 #include "core/inc/amd_memory_region.h"
 
 #include <algorithm>
+#include <mutex>
+#include <shared_mutex>
 
 #include "core/inc/runtime.h"
 #include "core/inc/amd_cpu_agent.h"
@@ -131,14 +133,14 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
-  return AllocateImpl(size, alloc_flags, address, agent_node_id);
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
+  return AllocateImpl(size, alloc_flags, mem, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
-                                        void** address, int agent_node_id) const {
-  if (address == NULL) {
+                                        void** mem, int agent_node_id) const {
+  if (mem == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -146,21 +148,23 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  // Alocation requests for system memory considers aggregate
-  // memory available on all CPU devices
-  if (size > ((IsSystem() ?
-                max_sysmem_alloc_size_ : max_single_alloc_size_))) {
+  // Skip the per-region cap on Windows/DXG so over-commit requests can
+  // reach WDDM; system memory still enforces the cap.
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+  if (IsSystem() && (size > max_sysmem_alloc_size_)) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, address, size,
-                                          agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   return FreeImpl(address, size);
 }
 
@@ -172,7 +176,7 @@ hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
-  ScopedAcquire<KernelMutex> lock(&owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }
@@ -448,7 +452,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
   std::vector<uint64_t> union_agents;
   info.size = sizeof(info);
 
-  ScopedAcquire<KernelMutex> lock(&access_lock_);
+  std::lock_guard<std::mutex> lock(access_lock_);
 
   if (core::Runtime::runtime_singleton_->PtrInfo(const_cast<void*>(ptr), &info, malloc,
                                                  &agent_count, &accessible,
@@ -512,8 +516,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
 
   {  // Sequence with pointer info since queries to other fragments of the block may be adjusted by
      // this call.
-    ScopedAcquire<KernelSharedMutex::Shared> lock(
-        core::Runtime::runtime_singleton_->memory_lock_.shared());
+    std::shared_lock<std::shared_mutex> lock(core::Runtime::runtime_singleton_->memory_lock_);
     uint64_t alternate_va = 0;
     if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &map_flag,
                                              whitelist_nodes.size(),

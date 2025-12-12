@@ -31,6 +31,10 @@ class KFDPerfCountersTest : public KFDBaseComponentTest {
  public:
     KFDPerfCountersTest() {}
     ~KFDPerfCountersTest() {}
+    void GetCounterProperties(int gpuNode);
+    void RegisterTrace(int gpuNode);
+    void StartStopQueryTrace(int gpuNode);
+    void ClockCountersBasicTest(int gpuNode);
 
  protected:
     virtual void SetUp();

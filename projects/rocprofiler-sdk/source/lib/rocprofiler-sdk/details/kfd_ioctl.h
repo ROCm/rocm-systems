@@ -610,7 +610,7 @@ enum KFD_MIGRATE_TRIGGERS
     KFD_MIGRATE_TRIGGER_TTM_EVICTION   /* TTM eviction */
 };
 
-/* The reason of user queue evition event */
+/* The reason of user queue eviction event */
 enum KFD_QUEUE_EVICTION_TRIGGERS
 {
     KFD_QUEUE_EVICTION_TRIGGER_SVM,     /* SVM buffer migration */
@@ -717,7 +717,7 @@ struct kfd_ioctl_spm_args
 /**
  * kfd_ioctl_spm_buffer_header - SPM Buffer header for kfd_ioctl_spm_args->dest_buf
  *
- * @version        [out]: spm versiom
+ * @version        [out]: spm version
  * @bytes_copied   [out]: amount of data for each sub-block
  * @has_data_loss: [out]: boolean indicating whether data was lost for each sub-block
  *                        (e.g. due to a ring-buffer overflow)
@@ -745,7 +745,7 @@ struct kfd_ioctl_spm_buffer_header
  *    mask to start record the event to the kfifo, use bitmap mask combination
  *    for multiple events. New event mask will overwrite the previous event mask.
  *    KFD_SMI_EVENT_MASK_FROM_INDEX(KFD_SMI_EVENT_ALL_PROCESS) bit requires sudo
- *    permisson to receive SVM events from all process.
+ *    permission to receive SVM events from all processes.
  *
  * To receive the event
  *    Application can poll file descriptor to wait for the events, then read event
@@ -1236,7 +1236,7 @@ struct kfd_runtime_info
  *
  * Coordinates debug exception signalling and debug device enablement with runtime.
  *
- * @r_debug - pointer to user struct for sharing information between ROCr and the debuggger
+ * @r_debug - pointer to user struct for sharing information between ROCr and the debugger
  * @mode_mask - mask to set mode
  *	KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK - enable runtime for debugging, otherwise disable
  *	KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK - enable trap temporary setup (ignore on disable)
@@ -1350,7 +1350,7 @@ enum kfd_dbg_trap_operations
  *     @exception_mask (IN)	- exceptions to raise to the debugger
  *     @rinfo_ptr      (IN)	- pointer to runtime info buffer (see kfd_runtime_info)
  *     @rinfo_size     (IN/OUT)	- size of runtime info buffer in bytes
- *     @dbg_fd	       (IN)	- fd the KFD will nofify the debugger with of raised
+ *     @dbg_fd	       (IN)	- fd the KFD will notify the debugger of raised
  *				  exceptions set in exception_mask.
  *
  *     Generic errors apply (see kfd_dbg_trap_operations).
@@ -1823,9 +1823,10 @@ struct kfd_ioctl_pc_sample_args
 #define KFD_IOC_PROFILER_VERSION_NUM 1
 enum kfd_profiler_ops
 {
-    KFD_IOC_PROFILER_PMC       = 0,
-    KFD_IOC_PROFILER_PC_SAMPLE = 1,
-    KFD_IOC_PROFILER_VERSION   = 2,
+    KFD_IOC_PROFILER_PMC         = 0,
+    KFD_IOC_PROFILER_PC_SAMPLE   = 1,
+    KFD_IOC_PROFILER_VERSION     = 2,
+    KFD_IOC_PROFILER_PTL_CONTROL = 3,
 };
 
 /**
@@ -1838,6 +1839,12 @@ struct kfd_ioctl_pmc_settings
     __u32 perfcount_enable; /* Force Perfcount Enable for queues on GPU */
 };
 
+struct kfd_ioctl_ptl_control
+{
+    __u32 gpu_id; /* This is the user_gpu_id */
+    __u32 enable; /* 1 to enable PTL, 0 to disable PTL */
+};
+
 struct kfd_ioctl_profiler_args
 {
     __u32 op; /* kfd_profiler_op */
@@ -1846,6 +1853,7 @@ struct kfd_ioctl_profiler_args
         struct kfd_ioctl_pc_sample_args pc_sample;
         struct kfd_ioctl_pmc_settings   pmc;
         __u32                           version; /* KFD_IOC_PROFILER_VERSION_NUM */
+        struct kfd_ioctl_ptl_control    ptl;
     };
 };
 

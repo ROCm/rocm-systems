@@ -41,7 +41,6 @@
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
 
-#include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
@@ -63,7 +62,7 @@ namespace memory_allocation
 namespace
 {
 using context_t                = context::context;
-using external_corr_id_map_t   = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t   = tracing::external_correlation_id_map_t;
 using region_to_agent_map      = std::unordered_map<hsa_region_t, rocprofiler_agent_id_t>;
 using memory_pool_to_agent_map = std::unordered_map<hsa_amd_memory_pool_t, rocprofiler_agent_id_t>;
 using region_to_agent_pair     = std::pair<region_to_agent_map*, rocprofiler_agent_id_t>;
@@ -503,6 +502,14 @@ memory_allocation_impl(Args... args)
         _data.correlation_id->add_ref_count();
     }
 
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
+    }
+
     auto thr_id = _data.correlation_id->thread_idx;
     tracing::populate_external_correlation_ids(
         tracing_data.external_correlation_ids,
@@ -627,6 +634,14 @@ memory_free_impl(Args... args)
         // increase the reference count to prevent this correlation ID from being retired by another
         // service
         _data.correlation_id->add_ref_count();
+    }
+
+    if(!_data.correlation_id)
+    {
+        // During finalization - execute without tracing
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     auto thr_id = _data.correlation_id->thread_idx;

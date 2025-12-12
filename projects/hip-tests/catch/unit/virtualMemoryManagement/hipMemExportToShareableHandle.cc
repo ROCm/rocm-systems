@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipMemExportToShareableHandle hipMemExportToShareableHandle
@@ -45,7 +29,7 @@ THE SOFTWARE.
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemExportToShareableHandle_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -84,7 +68,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Positive_Basic") {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -133,7 +117,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
   HIP_CHECK(hipMemRelease(handle));
 }
 
-TEST_CASE("Unit_hipMemExportToShareableHandle_Capture") {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
   CTX_CREATE();
 
   hipDevice_t device;
@@ -171,6 +155,66 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Capture") {
 
   CTX_DESTROY();
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Export Fabric Handle to stdout
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemExportToShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  checkFabricHandleSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypeFabric;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+  size_t allocSize = 4096;
+  allocSize = ((granularity + allocSize -1) / granularity) * granularity;
+
+  hipDeviceptr_t addr = 0;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&addr), allocSize, 0, 0, 0));
+
+  hipMemGenericAllocationHandle_t allocHandle;
+  HIP_CHECK(hipMemCreate(&allocHandle, granularity * 2, &prop, 0));
+
+  HIP_CHECK(hipMemMap(reinterpret_cast<void*>(addr), allocSize, 0, allocHandle, 0));
+
+  hipMemAccessDesc accessDesc{};
+  accessDesc.location = prop.location;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(addr), allocSize, &accessDesc, 1));
+
+  int fabrichandle;
+  HIP_CHECK(hipMemExportToShareableHandle(reinterpret_cast<void*>(&fabrichandle), allocHandle,
+                                          hipMemHandleTypeFabric, 0));
+
+  REQUIRE(fabrichandle != 0);
+
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(addr), allocSize));
+  HIP_CHECK(hipMemRelease(allocHandle));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(addr), allocSize));
+
+  CTX_DESTROY();
+}
+
+
 
 /**
  * End doxygen group VirtualMemoryManagementTest.

@@ -1,0 +1,557 @@
+###############################################################################
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+###############################################################################
+
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+
+# Set root directory for ROCm Systems shared files
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
+###############################################################################
+# AVOID IN SOURCE BUILD
+###############################################################################
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND
+   CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  set(MSG "")
+  message(STATUS "Warning! Building from the source directory is not recommended")
+  message(STATUS "If unintended, please remove 'CMakeCache.txt' and 'CMakeFiles'")
+  message(STATUS "and build from a separate directory")
+  message(FATAL_ERROR "In-source build")
+endif()
+
+###############################################################################
+# CONFIGURATION OPTIONS
+###############################################################################
+
+option(PROFILE "Enable statistics and timing support" OFF)
+option(USE_RO "Enable RO conduit" OFF)
+option(USE_IPC "Enable IPC support (using HIP)" ON)
+option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
+option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
+option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
+option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
+option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
+option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
+option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
+option(USE_HEAP_DEVICE_VMM_FABRIC "Heap uses GPU memory with VMM and Fabric handles (requires ROCm 7.next)" OFF)
+option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
+option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
+option(USE_SINGLE_NODE "Enable single node support only." OFF)
+option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
+option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
+
+option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (uses MPI if available, otherwise SLR)" OFF)
+option(BUILD_EXAMPLES "Build the examples" OFF)
+option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
+option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
+option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
+option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
+
+option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
+option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
+option(BUILD_DEBUG_TRACE_HOST "Compile in host-side trace logging (LOG_API/TRACE)" OFF)
+option(BUILD_DEBUG_TRACE_DEVICE "Compile in device-side trace logging (LOGD_API/TRACE)" OFF)
+option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GDA error checking)" OFF)
+
+option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
+option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
+option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
+
+set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
+set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
+
+###############################################################################
+# PROJECT
+###############################################################################
+include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
+
+## Setup VERSION
+set(VERSION_STRING 3.6.0)
+message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
+
+project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
+
+find_package(ROCmCMakeBuildTools)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+include(ROCMCheckTargetIds)
+
+rocm_setup_version(VERSION ${VERSION_STRING})
+
+#############################################################################
+# VALIDATE VMM POSIX ALLOCATOR OPTION
+#############################################################################
+if(USE_HEAP_DEVICE_VMM_POSIX)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  endif()
+endif()
+
+#############################################################################
+# DETECT POD CAPABILITY
+#############################################################################
+# Try to find AMD SMI library
+find_package(amd_smi QUIET)
+
+set(HAVE_AMDSMI_GPU_FABRIC_INFO FALSE)
+
+if(TARGET amd_smi)
+  include(CheckLibraryExists)
+  include(CheckCXXSourceCompiles)
+  include(CMakePushCheckState)
+
+  # Check if AMD SMI library has fabric info support
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_LIBRARIES amd_smi)
+  check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
+  cmake_pop_check_state()
+
+  # Check if HIP runtime has hipMemFabricHandle_t
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  check_cxx_source_compiles("
+    #include <hip/hip_runtime_api.h>
+    int main() {
+      hipMemFabricHandle_t handle;
+      (void)handle;
+      return 0;
+    }
+  " HAVE_HIP_FABRIC_HANDLE)
+  cmake_pop_check_state()
+
+  # Both conditions must be met for full fabric support
+  if(HAVE_AMDSMI_FABRIC_FUNC AND HAVE_HIP_FABRIC_HANDLE)
+    set(HAVE_AMDSMI_GPU_FABRIC_INFO TRUE)
+    message(STATUS "AMD SMI library found with fabric info support - enabling pod-based IPC capability detection")
+  else()
+    if(NOT HAVE_AMDSMI_FABRIC_FUNC)
+      message(STATUS "AMD SMI library found but lacks amdsmi_get_gpu_fabric_info - disabling pod-based IPC capability detection")
+    endif()
+    if(NOT HAVE_HIP_FABRIC_HANDLE)
+      message(STATUS "HIP runtime lacks hipMemFabricHandle_t support (requires ROCm 7.14+) - disabling fabric handle features")
+    endif()
+  endif()
+else()
+  message(STATUS "AMD SMI library not found - disabling pod-based IPC capability detection")
+endif()
+
+#############################################################################
+# VALIDATE VMM FABRIC ALLOCATOR OPTION
+#############################################################################
+if(USE_HEAP_DEVICE_VMM_FABRIC)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires ROCm 7.next or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  endif()
+
+  # VMM Fabric allocator requires both AMD SMI fabric info and HIP fabric handle support
+  if(NOT HAVE_AMDSMI_GPU_FABRIC_INFO)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_FABRIC requires both:\n"
+                        "  1. AMD SMI library with amdsmi_get_gpu_fabric_info support\n"
+                        "  2. HIP runtime with hipMemFabricHandle_t support (ROCm 7.14+)\n"
+                        "Either update to ROCm 7.14 or newer, or disable USE_HEAP_DEVICE_VMM_FABRIC.")
+  endif()
+
+  message(STATUS "USE_HEAP_DEVICE_VMM_FABRIC enabled with full fabric handle support")
+endif()
+
+#############################################################################
+# SET GPU ARCHITECTURES
+#############################################################################
+include(cmake/rocm_local_targets.cmake)
+
+set(DEFAULT_GPUS
+    gfx90a;
+    gfx1100;
+    gfx1201;
+    gfx942)
+
+if(${ROCM_MAJOR_VERSION} GREATER 6)
+  list(APPEND DEFAULT_GPUS gfx950)
+endif()
+
+if(${ROCM_MAJOR_VERSION} GREATER 7 OR (${ROCM_MAJOR_VERSION} EQUAL 7 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 14))
+  list(APPEND DEFAULT_GPUS gfx1250)
+endif()
+
+if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
+  set(BUILD_LOCAL_GPU_TARGET_ONLY ON)
+endif()
+
+if (BUILD_LOCAL_GPU_TARGET_ONLY)
+  message(STATUS "Building only for local GPU target")
+  if (COMMAND rocm_local_targets)
+    rocm_local_targets(DEFAULT_GPUS)
+  else()
+    message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
+  endif()
+endif()
+
+set(DEFAULT_GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
+    "Target default GPUs if GPU_TARGETS is not defined.")
+
+# When the user supplies GPU_TARGETS:
+#   - Normalise comma/semicolon separators
+#   - Build a base→full map so feature suffixes (e.g. gfx950:sramecc+:xnack-)
+#     can be restored after validation
+#   - Produce a bare-arch list for rocm_check_target_ids and HIP compilation,
+#     which both reject feature-suffixed entries in --offload-arch
+if(GPU_TARGETS)
+  string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+  set(_bare_targets "")
+  foreach(_t ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _base "${_t}")
+    set(_USER_FULL_${_base} "${_t}")
+    list(APPEND _bare_targets "${_base}")
+  endforeach()
+  list(REMOVE_DUPLICATES _bare_targets)
+endif()
+
+if(COMMAND rocm_check_target_ids)
+  if(GPU_TARGETS)
+    message(STATUS "Checking for ROCm support for GPU targets: " "${_bare_targets}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_bare_targets})
+  else()
+    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
+  endif()
+else()
+  message(WARNING "Unable to check for supported GPU targets.")
+  if(GPU_TARGETS)
+    set(SUPPORTED_GPUS ${_bare_targets})
+  else()
+    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
+  endif()
+endif()
+
+# GPU_TARGETS_FULL: validated arch strings with feature suffixes restored.
+# Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
+# HSACOs — HIP error 209 occurs if the suffix in the HSACO metadata does not
+# match the active feature configuration of the GPU.
+# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
+# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
+if(GPU_TARGETS)
+  set(_full_validated "")
+  foreach(_base ${SUPPORTED_GPUS})
+    if(DEFINED _USER_FULL_${_base})
+      list(APPEND _full_validated "${_USER_FULL_${_base}}")
+    else()
+      list(APPEND _full_validated "${_base}")
+    endif()
+  endforeach()
+  set(GPU_TARGETS_FULL "${_full_validated}" CACHE STRING
+    "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
+else()
+  unset(GPU_TARGETS_FULL CACHE)
+endif()
+
+set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
+
+message(STATUS "Compiling for ${GPU_TARGETS}")
+
+###############################################################################
+# CREATE ROCSHMEM LIBRARY
+###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_library(${PROJECT_NAME})
+  add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+
+  #############################################################################
+  # PACKAGE DEPENDENCIES
+  #############################################################################
+  # GDA links libnuma directly; hsakmt (USE_SDMA) also depends on numa::numa
+  if(USE_GDA OR USE_SDMA)
+    find_package(NUMA QUIET HINTS "${ROCM_PATH}/lib/rocm_sysdeps")
+    if(NOT TARGET numa::numa)
+      find_package(PkgConfig QUIET)
+      if(PKG_CONFIG_FOUND)
+        pkg_check_modules(_NUMA_PC QUIET numa)
+      endif()
+      find_library(_NUMA_LIB NAMES numa HINTS ${_NUMA_PC_LIBDIR})
+      find_path(_NUMA_INC NAMES numa.h HINTS ${_NUMA_PC_INCLUDEDIR})
+      include(FindPackageHandleStandardArgs)
+      find_package_handle_standard_args(NUMA DEFAULT_MSG _NUMA_LIB _NUMA_INC)
+      if(NUMA_FOUND AND NOT TARGET numa::numa)
+        add_library(numa::numa SHARED IMPORTED)
+        set_target_properties(numa::numa PROPERTIES
+          IMPORTED_LOCATION "${_NUMA_LIB}"
+          INTERFACE_INCLUDE_DIRECTORIES "${_NUMA_INC}")
+      endif()
+    endif()
+
+    if(USE_GDA AND NOT TARGET numa::numa)
+      message(STATUS "libnuma not found. Unable to build GDA")
+      set(USE_GDA OFF)
+      set(GDA_IONIC OFF)
+      set(GDA_BNXT OFF)
+      set(GDA_MLX5 OFF)
+    endif()
+  endif()
+
+  if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
+    find_package(MPI)
+  else()
+    message ("-- External MPI detection disabled by user")
+  endif()
+
+  if (MPI_FOUND)
+    set(HAVE_EXTERNAL_MPI ON)
+  else()
+    set(HAVE_EXTERNAL_MPI OFF)
+    set(BUILD_UNIT_TESTS OFF)
+    set(BUILD_EXAMPLES OFF)
+  endif()
+
+  if (USE_EXTERNAL_MPI STREQUAL "ON")
+    if(NOT HAVE_EXTERNAL_MPI)
+      message(FATAL_ERROR "External MPI support requested but MPI support not found. Build Aborted")
+    endif()
+  endif()
+
+  find_package(hip REQUIRED)
+  find_package(hsa-runtime64 REQUIRED)
+
+  if (USE_SDMA)
+    find_package(hsakmt REQUIRED)
+  endif()
+
+  set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+  find_package(Threads REQUIRED)
+
+  # Check if std::filesystem requires linking stdc++fs
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_QUIET TRUE)
+  check_cxx_source_compiles("
+    #include <filesystem>
+    int main() {
+      auto p = std::filesystem::current_path();
+      return 0;
+    }
+  " FILESYSTEM_NO_LINK_NEEDED)
+  set(CMAKE_REQUIRED_QUIET FALSE)
+
+  if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  else()
+    set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
+  endif()
+
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE ROCSHMEM_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NOT ROCSHMEM_GIT_HASH)
+    set(ROCSHMEM_GIT_HASH "unknown")
+  endif()
+
+  string(REPLACE ";" " " ROCSHMEM_OFFLOAD_TARGETS "${GPU_TARGETS}")
+
+  set(_backends "")
+  if(USE_GDA)
+    set(_gda_nics "")
+    foreach(_nic IN ITEMS IONIC BNXT MLX5)
+      if(GDA_${_nic})
+        list(APPEND _gda_nics "${_nic}")
+      endif()
+    endforeach()
+    list(JOIN _gda_nics "/" _gda_providers)
+    list(APPEND _backends "GDA(${_gda_providers})")
+  endif()
+  if(USE_RO)
+    list(APPEND _backends "RO")
+  endif()
+  if(USE_IPC)
+    list(APPEND _backends "IPC")
+  endif()
+
+  if(_backends)
+    list(JOIN _backends "+" ROCSHMEM_BACKEND)
+  else()
+    set(ROCSHMEM_BACKEND "NONE")
+  endif()
+  set(ROCSHMEM_VENDOR_STRING "rocSHMEM_v${VERSION_STRING}_${ROCSHMEM_BACKEND}")
+
+  configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
+
+  # Embed rocshmem_config.h as a C++17 raw string literal so build_info.cpp
+  # (and the rocshmem_info tool) can display it without reading the file at runtime.
+  file(READ "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h" _config_content)
+  file(WRITE "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config_embedded.hpp"
+    "// Auto-generated from rocshmem_config.h — do not edit.\n"
+    "#pragma once\n"
+    "static const char rocshmem_config_h_content[] = R\"ROCSHMEM_CFG_END(\n"
+    "${_config_content}"
+    ")ROCSHMEM_CFG_END\";\n"
+  )
+
+  #############################################################################
+  # LINKING AND INCLUDE DIRECTORIES
+  #############################################################################
+  target_compile_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      -fgpu-rdc
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+    PRIVATE
+      -Wall
+      -Wextra
+      -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+  )
+
+  target_include_directories(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>            # rocshmem_config.h
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include/rocshmem>   # rocshmem_config.h from rocshmem.hpp
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+      $<INSTALL_INTERFACE:include>
+  )
+
+  target_link_libraries(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<BOOL:${HAVE_EXTERNAL_MPI}>:MPI::MPI_CXX>
+      Threads::Threads
+      hip::device
+      hip::host
+      dl
+      hsa-runtime64::hsa-runtime64
+      -fgpu-rdc
+      $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
+      $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
+      $<$<BOOL:${USE_GDA}>:numa::numa>
+  )
+
+  target_link_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+  )
+
+  if (ASAN)
+    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
+    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+
+    # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
+    target_link_options(
+      ${PROJECT_NAME}
+      PUBLIC
+        -Wl,-rpath,${ASAN_RUNTIME_DIR}
+    )
+  endif()
+
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    # ROCm 6.x requires us to explicitly enable warp sync builtins
+    target_compile_definitions(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:HIP_ENABLE_WARP_SYNC_BUILTINS=1>)
+  endif()
+
+  #############################################################################
+  # DEVICE BITCODE COMPILATION
+  #############################################################################
+  include(${CMAKE_SOURCE_DIR}/cmake/DeviceBitcode.cmake)
+
+  #############################################################################
+  # INSTALL
+  #############################################################################
+  include(ROCMInstallTargets)
+  include(ROCMCreatePackage)
+
+  rocm_install(TARGETS rocshmem)
+
+  rocm_install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+
+  rocm_install(
+    FILES "${CMAKE_BINARY_DIR}/include/rocshmem/rocshmem_config.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocshmem
+  )
+
+  if (BUILD_TOOLS)
+    add_subdirectory(tools)
+    rocm_install(
+      PROGRAMS "${CMAKE_BINARY_DIR}/tools/rocshmem_info"
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+  endif()
+
+  rocm_package_add_dependencies(
+    DEPENDS
+      hsa-rocr
+      hip-runtime-amd
+      rocm-dev
+  )
+
+  rocm_export_targets(
+    TARGETS roc::rocshmem
+    NAMESPACE roc::
+    DEPENDS PACKAGE NUMA
+  )
+  include(ROCMPackageConfigHelpers)
+  include(ROCMClients)
+  rocm_package_setup_component(clients)
+  rocm_package_setup_client_component(tests PACKAGE_NAME tests)
+
+  rocm_create_package(
+    NAME "rocSHMEM"
+    DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
+    MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
+  )
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_subdirectory(src)
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if(BUILD_CTESTS)
+    enable_testing()
+endif()
+add_subdirectory(tests)
+
+if (BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+

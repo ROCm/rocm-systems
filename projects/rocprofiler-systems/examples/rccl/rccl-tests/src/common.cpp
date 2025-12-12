@@ -1,18 +1,20 @@
 
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
 
 #include "common.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include "hip/hip_runtime.h"
+#include "hip/hip_runtime_api.h"
 #include "rccl_float8.h"
 #include <cstdio>
 #include <ctype.h>
+#include <dlfcn.h>
+#include <errno.h>
 #include <getopt.h>
 #include <hip/hip_bfloat16.h>
 #include <libgen.h>
@@ -27,9 +29,45 @@
 #include "git_version.h"
 #include "verifiable.h"
 
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
+
 int     test_ncclVersion = 0;  // init'd with ncclGetVersion()
 int32_t gpu_block3;
 size_t  cache_bytes = 192 * 1024 * 1024;  // Use 192MB
+
+rcclTestsGetAlgoInfo_t     rcclTestsGetAlgoInfo     = NULL;
+rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
+rcclTestsGetAlgoName_t     rcclTestsGetAlgoName     = NULL;
+
+static void
+loadRcclSyms()
+{
+    static void* handle  = NULL;
+    const char*  libname = "librccl.so";
+    if(!handle)
+    {
+        handle = dlopen(libname, RTLD_LAZY | RTLD_LOCAL);
+        if(!handle)
+        {
+            fprintf(stderr, "dlopen failed: %s\n", dlerror());
+            return;
+        }
+    }
+    rcclTestsGetAlgoInfo = (rcclTestsGetAlgoInfo_t) dlsym(handle, "rcclGetAlgoInfo");
+    rcclTestsGetAlgoName = (rcclTestsGetAlgoName_t) dlsym(handle, "rcclGetAlgoName");
+    rcclTestsGetProtocolName =
+        (rcclTestsGetProtocolName_t) dlsym(handle, "rcclGetProtocolName");
+}
+
+// RCCL_FLOAT8 support
+bool rccl_float8_useFnuz = false;
+
+bool
+IsArchMatch(char const* arch, char const* target)
+{
+    // helper function to reduce clutter in code elsewhere. Returns true on match.
+    return (strncmp(arch, target, strlen(target)) == 0);
+}
 
 #if NCCL_MAJOR >= 2
 ncclDataType_t test_types[ncclNumTypes] = { ncclInt8,
@@ -41,14 +79,14 @@ ncclDataType_t test_types[ncclNumTypes] = { ncclInt8,
                                             ncclHalf,
                                             ncclFloat,
                                             ncclDouble
-#    if RCCL_BFLOAT16 == 1
+#    if HAVE_BF16
                                             ,
                                             ncclBfloat16
 #    endif
-#    if RCCL_FLOAT8 == 1
+#    if HAVE_FP8
                                             ,
-                                            ncclFp8E4M3,
-                                            ncclFp8E5M2
+                                            ncclFloat8e4m3,
+                                            ncclFloat8e5m2
 #    endif
 };
 const char* test_typenames[ncclNumTypes] = { "int8",
@@ -60,11 +98,11 @@ const char* test_typenames[ncclNumTypes] = { "int8",
                                              "half",
                                              "float",
                                              "double"
-#    if RCCL_BFLOAT16 == 1
+#    if HAVE_BF16
                                              ,
                                              "bfloat16"
 #    endif
-#    if RCCL_FLOAT8 == 1
+#    if HAVE_FP8
                                              ,
                                              "fp8_e4m3",
                                              "fp8_e5m2"
@@ -371,6 +409,15 @@ InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType
 {
     ncclVerifiablePrepareExpected(data, count, (int) type, (int) op, nranks, seed, offset,
                                   cudaStreamDefault);
+    return testSuccess;
+}
+
+testResult_t
+InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset,
+                  ncclDataType_t type, ncclRedOp_t op)
+{
+    ncclVerifiableApplyBias(expected, bias, count, (int) type, (int) op, offset,
+                            cudaStreamDefault);
     return testSuccess;
 }
 
@@ -716,7 +763,7 @@ startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int
         TESTCHECK(args->collTest->runColl(
             (void*) (in_place ? recvBuff + args->sendInplaceOffset * rank : sendBuff),
             (void*) (in_place ? recvBuff + args->recvInplaceOffset * rank : recvBuff),
-            count, type, op, root, args->comms[i], args->streams[i]));
+            count, type, op, root, args->comms[i], args->streams[i], args->bias[i]));
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
         if(opIndex >= ncclNumOps)
@@ -1239,7 +1286,7 @@ threadLaunch(struct testThread* thread)
 
 testResult_t
 AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvBytes,
-              void** expected, size_t nbytes)
+              void** expected, size_t nbytes, void** bias)
 {
     if(enable_rotating_tensor)
     {
@@ -1252,6 +1299,8 @@ AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvByt
         {
             CUDACHECK(hipExtMallocWithFlags(sendbuff, nbytes, hipDeviceMallocUncached));
             CUDACHECK(hipExtMallocWithFlags(recvbuff, nbytes, hipDeviceMallocUncached));
+            if(bias)
+                CUDACHECK(hipExtMallocWithFlags(bias, nbytes, hipDeviceMallocUncached));
             if(datacheck)
                 CUDACHECK(
                     hipExtMallocWithFlags(expected, recvBytes, hipDeviceMallocUncached));
@@ -1262,6 +1311,9 @@ AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvByt
                 hipExtMallocWithFlags(sendbuff, nbytes, hipDeviceMallocFinegrained));
             CUDACHECK(
                 hipExtMallocWithFlags(recvbuff, nbytes, hipDeviceMallocFinegrained));
+            if(bias)
+                CUDACHECK(
+                    hipExtMallocWithFlags(bias, nbytes, hipDeviceMallocFinegrained));
             if(datacheck)
                 CUDACHECK(hipExtMallocWithFlags(expected, recvBytes,
                                                 hipDeviceMallocFinegrained));
@@ -1271,12 +1323,14 @@ AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvByt
     {
         CUDACHECK(hipHostMalloc(sendbuff, nbytes));
         CUDACHECK(hipHostMalloc(recvbuff, nbytes));
+        if(bias) CUDACHECK(hipHostMalloc(bias, nbytes));
         if(datacheck) CUDACHECK(hipHostMalloc(expected, recvBytes));
     }
     else if(memorytype == ncclManaged)
     {
         CUDACHECK(cudaMallocManaged(sendbuff, nbytes));
         CUDACHECK(cudaMallocManaged(recvbuff, nbytes));
+        if(bias) CUDACHECK(cudaMallocManaged(bias, nbytes));
         if(datacheck) CUDACHECK(cudaMallocManaged(expected, recvBytes));
 #if 0
     CUDACHECK(cudaMemset(*sendbuff, 0, nbytes));
@@ -1288,6 +1342,7 @@ AllocateBuffs(void** sendbuff, size_t sendBytes, void** recvbuff, size_t recvByt
     {
         CUDACHECK(cudaMalloc(sendbuff, nbytes));
         CUDACHECK(cudaMalloc(recvbuff, nbytes));
+        if(bias) CUDACHECK(cudaMalloc(bias, nbytes));
         if(datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
     }
     CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
@@ -1333,6 +1388,7 @@ main(int argc, char* argv[])
         test_opnum++;  // PreMulSum
     }
 #endif
+    loadRcclSyms();
 
     // Parse args
     // Replace getopt_long with manual argument parsing
@@ -1764,6 +1820,7 @@ run()
     std::vector<cudaStream_t> streams(nGpus * nThreads);
     std::vector<void*>        sendbuffs(nGpus * nThreads);
     std::vector<void*>        recvbuffs(nGpus * nThreads);
+    std::vector<void*>        bias(nGpus * nThreads);
     std::vector<void*>        expected(nGpus * nThreads);
     size_t                    sendBytes, recvBytes;
 
@@ -1777,7 +1834,8 @@ run()
         gpus[i] = ((gpu0 != -1 ? gpu0 : localRank * nThreads * nGpus) + i) % numDevices;
         CUDACHECK(cudaSetDevice(gpus[i]));
         TESTCHECK(AllocateBuffs(sendbuffs.data() + i, sendBytes, recvbuffs.data() + i,
-                                recvBytes, expected.data() + i, (size_t) maxBytes));
+                                recvBytes, expected.data() + i, (size_t) maxBytes,
+                                bias.data() + i));
         if(streamnull)
             streams[i] = NULL;
         else
@@ -1895,6 +1953,7 @@ run()
         threads[t].args.gpus                   = gpus.data() + t * nGpus;
         threads[t].args.sendbuffs              = sendbuffs.data() + t * nGpus;
         threads[t].args.recvbuffs              = recvbuffs.data() + t * nGpus;
+        threads[t].args.bias                   = bias.data() + t * nGpus;
         threads[t].args.expected               = expected.data() + t * nGpus;
         threads[t].args.ncclId                 = ncclId;
         threads[t].args.comms                  = comms + t * nGpus;
@@ -1952,6 +2011,7 @@ run()
     {
         if(sendbuffs[i]) CUDACHECK(cudaFree((char*) sendbuffs[i]));
         if(recvbuffs[i]) CUDACHECK(cudaFree((char*) recvbuffs[i]));
+        if(bias[i]) CUDACHECK(cudaFree((char*) bias[i]));
         if(datacheck) CUDACHECK(cudaFree(expected[i]));
     }
     CUDACHECK(cudaFreeHost(delta));

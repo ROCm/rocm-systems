@@ -1,0 +1,7 @@
+{
+  "attack_id": "path_traversal_metadata",
+  "status": "defeated",
+  "details": {
+    "target_outside_project": "/tmp/pytest-of-aelwazir/pytest-270/test_patch_apply_rejects_path_0/victim.txt"
+  }
+}

@@ -74,7 +74,11 @@ static const uint32_t kDtifBdfId = 0xC81407;
 
 std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
   if (rocrtst::isEmuModeEnabled()) {
-    return {{"1k", 1024}};
+    return {{"1k", 1024},
+            {"4K", 4 * 1024},
+            {"8K", 8 * 1024},
+            {"128K", 128 * 1024},
+            {"1M", 1024 * 1024}};
   } else {
     return {{"1k", 1024},
             {"2K", 2 * 1024},
@@ -99,15 +103,10 @@ std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::initGranularities() {
   }
 }
 
-const int MemoryAsyncCopy::kNumGranularity = rocrtst::isEmuModeEnabled() ? 1 : 20;
 const std::vector<MemoryAsyncCopy::Granularity> MemoryAsyncCopy::Granularities = MemoryAsyncCopy::initGranularities();
 const int MemoryAsyncCopy::kMaxCopySize = MemoryAsyncCopy::Granularities.back().Size;
 
 MemoryAsyncCopy::MemoryAsyncCopy(void) : TestBase() {
-  if (Granularities.size() != kNumGranularity) {
-    throw std::runtime_error("kNumGranularity does not match size of arrays");
-  }
-
   cpu_agent_.handle = 0;  // Ignore any previous initialization
   gpu_local_agent1_.handle = 0;
   gpu_local_agent2_.handle = 0;
@@ -143,6 +142,7 @@ MemoryAsyncCopy::~MemoryAsyncCopy(void) {
 
 void MemoryAsyncCopy::SetUp(void) {
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   hwloc_topology_init(&topology_);
 
@@ -378,7 +378,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  err = hsa_amd_memory_async_copy(ptr_src, *cpy_ag, host_ptr_src, *cpy_ag,
+  err = hsa_amd_memory_async_copy(ptr_src, src_agent, host_ptr_src, cpu_agent_,
                                                             size, 0, NULL, s);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
@@ -400,7 +400,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  for (int i = 0; i < kNumGranularity; i++) {
+  for (int i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       printf("Skip test with block size %s\n", Granularities[i].Str);
       break;
@@ -421,7 +421,7 @@ void MemoryAsyncCopy::RunBenchmarkWithVerification(Transaction *t) {
       int index = copy_timer.CreateTimer();
 
       copy_timer.StartTimer(index);
-      err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag, 
+      err = hsa_amd_memory_async_copy(ptr_dst, dst_agent, ptr_src, src_agent,
                                                 Granularities[i].Size, 0, NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
@@ -569,10 +569,12 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
     printf("Skipped...\n");
     return;
   }
+
   if (verified_) {
     std::cout << "Verification: Pass" << std::endl;
   } else {
     std::cout << "Verification: Fail" << std::endl;
+    FAIL();
   }
 
   if (verbosity() < VERBOSE_STANDARD) {
@@ -582,7 +584,7 @@ void MemoryAsyncCopy::DisplayBenchmark(Transaction *t) const {
   printf("Data Size             Avg Time(us)         Avg BW(GB/s)"
       "          Min Time(us)          Peak BW(GB/s)\n");
 
-  for (int i = 0; i < kNumGranularity; i++) {
+  for (int i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       printf("Notice: Data Size >= %s is skipped due to hard limit of 1/2 vram size \n\n", Granularities[i].Str);
       break;

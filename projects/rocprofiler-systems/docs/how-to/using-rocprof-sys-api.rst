@@ -6,6 +6,11 @@
 Using the ROCm Systems Profiler API
 ****************************************************
 
+.. deprecated::
+   The ROCm Systems Profiler user API is deprecated and will be removed in a future release.
+   Use the `ROCTx Markers <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofiler-sdk-roctx.html>`_
+   instrumentation instead for runtime profiling and tracing.
+
 The following example shows how a program can use the ROCm Systems Profiler API
 for run-time analysis.
 

@@ -1,0 +1,42 @@
+# PC Sampling stall reason catalog.
+# Ref: llm-reference-guide.md lines 978-1001; rocprofv3 PC sampling (beta).
+
+- code: INTERLOCK_VMEM
+  name: "VMEM interlock"
+  root_cause: "Waiting for vector memory (VMEM_LD/VMEM_ST) operations to complete"
+  mitigation: "Increase occupancy to hide latency; use LDS staging; consider prefetching"
+
+- code: INTERLOCK_LDS
+  name: "LDS interlock"
+  root_cause: "LDS bank conflict or address calculation dependency"
+  mitigation: "Pad LDS arrays; shuffle access pattern; use 128-bit loads"
+
+- code: INTERLOCK_SMEM
+  name: "Scalar memory interlock"
+  root_cause: "Waiting for scalar memory operation"
+  mitigation: "Rare; usually constant buffer access — batch constant loads"
+
+- code: INTERLOCK_DEP
+  name: "Register dependency chain"
+  root_cause: "Instruction waiting on prior instruction's destination register"
+  mitigation: "Unroll loop to expose ILP; manual instruction scheduling"
+
+- code: INTERLOCK_SALU
+  name: "Scalar ALU interlock"
+  root_cause: "Scalar ALU pipeline stall"
+  mitigation: "Usually indicates excessive scalar work; offload to VALU"
+
+- code: INTERLOCK_VALU
+  name: "Vector ALU interlock"
+  root_cause: "VALU pipeline full"
+  mitigation: "This is good if saturation is expected; else check FMA utilization"
+
+- code: INTERLOCK_MATRIX
+  name: "MFMA interlock"
+  root_cause: "MFMA unit busy — often desired for matmul kernels"
+  mitigation: "Ensure MFMA is properly fed; check input layout"
+
+- code: BARRIER
+  name: "Barrier wait"
+  root_cause: "s_barrier / s_waitcnt blocking wave"
+  mitigation: "Reduce barrier frequency; overlap compute with memory"

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "agent_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "metadata.hpp"
 #include "output_config.hpp"
 #include "stream_info.hpp"
@@ -47,9 +48,12 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_alloc_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen);
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<tool_spm_counter_record_t>&                             spm_collection_gen,
+    const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen);
 
 // used in schema generation
 struct argument_info
@@ -72,5 +76,6 @@ struct track_data
 
 bool
 operator==(const track_data& lhs, const track_data& rhs);
+
 }  // namespace tool
 }  // namespace rocprofiler

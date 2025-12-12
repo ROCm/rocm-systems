@@ -60,7 +60,7 @@ class HostQueue : public Queue {
   ~HostQueue();
 
   hsa_status_t Inactivate() override { return HSA_STATUS_SUCCESS; }
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override {
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 

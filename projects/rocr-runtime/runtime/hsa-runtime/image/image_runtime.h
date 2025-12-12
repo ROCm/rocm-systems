@@ -103,6 +103,14 @@ class ImageRuntime {
       const void* image_data, const hsa_access_permission_t access_permission,
       hsa_ext_image_t& image);
 
+  /// @brief Create mipmapped array object with AMD-specific layout and return its handle.
+  hsa_status_t CreateMipmapArrayHandleWithLayout(
+      hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+      const hsa_amd_image_descriptor_t* image_layout,
+      const void* image_data, const hsa_access_permission_t access_permission,
+      uint32_t num_mipmap_levels,
+      hsa_ext_image_t& image_handle);
+
   /// @brief Destroy the device image object referenced by the handle.
   hsa_status_t DestroyImageHandle(const hsa_ext_image_t& image);
 
@@ -136,6 +144,35 @@ class ImageRuntime {
 
   /// @brief Destroy the device sampler object referenced by the handle.
   hsa_status_t DestroySamplerHandle(hsa_ext_sampler_t& sampler);
+
+  /// @brief Create device Mipmap array object and return its handle
+  hsa_status_t CreateMipmapArrayHandle(
+      hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+      const void* image_data, const hsa_access_permission_t access_permission,
+      uint32_t num_mipmap_levels,
+      const hsa_ext_image_data_layout_t mipmap_layout,
+      size_t image_data_row_pitch, size_t image_data_slice_pitch,
+      hsa_ext_image_t& image_handle);
+
+  /// @brief - Helper function to  compute mipmapped surface size / alignment & max levels.
+  hsa_status_t GetMipmapArraySizeAndAlignment(
+    hsa_agent_t component,
+    const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_data_layout_t layout,
+    size_t row_pitch,
+    size_t slice_pitch,
+    size_t& size_out,
+    size_t& alignment_out);
+
+  /// @brief Destroy the mipmapped array object referenced by the handle.
+  hsa_status_t DestroyMipmapArrayHandle(const hsa_ext_image_t& image_handle);
+
+  /// @brief Get the handle for a specific mipmap level in a mipmapped array.
+  hsa_status_t GetMipmapArrayLevelHandle(
+    hsa_agent_t agent, const hsa_ext_image_t& mipmapped_array,
+    uint32_t mip_level, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_ext_image_t& level_image_out);
 
   ImageManager* image_manager(hsa_agent_t agent) {
     std::map<uint64_t, ImageManager*>::iterator it = image_managers_.find(agent.handle);

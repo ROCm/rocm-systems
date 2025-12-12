@@ -410,7 +410,11 @@ hsa_status_t hsa_ven_amd_aqlprofile_iterate_event_coord(
  * @brief Extension version.
  */
 #define hsa_ven_amd_aqlprofile_VERSION_MAJOR 1
+#ifdef _WIN32
+#define hsa_ven_amd_aqlprofile_LIB(suff) "hsa-amd-aqlprofile" suff ".dll"
+#else
 #define hsa_ven_amd_aqlprofile_LIB(suff) "libhsa-amd-aqlprofile" suff ".so"
+#endif
 
 #ifdef HSA_LARGE_MODEL
 static const char kAqlProfileLib[] = hsa_ven_amd_aqlprofile_LIB("64");

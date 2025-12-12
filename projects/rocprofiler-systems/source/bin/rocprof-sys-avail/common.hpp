@@ -1,42 +1,25 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "defines.hpp"
+#include <cstdint>
 
 #include <timemory/components/types.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 //--------------------------------------------------------------------------------------//
@@ -45,7 +28,6 @@
 namespace regex_const = ::std::regex_constants;  // NOLINT
 namespace comp        = ::tim::component;        // NOLINT
 using settings        = ::tim::settings;         // NOLINT
-using tim::demangle;                             // NOLINT
 using tim::type_list;                            // NOLINT
 
 //--------------------------------------------------------------------------------------//
@@ -83,24 +65,12 @@ constexpr size_t num_settings_options    = 4;
 constexpr size_t num_hw_counter_options  = 5;
 constexpr size_t num_dump_config_options = TOTAL;
 
-extern std::string       global_delim;
+extern bool              debug_msg;
 extern bool              csv;
 extern bool              markdown;
-extern bool              alphabetical;
-extern bool              available_only;
-extern bool              all_info;
-extern bool              force_brief;
-extern bool              debug_msg;
 extern bool              case_insensitive;
 extern bool              regex_hl;
-extern bool              expand_keys;
-extern bool              force_config;
-extern bool              print_advanced;
-extern int32_t           max_width;
-extern int32_t           num_cols;
-extern int32_t           min_width;
-extern int32_t           padding;
-extern int32_t           verbose_level;
+extern std::int32_t      verbose_level;
 extern str_vec_t         regex_keys;
 extern str_vec_t         category_regex_keys;
 extern str_set_t         category_view;
@@ -109,12 +79,26 @@ extern std::stringstream lerr;
 // explicit setting names to exclude
 extern std::set<std::string> settings_exclude;
 
-// exclude some timemory settings which are not relevant to rocprof-sys
-//  exact matches, e.g. ROCPROFSYS_BANNER
-extern std::string settings_rexclude_exact;
-
-//  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
-extern std::string settings_rexclude_begin;
+struct format_options
+{
+    std::string  delim          = "|";
+    bool         csv            = false;
+    bool         markdown       = false;
+    bool         alphabetical   = false;
+    bool         available_only = false;
+    bool         all_info       = false;
+    bool         force_brief    = false;
+    bool         expand_keys    = false;
+    bool         force_config   = false;
+    bool         print_advanced = false;
+    std::int32_t max_width      = 0;
+    std::int32_t num_cols       = 0;
+    std::int32_t min_width      = 40;
+    std::int32_t padding        = 4;
+    // Preset export metadata (used with -F json)
+    std::string preset_name;
+    std::string preset_description;
+};
 
 constexpr size_t max_error_message_buffer_length = 4096;
 
@@ -147,6 +131,23 @@ remove(std::string inp, const std::set<std::string>& entries);
 
 bool
 file_exists(const std::string&);
+
+// ROCm operation-list settings follow the env-var shape
+// ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS. These helpers are the single source of
+// truth for that mapping; do not reconstruct the prefix/suffix elsewhere.
+
+// Returns the lowercased <DOMAIN> if _env_var_name matches the shape exactly,
+// or std::nullopt otherwise (e.g. companion settings such as
+// _OPERATIONS_EXCLUDE return nullopt).
+std::optional<std::string>
+rocm_domain_from_setting_name(std::string_view _env_var_name);
+
+// Builds ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS from any-case domain name.
+std::string
+rocm_setting_name_for_domain(std::string_view _domain);
+
+void
+filter_operations(const std::string& env_var_name, std::vector<std::string>& choices);
 
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \

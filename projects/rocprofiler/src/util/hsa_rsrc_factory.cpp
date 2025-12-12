@@ -73,11 +73,11 @@ static const char* cpp_demangle(const char* symname) {
 
 // Callback function to get available in the system agents
 hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
-  hsa_status_t status = HSA_STATUS_ERROR;
   HsaRsrcFactory* hsa_rsrc = reinterpret_cast<HsaRsrcFactory*>(data);
-  const AgentInfo* agent_info = hsa_rsrc->AddAgentInfo(agent);
-  if (agent_info != nullptr) status = HSA_STATUS_SUCCESS;
-  return status;
+  // AddAgentInfo may return NULL for unsupported agent types (e.g., NPU).
+  // We should continue iterating regardless.
+  hsa_rsrc->AddAgentInfo(agent);
+  return HSA_STATUS_SUCCESS;
 }
 
 // This function checks to see if the provided

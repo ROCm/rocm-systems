@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/hip_cooperative_groups_helper.h
@@ -182,6 +166,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
   return (num_threads_till_current_workgroup + local_thread_rank);
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return static_cast<__hip_uint32_t>((blockIdx.z * gridDim.y * gridDim.x) +
+                                     (blockIdx.y * gridDim.x) + (blockIdx.x));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
@@ -191,6 +180,11 @@ __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
 /**
@@ -219,6 +213,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
                                       (threadIdx.y * blockDim.x) + (threadIdx.x)));
 }
 
+__CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
+  return (static_cast<__hip_uint32_t>((blockIdx.z * gridDim.x * gridDim.y) +
+                                      (blockIdx.y * gridDim.x) + (blockIdx.x)));
+}
+
 __CG_STATIC_QUALIFIER__ bool is_valid() { return true; }
 
 __CG_STATIC_QUALIFIER__ void sync() { __syncthreads(); }
@@ -228,19 +227,40 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
                static_cast<__hip_uint32_t>(blockDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal))
+    __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    __builtin_amdgcn_s_barrier_wait(-1);
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 }  // namespace workgroup
 
 namespace tiled_group {
 
-// enforce ordering for memory intructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent"); }
+// enforce ordering for memory instructions
+__CG_STATIC_QUALIFIER__ void sync() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+}
 
 }  // namespace tiled_group
 
 namespace coalesced_group {
 
-// enforce ordering for memory intructions
-__CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "agent"); }
+// enforce ordering for memory instructions
+__CG_STATIC_QUALIFIER__ void sync() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "wavefront");
+}
 
 // Masked bit count
 //
@@ -248,13 +268,16 @@ __CG_STATIC_QUALIFIER__ void sync() { __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "
 // have i-th bit of x set and come before the current thread.
 __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int add = 0) {
   unsigned int counter = 0;
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo)) __builtin_trap();
   if (static_cast<int>(warpSize) == 32) {
     counter = __builtin_amdgcn_mbcnt_lo(static_cast<unsigned int>(x), add);
   } else {
     unsigned int lo = static_cast<unsigned int>(x & 0xFFFFFFFF);
     unsigned int hi = static_cast<unsigned int>((x >> 32) & 0xFFFFFFFF);
     counter = __builtin_amdgcn_mbcnt_lo(lo, add);
-    counter = __builtin_amdgcn_mbcnt_hi(hi, counter);
+    counter = __builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi)
+                  ? __builtin_amdgcn_mbcnt_hi(hi, counter)
+                  : counter;
   }
 
   return counter;
@@ -262,9 +285,131 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
 
 }  // namespace coalesced_group
 
+namespace cluster {
+__CG_STATIC_QUALIFIER__ void sync() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_cluster_barrier))
+    // Generates a signal + wait combination for cluster barrier
+    __builtin_amdgcn_s_cluster_barrier();
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();  // fallback to s_barrier if device does not support clusters
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+}
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait)) {
+    bool isfirst = __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal_isfirst)
+                       ? __builtin_amdgcn_s_barrier_signal_isfirst(-1)  // -1 is workgroup barrier
+                       : false;
+    __builtin_amdgcn_s_barrier_wait(-1);
+
+    if (isfirst) {
+      // Signal the cluster barrier, -3 means user cluster barrier
+      __builtin_amdgcn_s_barrier_signal(-3);
+    }
+  }
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_wait))
+    // wait on the cluster barrier, -3 means user cluster barrier
+    __builtin_amdgcn_s_barrier_wait(-3);
+  else if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier))
+    __builtin_amdgcn_s_barrier();  // Fall back to s_barrier
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fence))
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+}
+
+__CG_STATIC_QUALIFIER__ dim3 block_index() {
+  return dim3(__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x)
+                  ? __builtin_amdgcn_cluster_workgroup_id_x()
+                  : 0,
+              __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_y)
+                  ? __builtin_amdgcn_cluster_workgroup_id_y()
+                  : 0,
+              __builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_z)
+                  ? __builtin_amdgcn_cluster_workgroup_id_z()
+                  : 0);
+}
+
+__CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
+  return dim3((__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_x()
+                   : 0) +
+                  1,
+              (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_y)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_y()
+                   : 0) +
+                  1,
+              (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_z)
+                   ? __builtin_amdgcn_cluster_workgroup_max_id_z()
+                   : 0) +
+                  1);
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int block_rank() {
+  auto idx = block_index();
+  auto dim = dim_blocks();
+  return idx.x + idx.y * dim.x + idx.z * dim.x * dim.y;
+}
+
+__CG_STATIC_QUALIFIER__ dim3 thread_index() {
+  const dim3 blockIndex = block_index();
+  return dim3(blockIndex.x * blockDim.x + threadIdx.x, blockIndex.y * blockDim.y + threadIdx.y,
+              blockIndex.z * blockDim.z + threadIdx.z);
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
+  return (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id)
+              ? __builtin_amdgcn_cluster_workgroup_max_flat_id()
+              : 0) +
+         1;
+}
+
+__CG_STATIC_QUALIFIER__ dim3 dim_threads() {
+  const dim3 dimBlocks = dim_blocks();
+  const unsigned int x = dimBlocks.x * blockDim.x;
+  const unsigned int y = dimBlocks.y * blockDim.y;
+  const unsigned int z = dimBlocks.z * blockDim.z;
+  return dim3(x, y, z);
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int num_threads() {
+  auto d = dim_threads();
+  return d.x * d.y * d.z;
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int thread_rank() {
+  return block_rank() * (blockDim.x * blockDim.y * blockDim.z) +
+      ((threadIdx.z * blockDim.y * blockDim.x) + (threadIdx.y * blockDim.x) + threadIdx.x);
+}
+
+template <typename T> __CG_STATIC_QUALIFIER__ T* map_shared_rank(T* in, int rank) {
+#if __has_builtin(__builtin_amdgcn_map_shared_rank)
+  return (T*)(__builtin_amdgcn_is_invocable(__builtin_amdgcn_map_shared_rank)
+                  ? __builtin_amdgcn_map_shared_rank((void*)in, rank)
+                  : nullptr);
+#else
+  return nullptr;
+#endif
+}
+
+__CG_STATIC_QUALIFIER__ unsigned int query_shared_rank(const void* in) {
+#if __has_builtin(__builtin_amdgcn_query_shared_rank)
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_query_shared_rank)) __builtin_trap();
+  return static_cast<unsigned int>(
+      __builtin_amdgcn_query_shared_rank((__attribute__((address_space(11))) const void*)in));
+#else
+  return 0;
+#endif
+}
+}  // namespace cluster
 }  // namespace internal
-
 }  // namespace cooperative_groups
 /**
  *  @}

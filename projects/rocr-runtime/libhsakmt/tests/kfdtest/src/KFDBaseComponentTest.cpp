@@ -40,17 +40,32 @@ void KFDBaseComponentTest::TearDownTestCase() {
 void KFDBaseComponentTest::SetUp() {
     ROUTINE_START
 
-    ASSERT_SUCCESS(hsaKmtOpenKFD());
-    EXPECT_SUCCESS(hsaKmtGetVersion(&m_VersionInfo));
-    memset( &m_SystemProperties, 0, sizeof(m_SystemProperties) );
+    memset(&m_SystemProperties, 0, sizeof(m_SystemProperties));
     memset(m_RenderNodes, 0, sizeof(m_RenderNodes));
 
+#ifdef HSAKMT_CTX
+    ASSERT_SUCCESS(hsaKmtOpenKFDCtx(&m_hsakmt_primary_ctx));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAcquireSystemProperties, m_hsakmt_primary_ctx, &m_SystemProperties));
+    m_hsakmt_current_ctx = m_hsakmt_primary_ctx;
+
+    #ifdef HSAKMT_SECONDARY_CTX
+        ASSERT_SUCCESS(hsaKmtOpenSecondaryKFDCtx(&m_hsakmt_secondary_ctx));
+        ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAcquireSystemProperties, m_hsakmt_secondary_ctx, &m_SystemProperties));
+        m_hsakmt_current_ctx = m_hsakmt_secondary_ctx;
+    #endif
+#else
+    ASSERT_SUCCESS(hsaKmtOpenKFD());
+    ASSERT_SUCCESS(hsaKmtAcquireSystemProperties(&m_SystemProperties));
+#endif
+
+    EXPECT_SUCCESS(hsaKmtGetVersion(&m_VersionInfo));
+
+    g_baseTest = this;
     /** In order to be correctly testing the KFD interfaces and ensure
      *  that the KFD acknowledges relevant node parameters
      *  for the rest of the tests and used for more specific topology tests,
      *  call to GetSystemProperties for a system snapshot of the topology here
      */
-    ASSERT_SUCCESS(hsaKmtAcquireSystemProperties(&m_SystemProperties));
     ASSERT_GT(m_SystemProperties.NumNodes, HSAuint32(0)) << "HSA has no nodes.";
 
     m_NodeInfo.Init(m_SystemProperties.NumNodes);
@@ -72,11 +87,13 @@ void KFDBaseComponentTest::SetUp() {
     /* m_FamilyId is default gpu family id, keep it to support old test method */
     m_FamilyId = FamilyIdFromNode(nodeProperties);
 
+    /* Check if XNACK is supported on the ASIC */
+    m_is_xnack_supported = m_FamilyId < FAMILY_AL ? false : true;
+
     /* these values are for default gpu, keep them to support old test method */
     GetHwQueueInfo(nodeProperties, &m_numCpQueues, &m_numSdmaEngines,
                     &m_numSdmaXgmiEngines, &m_numSdmaQueuesPerEngine);
 
-    g_baseTest = this;
 
     /* m_pAsm is default gpu assembler, keep it to support old test method */
     m_pAsm = new Assembler(GetGfxVersion(nodeProperties));
@@ -98,7 +115,7 @@ void KFDBaseComponentTest::SetUp() {
         while ((end = g_ConcurrentNodes.find(',', start)) != std::string::npos) {
             std::string token = g_ConcurrentNodes.substr(start, end - start);
             if (!token.empty()) {
-                int node = std::stoi(token); 
+                int node = std::stoi(token);
             
                 if (std::find(gpuNodes.begin(), gpuNodes.end(), node) != gpuNodes.end()) 
                     uniqueIndices.insert(node);
@@ -138,7 +155,7 @@ void KFDBaseComponentTest::SetUp() {
     if (g_TestGPUsNum == 1) {
         syslog(LOG_INFO, "[Test on Node#%03d] "
                     "STARTED ========== %s.%s ==========",
-                    g_SelectedNodes.empty() ? 
+                    g_TestNodeId > 0 ? 
                             m_NodeInfo.HsaDefaultGPUNode() : g_SelectedNodes[0],
                     curr_test_info->test_case_name(), curr_test_info->name());
     } else {    
@@ -162,8 +179,17 @@ void KFDBaseComponentTest::TearDown() {
         drmClose(m_RenderNodes[i].fd);
     }
 
-    EXPECT_SUCCESS(hsaKmtReleaseSystemProperties());
+#ifdef HSAKMT_CTX
+    #ifdef HSAKMT_SECONDARY_CTX
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_secondary_ctx));
+        EXPECT_SUCCESS(hsaKmtCloseSecondaryKFDCtx(m_hsakmt_secondary_ctx));
+    #endif
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_primary_ctx));
+    EXPECT_SUCCESS(hsaKmtCloseKFDCtx());
+#else
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtReleaseSystemProperties, m_hsakmt_current_ctx));
     EXPECT_SUCCESS(hsaKmtCloseKFD());
+#endif
     g_baseTest = NULL;
 
     if (m_pAsm)
@@ -185,7 +211,7 @@ void KFDBaseComponentTest::TearDown() {
         if (g_TestGPUsNum == 1)
             syslog(LOG_INFO, "[Test on Node#%03d] PASSED"
                              "  ========== %s.%s ==========",
-                g_SelectedNodes.empty() ? 
+                g_TestNodeId > 0 ? 
                             m_NodeInfo.HsaDefaultGPUNode() : g_SelectedNodes[0],
                 curr_test_info->test_case_name(), curr_test_info->name());
         else
@@ -198,7 +224,7 @@ void KFDBaseComponentTest::TearDown() {
         if (g_TestGPUsNum == 1)
             syslog(LOG_WARNING, "[Test on Node#%03d] FAILED"
                                  "  ========== %s.%s ==========",
-                g_SelectedNodes.empty() ? 
+                g_TestNodeId > 0 ? 
                             m_NodeInfo.HsaDefaultGPUNode() : g_SelectedNodes[0],
                 curr_test_info->test_case_name(), curr_test_info->name());
         else
@@ -226,7 +252,7 @@ HSAuint64 KFDBaseComponentTest::GetSysMemSize() {
              * Compute total system memory size. KFD driver also computes
              * the system memory (si_meminfo) similarly
              */
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node, 1, &cpuMemoryProps));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx, node, 1, &cpuMemoryProps));
             systemMemSize += cpuMemoryProps.SizeInBytes;
         }
     }
@@ -242,7 +268,7 @@ HSAuint64 KFDBaseComponentTest::GetVramSize(int gpuNode) {
     EXPECT_NE((const HsaNodeProperties *)NULL, nodeProps);
     HSAuint32 numBanks = nodeProps->NumMemoryBanks;
     HsaMemoryProperties memoryProps[numBanks];
-    EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(gpuNode, numBanks, memoryProps));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, m_hsakmt_current_ctx, gpuNode, numBanks, memoryProps));
     unsigned bank;
     for (bank = 0; bank < numBanks; bank++) {
         if (memoryProps[bank].HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE
@@ -279,7 +305,6 @@ bool KFDBaseComponentTest::SVMAPISupported_GPU(unsigned int gpuNode) {
     return supported;
 }
 
-
 /*
  * Some asics need CWSR workround for DEGFX11_12113
  */
@@ -310,7 +335,7 @@ int KFDBaseComponentTest::FindDRMRenderNode(int gpuNode) {
 
     nodeProperties = new HsaNodeProperties();
 
-    status = hsaKmtGetNodeProperties(gpuNode, nodeProperties);
+    status = HSAKMT_CALL(hsaKmtGetNodeProperties, m_hsakmt_current_ctx, gpuNode, nodeProperties);
     EXPECT_SUCCESS(status) << "Node index: " << gpuNode << "hsaKmtGetNodeProperties returned status " << status;
 
     if (status != HSAKMT_STATUS_SUCCESS) {
@@ -360,6 +385,8 @@ HsaMemFlags& KFDBaseComponentTest::GetHsaMemFlags() {
     return m_MemoryFlags;
 }
 
+bool KFDBaseComponentTest::XNACKSupported() { return m_is_xnack_supported; }
+
 static void* KFDTest_GPU(void* ptr) {
 
     KFDTEST_GPUPARAMETERS* pKFDTest_GPUParameters = (KFDTEST_GPUPARAMETERS*)ptr;
@@ -378,72 +405,81 @@ static void* KFDTest_GPU(void* ptr) {
     pthread_exit(NULL);
 }
 
-HSAKMT_STATUS KFDBaseComponentTest::KFDTestMultiGPU(Test_Function test_function,
-                                        const std::vector<int>& gpuNodes,
-                                        unsigned int gpu_num) {
+HSAKMT_STATUS KFDBaseComponentTest::KFDTestMultiGPU(
+                                            std::function<void(int)> test_func, 
+                                            const std::vector<int>& gpuNodes,
+                                            unsigned int gpu_num) {
     HSAKMT_STATUS r = HSAKMT_STATUS_SUCCESS;
-    int gpu_node;
-    int err = 0;
-    int i, j;
+    std::vector<std::thread> threads;
+    std::atomic<bool> test_failed(false);
+    threads.reserve(gpu_num);
 
-    if (gpuNodes.empty()) 
-        return HSAKMT_STATUS_SUCCESS;
+    if (gpuNodes.empty()) return HSAKMT_STATUS_SUCCESS;
 
-    KFDTEST_GPUPARAMETERS kfdtest_GpuParameters[gpu_num];
-    KFDTEST_PARAMETERS kfdTest_Parameters[gpu_num];
-    pthread_t pThreadGPU[gpu_num];
+    for (int i = 0; i < gpu_num; i++) {
+        int gpu_node = gpuNodes.at(i);
 
-    for (i = 0; i < gpu_num; i++) {
-
-        gpu_node = gpuNodes.at(i);
-
-        kfdTest_Parameters[i].pTestObject = this;
-        kfdTest_Parameters[i].gpuNode = gpu_node;
-
-        kfdtest_GpuParameters[i].pKFDTest_Parameters = &kfdTest_Parameters[i];
-        kfdtest_GpuParameters[i].pTest_Function = test_function;
-
-        err = pthread_create(&pThreadGPU[i], NULL, KFDTest_GPU,
-                             (void *)&kfdtest_GpuParameters[i]);
-        if (err) {
+        try {
+            threads.emplace_back([test_func, gpu_node, &test_failed]() {
+                const testing::TestInfo* test_info_before = 
+                    ::testing::UnitTest::GetInstance()->current_test_info();
+                bool had_failure_before = test_info_before->result()->Failed();
+                
+                test_func(gpu_node);
+                
+                const testing::TestInfo* test_info_after = 
+                    ::testing::UnitTest::GetInstance()->current_test_info();
+                if (!had_failure_before && test_info_after->result()->Failed()) {
+                    LOG() << "Test failed at gpu " << gpu_node << std::endl;
+                    test_failed = true;
+                }
+            });
+        } catch (const std::system_error& e) {
             std::cout << "Thread creation for gpu node failed : " << gpu_node
-                      << strerror(err) << std::endl;
+                      << " " << e.what() << std::endl;
             r = HSAKMT_STATUS_ERROR;
-            goto err_out;
+            break;
         }
     }
 
-err_out:
-   /* wait threads created successully to finish */
-   for (j = 0; j < i; j++) {
-       err = pthread_join(pThreadGPU[j], NULL);
-       if (err) {
-           std::cout << "pthread_join at gpu node failed : " << gpuNodes.at(j)
-                     << strerror(err) << std::endl;
-           r = HSAKMT_STATUS_ERROR;
-       }
-   }
+    // Wait for all threads to complete
+    for (auto& thread : threads) {
+        try {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        } catch (const std::system_error& e) {
+            std::cout << "thread join failed: " << e.what() << std::endl;
+            r = HSAKMT_STATUS_ERROR;
+        }
+    }
 
-   return r;
+    if (test_failed)
+        r = HSAKMT_STATUS_ERROR;
+
+    return r;
 }
 
-HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) {
-
+HSAKMT_STATUS KFDBaseComponentTest::KFDTestLaunch(std::function<void(int)> test_func) {
     /* test on default GPU only */
     if (g_TestNodeId >= 0) {
         int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
         if (defaultGPUNode < 0) {
-            LOG() << "defaultGPUNode is invalid." << defaultGPUNode <<std::endl;
+            LOG() << "defaultGPUNode is invalid." << defaultGPUNode << std::endl;
             return HSAKMT_STATUS_INVALID_PARAMETER;
         }
 
-        KFDTEST_PARAMETERS TestParamters;
-        TestParamters.pTestObject = this;
-        TestParamters.gpuNode = defaultGPUNode;
-        try {
-            test_function(&TestParamters);
-        } catch (...) {
-            LOG() << "test failed at gpu" << defaultGPUNode << std::endl;
+        const testing::TestInfo* test_info_before = 
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        bool had_failure_before = test_info_before->result()->Failed();
+        
+        test_func(defaultGPUNode);
+        
+        const testing::TestInfo* test_info_after = 
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        if (!had_failure_before && test_info_after->result()->Failed()) {
+            LOG() << "Test failed at gpu " << defaultGPUNode << std::endl;
+            return HSAKMT_STATUS_ERROR;
         }
 
         return HSAKMT_STATUS_SUCCESS;
@@ -451,7 +487,7 @@ HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) 
 
     /* run test_function on all selected GPUs */
     HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
-    err = KFDTestMultiGPU(test_function, g_SelectedNodes, g_TestGPUsNum);
+    err = KFDTestMultiGPU(test_func, g_SelectedNodes, g_TestGPUsNum);
 
     return err;
 }

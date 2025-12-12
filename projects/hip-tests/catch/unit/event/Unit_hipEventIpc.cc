@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 // Test hipEventIpc behavior.
 
@@ -26,6 +10,10 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 #include <hip_test_common.hh>
+#include <utils.hh>
+
+#include <chrono>
+#include <cstring>
 
 /**
  * @addtogroup hipEventCreateWithFlags hipEventCreateWithFlags
@@ -44,7 +32,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventIpc") {
+HIP_TEST_CASE(Unit_hipEventIpc) {
   size_t N = 4 * 1024 * 1024;
   unsigned threadsPerBlock = 256;
   int iterations = 1;
@@ -122,6 +110,83 @@ TEST_CASE("Unit_hipEventIpc") {
 
   HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that hipEventDestroy() on an interprocess (IPC) event is non-blocking.
+ *    Destroying a still-pending IPC event must NOT wait for the event's own GPU work
+ *    to finish (matching CUDA's cudaEventDestroy() semantics). The IPC signal is handed
+ *    to a per-device deferred-cleanup queue and freed at the next device-wide sync,
+ *    so destroy returns in ~microseconds rather than ~the full kernel duration.
+ * Test source
+ * ------------------------
+ *  - unit/event/Unit_hipEventIpc.cc
+ * Test requirements
+ * ------------------------
+ *  - Device supports the true (ROCr) IPC-signal path; the emulated IPC path
+ *    (PAL/Windows) is skipped because its destroy is blocking by design.
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipEventIpc_DestroyNonBlocking) {
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  if (!props.ipcEventSupported) {
+    HIP_SKIP_TEST("Device does not support IPC events");
+  }
+
+  // Non-blocking destroy only applies to the true ROCr IPC-signal path. The emulated path
+  // (used when ROCr IPC signals are unavailable, e.g. PAL/Windows) intentionally waits for
+  // the event's GPU work in ~IPCEventEmulated(), so destroy is blocking there by design.
+  // Distinguish the two by the IPC handle's leading type word (0 == emulated, 1 == ROCr),
+  // which mirrors the runtime backend selection in hipEventCreateWithFlags().
+  {
+    hipEvent_t probe;
+    HIP_CHECK(hipEventCreateWithFlags(&probe, hipEventInterprocess | hipEventDisableTiming));
+    hipIpcEventHandle_t handle{};
+    HIP_CHECK(hipIpcGetEventHandle(&handle, probe));
+    uint32_t handleType = 0;
+    static_assert(sizeof(handleType) <= sizeof(handle), "IPC handle smaller than its type word");
+    std::memcpy(&handleType, &handle, sizeof(handleType));
+    HIP_CHECK(hipEventDestroy(probe));
+    constexpr uint32_t kEmulatedIpcEvent = 0;
+    if (handleType == kEmulatedIpcEvent) {
+      HIP_SKIP_TEST("Device uses emulated IPC events; destroy is blocking by design");
+    }
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipEvent_t event;
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventInterprocess | hipEventDisableTiming));
+
+  // Keep the GPU busy so the event's recorded work is still in flight at destroy time. Use a
+  // long delay so a non-blocking destroy (microseconds) sits far below the threshold and a
+  // blocking destroy (~the full kernel) sits far above it, well clear of any timing jitter.
+  const std::chrono::milliseconds delay(isQuickLevel() ? 2000 : 5000);
+  LaunchDelayKernel(delay, stream);
+  HIP_CHECK(hipEventRecord(event, stream));
+
+  // The event completes only behind the long delay kernel, so it must read as pending.
+  HIP_CHECK_ERROR(hipEventQuery(event), hipErrorNotReady);
+
+  // The call under test: destroy must return immediately, not block for the kernel.
+  const auto t0 = std::chrono::steady_clock::now();
+  HIP_CHECK(hipEventDestroy(event));
+  const auto t1 = std::chrono::steady_clock::now();
+  const auto destroy_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+  INFO("hipEventDestroy took " << destroy_ms << " ms; delay kernel is " << delay.count() << " ms");
+  // A non-blocking destroy is sub-millisecond; the pre-fix blocking destroy took ~the full
+  // kernel duration. Half the kernel time cleanly separates the two while tolerating jitter.
+  REQUIRE(destroy_ms < delay.count() / 2);
+
+  // Drain the per-device deferred IPC-signal cleanup queue now that the work can complete.
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**

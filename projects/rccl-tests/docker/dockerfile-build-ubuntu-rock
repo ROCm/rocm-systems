@@ -1,0 +1,43 @@
+# Copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Parameters related to building rccl
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="rccl-maintainer@amd.com"
+
+ARG user_uid
+
+# Install dependent packages
+# Dependencies:
+# * hcc-config.cmake: pkg-config
+# * tensile: python2.7, python-yaml
+# * rocblas-test: gfortran, googletest
+# * rocblas-bench: libboost-program-options-dev
+# * libhsakmt.so: libnuma1
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    rock-dkms \
+    sudo \
+    ca-certificates \
+    chrpath \
+    git \
+    make \
+    cmake \
+    pkg-config \
+    python2.7 \
+    python-yaml \
+    python3-pytest \
+    rocm-cmake \
+    libboost-program-options-dev \
+    libnuma1 \
+    libomp-dev \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# docker pipeline runs containers with particular uid
+# create a jenkins user with this specific uid so it can use sudo priviledges
+# Grant any member of sudo group password-less sudo privileges
+RUN useradd --create-home -u ${user_uid} -o -G video --shell /bin/bash jenkins && \
+    mkdir -p /etc/sudoers.d/ && \
+    echo '%video ALL=(ALL) NOPASSWD:ALL' | tee /etc/sudoers.d/sudo-nopasswd
+

@@ -32,81 +32,61 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.json input.yml)
-
-# pmc1
-add_test(
-    NAME rocprofv3-test-counter-collection-multiplex-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.json -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc
-        -o out_json -f csv -- $<TARGET_FILE:simple-transpose>)
-
-add_test(
-    NAME rocprofv3-test-counter-collection-multiple-yaml-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.yml -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o
-        out_yaml -f csv -- $<TARGET_FILE:simple-transpose>)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-pmc1 "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-counter-collection-multiplex-execute
-    rocprofv3-test-counter-collection-multiple-yaml-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${cc-env-pmc1}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               TRUE)
-
-add_test(
-    NAME rocprofv3-test-counter-collection-multiplex-validate
+# JSON input test
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-multiplex
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_agent_info.csv
-        --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input.json -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o
+        out_json -f csv -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-counter-collection-multiplex
+    UNSTABLE)
 
-set_tests_properties(
-    rocprofv3-test-counter-collection-multiplex-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-counter-collection-multiplex-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               TRUE)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-counter-collection-multiplex
+    TEST_PATHS validate.py
+    COPY conftest.py input.json input.yml
+    CONFIG pytest.ini
+    ARGS --agent-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_agent_info.csv
+         --counter-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiplex
+    UNSTABLE)
 
-add_test(
-    NAME rocprofv3-test-counter-collection-multiple-yaml-validate
+# YAML input test
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-multiple-yaml
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_agent_info.csv
-        --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.yml
+        -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out_yaml -f csv --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-counter-collection-multiple-yaml
+    UNSTABLE)
 
-set_tests_properties(
-    rocprofv3-test-counter-collection-multiple-yaml-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-counter-collection-multiple-yaml-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               TRUE)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-counter-collection-multiple-yaml
+    TEST_PATHS validate.py
+    COPY conftest.py input.json input.yml
+    CONFIG pytest.ini
+    ARGS --agent-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_agent_info.csv
+         --counter-input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-multiple-yaml
+    UNSTABLE)

@@ -1,26 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "function_signature.hpp"
+#include <cstdint>
+
+#include "core/demangler.hpp"
 
 function_signature::function_signature(std::string_view _ret, std::string_view _name,
                                        std::string_view _file, location_t _row,
@@ -32,7 +16,7 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
 , m_row(std::move(_row))
 , m_col(std::move(_col))
 , m_return(_ret)
-, m_name(tim::demangle(_name.data()))
+, m_name(rocprofsys::utility::demangle(_name.data()))
 , m_file(_file)
 {
     if(m_file.find('/') != std::string_view::npos)
@@ -46,11 +30,15 @@ function_signature::function_signature(std::string_view _ret, std::string_view _
                                        bool _info_beg, bool _info_end)
 : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
 {
-    m_params = "(";
+    m_params.clear();
+    m_params.push_back('(');
     for(const auto& itr : _params)
-        m_params.append(itr + ", ");
-    if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
-    m_params += ")";
+    {
+        m_params.append(itr);
+        m_params.append(", ");
+    }
+    if(!_params.empty()) m_params.resize(m_params.length() - 2);
+    m_params.push_back(')');
 }
 
 std::string
@@ -90,7 +78,7 @@ function_signature::get(bool _all, bool _save) const
             ss << " [" << _rc1 << "]";
         else if(!m_info_end && !_rc1.empty())
             ss << " [" << _rc1 << "]";
-        else if(m_loop_num < std::numeric_limits<uint32_t>::max())
+        else if(m_loop_num < std::numeric_limits<std::uint32_t>::max())
             ss << " [loop#" << m_loop_num << "]";
         else
             errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -131,7 +117,7 @@ Settings::Settings() {
                                                           : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false;  // disable graph performance optimizations for PAL
+  // PAL now uses GraphExecClassic which has no segment scheduling — flag is irrelevant.
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
@@ -166,6 +152,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
+    case Pal::AsicRevision::Krackan1:
+    case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
     case Pal::AsicRevision::Phoenix2:
     case Pal::AsicRevision::HawkPoint1:
@@ -196,7 +184,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         enableWave32Mode_ = 0;
       }
       lcWavefrontSize64_ = !enableWave32Mode_;
-      if (palProp.gfxLevel == Pal::GfxIpLevel::GfxIp10_1) {
+      if (palProp.gfxTriple.major == 10 && palProp.gfxTriple.minor == 1) {
         // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
         imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
       }
@@ -344,6 +332,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #if !defined(_LP64)
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
 #endif
+  }
+  uint64_t resourceCacheCap = static_cast<uint64_t>(GPU_MAX_RESOURCE_CACHE_SIZE) * Mi;
+  if (resourceCacheCap < static_cast<uint64_t>(resourceCacheSize_)) {
+    // In 32 bit build, if the above is true, resourceCacheCap is smaller than
+    // 32 bit variable resourceCacheSize_, truncation doesn't happen in the following assignment.
+    resourceCacheSize_ = static_cast<size_t>(resourceCacheCap);
   }
 
   // If is Rebar, override prepinned memory size.

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -176,9 +162,11 @@ bool PrintfDbg::checkFloat(const std::string& fmt) const {
     case 'e':
     case 'E':
     case 'f':
+    case 'F':
     case 'g':
     case 'G':
     case 'a':
+    case 'A':
       return true;
       break;
     default:
@@ -207,9 +195,13 @@ int PrintfDbg::checkVectorSpecifier(const std::string& fmt, size_t startPos, siz
     else if (fmt[curPos - 4] == 'v') {
       size = 3;
     }
-    // the modifier is "hh"
+    // the modifier is "hh", or two-digit vector size (16) with "h" or "l"
     else if ((curPos >= 5) && (fmt[curPos - 5] == 'v')) {
       size = 4;
+    }
+    // two-digit vector size (16) with "hl" or "hh" modifier
+    else if ((curPos >= 6) && (fmt[curPos - 6] == 'v')) {
+      size = 5;
     }
     if (size > 0) {
       curPos = size;
@@ -247,23 +239,42 @@ static constexpr char Separator[] = ",\0";
 size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t size,
                                  const void* argument) const {
   // Serialize the output to the screen
-  amd::ScopedLock k(dev().lockAsyncOps());
+  std::scoped_lock k(dev().lockAsyncOps());
 
   size_t copiedBytes = size;
   // Print the string argument, using standard PrintfDbg()
   if (checkString(fmt.c_str())) {
     // copiedBytes should be as number of printed chars
     copiedBytes = 0;
-    //(null) should be printed
-    if (*(reinterpret_cast<const unsigned char*>(argument)) == 0) {
+    uint32_t argVal = *(reinterpret_cast<const uint32_t*>(argument));
+    if (argVal == 0) {
+      // Null pointer: (null) should be printed
       amd::Os::printf(fmt.data(), 0);
       // copiedBytes = strlen("(null)")
       copiedBytes = 6;
+    } else if (argVal == 0xFFFFFF00) {
+      // Empty string sentinel from the compiler - print empty string
+      amd::Os::printf(fmt.data(), "");
+      copiedBytes = 4;
     } else {
       const unsigned char* argumentStr = reinterpret_cast<const unsigned char*>(argument);
-      amd::Os::printf(fmt.data(), argumentStr);
-      // copiedBytes = strlen(argumentStr)
-      while (argumentStr[copiedBytes++] != 0);
+      if (size > 0 && size < ConstStr) {
+        size_t len = 0;
+        while (len < size && argumentStr[len] != 0) len++;
+        // When strlen is a multiple of 4, the compiler stores only the string
+        // bytes without a null terminator (ArgSize = strlen + 4 but the last
+        // 4 bytes are never written). If no null was found, the real string
+        // length is size - 4.
+        if (len == size && size >= 4) {
+          len = size - 4;
+        }
+        std::string safeStr(reinterpret_cast<const char*>(argumentStr), len);
+        amd::Os::printf(fmt.data(), safeStr.c_str());
+        copiedBytes = size;
+      } else {
+        amd::Os::printf(fmt.data(), argumentStr);
+        while (argumentStr[copiedBytes++] != 0);
+      }
     }
   }
 
@@ -275,6 +286,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
       hlFmt = fmt;
       hlFmt.erase(hlFmt.find_first_of("hl"), 2);
     }
+    static const char* fSpecifiers = "cdieEfFgGaAosuxXp";
     switch (size) {
       case 0: {
         const char* str = reinterpret_cast<const char*>(argument);
@@ -319,13 +331,14 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
         } else {
           bool hhModifier = (strstr(fmt.c_str(), "hh") != nullptr);
           if (hhModifier) {
-            // current implementation of printf in gcc 4.5.2 runtime libraries, doesn`t recognize
-            // "hh" modifier ==>
-            // argument should be explicitly converted to  unsigned char (uchar) before printing and
-            // fmt should be updated not to contain "hh" modifier
             std::string hhFmt = fmt;
             hhFmt.erase(hhFmt.find_first_of("h"), 2);
-            amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            char specifier = fmt[fmt.size() - 1];
+            if (specifier == 'd' || specifier == 'i') {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const signed char*>(argument)));
+            } else {
+              amd::Os::printf(hhFmt.data(), *(reinterpret_cast<const unsigned char*>(argument)));
+            }
           } else if (hlModifier) {
             amd::Os::printf(hlFmt.data(), size == 2
                                               ? *(reinterpret_cast<const uint16_t*>(argument))
@@ -366,7 +379,7 @@ size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t
 
 void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* workitemData,
                                 size_t& i) const {
-  static const char* specifiers = "cdieEfgGaosuxXp";
+  static const char* specifiers = "cdieEfFgGaAosuxXp";
   static const char* modifiers = "hl";
   static const char* special = "%n";
   static const std::string sepStr = "%s";
@@ -481,7 +494,15 @@ void PrintfDbg::outputDbgBuffer(const device::PrintfInfo& info, const uint32_t* 
 
   if (pos != std::string::npos) {
     fmt = str.substr(pos, str.size() - pos);
-    outputArgument(sepStr, false, ConstStr, fmt.data());
+    // Resolve %% escape sequences to literal % before printing as a string
+    size_t p = 0;
+    while ((p = fmt.find("%%", p)) != std::string::npos) {
+      fmt.erase(p, 1);
+      p++;
+    }
+    if (!fmt.empty()) {
+      outputArgument(sepStr, false, ConstStr, fmt.data());
+    }
   }
 }
 

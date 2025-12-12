@@ -1,0 +1,24 @@
+# vLLM on ROCm — known API pitfalls.
+# Ref: llm-reference-guide.md lines 2206-2270.
+
+pitfalls:
+  - id: pin_memory_not_param
+    title: "pin_memory is NOT an LLM() constructor parameter"
+    description: "Passing pin_memory=True to vllm.LLM() raises TypeError"
+    correct_usage: "Use swap_space or cpu_offload_gb instead"
+    source: "vLLM v0.7+ API"
+
+  - id: multiprocessing_warning
+    title: "vLLM spawns multiple processes; rocprofv3 needs --process-sync"
+    description: "Fork-based multiprocessing strips LD_PRELOAD; use --process-sync flag"
+
+llm_constructor_params:
+  - name: swap_space
+    type: int
+    description: "GB of CPU swap for KV cache"
+  - name: cpu_offload_gb
+    type: float
+    description: "CPU offload in GB for weight tensors"
+  - name: max_num_seqs
+    type: int
+    description: "Max concurrent sequences"

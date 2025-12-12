@@ -21,8 +21,11 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/firmware_restrictions.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -36,8 +39,9 @@ namespace counters
 {
 CounterController::CounterController()
 {
-    // Pre-read metrics map file to catch faliures during initial setup.
+    // Pre-read metrics map file to catch failures during initial setup.
     rocprofiler::counters::loadMetrics();
+    rocprofiler::counters::check_installed_firmware_restrictions();
 }
 
 // Adds a counter collection profile to our global cache.
@@ -75,11 +79,13 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
 
     auto& ctx = *ctx_p;
 
-    if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+    if(ctx.dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
 
     // FIXME: Due to the clock gating issue, counter collection and PC sampling service
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(!rocprofiler::buffer::get_buffer(buffer_id) &&
        buffer_id != rocprofiler_buffer_id_t{.handle = 0})
@@ -98,24 +104,22 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if(counters::counter_collection_has_device_lock())
-    {
-        /**
-         * Note: This should retrun if the lock fails to aquire in the future. However, this
-         * is a change in the required permissions for rocprofiler and needs to be communicated
-         * with partners before strict enforcement. If the required permissions are not obtained,
-         * those profilers will function as they currently do (without any of the benefits of the
-         * IOCTL).
-         */
-        counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
-    }
-
     ctx.device_counter_collection->agent_data.emplace_back();
     ctx.device_counter_collection->agent_data.back().callback_data =
         rocprofiler_user_data_t{.ptr = user_data};
     ctx.device_counter_collection->agent_data.back().agent_id = agent_id;
     ctx.device_counter_collection->agent_data.back().cb       = cb;
     ctx.device_counter_collection->agent_data.back().buffer   = buffer_id;
+
+    // OLD behavior: Lock the device and disable PTL at configuration time instead of context start
+    if(counters::use_device_lock_at_start())
+    {
+        if(counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
+        }
+        counters::counter_collection_ptl_disable(rocprofiler::agent::get_agent(agent_id));
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -143,14 +147,29 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    if(!ctx.counter_collection)
+    if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(!ctx.dispatch_counter_collection)
     {
-        ctx.counter_collection =
+        // Disable PTL for all GPUs for dispatch counter collection
+        for(const auto& agent : agent::get_agents())
+        {
+            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                if(counters::ptl_control_supported())
+                {
+                    counters::counter_collection_ptl_disable(
+                        rocprofiler::agent::get_agent(agent->id));
+                }
+            }
+        }
+
+        ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }
 
-    auto& cb =
-        *ctx.counter_collection->callbacks.emplace_back(std::make_shared<counter_callback_info>());
+    auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(
+        std::make_shared<counter_callback_info>());
 
     cb.user_cb       = callback;
     cb.callback_args = callback_args;

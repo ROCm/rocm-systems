@@ -21,4 +21,3 @@ cp client/certs/rdc_cacert.pem $INSTALL_DIR/client/certs
 chmod 700 $INSTALL_DIR/server/private
 chown -R rdc:rdc $INSTALL_DIR/server
 chown -R rdc:rdc $INSTALL_DIR/client
-

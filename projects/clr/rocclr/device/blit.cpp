@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/commandqueue.hpp"
 #include "device/device.hpp"
@@ -349,6 +335,55 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
   dstMemory.cpuUnmap(vDev_);
   srcMemory.cpuUnmap(vDev_);
 
+  return true;
+}
+
+bool HostBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
+  // Default implementation falls back to individual copies
+  for (const auto& op : copyOps) {
+    if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+      return false;
+    }
+    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
+        *op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
+        *op.dstMemory->getContext().devices()[0]);
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      return false;
+    }
+    amd::Coord3D srcOrigin(op.srcOffset);
+    amd::Coord3D dstOrigin(op.dstOffset);
+    amd::Coord3D size(op.size);
+    if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, false, op.metadata)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HostBlitManager::WriteBufferBatch(
+    const std::vector<amd::BatchWriteMemoryOp>& write_ops) const {
+  for (const amd::BatchWriteMemoryOp& op : write_ops) {
+    device::Memory* dst_dev_mem =
+        op.dst_memory->getDeviceMemory(*op.dst_memory->getContext().devices()[0]);
+
+    if (!writeBuffer(op.src_host, *dst_dev_mem, amd::Coord3D(op.dst_offset), amd::Coord3D(op.size),
+                     false, op.metadata)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HostBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp>& read_ops) const {
+  for (const amd::BatchReadMemoryOp& op : read_ops) {
+    device::Memory* src_dev_mem =
+        op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]);
+    if (!readBuffer(*src_dev_mem, op.dst_host, amd::Coord3D(op.src_offset), amd::Coord3D(op.size),
+                    false, op.metadata)) {
+      return false;
+    }
+  }
   return true;
 }
 

@@ -23,6 +23,8 @@
 #define _GNU_SOURCE 1
 
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/common/dl.hpp"
 #include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
@@ -40,6 +42,7 @@
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -49,6 +52,8 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration/iterate.hpp"
+#include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
@@ -150,6 +155,90 @@ resolved_exists(std::string_view fname)
     return fs::exists(fname);
 }
 
+auto
+get_this_library_path()
+{
+    const auto libnames = std::vector<std::string>{
+        fmt::format("librocprofiler-sdk.so.{}.{}.{}",
+                    ROCPROFILER_VERSION_MAJOR,
+                    ROCPROFILER_VERSION_MINOR,
+                    ROCPROFILER_VERSION_PATCH),
+        fmt::format("librocprofiler-sdk.so.{}", ROCPROFILER_SOVERSION),
+        "librocprofiler-sdk.so",
+    };
+
+    if(auto _this_lib_path =
+           common::dl::get_symbol_path(libnames,
+                                       "rocprofiler_set_api_table",
+                                       reinterpret_cast<const void*>(rocprofiler_set_api_table),
+                                       true);
+       _this_lib_path)
+        return *_this_lib_path;
+
+    for(const auto& libname : libnames)
+    {
+        if(auto _this_lib_path = common::dl::get_linked_path(libname, {RTLD_NOLOAD | RTLD_LAZY});
+           _this_lib_path)
+        {
+            if(!resolved_exists(*_this_lib_path))
+            {
+                ROCP_CI_LOG(FATAL) << fmt::format("{} resolved path '{}' does not exist",
+                                                  libname,
+                                                  fs::absolute(fs::path{*_this_lib_path}).string());
+            }
+            return fs::canonical(fs::path{*_this_lib_path}).string();
+        }
+    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "{} could not locate itself in the list of loaded libraries",
+        fmt::join(libnames.begin(), libnames.end(), "/"));
+
+    return std::string{};
+}
+
+void
+set_rocprofiler_register_library()
+{
+    // this function sets the ROCPROFILER_REGISTER_LIBRARY env var to the path of this library
+    // to ensure that rocprofiler-register will always use this instance of the rocprofiler-sdk
+    // library.
+
+    static auto _once = std::once_flag{};
+    std::call_once(_once, []() {
+        init_logging();
+        auto _this_library_path = get_this_library_path();
+        ROCP_INFO << fmt::format("rocprofiler-sdk library path: '{}'", _this_library_path);
+        // opt out of setting the ROCPROFILER_REGISTER_LIBRARY env var
+        auto enabled = common::get_env("ROCPROFILER_SET_ROCPROFILER_REGISTER_LIBRARY", true);
+        // ensures that rocprofiler-register uses this library path
+        if(!_this_library_path.empty() && enabled)
+        {
+            // used to check for conflicts if already set
+            auto _existing = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
+            if(_existing.empty() ||
+               common::get_env("ROCPROFILER_FORCE_ROCPROFILER_REGISTER_LIBRARY", false))
+            {
+                common::set_env("ROCPROFILER_REGISTER_LIBRARY", _this_library_path, 1);
+            }
+            else
+            {
+                // only report conflict if existing value differs from this library path
+                auto _existing_path = fs::path{_existing};
+                ROCP_CI_LOG_IF(WARNING,
+                               _existing_path.is_absolute() &&
+                                   fs::canonical(_existing_path).string() != _this_library_path)
+                    << fmt::format(
+                           "ROCPROFILER_REGISTER_LIBRARY is already set to '{}' (resolves to "
+                           "'{}'), not overriding with '{}'",
+                           _existing,
+                           fs::canonical(_existing_path).string(),
+                           _this_library_path);
+            }
+        }
+    });
+}
+
 // invoke all rocprofiler_configure symbols
 bool
 invoke_client_configures();
@@ -175,8 +264,8 @@ get_status()
 
 struct attach_status
 {
-    bool has_attach_table = false;
-    bool is_attached      = false;
+    std::atomic<bool> has_attach_table{false};
+    std::atomic<bool> is_attached{false};
 };
 
 auto*
@@ -303,6 +392,18 @@ find_clients()
     }
 
     auto get_env_libs = []() {
+        // Never honor ROCP_TOOL_LIBRARIES in a secure-execution context (setuid/
+        // setgid binaries, file capabilities, etc.). Otherwise an unprivileged
+        // local user could inject an arbitrary shared library (via dlopen) into a
+        // privileged process by setting this environment variable.
+        if(common::is_at_secure())
+        {
+            ROCP_CI_LOG(WARNING) << "[ROCP_TOOL_LIBRARIES] ignoring environment variable because "
+                                    "the process is running in a secure-execution context "
+                                    "(AT_SECURE)";
+            return std::vector<std::string>{};
+        }
+
         auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
         auto       val_arr   = std::vector<std::string>{};
         size_t     pos       = 0;
@@ -331,6 +432,9 @@ find_clients()
 
     auto env = get_env_libs();
 
+    // set to true to disable elf utils optimizations
+    auto optimize_elf_parsing = common::get_env("ROCPROFILER_OPTIMIZE_FIND_CLIENTS", true);
+
     if(!env.empty())
     {
         for(const auto& itr : env)
@@ -339,7 +443,7 @@ find_clients()
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto elfinfo = common::elf_utils::read(itr);
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
@@ -411,16 +515,16 @@ find_clients()
     {
         for(const auto& itr : get_link_map())
         {
-            ROCP_INFO << "searching " << itr << " for rocprofiler_configure";
+            ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
 
             if(fs::exists(itr) && resolved_exists(itr))
             {
-                auto elfinfo = common::elf_utils::read(itr);
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
                 if(!elfinfo.has_symbol([](std::string_view symname) {
                        return (symname == "rocprofiler_configure");
                    }))
                 {
-                    ROCP_INFO << fmt::format(
+                    ROCP_TRACE << fmt::format(
                         "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "
                         "(search method: ELF parsing) required by rocprofiler-sdk for tools",
                         itr);
@@ -434,7 +538,7 @@ find_clients()
                 continue;
             }
 
-            ROCP_INFO << "dlopening " << itr << " for rocprofiler_configure";
+            ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
@@ -670,6 +774,9 @@ invoke_client_attaches()
         }
     }
 
+    if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
+        get_attach_status()->is_attached.store(true, std::memory_order_release);
+
     return ret;
 }
 
@@ -694,7 +801,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            pc_sampling::service_sync();
+            pc_sampling::service_sync(itr->internal_client_id);
 
             auto _fini_status = get_fini_status();
             if(_fini_status == 0) set_fini_status(-1);
@@ -709,6 +816,9 @@ invoke_client_detaches()
             ROCP_INFO << "Client " << itr->name << " does not have tool_detach function";
         }
     }
+
+    if(get_attach_status())
+        get_attach_status()->is_attached.store(false, std::memory_order_release);
 
     return ret;
 }
@@ -736,7 +846,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                pc_sampling::service_sync();
+                pc_sampling::service_sync(itr->internal_client_id);
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
@@ -751,9 +861,18 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 }  // namespace
 
 bool
+is_attached()
+{
+    return (get_attach_status()) ? get_attach_status()->is_attached.load(std::memory_order_acquire)
+                                 : false;
+}
+
+bool
 supports_attachment()
 {
-    return (get_attach_status()) ? get_attach_status()->has_attach_table : false;
+    return (get_attach_status())
+               ? get_attach_status()->has_attach_table.load(std::memory_order_acquire)
+               : false;
 }
 
 void
@@ -818,6 +937,8 @@ initialize()
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         ROCP_INFO << "rocprofiler initialize started...";
+        // set the "ROCPROFILER_REGISTER_LIBRARY" env var
+        set_rocprofiler_register_library();
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
@@ -962,9 +1083,39 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     // let's just make sure that the forced configure function is a nullptr
     if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
+    rocprofiler::registration::set_rocprofiler_register_library();
     forced_config = configure_func;
     rocprofiler::registration::initialize();
+
+    // Trigger re-propagation of all registered API tables via rocprofiler-register.
+    // This enables late-start profiling where runtimes may have already initialized
+    // and registered their API tables before rocprofiler-sdk was loaded.
+    auto status = rocprofiler::registration::late::invoke_register_propagation();
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
+                     << "This is normal if runtimes have not initialized yet, or if "
+                     << "rocprofiler-register is not loaded. Runtimes that initialize "
+                     << "after this call will be automatically profiled.";
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
+                                              void*                                      data)
+{
+    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations();
+
+    if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
+
+    for(auto& itr : *registrations)
+    {
+        int ret = callback(&itr, data);
+        if(ret != 0) break;
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -997,6 +1148,21 @@ rocprofiler_set_api_table(const char* name,
 
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
+
+    // Verify that the rocattach table is always the first table registered when the attach
+    // feature is in use. Any table registered before rocattach means modules may be initialized
+    // without awareness of attachment.
+    static auto _non_rocattach_registered = std::atomic<bool>{false};
+    if(std::string_view{name} == "rocattach")
+    {
+        ROCP_CI_LOG_IF(WARNING, _non_rocattach_registered.load())
+            << "sdk-attach API table was not the first API table registered. The attach library "
+               "must be registered before all other API tables for correctness of traced objects.";
+    }
+    else
+    {
+        _non_rocattach_registered.store(true);
+    }
 
     // pass to ROCTx init
     ROCP_ERROR_IF(num_tables == 0) << "rocprofiler expected " << name
@@ -1090,9 +1256,17 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
+        rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
+
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::thread_trace::initialize(hsa_api_table);
+        // code_object::initialize must precede queue_controller_init: when the attach library is
+        // in use, queue interception is live immediately upon queue_controller_init returning, so
+        // any dispatch that arrives before code object hooks are installed would miss load
+        // notifications. The same ordering is required here (non-attach path) so that the HSA
+        // table hook state is consistent before queue processing can begin.
+        rocprofiler::code_object::initialize(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         // Process agent ctx's that were started prior to HSA init
         rocprofiler::counters::device_counting_service_hsa_registration();
@@ -1100,7 +1274,6 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
-        rocprofiler::code_object::initialize(hsa_api_table);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
@@ -1113,6 +1286,50 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
+
+        // install queue interposition AFTER update_table so our wrappers
+        // sit outermost in core_ and chain through the tracing functors
+        {
+            auto non_queue_interposition_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return (ctx->dispatch_counter_collection != nullptr ||
+                            ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr ||
+                            ctx->dispatch_spm != nullptr);
+                });
+
+            ROCP_INFO << fmt::format(
+                "[queue-interposition] counter/ATT/PC-sampling contexts found: {}. The presence of "
+                "any of these contexts will prevent inline intercept (for the time being).",
+                non_queue_interposition_contexts.size());
+
+            // if non_queue_interposition_contexts is empty, default to inline intercept.
+            // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
+            auto enable_queue_interposition = rocprofiler::common::get_env(
+                "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // if ROCPROFILER_QUEUE_INTERPOSITION is explicitly set to true, but there are contexts
+            // that require non-inline intercept, print a warning and fall back to non-inline
+            // intercept
+            if(enable_queue_interposition && !non_queue_interposition_contexts.empty())
+            {
+                ROCP_WARNING << fmt::format(
+                    "ROCPROFILER_QUEUE_INTERPOSITION was explicitly set to true, but {} contexts "
+                    "were found that require non-inline intercept. Falling back to non-inline "
+                    "intercept...",
+                    non_queue_interposition_contexts.size());
+                enable_queue_interposition = false;
+            }
+
+            // report the final decision on inline vs non-inline intercept
+            ROCP_INFO << "[queue-interposition] ROCPROFILER_QUEUE_INTERPOSITION="
+                      << (enable_queue_interposition ? "true" : "false");
+
+            // (eventually) we will want to always install the intercepts so that dynamic enablement
+            // of inline intercept can occur when conditions allow.
+            if(enable_queue_interposition)
+                rocprofiler::hsa::queue_interposition::interposition_init(
+                    hsa_api_table->core_, enable_queue_interposition);
+        }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured
@@ -1301,12 +1518,17 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocattach_api = static_cast<RocAttachDispatchTable*>(tables[0]);
 
+        // Set has_attach_table before other initialization so that supports_attachment()
+        // will be correct for any installed interceptions.
+        rocprofiler::registration::get_attach_status()->has_attach_table = true;
+
         // unlike other APIs, we do not offer tracing for our own attach library
         // forward the table to the relevant code sections, then move on
-        rocprofiler::hsa::queue_controller_init(rocattach_api);
         rocprofiler::code_object::initialize(rocattach_api);
-
-        rocprofiler::registration::get_attach_status()->has_attach_table = true;
+        rocprofiler::hsa::queue_controller_init(rocattach_api);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
+#endif
     }
     else
     {

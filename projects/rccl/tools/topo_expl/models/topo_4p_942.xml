@@ -1,0 +1,58 @@
+<system version="2">
+  <cpu numaid="2" affinity="000000ff,ffff0000,00000000,000000ff,ffff0000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="144">
+    <pci busid="0000:82:00.0" class="0x120000" vendor="0x1002" device="0x74a0" subsystem_vendor="0x1002" subsystem_device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+      <gpu dev="0" sm="228" gcn="942" arch="38911" rank="0" gdr="1">
+        <xgmi target="0000:c2:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:02:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:42:00.0" count="1" tclass="0x120000"/>
+      </gpu>
+    </pci>
+    <pci busid="0000:81:00.0" class="0x020000" vendor="0x17db" device="0x0501" subsystem_vendor="0x17db" subsystem_device="0x0000" link_speed="16.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="cxi0" dev="0" speed="200000000" port="1" latency="0.000000" guid="0x0" maxconn="128" gdr="1"/>
+      </nic>
+    </pci>
+  </cpu>
+  <cpu numaid="3" affinity="ffffff00,00000000,00000000,ffffff00,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="144">
+    <pci busid="0000:c2:00.0" class="0x120000" vendor="0x1002" device="0x74a0" subsystem_vendor="0x1002" subsystem_device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+      <gpu dev="1" sm="228" gcn="942" arch="38911" rank="1" gdr="1">
+        <xgmi target="0000:82:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:02:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:42:00.0" count="1" tclass="0x120000"/>
+      </gpu>
+    </pci>
+    <pci busid="0000:c1:00.0" class="0x020000" vendor="0x17db" device="0x0501" subsystem_vendor="0x17db" subsystem_device="0x0000" link_speed="16.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="cxi1" dev="1" speed="200000000" port="1" latency="0.000000" guid="0x1" maxconn="128" gdr="1"/>
+      </nic>
+    </pci>
+  </cpu>
+  <cpu numaid="0" affinity="00000000,00000000,00ffffff,00000000,00000000,00ffffff" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="144">
+    <pci busid="0000:02:00.0" class="0x120000" vendor="0x1002" device="0x74a0" subsystem_vendor="0x1002" subsystem_device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+      <gpu dev="2" sm="228" gcn="942" arch="38911" rank="2" gdr="1">
+        <xgmi target="0000:82:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:c2:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:42:00.0" count="1" tclass="0x120000"/>
+      </gpu>
+    </pci>
+    <pci busid="0000:01:00.0" class="0x020000" vendor="0x17db" device="0x0501" subsystem_vendor="0x17db" subsystem_device="0x0000" link_speed="16.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="cxi2" dev="2" speed="200000000" port="1" latency="0.000000" guid="0x2" maxconn="128" gdr="1"/>
+      </nic>
+    </pci>
+  </cpu>
+  <cpu numaid="1" affinity="00000000,0000ffff,ff000000,00000000,0000ffff,ff000000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="144">
+    <pci busid="0000:42:00.0" class="0x120000" vendor="0x1002" device="0x74a0" subsystem_vendor="0x1002" subsystem_device="0x74a0" link_speed="32.0 GT/s PCIe" link_width="16">
+      <gpu dev="3" sm="228" gcn="942" arch="38911" rank="3" gdr="1">
+        <xgmi target="0000:82:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:c2:00.0" count="1" tclass="0x120000"/>
+        <xgmi target="0000:02:00.0" count="1" tclass="0x120000"/>
+      </gpu>
+    </pci>
+    <pci busid="0000:41:00.0" class="0x020000" vendor="0x17db" device="0x0501" subsystem_vendor="0x17db" subsystem_device="0x0000" link_speed="16.0 GT/s PCIe" link_width="16">
+      <nic>
+        <net name="cxi3" dev="3" speed="200000000" port="1" latency="0.000000" guid="0x3" maxconn="128" gdr="1"/>
+      </nic>
+    </pci>
+  </cpu>
+</system>

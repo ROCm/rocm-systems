@@ -24,16 +24,21 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_
 
 #include <map>
-#include "rocm_smi/rocm_smi.h"
+
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi.h"
 
 #ifdef ENABLE_ESMI_LIB
 extern "C" {
-    #include <cstdint>
-    #include <e_smi/e_smi.h>
+#include <e_smi/e_smi.h>
+
+#include <cstdint>
 }
 #endif
 
+extern "C" {
+#include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
+}
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
@@ -60,24 +65,17 @@ const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_DIRECTORY_NOT_FOUND, AMDSMI_STATUS_DIRECTORY_NOT_FOUND},
     {RSMI_STATUS_SETTING_UNAVAILABLE, AMDSMI_STATUS_SETTING_UNAVAILABLE},
     {RSMI_STATUS_AMDGPU_RESTART_ERR, AMDSMI_STATUS_AMDGPU_RESTART_ERR},
+    {RSMI_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED},
+    {RSMI_STATUS_IPC_ERROR, AMDSMI_STATUS_IPC_ERROR},
     {RSMI_STATUS_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
 };
 
 const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
-    {0, AMDSMI_VRAM_TYPE_UNKNOWN},
-    {1, AMDSMI_VRAM_TYPE_GDDR1},
-    {2, AMDSMI_VRAM_TYPE_DDR2},
-    {3, AMDSMI_VRAM_TYPE_GDDR3},
-    {4, AMDSMI_VRAM_TYPE_GDDR4},
-    {5, AMDSMI_VRAM_TYPE_GDDR5},
-    {6, AMDSMI_VRAM_TYPE_HBM},
-    {7, AMDSMI_VRAM_TYPE_DDR3},
-    {8, AMDSMI_VRAM_TYPE_DDR4},
-    {9, AMDSMI_VRAM_TYPE_GDDR6},
-    {10, AMDSMI_VRAM_TYPE_DDR5},
-    {11, AMDSMI_VRAM_TYPE_LPDDR4},
-    {12, AMDSMI_VRAM_TYPE_LPDDR5},
-    {13, AMDSMI_VRAM_TYPE_HBM3E},
+    {0, AMDSMI_VRAM_TYPE_UNKNOWN}, {1, AMDSMI_VRAM_TYPE_GDDR1},  {2, AMDSMI_VRAM_TYPE_DDR2},
+    {3, AMDSMI_VRAM_TYPE_GDDR3},   {4, AMDSMI_VRAM_TYPE_GDDR4},  {5, AMDSMI_VRAM_TYPE_GDDR5},
+    {6, AMDSMI_VRAM_TYPE_HBM},     {7, AMDSMI_VRAM_TYPE_DDR3},   {8, AMDSMI_VRAM_TYPE_DDR4},
+    {9, AMDSMI_VRAM_TYPE_GDDR6},   {10, AMDSMI_VRAM_TYPE_DDR5},  {11, AMDSMI_VRAM_TYPE_LPDDR4},
+    {12, AMDSMI_VRAM_TYPE_LPDDR5}, {13, AMDSMI_VRAM_TYPE_HBM3E},
 };
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
@@ -113,6 +111,45 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
 #endif
-} // namespace amd::smi
+
+// Define a map of smi nic status codes to amdsmi status codes
+const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
+    {SMI_NIC_STATUS_SUCCESS, AMDSMI_STATUS_SUCCESS},
+    {SMI_NIC_STATUS_ERROR, AMDSMI_STATUS_API_FAILED},
+    {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
+    {SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
+    {SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
+    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+    {SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
+    {SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
+    {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};
+amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status);
+
+/**
+ *  AMDSMI Library init reference count (amdsmi_init / amdsmi_shut_down)
+ *      - Lives in amd_smi_common.cc
+ */
+bool amdsmi_library_initialized();
+void amdsmi_library_init_ref_acquire();
+
+/**
+ *  AMDSMI Decrements init ref; should run (count reached zero).
+ *      - Returns true if AMDSmiSystem::cleanup()
+ *
+ */
+
+bool amdsmi_library_init_ref_release();
+
+}  // namespace amd::smi
+
+// Verifies AMD SMI is initialized; returns AMDSMI_STATUS_NOT_INIT from the enclosing function.
+#ifndef AMDSMI_CHECK_INIT
+#define AMDSMI_CHECK_INIT()                        \
+  do {                                             \
+    if (!amd::smi::amdsmi_library_initialized()) { \
+      return AMDSMI_STATUS_NOT_INIT;               \
+    }                                              \
+  } while (0)
+#endif
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

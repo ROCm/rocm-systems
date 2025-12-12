@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -50,6 +50,7 @@
 #include "core/inc/memory_region.h"
 #include "hsakmt/hsakmttypes.h"
 #include "inc/hsa.h"
+#include "core/inc/hsa_internal.h"
 
 namespace rocr {
 namespace core {
@@ -68,10 +69,28 @@ enum class DriverType {
 };
 
 /// @brief Handle for exported / imported memory.
-struct ShareableHandle {
+struct DriverMemoryHandle {
   uint64_t handle{};
+  int dmabuf_fd{-1};
+  uint64_t mmap_offset{0};
+  size_t size{0};
+  hsa_fabric_handle_t fabric_handle{};
 
   bool IsValid() const { return handle != 0; }
+
+  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
+  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
+};
+
+/// @brief Format of a shareable memory handle for export and import.
+///
+/// Selects how @ref ExportMemoryHandle and @ref ImportMemoryHandle encode the
+/// external reference to a driver memory allocation.
+enum ShareType {
+  /// @brief POSIX file descriptor for a DMA-BUF object (local or same-machine sharing).
+  DMABUF_FD,
+  /// @brief Globally unique fabric handle for multi-node / cross-domain sharing.
+  FABRIC_HANDLE,
 };
 
 /// @brief Kernel driver interface.
@@ -145,6 +164,7 @@ public:
                                       void **mem, size_t size,
                                       uint32_t node_id) = 0;
 
+  /// @brief Free memory allocated by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
@@ -156,12 +176,13 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
+  /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
   virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
-                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
-                                   HsaQueueResource& queue_resource) const = 0;
+                                   HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
+                                   void* queue_addr, uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes,
+                                   HsaEvent* event, HsaQueueResource& queue_resource) const = 0;
 
   /// @brief Destroy a queue.
   /// @param queue_id Kernel-mode driver's assigned queue ID.
@@ -175,7 +196,7 @@ public:
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   virtual hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                   HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                   HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                    uint64_t queue_size_bytes, HsaEvent* event) const = 0;
 
   /// @brief Set the CU mask for a queue.
@@ -195,22 +216,32 @@ public:
   virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                                      uint32_t* first_gws) const = 0;
 
-  /// @brief Imports memory using dma-buf.
+  /// @brief Exports a memory object.
   ///
-  /// @param[in] mem virtual address
-  /// @param[in] size memory size in bytes
-  /// @param[out] dmabuf_fd dma-buf file descriptor
-  /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                                    size_t *offset) = 0;
+  /// @param[in] agent agent that owns the memory
+  /// @param[in] handle driver memory handle to export
+  /// @param[in] type @ref ShareType to export
+  /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent,
+                                          const DriverMemoryHandle& handle, ShareType type,
+                                          void* export_handle) = 0;
 
-  /// @brief Imports a memory chunk via dma-buf.
+  /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @param[in] dmabuf_fd dma-buf file descriptor
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
+  ///
   /// @param[in] agent agent to import the memory for
-  /// @param[out] handle handle to the imported memory
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                    core::ShareableHandle &handle) = 0;
+  /// @param[out] handle handle to the imported memory; @p handle->size is set to the
+  ///             imported allocation size in bytes
+  /// @param[in] type @ref ShareType to import
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
+  /// @param[in] mem address of existing buffer, used to bypass import
+  virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
+                                          ShareType type, void* import_handle,
+                                          void* mem = nullptr) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -219,9 +250,10 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
-  virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
+  /// @param[in] node_id driver node id of the target GPU
+  virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
-                           hsa_access_permission_t perms) = 0;
+                           hsa_access_permission_t perms, uint32_t node_id) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
   ///
@@ -229,14 +261,30 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
-                             size_t offset, size_t size) = 0;
+  /// @param[in] node_id driver node id of the target GPU
+  virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
+                             size_t offset, size_t size, uint32_t node_id) = 0;
 
-  /// @brief Releases the object associated with the handle.
+  /// @brief Maps the virtual address to the physical address and creates a handle to share this
+  /// mapping.
   ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t
-  ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
+  ///
+  /// @param[in] va virtual address
+  /// @param[in] mem physical memory handle
+  /// @param[in] size memory size in bytes
+  /// @param[in] agent agent associated with @p mem
+  /// @param[out] handle handle of the memory object
+  /// @param[out] offset memory offset in bytes
+  virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
+                                             const core::Agent& agent,
+                                             core::DriverMemoryHandle* handle,
+                                             uint64_t* offset) = 0;
+
+  /// @brief Destroys the handle created during @ref CreateShareableHandle.
+  ///
+  /// @param[in] handle handle of the object to destroy
+  virtual hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.
@@ -265,6 +313,57 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Imports an OS-native external semaphore handle (e.g. a
+  /// Vulkan-exported NT handle on Windows) into the kernel-mode driver
+  /// and returns an opaque hsa_amd_external_semaphore_t whose lifecycle
+  /// the runtime owns.
+  /// @param[in] node_id Node ID of the agent that will use the semaphore.
+  /// @param[in] nt_handle OS-native handle (NT handle for Win32 types).
+  /// @param[in] type Handle type from the public hsa_amd extension.
+  /// @param[out] out_sem On success, the imported semaphore.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver does
+  /// not support external semaphore import.
+  virtual hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                               hsa_amd_external_semaphore_handle_type_t type,
+                                               hsa_amd_external_semaphore_t* out_sem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Releases an external semaphore handle previously returned by
+  /// @ref ImportExternalSemaphore.
+  /// @param[in] sem Semaphore to release.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Submits a GPU-side signal of an imported external semaphore on
+  /// the given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the signal is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t SignalExternalSemaphore(uint64_t queue_id,
+                                               hsa_amd_external_semaphore_t sem,
+                                               uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
+  /// @brief Submits a GPU-side wait on an imported external semaphore on the
+  /// given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the wait is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t WaitExternalSemaphore(uint64_t queue_id,
+                                             hsa_amd_external_semaphore_t sem,
+                                             uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
   /// @brief Sets trap handler and trap buffer to be used for all queues associated
   /// with the specified NodeId within this process context
   /// @param[in] node_id Node ID of the agent
@@ -276,12 +375,26 @@ public:
   virtual hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                                       const void* buffer_base, uint64_t buffer_base_size) const = 0;
 
+  /// @brief Forward the RAS-poison SIGBUS delay to the kernel driver for a node.
+  /// @param[in] node_id  Node ID of the agent.
+  /// @param[in] delay_ms Delay in ms (UINT32_MAX disables the opt-in).
+  /// @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR if the kernel/driver does
+  ///         not support the opt-in (callers may treat as non-fatal).
+  virtual hsa_status_t SetSigbusDelay(uint32_t /*node_id*/, uint32_t /*delay_ms*/) const {
+    return HSA_STATUS_ERROR;
+  }
+
   /// @brief Gets the device handle for a specific node.
   /// @param node_id Node ID of the agent
   /// @param device_handle Device handle
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the device
   virtual hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const = 0;
 
+  /// @brief Gets the device file descriptor for a specific node.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] fd
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the file descriptor
+  virtual hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const = 0;
 
   /// @brief Gets clock counters for particular Node
   /// @param[in] node_id Node ID of the agent
@@ -350,6 +463,13 @@ public:
   /// @param[in] mem address of memory to be made unresident
   /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
+
+  /// @brief Gets the queue save area information for a specific queue.
+  /// @param[in]  queue_id Queue ID of the queue
+  /// @param[out] address Address of the queue save area
+  /// @param[out] size Size of the used queue save area in bytes
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
+  virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

@@ -25,62 +25,57 @@
 #include <dlfcn.h>
 #include <string.h>
 
-#include <map>
 #include <iostream>
-#include <mutex>   //  NOLINT(build/c++11)
+#include <map>
+#include <mutex>  //  NOLINT(build/c++11)
 
 #include "rocm_smi/rocm_smi.h"
-
 
 namespace amd {
 namespace smi {
 class ROCmSmiLibraryLoader {
  public:
-     ROCmSmiLibraryLoader();
+  ROCmSmiLibraryLoader();
 
-     rsmi_status_t load(const char* filename);
+  rsmi_status_t load(const char* filename);
 
-     template<typename T> rsmi_status_t load_symbol(T* func_handler,
-            const char* func_name);
+  template <typename T>
+  rsmi_status_t load_symbol(T* func_handler, const char* func_name);
 
+  rsmi_status_t unload();
 
-     rsmi_status_t unload();
-
-     ~ROCmSmiLibraryLoader();
+  ~ROCmSmiLibraryLoader();
 
  private:
-     void* libHandler_;
-     std::mutex library_mutex_;
-     bool library_loaded_ = false;
+  void* libHandler_;
+  std::mutex library_mutex_;
+  bool library_loaded_ = false;
 };
 
-template<typename T> rsmi_status_t ROCmSmiLibraryLoader::load_symbol(
-            T* func_handler,
-            const char* func_name) {
-    if (!libHandler_) {
-        return RSMI_STATUS_FAIL_LOAD_MODULE;
-    }
+template <typename T>
+rsmi_status_t ROCmSmiLibraryLoader::load_symbol(T* func_handler, const char* func_name) {
+  if (!libHandler_) {
+    return RSMI_STATUS_FAIL_LOAD_MODULE;
+  }
 
-    if (!func_handler || !func_name) {
-        return RSMI_STATUS_FAIL_LOAD_SYMBOL;
-    }
+  if (!func_handler || !func_name) {
+    return RSMI_STATUS_FAIL_LOAD_SYMBOL;
+  }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
+  std::lock_guard<std::mutex> guard(library_mutex_);
 
-    *reinterpret_cast<void**>(func_handler) =
-            dlsym(libHandler_, func_name);
-    if (*func_handler == nullptr) {
-        char* error = dlerror();
-        std::cerr << "ROCmSmiLibraryLoader: Fail to load the symbol "
-                    << func_name << ": " << error << std::endl;
-        return RSMI_STATUS_FAIL_LOAD_SYMBOL;
-    }
+  *reinterpret_cast<void**>(func_handler) = dlsym(libHandler_, func_name);
+  if (*func_handler == nullptr) {
+    char* error = dlerror();
+    std::cerr << "ROCmSmiLibraryLoader: Fail to load the symbol " << func_name << ": " << error
+              << std::endl;
+    return RSMI_STATUS_FAIL_LOAD_SYMBOL;
+  }
 
-    return RSMI_STATUS_SUCCESS;
+  return RSMI_STATUS_SUCCESS;
 }
 
 }  // namespace smi
 }  // namespace amd
-
 
 #endif  // ROCM_SMI_INCLUDE_ROCM_SMI_LIB_LOADER_H_

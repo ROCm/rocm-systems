@@ -48,7 +48,7 @@ namespace rocr {
 namespace core {
 
 HsaEvent* InterruptSignal::EventPool::alloc() {
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   if (events_.empty()) {
     if (!allEventsAllocated) {
       HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
@@ -64,7 +64,7 @@ HsaEvent* InterruptSignal::EventPool::alloc() {
 
 void InterruptSignal::EventPool::free(HsaEvent* evt) {
   if (evt == nullptr) return;
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   events_.push_back(unique_event_ptr(evt));
 }
 
@@ -173,7 +173,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
       if (g_use_mwaitx) {
         // Short timeout for active waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 1000);
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 1000, true);
       }
       continue;
     }
@@ -181,7 +181,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     if (now - start_time < kMaxElapsed) {
       if (g_use_mwaitx) {
         // Longer timeout with timer for passive waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
       }
       continue;
     }

@@ -99,7 +99,7 @@ TEST_F(KFDPMTest, SuspendWithIdleQueueAfterWork) {
     WaitOnValue(&(destBuffer.As<unsigned int*>()[2]), 0x3);
     WaitOnValue(&(destBuffer.As<unsigned int*>()[3]), 0x4);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS(queue.Destroy());
 
     TEST_END

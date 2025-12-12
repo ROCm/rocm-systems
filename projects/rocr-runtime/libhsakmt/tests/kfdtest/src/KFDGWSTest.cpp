@@ -42,14 +42,11 @@ void KFDGWSTest::TearDown() {
     ROUTINE_END
 }
 
-static void Allocate(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDGWSTest* pKFDGWSTest = (KFDGWSTest*)pTestParamters->pTestObject;
+void KFDGWSTest::Allocate(int gpuNode) {
 
     HSAuint32 firstGWS;
     PM4Queue queue;
-    HsaNodeInfo* m_NodeInfo = pKFDGWSTest->Get_NodeInfo();
+    HsaNodeInfo* m_NodeInfo = Get_NodeInfo();
     const HsaNodeProperties *pNodeProperties = m_NodeInfo->GetNodeProperties(gpuNode);
 
     if (!pNodeProperties || !pNodeProperties->NumGws) {
@@ -58,7 +55,7 @@ static void Allocate(KFDTEST_PARAMETERS* pTestParamters) {
     }
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtAllocQueueGWS(queue.GetResource()->QueueId,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocQueueGWS, m_hsakmt_current_ctx, queue.GetResource()->QueueId,
                        pNodeProperties->NumGws,&firstGWS), gpuNode);
     EXPECT_EQ_GPU(0, firstGWS, gpuNode);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -67,17 +64,16 @@ static void Allocate(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDGWSTest, Allocate) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(Allocate));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->Allocate(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void Semaphore(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDGWSTest::Semaphore(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDGWSTest* pKFDGWSTest = (KFDGWSTest*)pTestParamters->pTestObject;
-
-    HsaNodeInfo* m_NodeInfo = pKFDGWSTest->Get_NodeInfo();
+    HsaNodeInfo* m_NodeInfo = Get_NodeInfo();
     const HsaNodeProperties *pNodeProperties = m_NodeInfo->GetNodeProperties(gpuNode);
 
     HSAuint32 firstGWS;
@@ -92,12 +88,12 @@ static void Semaphore(KFDTEST_PARAMETERS* pTestParamters) {
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
     HsaMemoryBuffer buffer(PAGE_SIZE, gpuNode, true, false, false);
     ASSERT_SUCCESS(queue.Create(gpuNode));
-    ASSERT_SUCCESS_GPU(hsaKmtAllocQueueGWS(queue.GetResource()->QueueId,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtAllocQueueGWS, m_hsakmt_current_ctx, queue.GetResource()->QueueId,
                        pNodeProperties->NumGws,&firstGWS), gpuNode);
     EXPECT_EQ_GPU(0, firstGWS, gpuNode);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDGWSTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(GwsInitIsa, isaBuffer.As<char*>()), gpuNode);
 
@@ -124,7 +120,9 @@ static void Semaphore(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDGWSTest, Semaphore) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(Semaphore));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->Semaphore(gpuNode);
+    }));
 
     TEST_END
 }

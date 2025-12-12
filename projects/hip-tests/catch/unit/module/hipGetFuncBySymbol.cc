@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipGetFuncBySymbol hipGetFuncBySymbol
@@ -93,7 +80,7 @@ bool verifyResult(int* a, int* output_ref, int arrSize) {
  * - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipGetFuncBySymbol_PositiveTest") {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
   uint32_t *A_d, *C_d;
   uint32_t *A_h, *C_h;
   size_t N = 1000000;
@@ -166,7 +153,7 @@ TEST_CASE("Unit_hipGetFuncBySymbol_PositiveTest") {
  *    - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipGetFuncBySymbol_NegativeTests") {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_NegativeTests) {
   hipFunction_t funcPointer;
 
   // Passing NULL as second parameter
@@ -189,7 +176,7 @@ TEST_CASE("Unit_hipGetFuncBySymbol_NegativeTests") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetFuncBySymbol_InChildProcess") {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_InChildProcess) {
   hip::SpawnProc proc("hipGetFuncBySymbol_exe", true);
   REQUIRE(proc.run() == 0);
 }
@@ -207,12 +194,11 @@ TEST_CASE("Unit_hipGetFuncBySymbol_InChildProcess") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   hipFunction_t funcPointer;
@@ -264,12 +250,12 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev", "[multigpu]") {
  * Local function useful to create stream and memory copy and launch kernel
  */
 void MultiThreadMultiDevFunc(int DevId) {
-  HIP_CHECK(hipSetDevice(DevId));
+  HIP_CHECK_THREAD(hipSetDevice(DevId));
 
   int* h_a = reinterpret_cast<int*>(malloc(SIZE_BYTES));
-  REQUIRE(h_a != nullptr);
+  REQUIRE_THREAD(h_a != nullptr);
   int* output_ref = reinterpret_cast<int*>(malloc(SIZE_BYTES));
-  REQUIRE(output_ref != nullptr);
+  REQUIRE_THREAD(output_ref != nullptr);
 
   for (int i = 0; i < ARR_SIZE; i++) {
     h_a[i] = 2;
@@ -277,37 +263,40 @@ void MultiThreadMultiDevFunc(int DevId) {
   }
 
   hipStream_t stream;
-  HIP_CHECK(hipSetDevice(DevId));
-  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK_THREAD(hipSetDevice(DevId));
+  HIP_CHECK_THREAD(hipStreamCreate(&stream));
 
   int* d_a = nullptr;
-  HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES));
-  REQUIRE(d_a != nullptr);
-  HIP_CHECK(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
+  HIP_CHECK_THREAD(hipMalloc(&d_a, SIZE_BYTES));
+  REQUIRE_THREAD(d_a != nullptr);
+  HIP_CHECK_THREAD(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, 64);
 
   hipFunction_t funcPointer;
-  REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) == hipSuccess);
+  REQUIRE_THREAD(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) ==
+                 hipSuccess);
 
   void* kernelParam[] = {d_a};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
                               HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-  REQUIRE(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-                                threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, stream,
-                                nullptr, kernel_parameter) == hipSuccess);
+  REQUIRE_THREAD(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y,
+                                       blocksPerGrid.z, threadsPerBlock.x, threadsPerBlock.y,
+                                       threadsPerBlock.z, 0, stream, nullptr,
+                                       kernel_parameter) == hipSuccess);
 
-  HIP_CHECK(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(stream));
 
-  REQUIRE(verifyResult(h_a, output_ref, ARR_SIZE) == true);
+  REQUIRE_THREAD(verifyResult(h_a, output_ref, ARR_SIZE) == true);
 
   free(h_a);
   free(output_ref);
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK_THREAD(hipStreamDestroy(stream));
+  HIP_CHECK_THREAD(hipFree(d_a));
 }
 
 /**
@@ -323,12 +312,11 @@ void MultiThreadMultiDevFunc(int DevId) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetFuncBySymbol_MultiDevMultiThread", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   ::std::vector< ::std::thread> threads;
@@ -340,4 +328,5 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDevMultiThread", "[multigpu]") {
   for (int dev = 0; (dev < deviceCount) && (dev < threads.size()); dev++) {
     threads[dev].join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
 }

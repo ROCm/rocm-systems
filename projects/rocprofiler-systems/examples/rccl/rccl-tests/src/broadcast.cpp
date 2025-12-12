@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 BroadcastGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -41,6 +42,16 @@ BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, 
     return testSuccess;
 }
 
+testResult_t
+BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type,
+                              int* algo, int* proto, int* nchannels)
+{
+    if(rcclTestsGetAlgoInfo == NULL) return testInternalError;
+    NCCLCHECK(rcclTestsGetAlgoInfo(comm, ncclFuncBroadcast, count, type, 0, 0, 1, algo,
+                                   proto, nchannels));
+    return testSuccess;
+}
+
 void
 BroadcastGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw,
                int nranks)
@@ -54,8 +65,10 @@ BroadcastGetBw(size_t count, int typesize, double sec, double* algBw, double* bu
 
 testResult_t
 BroadcastRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                 void* bias = nullptr)
 {
+    (void) bias;
     int rank;
     NCCLCHECK(ncclCommUserRank(comm, &rank));
 #if NCCL_MAJOR >= 2 && NCCL_MINOR >= 2
@@ -73,8 +86,9 @@ BroadcastRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t ty
     return testSuccess;
 }
 
-struct testColl broadcastTest = { "Broadcast", BroadcastGetCollByteCount,
-                                  BroadcastInitData, BroadcastGetBw, BroadcastRunColl };
+struct testColl broadcastTest = { "Broadcast",       BroadcastGetCollByteCount,
+                                  BroadcastInitData, BroadcastGetBw,
+                                  BroadcastRunColl,  BroadcastGetAlgoProtoChannels };
 
 void
 BroadcastGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

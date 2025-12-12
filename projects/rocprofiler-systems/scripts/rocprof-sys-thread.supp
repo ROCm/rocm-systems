@@ -21,11 +21,22 @@ called_from_lib:libstackwalk.so
 called_from_lib:libsymtabAPI.so
 called_from_lib:libtbb.so
 
+# OpenMP runtime: Dyninst's parallel sections in BPatch produce malloc/free
+# hand-offs between the main thread and libgomp workers. Not actionable in
+# rocprof-sys.
+called_from_lib:libgomp.so
+
 # suppress any races originating in some Dyninst function
 race_top:Dyninst::
 race:Dyninst::
 race:libparseAPI.so
 race:boost::
+
+# Dyninst's libparseAPI populates a std::map<addr,std::string> from main while
+# its own libgomp workers read it; the active TSan frames are all libstdc++
+# (basic_string::_M_assign -> memcpy), so called_from_lib:libparseAPI.so does
+# not match. Suppress the std::string assignment frame directly.
+race:std::__cxx11::basic_string
 
 # thread leaks
 thread:*

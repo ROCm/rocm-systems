@@ -409,7 +409,7 @@ const size_t NUM_XCD_ERRORS = sizeof(xcd_error_table) / sizeof(xcd_error_table[0
 const size_t NUM_AID_ERRORS = sizeof(aid_error_table) / sizeof(aid_error_table[0]);
 const size_t NUM_INSTANCES = sizeof(instance_table) / sizeof(instance_table[0]);
 
-int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name) {
+int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char** bank_name) {
   if (!bank_name) {
     return -1;
   }
@@ -425,7 +425,7 @@ int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name) {
   return 1;
 }
 
-int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **error_type) {
+int find_error_type_by_bank(const char* bank, uint32_t error_code, const char** error_type) {
   if (!bank || !error_type) {
     return -1;
   }
@@ -441,8 +441,8 @@ int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **
   return 1;
 }
 
-int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint32_t error_code,
-                        const char **error_type) {
+int find_error_in_table(const aca_error_entry_t* table, size_t table_size, uint32_t error_code,
+                        const char** error_type) {
   if (!table || !error_type) {
     return -1;
   }
@@ -458,7 +458,7 @@ int find_error_in_table(const aca_error_entry_t *table, size_t table_size, uint3
   return 1;
 }
 
-int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid) {
+int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t* oam_aid) {
   if (!oam_aid || instance_id_hi >= NUM_OAM_AID_ENTRIES) {
     return -1;
   }
@@ -468,7 +468,7 @@ int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid) {
   return 0;
 }
 
-int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name) {
+int find_instance_name(const char* bank, uint32_t instance_id_lo, const char** instance_name) {
   if (!bank || !instance_name) {
     return -1;
   }

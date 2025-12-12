@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  Simple test to demonstrate usage of graph.
@@ -24,9 +11,16 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
+#ifdef KERNEL_ARG_PREFETCH
+// Trimmed for mi4xx emu
+#define N 32 * 32
+#define NSTEP 1
+#define NKERNEL 5
+#else
 #define N 1024 * 1024
 #define NSTEP 1000
 #define NKERNEL 25
+#endif  // KERNEL_ARG_PREFETCH
 #define CONSTANT 5.34
 
 static __global__ void simpleKernel(float* out_d, float* in_d) {
@@ -67,8 +61,9 @@ static void hipTestWithGraph() {
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
 
+  const int nstep = isQuickLevel() ? 10 : NSTEP;
   auto start1 = std::chrono::high_resolution_clock::now();
-  for (int istep = 0; istep < NSTEP; istep++) {
+  for (int istep = 0; istep < nstep; istep++) {
     HIP_CHECK(hipGraphLaunch(instance, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
@@ -94,6 +89,7 @@ static void hipTestWithGraph() {
   HIP_CHECK(hipFree(in_d));
   HIP_CHECK(hipFree(out_d));
   HIP_CHECK(hipGraphExecDestroy(instance));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -120,8 +116,9 @@ static void hipTestWithoutGraph() {
   HIP_CHECK(hipMemcpy(in_d, in_h, N * sizeof(float), hipMemcpyHostToDevice));
 
   // start CPU wallclock timer
+  const int nstep2 = isQuickLevel() ? 10 : NSTEP;
   auto start = std::chrono::high_resolution_clock::now();
-  for (int istep = 0; istep < NSTEP; istep++) {
+  for (int istep = 0; istep < nstep2; istep++) {
     for (int ikrnl = 0; ikrnl < NKERNEL; ikrnl++) {
       simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1), 0, stream>>>(out_d, in_d);
     }
@@ -148,7 +145,14 @@ static void hipTestWithoutGraph() {
 /**
  * Simple test to demonstrate usage of graph.
  */
-TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
+#ifdef KERNEL_ARG_PREFETCH
+TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch") {
+  if (!HipTest::isKernelArgPrefetchSupported()) {
+    HIP_SKIP_TEST("Kernel arg prefetch is not supported on the device. Skipped.");
+  }
+#else
+HIP_TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
+#endif  // KERNEL_ARG_PREFETCH
   // Sections run test with and without graph.
   SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 

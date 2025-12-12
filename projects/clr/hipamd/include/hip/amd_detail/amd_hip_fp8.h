@@ -1,25 +1,7 @@
-/**
- * MIT License
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2019 - 2024 Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -31,7 +13,7 @@
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP8_H_
 
 #if (defined(__gfx942__) || defined(__gfx1200__) || defined(__gfx1201__) ||                        \
-     defined(__gfx950__)) &&                                                                       \
+     defined(__gfx950__) || defined (__gfx1250__)) &&                                              \
     __HIP_DEVICE_COMPILE__
 #define HIP_FP8_CVT_FAST_PATH 1
 #else
@@ -41,8 +23,9 @@
 #if defined(__gfx942__) && __HIP_DEVICE_COMPILE__
 #define HIP_FP8_TYPE_OCP 0
 #define HIP_FP8_TYPE_FNUZ 1
-#elif (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) &&                     \
-    __HIP_DEVICE_COMPILE__
+#elif (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__) ||                      \
+       defined(__gfx1250__)) &&                                                                    \
+       __HIP_DEVICE_COMPILE__
 #define HIP_FP8_TYPE_OCP 1
 #define HIP_FP8_TYPE_FNUZ 0
 #else
@@ -63,14 +46,14 @@
 #endif
 #endif
 
-// Include it explicitly for HIPRTC
-#include "amd_hip_bf16.h"
-
 #if !defined(__HIPCC_RTC__)
+#include "amd_hip_bf16.h"
+#include "amd_hip_mx_common.h"
+
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
-#include "host_defines.h"          // __hip_internal::
+#include "host_defines.h"
 #include "amd_hip_vector_types.h"  // float2 etc
 #include "amd_hip_fp16.h"          // __half_raw
 #include "math_fwd.h"              // ocml device functions
@@ -113,9 +96,9 @@
 #if !defined(__HIPCC_RTC__)
 static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
-static_assert(sizeof(unsigned char) == 1);
-static_assert(sizeof(unsigned short int) == 2);
-static_assert(sizeof(unsigned int) == 4);
+static_assert(sizeof(unsigned char) == 1, "");
+static_assert(sizeof(unsigned short int) == 2, "");
+static_assert(sizeof(unsigned int) == 4, "");
 
 /**
  * \brief Describes FP8 interpretation
@@ -561,30 +544,40 @@ static __device__ __hip_fp8_storage_t cast_to_f8_from_f32(float v, bool saturate
   if (saturate) {
     if (interpret == __HIP_E4M3_FNUZ) {
       if ((val.i32val & 0x7F800000) != 0x7F800000) {  /// propagate NAN/INF, no clipping
-        val.fval = __builtin_amdgcn_fmed3f(val.fval, 240.0, -240.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          val.fval = __builtin_amdgcn_fmed3f(val.fval, 240.0, -240.0);
       }
     } else if (interpret == __HIP_E4M3) {             // OCP type
       if ((val.i32val & 0x7F800000) != 0x7F800000) {  /// propagate NAN/INF, no clipping
-        val.fval = __builtin_amdgcn_fmed3f(val.fval, 448.0, -448.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          val.fval = __builtin_amdgcn_fmed3f(val.fval, 448.0, -448.0);
       }
     } else {
       if ((val.i32val & 0x7F800000) != 0x7F800000) {  /// propagate NAN/INF, no clipping
-        val.fval = __builtin_amdgcn_fmed3f(val.fval, 57344.0, -57344.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          val.fval = __builtin_amdgcn_fmed3f(val.fval, 57344.0, -57344.0);
       }
     }
   }
 
   if (stochastic_rounding) {
     ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-               ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
-               : __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0);  // 0 pos
+               ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_sr_fp8_f32)
+                      ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
+                      : 0u)
+               : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_sr_bf8_f32)
+                      ? __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0)
+                      : 0u);  // 0 pos
     val.i32val = ival;
     i8data = val.i8val[0];  // little endian
   } else {                  // RNE CVT
-    ival =
-        (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-            ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
-            : __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false);  // false -> WORD0
+    ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
+               ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
+                      ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
+                      : 0u)
+               : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
+                      ? __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false)
+                      : 0u);  // false -> WORD0
     val.i32val = ival;
     i8data = val.i8val[0];
   }
@@ -606,31 +599,41 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
   if (saturate) {  /// propagate NAN/INF, no clipping
     if (interpret == __HIP_E4M3_FNUZ) {
       if ((f2val.i32val[0] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 240.0, -240.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 240.0, -240.0);
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 240.0, -240.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 240.0, -240.0);
       }
     } else if (interpret == __HIP_E4M3) {
       if ((f2val.i32val[0] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 448.0, -448.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 448.0, -448.0);
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 448.0, -448.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 448.0, -448.0);
       }
     } else {
       if ((f2val.i32val[0] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 57344.0, -57344.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.x = __builtin_amdgcn_fmed3f(f2val.fval.x, 57344.0, -57344.0);
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
-        f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 57344.0, -57344.0);
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 57344.0, -57344.0);
       }
     }
   }
 
   f2val.i32val[0] = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-                        ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
-                        : __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false);
+                        ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
+                               ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
+                               : 0u)
+                        : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
+                               ? __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false)
+                               : 0u);
 
   return static_cast<__hip_fp8x2_storage_t>(f2val.i16val[0]);
 }
@@ -644,8 +647,12 @@ static __device__ float cast_to_f32_from_f8(__hip_fp8_storage_t v,
   val.i8val[0] = v;
 
   float fval = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-                   ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
-                   : __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0);
+                   ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f32_fp8)
+                          ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
+                          : 0.0f)
+                   : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f32_bf8)
+                          ? __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0)
+                          : 0.0f);
   return fval;
 }
 
@@ -658,8 +665,12 @@ static __device__ float2 cast_to_f32x2_from_f8x2(__hip_fp8x2_storage_t v,
   val.i16val[0] = v;
 
   auto f2 = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-                ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
-                : __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false);
+                ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f32_fp8)
+                       ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
+                       : __amd_floatx2_storage_t{})
+                : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f32_bf8)
+                       ? __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false)
+                       : __amd_floatx2_storage_t{});
   return float2{f2[0], f2[1]};
 }
 #endif  // HIP_FP8_CVT_FAST_PATH
@@ -949,6 +960,296 @@ __FP8_HOST_STATIC__ __hip_fp8x2_storage_t __hip_cvt_halfraw2_to_fp8x2(
 #endif
   return __hip_cvt_float2_to_fp8x2(__half22float2(__half2(x)), sat, interp);
 }
+
+namespace hip_detail {
+
+constexpr __hip_fp8_storage_t e8m0_NaN = 0xFFU;
+constexpr __hip_internal::uint16_t bf16_NaN = 0x7FFFU;
+constexpr __hip_internal::uint32_t default_float_NaN = 0x7FFF0000U;
+constexpr __hip_internal::uint64_t default_double_NaN = 0x7FFF000000000000U;
+
+constexpr __hip_internal::uint16_t bf16_sig_mask = 0x007FU;
+constexpr __hip_internal::uint32_t float_sig_mask = 0x007FFFFFU;
+constexpr __hip_internal::uint64_t double_sig_mask = 0x000FFFFFFFFFFFFFU;
+
+constexpr __hip_internal::uint16_t bf16_max_exp = 0x7F80U;
+constexpr __hip_internal::uint32_t float_max_exp = 0x7F800000U;
+constexpr __hip_internal::uint64_t double_max_exp = 0x7FF0000000000000U;
+
+constexpr __hip_internal::uint16_t bf16_sign_mask = 0x8000U;
+constexpr __hip_internal::uint32_t float_sign_mask = 0x80000000U;
+constexpr __hip_internal::uint64_t double_sign_mask = 0x8000000000000000U;
+
+constexpr __hip_internal::uint16_t bf16_half_sig_bit = 0x0040U;
+constexpr __hip_internal::uint32_t float_half_sig_bit = 0x00400000U;
+constexpr __hip_internal::uint64_t double_half_sig_bit = 0x0008000000000000U;
+
+__FP8_HOST_DEVICE_STATIC__ float __internal_cvt_e8m0_to_float(const __hip_fp8_storage_t x) {
+  union {
+    float as_float;
+    __hip_internal::uint32_t as_int;
+  } ret;
+
+  switch (x) {
+    case 0x00U: {
+      ret.as_int = float_half_sig_bit;
+      break;
+    }
+    case hip_detail::e8m0_NaN:
+      ret.as_int = default_float_NaN;
+      break;
+    default:
+      ret.as_int = static_cast<__hip_internal::uint32_t>(x) << 23;
+  };
+  return ret.as_float;
+}
+
+__FP8_HOST_DEVICE_STATIC__ double __internal_cvt_e8m0_to_double(const __hip_fp8_storage_t x) {
+  union {
+    double as_double;
+    __hip_internal::uint64_t as_int;
+  } ret;
+
+  switch (x) {
+    case hip_detail::e8m0_NaN:
+      ret.as_int = default_double_NaN;
+      break;
+    default:
+      // shift due to bias difference between double and single precision exponents
+      ret.as_int = (static_cast<__hip_internal::uint64_t>(x + 0x0380U) << 52);
+  }
+  return ret.as_double;
+}
+
+// Converts e8m0 to arbitrary integer type T
+// Uses conversion to float for bounds check
+// Double round not a concern as e8m0 is just the f32 mantissa
+template <typename T_int>
+__FP8_HOST_DEVICE_STATIC__ T_int internal_cvt_e8m0_to_int_type(__hip_fp8_storage_t x) {
+  float f = __internal_cvt_e8m0_to_float(x);
+  if (x == hip_detail::e8m0_NaN) {
+    return 0;
+  }
+  if (f >= __hip_internal::numeric_limits<T_int>::max()) {
+    return __hip_internal::numeric_limits<T_int>::max();
+  }
+  // e8m0 encodes only non-negative scales (2^-127..2^127) and NaN is handled
+  // above, so f is always >= 0. The lowest() clamp is therefore unreachable
+  // even when T_int is signed.
+  return static_cast<T_int>(f);
+}
+
+}  // namespace hip_detail
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_double_to_e8m0(
+    const double val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
+  union {
+    double as_double;
+    __hip_internal::uint64_t as_int;
+  } u{val};
+
+  // Shifts out mantissa bits from double dtype
+  unsigned short double_exp =
+      static_cast<unsigned short>((~hip_detail::double_sign_mask & u.as_int) >> 52);
+  __hip_fp8_storage_t e8m0;
+  if (double_exp == 0x0U) {
+    e8m0 = 0x0U;
+  } else {
+    // Use signed arithmetic to avoid unsigned underflow for small normal exponents
+    // 0x0380 is a bias difference between double and single precision (1023 - 127)
+    const int float_exp = static_cast<int>(double_exp) - 0x0380;
+    if (float_exp <= 0) {
+      // Underflow to subnormal/zero in float domain
+      e8m0 = 0x0U;
+    } else if (float_exp > 0x00FF) {
+      // NaN/Inf or overflow beyond 8-bit exponent range
+      e8m0 = hip_detail::e8m0_NaN;
+    } else {
+      // Valid finite range [1..254], 0xFF yields NaN and is later handled by saturation
+      e8m0 = static_cast<__hip_fp8_storage_t>(float_exp);
+    }
+  }
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::double_sig_mask) &&
+      (!((u.as_int & ~hip_detail::double_sign_mask) < hip_detail::double_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((u.as_int & ~hip_detail::double_sign_mask) <= hip_detail::double_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t __hip_cvt_float_to_e8m0(
+    const float val, const __hip_saturation_t saturate, const enum hipRoundMode rounding) {
+  union {
+    float as_float;
+    __hip_internal::uint32_t as_int;
+  } u{val};
+
+  // Shifts out mantissa bits from float dtype
+  __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(u.as_int >> 23);
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (u.as_int & hip_detail::float_sig_mask) &&
+      (!((u.as_int & ~hip_detail::float_sign_mask) < hip_detail::float_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((u.as_int & ~hip_detail::float_sign_mask) <= hip_detail::float_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_fp8_storage_t
+__hip_cvt_bfloat16raw_to_e8m0(const __hip_bfloat16_raw hr, const __hip_saturation_t saturate,
+                              const enum hipRoundMode rounding) {
+  // Shifts out mantissa bits from bf16 dtype
+  __hip_fp8_storage_t e8m0 = static_cast<unsigned char>(hr.x >> 7);
+
+  // If there is a mantissa and the exp wont overflow round up
+  if ((rounding == hipRoundPosInf) && (hr.x & hip_detail::bf16_sig_mask) &&
+      (!((hr.x & ~hip_detail::bf16_sign_mask) < hip_detail::bf16_half_sig_bit)) &&
+      (e8m0 < hip_detail::e8m0_NaN)) {
+    ++e8m0;
+  }
+
+  // If e8m0 is NaN and exponent is a large non-inf value round down to a value
+  if ((saturate == __HIP_SATFINITE) && (e8m0 == hip_detail::e8m0_NaN) &&
+      ((hr.x & ~hip_detail::bf16_sign_mask) <= hip_detail::bf16_max_exp)) {
+    --e8m0;
+  }
+  return e8m0;
+}
+
+__FP8_HOST_DEVICE_STATIC__ __hip_bfloat16_raw
+__hip_cvt_e8m0_to_bf16raw(const __hip_fp8_storage_t x) {
+  switch (x) {
+    case 0x00U:
+      return __hip_bfloat16_raw{hip_detail::bf16_half_sig_bit};
+    case hip_detail::e8m0_NaN:
+      return __hip_bfloat16_raw{hip_detail::bf16_NaN};
+    default:
+      return __hip_bfloat16_raw{static_cast<unsigned short>(x << 7)};
+  }
+}
+
+struct __hip_fp8_e8m0 {
+  __hip_fp8_storage_t __x;  //! raw storage of fp8 number
+  constexpr static __hip_saturation_t __default_saturation = __HIP_SATFINITE;
+  constexpr static hipRoundMode __default_interpret = hipRoundPosInf;
+
+  __hip_fp8_e8m0() = default;
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const __half f) {
+    __x = __hip_cvt_float_to_e8m0(__half2float(f), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const __hip_bfloat16 f) {
+    __x = __hip_cvt_bfloat16raw_to_e8m0(f, __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const double f) {
+    __x = __hip_cvt_double_to_e8m0(f, __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const float f) {
+    __x = __hip_cvt_float_to_e8m0(f, __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__ inline explicit __hip_fp8_e8m0(const long int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const long long int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const short int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const unsigned int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const unsigned long int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const unsigned long long int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+  __FP8_HOST_DEVICE__
+  inline explicit __hip_fp8_e8m0(const unsigned short int val) {
+    __x =
+        __hip_cvt_float_to_e8m0(static_cast<float>(val), __default_saturation, __default_interpret);
+  }
+
+  __FP8_HOST_DEVICE__ inline explicit operator __half() const {
+    return __float2half_rn(static_cast<float>(*this));
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator __hip_bfloat16() const {
+    return static_cast<__hip_bfloat16>(__hip_cvt_e8m0_to_bf16raw(__x));
+  }
+
+  /* fp8_e8m0 can't represent a zero value, so always return true.*/
+  __FP8_HOST_DEVICE__ inline explicit operator bool() const { return true; }
+  __FP8_HOST_DEVICE__ inline explicit operator char() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<char>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator double() const {
+    return hip_detail::__internal_cvt_e8m0_to_double(__x);
+  }
+
+  __FP8_HOST_DEVICE__ inline explicit operator float() const {
+    return hip_detail::__internal_cvt_e8m0_to_float(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator long int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<long int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator long long int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<long long int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator short int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<short int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator signed char() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<signed char>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator unsigned char() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<unsigned char>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator unsigned int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<unsigned int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator unsigned long int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<unsigned long int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator unsigned long long int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<unsigned long long int>(__x);
+  }
+  __FP8_HOST_DEVICE__ inline explicit operator unsigned short int() const {
+    return hip_detail::internal_cvt_e8m0_to_int_type<unsigned short int>(__x);
+  }
+};
 
 /**
  * \brief struct representing single fp8 number with e4m3 interpretation
@@ -2511,7 +2812,7 @@ struct __hip_fp8x2_e4m3 {
   __FP8_HOST__ operator float2() const {
 #endif
 #if HIP_FP8_CVT_FAST_PATH
-      return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
+    return internal::cast_to_f32x2_from_f8x2(__x, __default_interpret);
 #else
     return float2(internal::cast_from_f8<float, false>(static_cast<__hip_fp8_storage_t>(__x & 0xFF),
                                                        __wm, __we),
@@ -2526,7 +2827,7 @@ struct __hip_fp8x2_e4m3 {
  * \brief struct representing four ocp fp8 numbers with e4m3 interpretation
  *
  * */
-struct __hip_fp8x4_e4m3 {
+ struct __hip_fp8x4_e4m3 {
   __hip_fp8x4_storage_t __x;  //! raw storage of four fp8 numbers
   static constexpr __hip_saturation_t __default_saturation = __HIP_SATFINITE;
   static constexpr __hip_fp8_interpretation_t __default_interpret = __HIP_E4M3;

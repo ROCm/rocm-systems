@@ -31,7 +31,7 @@ The goal of `rocminfo` is to provide the user with all the system information th
 C++ code changes should conform to the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
 
 ## Pull Request Guidelines
-When you create a pull request, you should target the `TODO ADD THIS` branch.  
+When you create a pull request, you should target the `TODO ADD THIS` branch.
 
 By creating a pull request, you agree to the statements made in the [code license](#code-license) section. Your pull request should target the default branch. Our current default branch is the `TODO ADD THIS` branch, which serves as our integration branch.
 

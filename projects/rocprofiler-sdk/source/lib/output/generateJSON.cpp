@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "generateJSON.hpp"
+#include "kfd_info.hpp"
 #include "output_stream.hpp"
 #include "statistics.hpp"
 #include "timestamps.hpp"
@@ -193,12 +194,14 @@ write_json(
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
     const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
-    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen)
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen,
+    const generator<tool_spm_counter_record_t>&                        spm_gen)
 {
     // summary
     {
@@ -224,6 +227,7 @@ write_json(
         json_ar.setNextName("callback_records");
         json_ar.startNode();
         json_ar(cereal::make_nvp("counter_collection", counter_collection_gen));
+        json_ar(cereal::make_nvp("spm_counter_collection", spm_gen));
         json_ar.finishNode();
     }
 
@@ -238,6 +242,7 @@ write_json(
         json_ar(cereal::make_nvp("memory_copy", memory_copy_gen));
         json_ar(cereal::make_nvp("memory_allocation", memory_allocation_gen));
         json_ar(cereal::make_nvp("scratch_memory", scratch_memory_gen));
+        json_ar(cereal::make_nvp("kfd", kfd_gen));
         json_ar(cereal::make_nvp("rocdecode_api", rocdecode_api_gen));
         json_ar(cereal::make_nvp("rocjpeg_api", rocjpeg_api_gen));
         json_ar(cereal::make_nvp("pc_sample_host_trap", pc_sampling_host_trap_gen));

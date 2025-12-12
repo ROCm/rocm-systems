@@ -438,7 +438,7 @@ union SQ_IMG_RSRC_WORD7 {
 
 
 
-	
+
 #define SQ_IMG_SAMP_WORD0_REG_SZ 32
 #define SQ_IMG_SAMP_WORD0_CLAMP_X_SZ            3
 #define SQ_IMG_SAMP_WORD0_CLAMP_Y_SZ            3

@@ -1,30 +1,14 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 //
 //  above should always be included first
 //
 #include "api.hpp"
+#include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -35,17 +19,17 @@
 #include "core/config.hpp"
 #include "core/constraint.hpp"
 #include "core/cpu.hpp"
-#include "core/debug.hpp"
-#include "core/defines.hpp"
-#include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
+#include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/progress/bar.hpp"
+#include "core/progress/callback.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/cache_utility.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -56,11 +40,15 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha_policy.hpp"
+#include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
+#include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
-#include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -79,15 +67,15 @@
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/registration.h>
-#endif
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/registration.h>
+
+#include <nlohmann/json.hpp>
+
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -96,6 +84,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <pthread.h>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <unistd.h>
@@ -116,11 +105,14 @@ setup() ROCPROFSYS_INTERNAL_API;
 
 namespace
 {
-auto _timemory_manager  = tim::manager::instance();
-auto _timemory_settings = tim::settings::shared_instance();
+std::atomic<bool>  rocprofsys_init_library_done{ false };
+std::atomic<pid_t> rocprofsys_init_tooling_done{ 0 };
+std::atomic<bool>  rocprofsys_finalization_done{ false };
+auto               _timemory_manager  = tim::manager::instance();
+auto               _timemory_settings = tim::settings::shared_instance();
 
 void
-set_metadata_process_start_timestamp(int64_t _ts)
+set_metadata_process_start_timestamp(std::int64_t _ts)
 {
     auto process_info  = trace_cache::get_metadata_registry().get_process_info();
     process_info.start = _ts;
@@ -128,15 +120,35 @@ set_metadata_process_start_timestamp(int64_t _ts)
 }
 
 void
-set_metadata_process_end_timestamp(int64_t _ts)
+set_metadata_process_end_timestamp(std::int64_t _ts)
 {
     auto process_info = trace_cache::get_metadata_registry().get_process_info();
     process_info.end  = _ts;
     trace_cache::get_metadata_registry().set_process(process_info);
 }
 
+void
+set_metadata_environment_json(const std::string& _environment_json)
+{
+    auto process_info        = trace_cache::get_metadata_registry().get_process_info();
+    process_info.environment = _environment_json;
+    trace_cache::get_metadata_registry().set_process(process_info);
+}
+
+std::string
+escape_quotes(std::string str)
+{
+    std::string::size_type pos = 0;
+    while((pos = str.find('"', pos)) != std::string::npos)
+    {
+        str.replace(pos, 1, "\"\"");
+        pos += 2;
+    }
+    return str;
+}
+
 bool
-ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
+ensure_initialization(bool _offset, std::int64_t _glob_n, std::int64_t _offset_n)
 {
     auto _exit_info = component::exit_gotcha::get_exit_info();
     if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
@@ -147,12 +159,10 @@ ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
     if(_tid > 0 && _tid < _peak_num_threads)
     {
         const auto& _info = thread_info::get();
-        ROCPROFSYS_BASIC_VERBOSE_F(3,
-                                   "thread info: %s, offset: %s, global counter: %li, "
-                                   "offset counter: %li, max threads: %li\n",
-                                   std::to_string(static_cast<bool>(_info)).c_str(),
-                                   std::to_string(_offset).c_str(), _glob_n, _offset_n,
-                                   _peak_num_threads);
+        LOG_DEBUG("thread info: {}, offset: {}, global counter: {}, offset counter: {}, "
+                  "max threads: {}",
+                  static_cast<bool>(_info), _offset, _glob_n, _offset_n,
+                  _peak_num_threads);
     }
 
     return _offset;
@@ -177,25 +187,34 @@ ensure_finalization(bool _static_init = false)
             throw exception<std::runtime_error>("failure adding threading callback");
     }
 
-    ROCPROFSYS_CI_BASIC_THROW(
-        config::set_signal_handler(nullptr) != &finalization_handler,
-        "Assignment of signal handler failed. signal handler is %s, expected %s\n",
-        as_hex(reinterpret_cast<void*>(config::set_signal_handler(nullptr))).c_str(),
-        as_hex(reinterpret_cast<void*>(&finalization_handler)).c_str());
+    if(config::set_signal_handler(nullptr) != &finalization_handler)
+
+        throw std::runtime_error(fmt::format(
+            "Assignment of signal handler failed. signal handler is {}, expected "
+            "{}",
+            fmt::format("0x{:X}",
+                        reinterpret_cast<uintptr_t>(config::set_signal_handler(nullptr))),
+            fmt::format("0x{:X}", reinterpret_cast<uintptr_t>(&finalization_handler))));
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
     if(_tid)
     {
-        ROCPROFSYS_CI_THROW(_tid->sequent_value != threading::get_id(),
-                            "Error! internal tid != %li :: %li", threading::get_id(),
-                            _tid->sequent_value);
-        ROCPROFSYS_CI_THROW(_tid->system_value != threading::get_sys_tid(),
-                            "Error! system tid != %li :: %li", threading::get_sys_tid(),
-                            _tid->system_value);
+        if(_tid->sequent_value != threading::get_id())
+        {
+            throw std::runtime_error(fmt::format("Error! internal tid != {} :: {}",
+                                                 threading::get_id(),
+                                                 _tid->sequent_value));
+        }
+        if(_tid->system_value != threading::get_sys_tid())
+        {
+            throw std::runtime_error(fmt::format("Error! system tid != {} :: {}",
+                                                 threading::get_sys_tid(),
+                                                 _tid->system_value));
+        }
     }
 
-    if(common::get_env("ROCPROFSYS_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(common::get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
     timeout::setup();
 
@@ -205,26 +224,22 @@ ensure_finalization(bool _static_init = false)
     if(!tim::get_shared_ptr_pair_callback())
     {
         tim::get_shared_ptr_pair_callback() =
-            new tim::shared_ptr_pair_callback_t{ [](int64_t _n) {
+            new tim::shared_ptr_pair_callback_t{ [](std::int64_t _n) {
                 if(_n == 0) rocprofsys_finalize_hidden();
             } };
     }
 
     if(_static_init)
     {
-        ROCPROFSYS_BASIC_DEBUG_F("\n");
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
-        auto _search_paths = JOIN(':', tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
-                                  tim::get_env<std::string>("PWD"), ".",
-                                  tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("PATH", ""));
+        auto _search_paths = fmt::format(
+            "{}:{}:{}:{}:{}", rocprofsys::get_env<std::string>(env_vars::PATH, ""),
+            rocprofsys::get_env<std::string>("PWD"), ".",
+            rocprofsys::get_env<std::string>("LD_LIBRARY_PATH", ""),
+            rocprofsys::get_env<std::string>("LIBRARY_PATH", ""),
+            rocprofsys::get_env<std::string>("PATH", ""));
         common::setup_environ(_verbose, _search_paths);
-    }
-    else
-    {
-        ROCPROFSYS_DEBUG_F("\n");
     }
 
     if(_timemory_manager) _timemory_manager->set_write_metadata(-1);
@@ -237,7 +252,11 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    ROCPROFSYS_DEFAULT_OBJECT(fini_bundle)
+    fini_bundle()                                  = default;
+    fini_bundle(const fini_bundle&)                = default;
+    fini_bundle(fini_bundle&&) noexcept            = default;
+    fini_bundle& operator=(const fini_bundle&)     = default;
+    fini_bundle& operator=(fini_bundle&&) noexcept = default;
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }
@@ -246,14 +265,14 @@ struct fini_bundle
     template <typename... Args>
     void start(Args&&... _args)
     {
-        TIMEMORY_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
+        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
             std::get<Tp>(m_data), std::forward<Args>(_args)...));
     }
 
     template <typename... Args>
     void stop(Args&&... _args)
     {
-        TIMEMORY_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
+        ROCPROFSYS_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
             std::get<Tp>(m_data), std::forward<Args>(_args)...));
     }
 
@@ -261,7 +280,8 @@ struct fini_bundle
     {
         std::stringstream _ss;
         if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
-        _ss << timemory::join::join(", ", std::get<Tp>(m_data)...);
+        size_t _idx = 0;
+        ((_ss << (_idx++ > 0 ? ", " : "") << std::get<Tp>(m_data)), ...);
         return _ss.str();
     }
 
@@ -299,19 +319,19 @@ rocprofsys_set_env_hidden(const char* env_name, const char* env_val)
     bool        _success  = _set_envs.emplace(env_name).second;
 
     // just search env to avoid initializing the settings
-    ROCPROFSYS_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
-                                   "Setting env: %s=%s\n", env_name, env_val);
+    if(get_debug_init())
+    {
+        LOG_DEBUG("Setting env: {} = {}", env_name, env_val);
+    }
 
-    tim::set_env(env_name, env_val, 0);
+    rocprofsys::set_env(env_name, env_val, 0);
 
     if(_success && get_state() >= State::Init)
     {
-        ROCPROFSYS_WARNING_F(
-            0,
-            "rocprofsys_set_env(\"%s\", \"%s\") called after rocprof-sys was "
-            "initialized. "
-            "state = %s. This environment variable will have no effect\n",
-            env_name, env_val, std::to_string(get_state()).c_str());
+        LOG_WARNING(
+            "rocprofsys_set_env(\"{}\", \"{}\") called after rocprof-sys was "
+            "initialized. state = {}. This environment variable will have no effect",
+            env_name, env_val, static_cast<int>(get_state()));
     }
 }
 
@@ -349,15 +369,17 @@ read_command_line(pid_t _pid)
 void
 rocprofsys_preinit_cache()
 {
-    auto _cmd_line = read_command_line(getpid());
+    const auto        _cmd_line = read_command_line(getpid());
+    const std::string _command  = _cmd_line.empty()
+                                      ? "rocprofiler-systems"
+                                      : fmt::format("{}", fmt::join(_cmd_line, " "));
 
-    if(_cmd_line.empty())
-    {
-        _cmd_line.emplace_back("rocprofiler-systems");
-    }
+    std::stringstream _extdata_stream;
+    config::print_settings_json(_extdata_stream);
 
     trace_cache::get_metadata_registry().set_process(
-        { getpid(), getppid(), _cmd_line.at(0) });
+        { getpid(), getppid(), _command, "", escape_quotes(_extdata_stream.str()), 0,
+          0 });
 }
 
 void
@@ -373,30 +395,68 @@ rocprofsys_preinit_hidden()
     _preinit_callback();
     _preinit_callback = []() {};
 }
+
+using callback_t = void (*)();
+std::mutex              external_pause_resume_callbacks_mutex;
+std::vector<callback_t> external_pause_callbacks;
+std::vector<callback_t> external_resume_callbacks;
+
+void
+invoke_external_pause_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_pause_callbacks)
+        _fn();
+}
+
+void
+invoke_external_resume_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_resume_callbacks)
+        _fn();
+}
+
 }  // namespace
 
 extern "C" void
-rocprofsys_set_mpi_hidden(bool use, bool attached)
+rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+
+    if(pause_fn)
+    {
+        external_pause_callbacks.emplace_back(pause_fn);
+    }
+
+    if(resume_fn)
+    {
+        external_resume_callbacks.emplace_back(resume_fn);
+    }
+}
+
+extern "C" void
+rocprofsys_set_mpi_hidden(bool use)
 {
     static bool _once = false;
-    static auto _args = std::make_pair(use, attached);
+    static bool _arg  = use;
 
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
-    if(_once && std::tie(_args.first, _args.second) == std::tie(use, attached)) return;
+    if(_once && _arg == use) return;
     _once = true;
 
     // just search env to avoid initializing the settings
-    ROCPROFSYS_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
-                                   "use: %s, attached: %s\n", (use) ? "y" : "n",
-                                   (attached) ? "y" : "n");
-
-    _set_mpi_called       = true;
-    config::is_attached() = attached;
-
-    if(use && !attached && get_state() == State::PreInit)
+    if(get_debug_init())
     {
-        tim::set_env("ROCPROFSYS_USE_PID", "ON", 1);
+        LOG_DEBUG("use: {}", (use) ? "y" : "n");
+    }
+
+    _set_mpi_called = true;
+
+    if(use && get_state() == State::PreInit)
+    {
+        rocprofsys::set_env(env_vars::USE_PID, "ON", 1);
     }
     else if(!use)
     {
@@ -405,13 +465,11 @@ rocprofsys_set_mpi_hidden(bool use, bool attached)
 
     if(get_state() >= State::Init)
     {
-        ROCPROFSYS_WARNING_F(
-            0,
-            "rocprofsys_set_mpi(use=%s, attached=%s) called after rocprof-sys was "
-            "initialized. state = %s. MPI support may not be properly initialized. Use "
-            "ROCPROFSYS_USE_MPIP=ON and ROCPROFSYS_USE_PID=ON to ensure full support\n",
-            std::to_string(use).c_str(), std::to_string(attached).c_str(),
-            std::to_string(get_state()).c_str());
+        LOG_WARNING(
+            "rocprofsys_set_mpi(use={}) called after rocprof-sys was "
+            "initialized. state = {}. MPI support may not be properly initialized. Use "
+            "ROCPROFSYS_USE_MPIP=ON and ROCPROFSYS_USE_PID=ON to ensure full support",
+            use, static_cast<int>(get_state()));
     }
 
     rocprofsys_preinit_hidden();
@@ -425,8 +483,7 @@ rocprofsys_init_library_hidden()
     auto _tid = threading::get_id();
     (void) _tid;
 
-    static bool _once       = false;
-    auto        _debug_init = get_debug_init();
+    auto _debug_init = get_debug_init();
 
     int _selinux_mode = 0;
     {
@@ -437,31 +494,36 @@ rocprofsys_init_library_hidden()
 
     if(_selinux_mode == 1)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "/sys/fs/selinux/enforce has a value of %i. \n",
-                                 _selinux_mode);
-        std::cerr << "SELinux enforcing mode detected. Consider disabling SELinux "
-                  << "or configure permissive mode with 'sudo setenforce 0'. Aborting.\n";
+        LOG_DEBUG("/sys/fs/selinux/enforce has a value of {}.", _selinux_mode);
+        LOG_CRITICAL("SELinux enforcing mode detected. Consider disabling SELinux "
+                     "or configure permissive mode with 'sudo setenforce 0'. Aborting.");
         std::exit(EXIT_FAILURE);
     }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
-                                         std::to_string(get_state()).c_str());
+    if(_debug_init)
+    {
+        LOG_DEBUG("State is {}...", std::to_string(get_state()));
+    }
 
-    ROCPROFSYS_CI_THROW(get_state() != State::PreInit, "State is not PreInit :: %s",
-                        std::to_string(get_state()).c_str());
+    if(get_state() != State::PreInit)
+    {
+        throw std::runtime_error(
+            fmt::format("State is not PreInit :: {}", std::to_string(get_state())));
+    }
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once) return;
-    _once = true;
+    if(get_state() != State::PreInit) return;
+    if(rocprofsys_init_library_done.exchange(true)) return;
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s. Setting to %s...\n",
-                                         std::to_string(get_state()).c_str(),
-                                         std::to_string(State::Init).c_str());
+    if(_debug_init)
+    {
+        LOG_DEBUG("State is {}. Setting to {}...", std::to_string(get_state()),
+                  std::to_string(State::Init));
+        LOG_DEBUG("Calling backtrace once so that the one-time call of malloc in "
+                  "glibc's backtrace() occurs...");
+    }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(
-        _debug_init, "Calling backtrace once so that the one-time call of malloc in "
-                     "glibc's backtrace() occurs...\n");
     {
         std::stringstream _ss{};
         timemory_print_backtrace<16>(_ss);
@@ -470,22 +532,38 @@ rocprofsys_init_library_hidden()
 
     set_state(State::Init);
 
-    ROCPROFSYS_CI_THROW(get_state() != State::Init,
-                        "set_state(State::Init) failed. state is %s",
-                        std::to_string(get_state()).c_str());
+    if(get_state() != State::Init)
+    {
+        throw std::runtime_error(fmt::format("set_state(State::Init) failed. state is {}",
+                                             std::to_string(get_state())));
+    }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "Configuring settings...\n");
+    if(_debug_init)
+    {
+        LOG_DEBUG("Configuring settings...");
+    }
 
     // configure the settings
     configure_settings();
 
-    auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
-    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
-    } };
+    // Disable Timemory console output for specified ranks
+    if(!config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        auto* _settings = tim::settings::instance();
+        if(_settings)
+        {
+            _settings->cout_output() = false;
+            _settings->verbose()     = -1;
+            _settings->banner()      = false;
+        }
+    }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "\n");
+    auto _debug_value = get_debug();
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
+    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
+    } };
 }
 
 //======================================================================================//
@@ -493,63 +571,69 @@ rocprofsys_init_library_hidden()
 extern "C" bool
 rocprofsys_init_tooling_hidden(void)
 {
-    if(get_env("ROCPROFSYS_MONOCHROME", false, false)) tim::log::monochrome() = true;
+    if(get_env(env_vars::MONOCHROME, false)) tim::log::monochrome() = true;
 
-    if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true))
+    if(!rocprofsys::get_env(env_vars::INIT_TOOLING, true))
     {
         rocprofsys_init_library_hidden();
         return false;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
-    dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
-                               find_library_path("libamdhip64.so",
-                                                 { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
-                                                 { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
-#endif
+    auto _debug_init = get_debug_init();
 
-    static pid_t _once       = 0;
-    static auto  _debug_init = get_debug_init();
-
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
-                                         std::to_string(get_state()).c_str());
-
-    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
+    if(_debug_init)
     {
-        return false;
+        LOG_DEBUG("State is {}...", std::to_string(get_state()));
     }
-    _once = getpid();
+
+    if(get_state() != State::PreInit) return false;
+
+    pid_t expected = 0;
+    if(!rocprofsys_init_tooling_done.compare_exchange_strong(expected, getpid()))
+        return false;
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    ROCPROFSYS_CONDITIONAL_THROW(
-        get_state() == State::Init,
-        "%s called after rocprofsys_init_library() was explicitly called",
-        ROCPROFSYS_FUNCTION);
+    if(get_state() == State::Init)
+    {
+        throw std::runtime_error(
+            fmt::format("{} called after rocprofsys_init_library() was explicitly called",
+                        __FUNCTION__));
+    }
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(get_verbose_env() >= 0,
-                                         "Instrumentation mode: %s\n",
-                                         std::to_string(config::get_mode()).c_str());
+    LOG_DEBUG("Instrumentation mode: {}", std::to_string(config::get_mode()));
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "Printing banner...\n");
-
-    if(get_verbose_env() >= 0) print_banner();
-
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init,
-                                         "Calling rocprofsys_init_library()...\n");
+    if(_debug_init)
+    {
+        LOG_DEBUG("Calling rocprofsys_init_library()...");
+    }
 
     rocprofsys_init_library_hidden();
 
-    ROCPROFSYS_DEBUG_F("\n");
+    if(_debug_init)
+    {
+        LOG_DEBUG("Printing banner...");
+    }
+
+    print_banner();
 
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
-#if !(ROCPROFSYS_USE_ROCM > 0)
-        rocprofsys_preinit_cpu_agents();
-#endif
         rocprofsys_preinit_cache();
+
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
+    (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
+
+        component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
+            nlohmann::json _environment_json;
+            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
+            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+
+            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+        });
+#endif
 
         if(get_use_process_sampling())
         {
@@ -575,10 +659,50 @@ rocprofsys_init_tooling_hidden(void)
             sampling::unblock_signals();
         }
         get_main_bundle()->start();
-        ROCPROFSYS_DEBUG_F("State: %s -> State::Active\n",
-                           std::to_string(get_state()).c_str());
+        LOG_DEBUG("State: {} -> State::Active", std::to_string(get_state()));
 
-        trace_cache::get_buffer_storage().start_flushing_thread(getpid());
+        {
+            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+            trace_cache::get_buffer_storage().start(getpid());
+        }
+
+        auto trace_controller = rocprofiler_sdk::get_trace_controller();
+        if(trace_controller)
+        {
+            auto pause_callback = [](void) {
+                LOG_DEBUG("Pause callback...");
+                rocprofiler_sdk::pause();
+                sampling::pause();
+                component::mpi_gotcha::pause();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
+                component::vaapi_gotcha::pause();
+                ::rocprofsys::pthread_gotcha::pause();
+                component::numa_gotcha::pause();
+                rocprofsys::kokkosp::pause();
+                process_sampler::pause();
+                invoke_external_pause_callbacks();
+            };
+            auto resume_callback = [](void) {
+                LOG_DEBUG("Resume callback...");
+                rocprofiler_sdk::resume();
+                sampling::resume();
+                component::mpi_gotcha::resume();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
+                component::vaapi_gotcha::resume();
+                ::rocprofsys::pthread_gotcha::resume();
+                component::numa_gotcha::resume();
+                rocprofsys::kokkosp::resume();
+                process_sampler::resume();
+                invoke_external_resume_callbacks();
+            };
+            trace_controller->register_region_pause_resume_callbacks(resume_callback,
+                                                                     pause_callback);
+
+            trace_controller->force_initial_pause();
+        }
+
         set_state(State::Active);  // set to active as very last operation
     } };
 
@@ -590,9 +714,21 @@ rocprofsys_init_tooling_hidden(void)
     // start these gotchas once settings have been initialized
     if(get_init_bundle()) get_init_bundle()->start();
 
+    if(get_use_ucx())
+    {
+        LOG_DEBUG("Setting up UCX traces...\n");
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::start();
+    }
+
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Setting up OpenSHMEM traces...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::start();
+    }
+
     if(get_use_vaapi_tracing())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up VA-API traces...\n");
+        LOG_DEBUG("Setting up VA-API traces...");
         component::vaapi_gotcha::start();
     }
 
@@ -601,11 +737,9 @@ rocprofsys_init_tooling_hidden(void)
     // perfetto initialization
     if(get_use_perfetto())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up Perfetto...\n");
+        LOG_DEBUG("Setting up Perfetto...");
         rocprofsys::perfetto::setup();
     }
-
-    tasking::setup();
 
     if(get_use_causal()) causal::start_experimenting();
 
@@ -640,7 +774,7 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_use_perfetto())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Starting Perfetto...\n");
+        LOG_DEBUG("Starting Perfetto...");
         rocprofsys::perfetto::start();
     }
 
@@ -671,15 +805,17 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
        std::tie(_args.first, _args.second) == std::tie(_mode_sv, _is_binary_rewrite))
         return;
 
-    ROCPROFSYS_CONDITIONAL_THROW(
-        _count > 0 &&
-            std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite),
-        "\nrocprofsys_init(...) called multiple times with different arguments for mode "
-        "and/or is_binary_rewrite:"
-        "\n    Invocation #1: rocprofsys_init(mode=%-8s, is_binary_rewrite=%-5s, ...)"
-        "\n    Invocation #%i: rocprofsys_init(mode=%-8s, is_binary_rewrite=%-5s, ...)",
-        _args.first.data(), std::to_string(_args.second).c_str(), _count + 1, _mode,
-        std::to_string(_is_binary_rewrite).c_str());
+    if(_count > 0 &&
+       std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite))
+    {
+        throw std::runtime_error(fmt::format(
+            "rocprofsys_init(...) called multiple times with different arguments for "
+            "mode and/or is_binary_rewrite:"
+            "\n    Invocation #1: rocprofsys_init(mode={}, is_binary_rewrite={}, ...)"
+            "\n    Invocation #%i: rocprofsys_init(mode={}, is_binary_rewrite={}, ...)",
+            _args.first.data(), std::to_string(_args.second).c_str(), _count + 1, _mode,
+            std::to_string(_is_binary_rewrite)));
+    }
 
     // always the first
     (void) get_state();
@@ -690,28 +826,29 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
     {
         if(std::string_view{ _mode } != "trace" && std::string_view{ _mode } != "Trace")
         {
-            ROCPROFSYS_WARNING_F(
-                0,
-                "rocprofsys_init(mode=%s, is_binary_rewrite=%s, argv0=%s) "
-                "called after rocprof-sys was initialized. state = %s. Mode-based "
+            LOG_WARNING(
+                "rocprofsys_init(mode={}, is_binary_rewrite={}, argv0={}) "
+                "called after rocprof-sys was initialized. state = {}. Mode-based "
                 "settings (via -M <MODE> passed to rocprof-sys exe) may not be "
-                "properly configured.\n",
-                _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0.c_str(),
-                std::to_string(get_state()).c_str());
+                "properly configured.",
+                _mode, std::to_string(_is_binary_rewrite), _argv0,
+                std::to_string(get_state()));
         }
     }
 
     tracing::get_finalization_functions().emplace_back([_argv0_c]() {
-        ROCPROFSYS_CI_THROW(get_state() != State::Active,
-                            "Finalizer function for popping main invoked in non-active "
-                            "state :: state = %s\n",
-                            std::to_string(get_state()).c_str());
+        if(get_state() != State::Active)
+        {
+            throw std::runtime_error(
+                fmt::format("Finalizer function for popping main invoked in non-active "
+                            "state :: state = {}",
+                            std::to_string(get_state())));
+        }
         if(get_state() == State::Active)
         {
             auto _name = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
-            ROCPROFSYS_BASIC_VERBOSE(2, "Running rocprofsys_pop_trace(%s)...\n",
-                                     _name.c_str());
+            LOG_DEBUG("Running rocprofsys_pop_trace({})...", _name);
             rocprofsys_pop_trace_hidden(_name.c_str());
         }
     });
@@ -723,12 +860,13 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 
     set_metadata_process_start_timestamp(comp::wall_clock::record());
 
-    ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(
-        get_debug_env() || get_verbose_env() > 2,
-        "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
-        (_is_binary_rewrite) ? "y" : "n", _argv0.c_str());
+    if(get_debug_env() || get_verbose_env() > 2)
+    {
+        LOG_DEBUG("mode: {} | is binary rewrite: {} | command: {}", _mode,
+                  (_is_binary_rewrite) ? "y" : "n", _argv0);
+    }
 
-    tim::set_env("ROCPROFSYS_MODE", _mode, 0);
+    rocprofsys::set_env(env_vars::MODE, _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
     if(_set_mpi_called)
@@ -742,7 +880,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
 extern "C" void
 rocprofsys_reset_preload_hidden(void)
 {
-    tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
+    rocprofsys::set_env(env_vars::PRELOAD, "0", 1);
     auto&& _preload_libs = common::get_env("LD_PRELOAD", std::string{});
     if(_preload_libs.find("librocprof-sys") != std::string::npos)
     {
@@ -750,12 +888,12 @@ rocprofsys_reset_preload_hidden(void)
         for(const auto& itr : delimit(_preload_libs, ":"))
         {
             if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
+            _modified_preload += fmt::format(":{}", itr);
         }
         if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
             _modified_preload = _modified_preload.substr(1);
 
-        tim::set_env("LD_PRELOAD", _modified_preload, 1);
+        rocprofsys::set_env("LD_PRELOAD", _modified_preload, 1);
     }
 }
 
@@ -764,6 +902,13 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
+    if(rocprofsys_finalization_done.exchange(true))
+    {
+        LOG_DEBUG("Finalization already completed. Skipping.");
+        return;
+    }
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
@@ -775,8 +920,7 @@ rocprofsys_finalize_hidden(void)
     // return if not active
     if(get_state() != State::Active)
     {
-        ROCPROFSYS_BASIC_DEBUG_F("State = %s. Finalization skipped\n",
-                                 std::to_string(get_state()).c_str());
+        LOG_DEBUG("State = {}. Finalization skipped", std::to_string(get_state()));
         return;
     }
 
@@ -786,27 +930,23 @@ rocprofsys_finalize_hidden(void)
     {
         set_state(State::Finalized);
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
-        if(get_use_rocm())
-        {
-            ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
-            rocprofiler_sdk::shutdown();
-        }
-#endif
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
         const auto metadata_filepath =
-            trace_cache::get_metadata_filepath(get_root_process_id(), getpid());
+            trace_cache::utility::get_metadata_filepath(get_root_process_id(), getpid());
         _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
         std::quick_exit(EXIT_SUCCESS);
         return;
     }
 
-    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
-    ROCPROFSYS_VERBOSE_F(0, "finalizing...\n");
+    LOG_INFO("Finalizing rocprof-sys...");
 
     sampling::block_samples();
 
@@ -843,9 +983,10 @@ rocprofsys_finalize_hidden(void)
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
-    if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", true);
+    if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
-        if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
+        if(_debug_init)
+            config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
 
     auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
@@ -855,64 +996,74 @@ rocprofsys_finalize_hidden(void)
     {
         if(dmp::rank() == 0)
         {
-            ROCPROFSYS_PRINT_F("\n");
             config::print_settings(
-                tim::get_env<bool>("ROCPROFSYS_PRINT_ENV", get_debug()));
+                rocprofsys::get_env<bool>(env_vars::PRINT_ENV, get_debug()));
         }
     }
 
-    ROCPROFSYS_VERBOSE_F(1, "rocprofsys_push_trace :: called %zux\n", _push_count);
-    ROCPROFSYS_VERBOSE_F(1, "rocprofsys_pop_trace  :: called %zux\n", _pop_count);
+    LOG_DEBUG("rocprofsys_push_trace/rocprofsys_push_trace_with_args :: called {}",
+              _push_count);
+    LOG_DEBUG("rocprofsys_pop_trace  :: called {}", _pop_count);
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
                                           [](int) {});
 
-    ROCPROFSYS_DEBUG_F("Copying over all timemory hash information to main thread...\n");
+    LOG_DEBUG("Copying over all timemory hash information to main thread...");
     tracing::copy_timemory_hash_ids();
 
     // stop the main bundle which has stats for run
     if(get_main_bundle())
     {
-        ROCPROFSYS_DEBUG_F("Stopping main bundle...\n");
+        LOG_DEBUG("Stopping main bundle...");
         get_main_bundle()->stop();
     }
 
     fini_bundle_t _finalization{};
     _finalization.start();
 
+    if(get_use_ucx())
+    {
+        LOG_DEBUG("Shutting down UCX tracing...\n");
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::shutdown();
+    }
+
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Shutting down OpenSHMEM tracing...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::shutdown();
+    }
+
     if(get_use_vaapi_tracing())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
+        LOG_DEBUG("Shutting down VA-API tracing...");
         component::vaapi_gotcha::shutdown();
     }
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocm())
+    if(get_use_process_sampling())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
-        rocprofiler_sdk::shutdown();
+        LOG_DEBUG("Shutting down background sampler...");
+        process_sampler::shutdown();
     }
-#endif
 
-    ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
-    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    LOG_DEBUG("Shutting down ROCm...");
+    rocprofiler_sdk::shutdown();
+
+    LOG_DEBUG("Stopping and destroying instrumentation bundles...");
+    auto* _bundles = instrumentation_bundles::get();
+    for(size_t i = 0; _bundles && i < thread_info::get_peak_num_threads(); ++i)
     {
-        if(!instrumentation_bundles::get()) continue;
+        if(i >= _bundles->size()) continue;
         const auto& _info = thread_info::get(i, SequentTID);
-        auto&       itr   = instrumentation_bundles::get()->at(i);
+        auto&       itr   = _bundles->at(i);
         while(itr != nullptr && !itr->empty())
         {
-            int _lvl = 1;
             if(_info->is_offset)
             {
                 ++_pop_count;
-                _lvl = 4;
             }
-            ROCPROFSYS_VERBOSE_F(
-                _lvl,
-                "Warning! instrumentation bundle on thread %zu (TID=%li) "
-                "with label '%s' was not stopped.\n",
-                i, itr->back()->tid(), itr->back()->key().c_str());
+            LOG_WARNING("Instrumentation bundle on thread {} (TID={}) "
+                        "with label '{}' was not stopped.",
+                        i, itr->back()->tid(), itr->back()->key());
 
             itr->back()->stop();
             itr->back()->pop();
@@ -923,7 +1074,7 @@ rocprofsys_finalize_hidden(void)
     // stop the main gotcha which shuts down the pthread gotchas
     if(get_init_bundle())
     {
-        ROCPROFSYS_DEBUG_F("Stopping main gotcha...\n");
+        LOG_DEBUG("Stopping main gotcha...");
         get_init_bundle()->stop();
 
         pthread_gotcha::shutdown();
@@ -933,39 +1084,32 @@ rocprofsys_finalize_hidden(void)
     // stop the gotcha bundle
     if(get_preinit_bundle())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down miscellaneous gotchas...\n");
+        LOG_DEBUG("Shutting down miscellaneous gotchas...");
         get_preinit_bundle()->stop();
         component::mpi_gotcha::shutdown();
     }
 
-    if(get_use_process_sampling())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down background sampler...\n");
-        process_sampler::shutdown();
-    }
-
     if(get_use_causal())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down causal sampling...\n");
+        LOG_DEBUG("Shutting down causal sampling...");
         causal::sampling::shutdown();
     }
 
     if(get_use_sampling())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down sampling...\n");
+        LOG_DEBUG("Shutting down sampling...");
         sampling::shutdown();
     }
 
-    ROCPROFSYS_VERBOSE_F(3, "Reporting the process- and thread-level metrics...\n");
+    LOG_TRACE("Reporting the process- and thread-level metrics...");
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
-        ROCPROFSYS_VERBOSE_F(0, "\n");
-        std::string _msg = JOIN("", *get_main_bundle());
+        std::string _msg = get_main_bundle()->as_string();
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-        ROCPROFSYS_VERBOSE_F(0, "%s\n", _msg.c_str());
-        ROCPROFSYS_DEBUG_F("Resetting main bundle...\n");
+        LOG_INFO("{}", _msg);
+        LOG_DEBUG("Resetting main bundle...");
         get_main_bundle()->reset();
     }
 
@@ -981,59 +1125,82 @@ rocprofsys_finalize_hidden(void)
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
             {
-                std::string _msg = JOIN("", *itr);
+                std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                ROCPROFSYS_VERBOSE_F(_thr_verbose, "%s\n", _msg.c_str());
+                if(_thr_verbose >= 0)
+                {
+                    LOG_INFO("{}", _msg);
+                }
             }
         }
     }
 
-    ROCPROFSYS_VERBOSE_F(0, "\n");
-
     // ensure that all the MT instances are flushed
     if(get_use_sampling())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Post-processing the sampling backtraces...\n");
+        LOG_DEBUG("Post-processing the sampling backtraces...");
         sampling::post_process();
     }
 
+    auto _output_registry = output_file_registry{};
+
     if(get_use_causal())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Finishing the causal experiments...\n");
+        LOG_DEBUG("Finishing the causal experiments...");
         causal::finish_experimenting();
+
+        auto _base = config::get_causal_output_filename();
+        _output_registry.register_file(fmt::format("{}.json", _base),
+                                       output_format::causal_json);
+        _output_registry.register_file(fmt::format("{}.txt", _base),
+                                       output_format::causal_text);
     }
 
     if(get_use_process_sampling())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Post-processing the system-level samples...\n");
+        LOG_DEBUG("Post-processing the system-level samples...");
         process_sampler::post_process();
     }
 
-    // shutdown tasking before timemory is finalized
-    ROCPROFSYS_VERBOSE_F(1, "Shutting down thread-pools...\n");
-    tasking::shutdown();
-
     if(get_use_code_coverage())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Post-processing the code coverage...\n");
+        LOG_DEBUG("Post-processing the code coverage...");
         coverage::post_process();
     }
 
     tracing::copy_timemory_hash_ids();
 
+    // Flush any pending region cache entries (e.g., main entry point that wasn't
+    // explicitly stopped before finalization)
+    LOG_DEBUG("Flushing pending region cache entries...");
+    rocprofsys_flush_pending_region_cache_hidden();
+
     bool _perfetto_output_error = false;
     if(get_use_perfetto())
     {
-        ROCPROFSYS_VERBOSE_F(0, "Finalizing perfetto...\n");
+        LOG_DEBUG("Finalizing perfetto...");
         rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error);
+                                           _perfetto_output_error, _output_registry);
     }
 
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
-        _manager.post_process_bulk();
+
+        rocprofsys::progress::bar_options _bar_opts;
+        _bar_opts.verbose = config::get_verbose();
+
+        rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
+                                                            std::uint64_t _total) {
+            auto                      _bar = std::make_shared<rocprofsys::progress::bar>(std::move(_label),
+                                                                                         _total, _bar_opts);
+            return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
+                _bar->on_advance(_delta);
+            } };
+        } };
+
+        _manager.post_process_bulk(_output_registry, _tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
@@ -1051,7 +1218,25 @@ rocprofsys_finalize_hidden(void)
                tim::cereal::make_nvp("memory_maps", _maps));
         });
 
-        ROCPROFSYS_VERBOSE_F(1, "Finalizing timemory...\n");
+        static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID);
+        static auto  session_id            = 0;
+
+        if(attach_add_session_id)
+            settings::default_process_suffix() = fmt::format("%pid%-{}", session_id++);
+
+        // Disable Timemory file output for disabled ranks
+        if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+        {
+            auto* _settings = tim::settings::instance();
+            if(_settings)
+            {
+                _settings->file_output() = false;
+                _settings->text_output() = false;
+                _settings->json_output() = false;
+            }
+        }
+
+        LOG_DEBUG("Finalizing timemory...");
         tim::timemory_finalize(_timemory_manager.get());
 
         auto _cfg       = settings::compose_filename_config{};
@@ -1059,6 +1244,30 @@ rocprofsys_finalize_hidden(void)
         _cfg.suffix     = settings::default_process_suffix();
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "rocprofsys", _cfg);
+
+        if(config::get_use_timemory())
+        {
+            auto _components = config::get_setting_value<std::string>(
+                                   std::string{ env_vars::TIMEMORY_COMPONENTS })
+                                   .value_or("wall_clock");
+
+            for(auto&& _comp_name : tim::delimit(_components, ",; "))
+            {
+                if(_comp_name.empty()) continue;
+
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "txt", _cfg),
+                    output_format::text, _comp_name);
+                _output_registry.register_file(
+                    settings::compose_output_filename(_comp_name, "json", _cfg),
+                    output_format::json, _comp_name);
+            }
+        }
+    }
+
+    if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
+    {
+        _output_registry.print_summary();
     }
 
     categories::shutdown();
@@ -1067,29 +1276,50 @@ rocprofsys_finalize_hidden(void)
 
     if(_perfetto_output_error)
     {
-        ROCPROFSYS_THROW("Error opening perfetto output file: %s",
-                         get_perfetto_output_filename().c_str());
+        throw std::runtime_error(fmt::format("Error opening perfetto output file: {}",
+                                             get_perfetto_output_filename()));
     }
 
-    ROCPROFSYS_CI_THROW(
-        _push_count > _pop_count, "%s",
-        TIMEMORY_JOIN(" ",
-                      "rocprofsys_push_trace was called more times than "
-                      "rocprofsys_pop_trace. The inverse is fine but the current state "
-                      "means not every measurement was ended :: pushed:",
-                      _push_count, "vs. popped:", _pop_count)
-            .c_str());
+    if(_push_count > _pop_count)
+    {
+        LOG_WARNING("rocprofsys_push_trace/rocprofsys_push_trace_with_args was called "
+                    "more times than rocprofsys_pop_trace. This is not fatal, but trace "
+                    "output will not include regions that were still open during "
+                    "finalization :: pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
+    }
 
-    debug::close_file();
+    // debug::close_file();
     config::finalize();
 
-    ROCPROFSYS_VERBOSE_F(0, "Finalized: %s\n", _finalization.as_string().c_str());
+    LOG_DEBUG("Finalized: {}", _finalization.as_string());
 
     tim::signals::enable_signal_detection(
         { tim::signals::sys_signal::SegFault, tim::signals::sys_signal::Stop },
         [](int) {});
 
     common::destroy_static_objects();
+
+    // Note: rocprofsys_init_library_done, rocprofsys_init_tooling_done, and state are NOT
+    // reset here. They are only reset during re-attach (in rocprofiler-sdk.cpp) when
+    // explicitly preparing for a new session. Resetting them during normal exit
+    // can cause crashes if cleanup code triggers reinitialization.
+}
+
+extern "C" void
+rocprofsys_set_finalization_done_hidden(void)
+{
+    rocprofsys_finalization_done.store(true);
+}
+
+extern "C" void
+rocprofsys_reset_for_reattach_hidden(void)
+{
+    rocprofsys_finalization_done.store(false);
+    rocprofsys_init_library_done.store(false);
+    rocprofsys_init_tooling_done.store(0);
+    ::rocprofsys::reset_database_path_memo();
+    ::rocprofsys::reset_state();
 }
 
 //======================================================================================//

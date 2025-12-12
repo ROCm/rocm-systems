@@ -115,13 +115,16 @@ class PcsRuntime {
     };
     struct client_session_data_t csd;
 
+    // Buffer info for DataCopyCallback. Made public so thread_local can access it.
+   public:
     struct data_ready_info_t {
       uint8_t* buf1;
       size_t buf1_sz;
       uint8_t* buf2;
       size_t buf2_sz;
     };
-    struct data_ready_info_t data_rdy;
+
+   private:
   };  // class PcSamplingSession
 
   hsa_status_t PcSamplingIterateConfig(
@@ -166,7 +169,7 @@ class PcsRuntime {
 }
   // Map of pc sampling sessions indexed by hsa_ven_amd_pcs_t handle
   std::map<uint64_t, PcSamplingSession> pc_sampling_;
-  KernelMutex pc_sampling_lock_;
+  std::mutex pc_sampling_lock_;
   uint64_t pc_sampling_id_;
 
   DISALLOW_COPY_AND_ASSIGN(PcsRuntime);

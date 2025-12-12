@@ -22,16 +22,40 @@ Workaround:
    $ pip3 uninstall astunparse
    $ pip3 astunparse
 
-tabulate doesn't print properly
-===============================
+Why does VALU utilization exceed the theoretical peak?
+======================================================
 
-To get around this issue, set the following environment variables to update your
-locale settings.
+In specific circumstances, the GPU can co-issue two VALU instructions in the same clock cycle. This may result in an observed VALU Utilization and FP64 VALU FLOP values above the theoretical peak. This is expected hardware behavior and not a measurement error.
 
-.. code-block:: shell
+This dual-issue capability can be further investigated via:
 
-   $ export LC_ALL=C.UTF-8
-   $ export LANG=C.UTF-8
+* **ROCm Compute Viewer**: The Instructions view shows when two instructions are issued to the VALU in the same cycle.
+* **On MI350 and newer platforms**: Starting in ROCm 7.2.0, the ``Dual-issue VALU Utilization`` metric shows the % of time when VALU is executing dual-issued instructions.
+
+When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays a warning message indicating this behavior.
+
+What does "Counter variance corrected" mean?
+=============================================
+
+When profiling, you may see the following warning:
+
+.. code-block:: text
+
+   WARNING: Counter variance corrected: X value(s) adjusted (max Y% deviation from multi-pass collection).
+
+This indicates that ROCm Compute Profiler detected and corrected negative values in derived metrics. This is expected behavior, not an error.
+
+**Why does this happen?**
+
+Hardware performance counters are collected across multiple profiling passes. When calculating derived metrics that involve subtraction (such as ``A - B``), small run-to-run variance can occasionally produce negative results. Since negative event counts are physically impossible, these values are automatically clamped to zero.
+
+**When should I be concerned?**
+
+* **Deviation < 1%**: Normal hardware variance. No action needed.
+* **Deviation ≥ 1%**: The warning is displayed. Results are still valid, but variance was higher than typical.
+* **Deviation > 5%**: Consider investigating profiling conditions (system load, thermal throttling, non-deterministic application behavior, etc.).
+
+This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
 
 How can I SSH tunnel in MobaXterm?
 ==================================
@@ -71,3 +95,16 @@ How can I SSH tunnel in MobaXterm?
      * ``<SSH server>``: *name of the server to connect to*
      * ``<SSH login>``: *username to login to the server*
      * ``<SSH port>``: ``22``
+
+Why are kernels on separate HIP streams not executing concurrently during profiling?
+====================================================================================
+
+ROCm Compute Profiler collects GPU performance counters with kernel
+dispatch association which requires serializing kernel dispatches.
+Kernel dispatches are serialized across HIP streams on the same GPU during
+profiling so that only one kernel executes at a time on a given GPU.
+Streams on different GPUs are not serialized. As a result, kernels
+launched on separate HIP streams on the same GPU will run one after
+another during profiling. Kernel duration and throughput metrics reflect
+this serialized execution rather than the concurrent behavior that may
+occur during normal execution.

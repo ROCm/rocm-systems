@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,7 +89,7 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
                                                    ///< service that report incompatibility
     ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES,     ///< The given resources are
                                                    ///< insufficient to complete operation
-    ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,    ///< Could not find the counter profile
+    ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,     ///< Could not find the counter profile
     ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,  ///< Cannot enable both agent and dispatch
                                                        ///< counting in the same context.
     ROCPROFILER_STATUS_INTERNAL_NO_AGENT_CONTEXT,   ///< No agent context found, may not be an error
@@ -103,7 +103,13 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,          ///< Exceeds hardware limits for collection.
     ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,  ///< Agent HW architecture not supported.
     ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,         ///< Permission denied.
+    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,  ///< rocprofiler-register version is
+                                                             ///< incompatible. Late-start profiling
+                                                             ///< requires ROCm 7.0+.
     ROCPROFILER_STATUS_LAST,
+    ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND =
+        ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,  ///< ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND
+                                                    ///< is deprecated
 } rocprofiler_status_t;
 
 /**
@@ -198,7 +204,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,         ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,     ///< Buffer kernel dispatch info
-    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
+    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclamation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
     ROCPROFILER_BUFFER_TRACING_OMPT,                       ///< @see ::rocprofiler_ompt_operation_t
@@ -321,7 +327,7 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
     /// captured and it is safe to disable those contexts without affecting the delivery of the
     /// requested data when the kernel completes. It is important to note that, even if the context
     /// associated with the kernel dispatch callback tracing service is disabled in between the
-    /// enter and exit phase, the exit phase callback is still delievered but that context will not
+    /// enter and exit phase, the exit phase callback is still delivered but that context will not
     /// be captured when the kernel is enqueued and therefore will not provide a
     /// ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback. Furthermore, it should be
     /// noted that if a tool encodes information into the `::rocprofiler_user_data_t` output
@@ -402,7 +408,8 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_RCCL_LIBRARY      = (1 << 4),
     ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCJPEG_LIBRARY,
+    ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_OMPT_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -435,6 +442,7 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,       ///< Application loaded RCCL runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecoder runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_OMPT,       ///< Application loaded OMPT runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 
@@ -510,7 +518,7 @@ typedef uint64_t rocprofiler_thread_id_t;
  * @brief Tracing Operation ID. Depending on the kind, operations can be determined.
  * If the value is equal to zero that means all operations will be considered
  * for tracing. Detailed API tracing operations can be found at associated header file
- * for that partiular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
+ * for that particular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
  * operations, look at source/include/rocprofiler-sdk/hsa/amd_ext_api_id.h
  */
 typedef int32_t rocprofiler_tracing_operation_t;
@@ -536,7 +544,7 @@ typedef uint64_t rocprofiler_counter_instance_id_t;
 /**
  * @brief A dimension for counter instances. Some example
  *        dimensions include XCC, SM (Shader), etc. This
- *        value represents the dimension beind described
+ *        value represents the dimension behind described
  *        or queried about.
  */
 typedef uint64_t rocprofiler_counter_dimension_id_t;
@@ -563,7 +571,7 @@ typedef union rocprofiler_user_data_t
  */
 typedef union rocprofiler_address_t
 {
-    uint64_t    handle;  ///< compatability
+    uint64_t    handle;  ///< compatibility
     uint64_t    value;   ///< usage example: store address in uint64_t format
     const void* ptr;     ///< usage example: generic form of address
 } rocprofiler_address_t;

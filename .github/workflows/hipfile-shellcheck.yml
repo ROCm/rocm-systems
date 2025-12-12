@@ -1,0 +1,33 @@
+# Run ShellCheck (https://www.shellcheck.net/) over shell scripts
+
+name: "hipFile ShellCheck"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/hipfile/**.sh'
+      - '.github/workflows/hipfile-shellcheck.yml'
+  pull_request:
+    paths:
+      - 'projects/hipfile/**.sh'
+      - '.github/workflows/hipfile-shellcheck.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hipfile-shellcheck:
+    name: "hipFile: Run ShellCheck over shell scripts"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0

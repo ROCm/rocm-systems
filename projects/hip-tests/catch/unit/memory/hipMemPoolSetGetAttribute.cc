@@ -1,21 +1,9 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
+
 #include "mempool_common.hh"
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -47,7 +35,7 @@ template <typename T> static void MemPoolSetGetAttribute(const hipMemPool_t memp
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_Default") {
+HIP_TEST_CASE(Unit_hipMemPoolSetGetAttribute_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   checkMempoolSupported(device)
@@ -80,7 +68,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_Default") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
+HIP_TEST_CASE(Unit_hipMemPoolSetGetAttribute_Positive_MemBasic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   checkMempoolSupported(device)
@@ -115,7 +103,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
+HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_Opportunistic) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id)
@@ -156,7 +144,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -171,7 +159,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;
@@ -195,7 +183,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -211,7 +199,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;
@@ -230,7 +218,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -248,7 +236,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notifiy kernel to exit after 500 ms
@@ -270,7 +258,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -283,7 +271,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
@@ -310,7 +298,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
+HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_EventDependencies) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -352,7 +340,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -367,7 +355,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
@@ -389,7 +377,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
     HIP_CHECK(hipEventRecord(event, stream1.stream()));
@@ -403,7 +391,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;
@@ -437,7 +425,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -496,7 +484,7 @@ static void resetHighValue(hipMemPool_t& memPool) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
+HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_ResetMemHighAttr) {
   checkMempoolSupported(0)
       // Create mempool
       hipMemPool_t mem_pool;
@@ -556,7 +544,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -666,7 +654,7 @@ static bool checkhipMemPoolSetAttribute(hipMemPoolAttr attr, int dev) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_SetGet) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
@@ -688,7 +676,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_UsedMem) {
   checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
@@ -776,7 +764,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_ReservedMem) {
   checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
@@ -819,7 +807,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_UsageStatistics) {
   checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
@@ -891,7 +879,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool) {
   checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
@@ -927,7 +915,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_CheckDefaultValues") {
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_CheckDefaultValues) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {

@@ -24,7 +24,7 @@
 
 #include <stdio.h>
 
-static void print_json_value_internal(JsonValue *value, int indent) {
+static void print_json_value_internal(JsonValue* value, int indent) {
   if (!value) return;
 
   switch (value->type) {
@@ -42,7 +42,7 @@ static void print_json_value_internal(JsonValue *value, int indent) {
       break;
     case JSON_OBJECT: {
       printf("{\n");
-      JsonPair *pair = value->data.object;
+      JsonPair* pair = value->data.object;
       bool first = true;
       while (pair) {
         if (!first) printf(",\n");
@@ -69,7 +69,7 @@ static void print_json_value_internal(JsonValue *value, int indent) {
   }
 }
 
-void print_json_value(JsonValue *value) {
+void print_json_value(JsonValue* value) {
   print_json_value_internal(value, 0);
   printf("\n");
 }

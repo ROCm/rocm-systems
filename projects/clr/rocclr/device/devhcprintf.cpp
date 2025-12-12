@@ -1,22 +1,8 @@
-/* Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /** \file Format string processing for printf based on hostcall messages.
  */
@@ -67,11 +53,11 @@ static const uint64_t* consumeFloatingPoint(FILE* stream, int* outCount, const s
 template <typename... Args>
 static const uint64_t* consumeCstring(FILE* stream, int* outCount, const std::string& spec,
                                       const uint64_t* ptr, Args... args) {
-  auto str = reinterpret_cast<const char*>(ptr);
-  auto old = *outCount;
+  const char* str = reinterpret_cast<const char*>(ptr);
   checkPrintf(stream, outCount, spec.c_str(), args..., str);
-  auto stringMemSize = *outCount - old + 1;
-  return ptr + (stringMemSize + 7) / 8;
+  size_t payloadBytes = std::strlen(str) + 1;
+  size_t qwords = (payloadBytes + 7) / 8;
+  return ptr + qwords;
 }
 
 template <typename... Args>
@@ -256,17 +242,28 @@ void handlePrintf(uint64_t* output, const uint64_t* input, uint64_t len) {
 // delimited by character ','.
 bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfInfo,
                                  std::map<uint64_t, std::string>& strMap) {
-  for (auto it : printfInfo) {
-    auto Delim = it.fmtString_.find_first_of(',');
-    auto HashStr = it.fmtString_.substr(0, Delim);
+  static_assert(sizeof(long long) == sizeof(uint64_t), "unexpected long long type width");
 
-    static_assert(sizeof(long long) == sizeof(uint64_t), "unexpected long long type width");
-    auto HashVal = std::strtoull(HashStr.c_str(), NULL, 16);
-    if (strMap.find(HashVal) != strMap.end()) {
+  for (const auto& info : printfInfo) {
+    auto Delim = info.fmtString_.find(',');
+    if (Delim == std::string::npos) {
+      LogError("Missing delimiter in printf metadata");
+      return false;
+    }
+
+    const char* HashStr = info.fmtString_.c_str();
+    char* ParseEnd = nullptr;
+    auto HashVal = std::strtoull(HashStr, &ParseEnd, 16);
+    if (ParseEnd != HashStr + Delim) {
+      LogError("Failed to parse printf hash");
+      return false;
+    }
+
+    auto InsertResult = strMap.emplace(HashVal, info.fmtString_.substr(Delim + 1));
+    if (!InsertResult.second) {
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }
-    strMap[HashVal] = it.fmtString_.substr(Delim + 1, it.fmtString_.size());
   }
 
   return true;

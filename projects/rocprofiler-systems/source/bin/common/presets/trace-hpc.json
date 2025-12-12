@@ -1,0 +1,90 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": true,
+            "metrics": {
+                "busy": {
+                    "enabled": true
+                },
+                "mem_usage": {
+                    "enabled": true
+                },
+                "power": {
+                    "enabled": true
+                },
+                "temp": {
+                    "enabled": true
+                }
+            }
+        },
+        "parallel": {
+            "enabled": true,
+            "runtimes": {
+                "kokkos": {
+                    "enabled": true
+                },
+                "mpi": {
+                    "enabled": true
+                },
+                "openmp": {
+                    "enabled": true
+                },
+                "rccl": {
+                    "enabled": true
+                }
+            }
+        },
+        "rocm": {
+            "api_domains": {
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                },
+                "scratch_memory": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "hardware_counters": {
+        "enabled": true,
+        "papi_events": {
+            "value": [
+                "PAPI_TOT_INS",
+                "PAPI_TOT_CYC",
+                "PAPI_L3_TCM"
+            ]
+        }
+    },
+    "metadata": {
+        "category": "hpc",
+        "cli_flag": "--trace-hpc",
+        "description": "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive applications",
+        "name": "trace-hpc",
+        "use_case": "MPI/OpenMP/HPC applications with hardware counter collection"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "sampling": {
+        "cpus": {
+            "value": "none"
+        },
+        "enabled": false,
+        "frequency_hz": {
+            "value": 100
+        }
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

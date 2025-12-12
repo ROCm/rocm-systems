@@ -1,59 +1,37 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
+#include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-#ifdef __linux__
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <memory.h>
-#include <sys/un.h>
-#endif
+#include <chrono>
+#include <thread>
 
 namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
-#define checkMempoolSupported(device) {\
-  int deviceSupportsMemoryPools = 0;\
-  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
-        hipDeviceAttributeMemoryPoolsSupported, device));\
-  if (0 == deviceSupportsMemoryPools) {\
-    HipTest::HIP_SKIP_TEST("Memory Pool not supported. Skipping Test..");\
-    return;\
-  }\
+#define checkMempoolSupported(device) {                                                            \
+  int deviceSupportsMemoryPools = 0;                                                               \
+  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,                                      \
+        hipDeviceAttributeMemoryPoolsSupported, device));                                          \
+  if (0 == deviceSupportsMemoryPools) {                                                            \
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);                                    \
+  }                                                                                                \
 }
 
-#define checkIfMultiDev(numOfDev) {\
-  if (numOfDev < 2) {\
-    HipTest::HIP_SKIP_TEST("Multiple GPUs not available. Skipping Test..");\
-    return;\
-  }\
+#define checkIfMultiDev(numOfDev) {                                                                \
+  if (numOfDev < 2) {                                                                              \
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);                                         \
+  }                                                                                                \
 }
 
 template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {
@@ -95,8 +73,9 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
 template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsigned int* notified) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   host_res[tid] = tid + 1;
-  __threadfence_system();
-  while (*notified == 0) { }
+  if (threadIdx.x == 0) {
+    while (*notified == 0) { }
+  }
 }
 
 template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemPools mempool_type) {
@@ -106,8 +85,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -124,7 +102,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
 
   int blocks = 16;
   hipMemPoolAttr attr;
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -166,8 +144,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -187,7 +164,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
 
   int blocks = 16;
   hipMemPoolAttr attr;
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem1, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -246,8 +223,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
   unsigned int *notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
@@ -267,7 +243,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
 
   int blocks = 2;
 
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem1, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -283,7 +259,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
   *notified = 0;
   // Second kernel launch with new memory
-  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem2, notified);
+  notifiedKernel<<<blocks, 32, 0, stream.stream()>>>(alloc_mem2, notified);
   *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
@@ -327,19 +303,21 @@ class streamMemAllocTest {
   int size;
   size_t byte_size;
   hipMemPool_t mem_pool;
+  bool threadSafe;
 
  public:
-  explicit streamMemAllocTest(int N) : size(N) {
+  explicit streamMemAllocTest(int N, bool threadSafe = false)
+      : size(N), threadSafe(threadSafe) {
     byte_size = N*sizeof(int);
   }
   // Create host buffers and initialize them with input data
   void createHostBufferWithData() {
     A_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(A_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, A_h != nullptr);
     B_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(B_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, B_h != nullptr);
     C_h = reinterpret_cast<int*>(malloc(byte_size));
-    REQUIRE(C_h != nullptr);
+    REQUIRE_OPT_THREAD(threadSafe, C_h != nullptr);
     // set data to host
     for (int i = 0; i < size; i++) {
       A_h[i] = 2*i + 1;  // Odd
@@ -359,13 +337,13 @@ class streamMemAllocTest {
     pool_props.allocType = hipMemAllocationTypePinned;
     pool_props.location.id = dev;
     pool_props.location.type = hipMemLocationTypeDevice;
-    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolCreate(&mem_pool, &pool_props));
     if (attr == hipMemPoolAttrReleaseThreshold) {
       uint64_t setThreshold = 0;
       if (testtype == testMaximum) {
         setThreshold = UINT64_MAX;
       }
-      HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &setThreshold));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &setThreshold));
     } else if ((attr == hipMemPoolReuseFollowEventDependencies) ||
               (attr == hipMemPoolReuseAllowOpportunistic) ||
               (attr == hipMemPoolReuseAllowInternalDependencies)) {
@@ -373,51 +351,62 @@ class streamMemAllocTest {
       if (testtype == testEnabled) {
         value = 1;
       }
-      HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
+      HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolSetAttribute(mem_pool, attr, &value));
     }
   }
   // allocate device memory from mempool.
   void allocFromMempool(hipStream_t stream) {
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&A_d),
               byte_size, mem_pool, stream));
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&B_d),
               byte_size, mem_pool, stream));
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocFromPoolAsync(reinterpret_cast<void**>(&C_d),
               byte_size, mem_pool, stream));
   }
   // Transfer data from host to device asynchronously.
   void transferToMempool(hipStream_t stream) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice,
               stream));
-    HIP_CHECK(hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(B_d, B_h, byte_size, hipMemcpyHostToDevice,
               stream));
   }
   // allocate from default mempool.
   void allocFromDefMempool(hipStream_t stream) {
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&A_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&A_d),
               byte_size, stream));
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&B_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&B_d),
               byte_size, stream));
-    HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C_d),
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMallocAsync(reinterpret_cast<void**>(&C_d),
               byte_size, stream));
   }
   // Execute Kernel to process input data and wait for it.
   void runKernel(hipStream_t stream) {
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(size / THREADS_PER_BLOCK),
-                        dim3(THREADS_PER_BLOCK), 0, stream,
-                        static_cast<const int*>(A_d),
-                        static_cast<const int*>(B_d), C_d, size);
-    HIP_CHECK(hipGetLastError());
+    int blocks = (size % THREADS_PER_BLOCK == 0) ? (size / THREADS_PER_BLOCK)
+                                                 : ((size / THREADS_PER_BLOCK) + 1);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
+                       static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, size);
+    HIP_CHECK_OPT_THREAD(threadSafe, hipGetLastError());
   }
   // Transfer data from device to host asynchronously.
   void transferFromMempool(hipStream_t stream) {
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost,
                         stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipStreamSynchronize(stream));
   }
   // Validate the data returned from device.
   bool validateResult() {
     for (int i = 0; i < size; i++) {
-      if (C_h[i] != (A_h[i] + B_h[i])) {
+      auto res = A_h[i] + B_h[i];
+      REQUIRE(res == C_h[i]);
+    }
+    return true;
+  }
+  // Thread-safe variant of validateResult(): returns a bool instead of using a
+  // Catch2 macro, so it is safe to call from worker threads.
+  bool validateResultThreadSafe() {
+    for (int i = 0; i < size; i++) {
+      auto res = A_h[i] + B_h[i];
+      if (res != C_h[i]) {
         return false;
       }
     }
@@ -425,13 +414,13 @@ class streamMemAllocTest {
   }
   // Free device memory
   void freeDevBuf(hipStream_t stream) {
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(B_d), stream));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
   }
   // Free mempool if not using global mempool
   void freeMempool() {
-    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemPoolDestroy(mem_pool));
   }
   // Free all host buffers
   void freeHostBuf() {
@@ -441,38 +430,174 @@ class streamMemAllocTest {
   }
 };
 
-#ifdef __linux__
-
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \
     fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__); exit(EXIT_FAILURE);                 \
   }
 
+#if HT_WIN
+typedef HANDLE hipShareableHdl;
+#else
 #ifdef HT_AMD
 typedef int64_t hipShareableHdl;
 #else
 typedef int hipShareableHdl;
 #endif
+#endif
 
-typedef pid_t Process;
+class SharedMemory {
+  void* addr_ = nullptr;
+  size_t size_ = 0;
+#if HT_WIN
+  HANDLE shmHandle_ = nullptr;
+#else
+  int shmFd_ = -1;
+#endif
+  bool opened_ = false;
+
+public:
+  SharedMemory() = default;
+  ~SharedMemory() { close(); }
+
+  SharedMemory(const SharedMemory&) = delete;
+  SharedMemory& operator=(const SharedMemory&) = delete;
+
+  int create(const char* name, size_t sz) {
+#if HT_WIN
+    size_ = sz;
+    shmHandle_ = CreateFileMapping(INVALID_HANDLE_VALUE, NULL,
+                                    PAGE_READWRITE, 0, (DWORD)sz, name);
+    if (shmHandle_ == 0) return GetLastError();
+    addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
+#else
+    size_ = sz;
+    shmFd_ = shm_open(name, O_RDWR | O_CREAT, 0777);
+    if (shmFd_ < 0) return errno;
+    if (ftruncate(shmFd_, sz) != 0) {
+      close();
+      return errno;
+    }
+    addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
+    if (addr_ == MAP_FAILED) {
+      addr_ = nullptr;
+      close();
+      return errno;
+    }
+#endif
+    opened_ = true;
+    return 0;
+  }
+
+  int open(const char* name, size_t sz) {
+#if HT_WIN
+    size_ = sz;
+    shmHandle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, name);
+    if (shmHandle_ == 0) return GetLastError();
+    addr_ = MapViewOfFile(shmHandle_, FILE_MAP_ALL_ACCESS, 0, 0, sz);
+    if (addr_ == NULL) {
+      close();
+      return GetLastError();
+    }
+#else
+    size_ = sz;
+    shmFd_ = shm_open(name, O_RDWR, 0777);
+    if (shmFd_ < 0) {
+      close();
+      return errno;
+    }
+    addr_ = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd_, 0);
+    if (addr_ == MAP_FAILED) {
+      addr_ = nullptr;
+      close();
+      return errno;
+    }
+#endif
+    opened_ = true;
+    return 0;
+  }
+
+  void close() {
+#if HT_WIN
+    if (addr_) { UnmapViewOfFile(addr_); addr_ = nullptr; }
+    if (shmHandle_) { CloseHandle(shmHandle_); shmHandle_ = nullptr; }
+#else
+    if (addr_) { munmap(addr_, size_); addr_ = nullptr; }
+    if (shmFd_ >= 0) { ::close(shmFd_); shmFd_ = -1; }
+#endif
+    size_ = 0;
+    opened_ = false;
+  }
+
+  void* addr() const { return addr_; }
+  size_t size() const { return size_; }
+
+  template <typename T>
+  T* as() { return reinterpret_cast<T*>(addr_); }
+};
+
+inline void barrierWait(std::atomic<int>& barrier, std::atomic<int>& sense, unsigned int n,
+                        std::chrono::seconds timeout = std::chrono::seconds(10)) {
+  int count = barrier.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+  if (static_cast<unsigned int>(count) == n) {
+    barrier.store(0, std::memory_order_release);
+    int current_sense = sense.load(std::memory_order_relaxed);
+    sense.store(1 - current_sense, std::memory_order_release);
+  } else {
+    int old_sense = sense.load(std::memory_order_relaxed);
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (sense.load(std::memory_order_acquire) == old_sense) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        WARN("barrierWait timed out after " << timeout.count() << "s waiting for "
+             << n << " threads (only " << count << " arrived)");
+        break;
+      }
+      std::this_thread::yield();
+    }
+  }
+}
+
+struct mempoolIpcShmStruct {
+  hipMemPoolPtrExportData ptrExportData;
+  hipMemAllocationHandleType handleType;
+  int device;
+  std::atomic<int> barrier;
+  std::atomic<int> sense;
+};
 
 struct ipcHdl {
+#if HT_WIN
+    HANDLE mailslot;
+#else
     int socket;
+#endif
     char *name;
 };
 
 class ipcSocketCom {
   ipcHdl *handle;
-  // method to create socket from server
+
   int createSocket() {
+#if HT_WIN
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+    handle->mailslot = INVALID_HANDLE_VALUE;
+    handle->name = NULL;
+    return 0;
+#else
     int server_fd;
     struct sockaddr_un servaddr;
 
     char name[16];
-    // Create a unique socket name based on current pid
     sprintf(name, "%u", getpid());
 
-    // Create the socket handle
     handle = new ipcHdl;
     if (nullptr == handle) {
       perror("Socket failure: Handle memory allocation failed");
@@ -483,8 +608,7 @@ class ipcSocketCom {
     handle->socket = -1;
     handle->name = NULL;
 
-    // Creating socket
-    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
+    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
       perror("Socket failure: Socket creation failed");
       return -1;
     }
@@ -510,9 +634,34 @@ class ipcSocketCom {
     strcpy(handle->name, name);
     handle->socket = server_fd;
     return 0;
+#endif
   }
-  // method to create socket from client
+
   int openSocket() {
+#if HT_WIN
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+    memset(handle, 0, sizeof(*handle));
+    handle->mailslot = INVALID_HANDLE_VALUE;
+    handle->name = nullptr;
+    char name[128];
+    sprintf(name, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
+            (unsigned long)GetCurrentProcessId());
+    handle->mailslot = CreateMailslot(name, 0, MAILSLOT_WAIT_FOREVER, NULL);
+    if (handle->mailslot == INVALID_HANDLE_VALUE) {
+      fprintf(stderr, "CreateMailslot failed (%lu)\n", GetLastError());
+      if (handle->name) delete[] handle->name;
+      delete handle;
+      handle = nullptr;
+      return -1;
+    }
+    handle->name = new char[strlen(name) + 1];
+    strcpy(handle->name, name);
+    return 0;
+#else
     int sock = 0;
     struct sockaddr_un cliaddr;
 
@@ -532,7 +681,6 @@ class ipcSocketCom {
     cliaddr.sun_family = AF_UNIX;
     char name[16];
 
-    // Create a unique socket name based on current process id.
     sprintf(name, "%u", getpid());
 
     strcpy(cliaddr.sun_path, name);
@@ -546,9 +694,20 @@ class ipcSocketCom {
     strcpy(handle->name, name);
 
     return 0;
+#endif
   }
-  // method to close socket
+
   int closeSocket() {
+#if HT_WIN
+    if (!handle) return -1;
+    if (handle->mailslot != INVALID_HANDLE_VALUE) {
+      CloseHandle(handle->mailslot);
+    }
+    if (handle->name) delete[] handle->name;
+    delete handle;
+    handle = nullptr;
+    return 0;
+#else
     if (!handle) {
       return -1;
     }
@@ -560,7 +719,9 @@ class ipcSocketCom {
     close(handle->socket);
     delete handle;
     return 0;
+#endif
   }
+
 public:
   ipcSocketCom() = default;
   ipcSocketCom(bool isServer) {
@@ -575,16 +736,28 @@ public:
   int closeThisSock() {
     return closeSocket();
   }
-  // method to receive shareable handle via socket
+
   int recvShareableHdl(hipShareableHdl *shHandle) {
-    struct msghdr msg;
+#if HT_WIN
+    DWORD cbRead = 0;
+    if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
+      fprintf(stderr, "ReadFile failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    if (cbRead != sizeof(*shHandle)) {
+      fprintf(stderr, "ReadFile returned unexpected size (%lu, expected %zu)\n",
+              cbRead, sizeof(*shHandle));
+      return -1;
+    }
+    return 0;
+#else
+    struct msghdr msg = {};
     struct iovec iov[1];
 
-    // Union to guarantee alignment requirements for control array
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     ssize_t n;
@@ -618,27 +791,59 @@ public:
     }
 
     return 0;
+#endif
   }
-  // method to send shareable handle via sockets
+
   int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
-    struct msghdr msg;
+#if HT_WIN
+    HANDLE hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process.dwProcessId);
+    if (hProcess == NULL) {
+      fprintf(stderr, "OpenProcess failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    HANDLE hDup = INVALID_HANDLE_VALUE;
+    if (!DuplicateHandle(GetCurrentProcess(), shareableHdl, hProcess,
+                         &hDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+      CloseHandle(hProcess);
+      fprintf(stderr, "DuplicateHandle failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    CloseHandle(hProcess);
+
+    char slotName[128];
+    sprintf(slotName, "\\\\.\\mailslot\\hipMemPoolIPC_%lu",
+            (unsigned long)process.dwProcessId);
+    HANDLE hFile = CreateFile(slotName, GENERIC_WRITE, FILE_SHARE_READ,
+                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+      fprintf(stderr, "CreateFile for mailslot failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    DWORD cbWritten;
+    if (!WriteFile(hFile, &hDup, sizeof(hDup), &cbWritten, NULL)) {
+      CloseHandle(hFile);
+      fprintf(stderr, "WriteFile failed (%lu)\n", GetLastError());
+      return -1;
+    }
+    CloseHandle(hFile);
+    return 0;
+#else
+    struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
 
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     struct sockaddr_un cliaddr;
 
-    // Construct client address to send this SHareable handle to
     bzero(&cliaddr, sizeof(cliaddr));
     cliaddr.sun_family = AF_UNIX;
     strcpy(cliaddr.sun_path, std::to_string(process).c_str());
 
-    // Send corresponding shareable handle to the client
     int sendfd = (int)shareableHdl;
 
     msg.msg_control = control_un.control;
@@ -664,6 +869,6 @@ public:
       return -1;
     }
     return 0;
+#endif
   }
 };
-#endif

@@ -1,0 +1,139 @@
+name: Test component
+
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        type: string
+        default: ""
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+      platform:
+        type: string
+      component:
+        type: string
+      default_container_image:
+        type: string
+        default: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
+
+
+permissions:
+  contents: read
+
+jobs:
+  test_component:
+    name: >-
+      Test ${{ fromJSON(inputs.component).job_name }}
+      (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})
+      ${{ fromJSON(inputs.component).expect_failure == true && '(xfail)' || '' }}
+    runs-on: ${{ inputs.test_runs_on }}
+    continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
+    container:
+      # If the component has specified an alternate image, honor that option.
+      # Otherwise use the default image.
+      image: >-
+        ${{ inputs.platform == 'linux' &&
+            (fromJSON(inputs.component).container_image || inputs.default_container_image)
+            || null
+        }}
+      # Container options are configured by TheRock's
+      # build_tools/github_actions/fetch_test_configurations.py.
+      options: ${{ fromJSON(inputs.component).container_options }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The shard array is based on "total_shards" from "fetch_test_configurations.py"
+        # The test executable will shard based on the array. (ex: [1, 2, 3, 4] = four test shards)
+        shard: ${{ fromJSON(inputs.component).shard_arr }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}"
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+    steps:
+      - name: "Fetch 'build_tools' from repository"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          sparse-checkout: build_tools
+          path: "prejob"
+
+      - name: Pre-job cleanup processes on Windows
+        if: ${{ runner.os == 'Windows' }}
+        shell: powershell
+        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Pre-job cleanup GPU processes on Linux
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
+      - name: Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+
+      - name: Run setup test environment workflow
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: ${{ fromJSON(inputs.component).fetch_artifact_args }}
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: |
+          python ./build_tools/print_driver_gpu_info.py
+
+      - name: Setup Additional Requirements
+        if: ${{ fromJSON(inputs.component).additional_requirements_files != '' }}
+        run: |
+          python ./build_tools/install_additional_requirements.py \
+          --requirements-files=${{ join(fromJSON(inputs.component).additional_requirements_files, ',') }}
+
+      - name: Set thread limits
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          if [[ -n "${KUBE_CPU_REQUEST:-}" ]]; then
+            CPU_COUNT="${KUBE_CPU_REQUEST%.*}"
+            echo "OPENBLAS_NUM_THREADS=${CPU_COUNT}" >> $GITHUB_ENV
+            echo "OMP_NUM_THREADS=${CPU_COUNT}" >> $GITHUB_ENV
+            echo "Thread limits set: OPENBLAS_NUM_THREADS=${CPU_COUNT}, OMP_NUM_THREADS=${CPU_COUNT} (from KUBE_CPU_REQUEST=${KUBE_CPU_REQUEST})"
+          else
+            echo "KUBE_CPU_REQUEST not set, thread limits not configured"
+          fi
+
+      - name: Test
+        timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
+          TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
+          TEST_COMPONENT: ${{ fromJSON(inputs.component).job_name }}
+          # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
+          # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
+          GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
+        run: |
+          ${{ fromJSON(inputs.component).test_script }}
+
+      # GitHub's 'Complete job' step is unaware of launched executables
+      # and will fail to clean up orphan processes.
+      - name: Post-job cleanup processes on Windows
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: powershell
+        run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Post-job cleanup GPU processes on Linux
+        if: ${{ always() && runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./build_tools/github_actions/cleanup_processes.sh

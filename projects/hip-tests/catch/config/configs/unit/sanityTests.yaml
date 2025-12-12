@@ -1,0 +1,5 @@
+---
+sanityTests:
+  Unit_AccessMallocAcrossKernels: *level_2
+  Unit_hipHostRegister_RegisterUnregister: *level_2
+  Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister: *level_2

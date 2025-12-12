@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # include guard
 include_guard(DIRECTORY)
 
@@ -150,6 +153,7 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
                     ${CMAKE_STRIP} -w --keep-symbol="rocprofsys_init"
                     --keep-symbol="rocprofsys_finalize"
                     --keep-symbol="rocprofsys_push_trace"
+                    --keep-symbol="rocprofsys_push_trace_with_args"
                     --keep-symbol="rocprofsys_pop_trace"
                     --keep-symbol="rocprofsys_push_region"
                     --keep-symbol="rocprofsys_pop_region"
@@ -168,25 +172,24 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
     endif()
 endfunction()
 
-# ------------------------------------------------------------------------------#
-# function add_rocprofiler_systems_test_target()
-#
-# Creates a target which runs ctest but depends on all the tests being built.
-#
-# function(ADD_ROCPROFSYS_TEST_TARGET) if(NOT TARGET rocprofiler-systems-test)
-# add_custom_target( rocprofiler-systems-test COMMAND ${CMAKE_COMMAND} --build
-# ${PROJECT_BINARY_DIR} --target test WORKING_DIRECTORY ${PROJECT_BINARY_DIR} COMMENT
-# "Running tests...") endif() endfunction()
-
 # ----------------------------------------------------------------------------------------#
-# macro rocprofiler_systems_checkout_git_submodule()
+# function rocprofiler_systems_checkout_git_submodule()
 #
-# Run "git submodule update" if a file in a submodule does not exist
+# Ensures a git submodule (or external repo) is checked out. If TEST_FILE exists in the
+# submodule directory, returns immediately. Otherwise:
 #
-# ARGS: RECURSIVE (option) -- add "--recursive" flag RELATIVE_PATH (one value) --
-# typically the relative path to submodule from PROJECT_SOURCE_DIR WORKING_DIRECTORY (one
-# value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
-# (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
+#   - If .gitmodules exists: runs "git submodule update --init" for the submodule.
+#   - If REPO_URL is provided: clones the repo with "git clone -b REPO_BRANCH", then
+#     optionally runs "git submodule update --init --recursive" when RECURSIVE is set.
+#
+# ARGS:
+#   RECURSIVE (option)       -- add "--recursive" to git submodule update
+#   RELATIVE_PATH (one)      -- path to submodule, relative to WORKING_DIRECTORY
+#   WORKING_DIRECTORY (one)  -- base directory (default: PROJECT_SOURCE_DIR)
+#   TEST_FILE (one)         -- file whose existence indicates checkout (default: CMakeLists.txt)
+#   REPO_URL (one)          -- fallback: clone this URL when submodule dir missing
+#   REPO_BRANCH (one)       -- branch for REPO_URL clone (default: master)
+#   ADDITIONAL_CMDS (many)  -- extra args passed to git submodule update or clone
 #
 function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # parse args
@@ -223,8 +226,6 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # if this file exists --> project has been checked out if not exists --> not been
     # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
-    # assuming a .gitmodules file exists
-    set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
 
     set(_TEST_FILE_EXISTS OFF)
     if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
@@ -237,6 +238,32 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
 
     find_package(Git REQUIRED)
 
+    # .gitmodules lives at the monorepo root, not under PROJECT_SOURCE_DIR, because
+    # rocprofiler-systems was moved into the rocm-systems monorepo. Use git rev-parse
+    # to locate the root (result cached in CMakeCache.txt after first configure run).
+    if(NOT DEFINED CACHE{ROCPROFILER_SYSTEMS_GIT_TOPLEVEL})
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --show-toplevel
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            OUTPUT_VARIABLE _GIT_TOPLEVEL
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _GIT_TOPLEVEL_RET
+        )
+        if(NOT _GIT_TOPLEVEL_RET EQUAL 0)
+            message(
+                FATAL_ERROR
+                "Failed to determine git top-level directory. "
+                "Ensure this project is inside a git repository."
+            )
+        endif()
+        set(ROCPROFILER_SYSTEMS_GIT_TOPLEVEL
+            "${_GIT_TOPLEVEL}"
+            CACHE INTERNAL
+            "Git top-level directory"
+        )
+    endif()
+    set(_SUBMODULE "${ROCPROFILER_SYSTEMS_GIT_TOPLEVEL}/.gitmodules")
+
     set(_SUBMODULE_EXISTS OFF)
     if(EXISTS "${_SUBMODULE}" AND NOT IS_DIRECTORY "${_SUBMODULE}")
         set(_SUBMODULE_EXISTS ON)
@@ -247,16 +274,51 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
         set(_HAS_REPO_URL ON)
     endif()
 
+    set(_RECURSE "")
+    if(CHECKOUT_RECURSIVE)
+        set(_RECURSE "--recursive")
+    endif()
+
+    # Shallow fetch: download only the pinned commit (--depth=1) instead of full
+    # history. Falls back to a full fetch if shallow fails (happens when the recorded
+    # SHA is not advertised by the remote, e.g. not a branch/tag tip and the server
+    # has not enabled uploadpack.allowReachableSHA1InWant).
+    option(
+        ROCPROFSYS_GIT_SHALLOW
+        "Use --depth=1 when fetching git submodules / external repos"
+        ON
+    )
+    set(_DEPTH "")
+    if(ROCPROFSYS_GIT_SHALLOW)
+        set(_DEPTH "--depth=1")
+    endif()
+
     # if the module has not been checked out
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
-        # perform the checkout
+        # perform the checkout (shallow first; --filter is only valid for git clone)
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
+
+        # retry without --depth=1 if shallow fetch failed
+        # (pinned SHA may not be reachable)
+        if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
+            message(
+                STATUS
+                "Optimized fetch of '${CHECKOUT_RELATIVE_PATH}' failed; retrying full fetch"
+            )
+            execute_process(
+                COMMAND
+                    ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
+                WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
+                RESULT_VARIABLE RET
+            )
+        endif()
 
         # check the return code
         if(RET GREATER 0)
@@ -282,22 +344,48 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
             execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
         endif()
 
-        # perform the checkout
+        # perform the checkout (shallow first)
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
+                ${GIT_EXECUTABLE} clone ${_DEPTH} -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
 
-        # perform the submodule update
+        # retry without --depth=1 if shallow clone failed
+        if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
+            message(
+                STATUS
+                "Optimized clone of '${CHECKOUT_REPO_URL}' failed; retrying full clone"
+            )
+            if(EXISTS "${_DIR}")
+                execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
+            endif()
+            execute_process(
+                COMMAND
+                    ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
+                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL}
+                    ${CHECKOUT_RELATIVE_PATH}
+                WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
+                RESULT_VARIABLE RET
+            )
+        endif()
+
+        # perform the submodule update (shallow; --filter is only valid for git clone)
         if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
             execute_process(
-                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
                 RESULT_VARIABLE RET
             )
+            if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
+                execute_process(
+                    COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                    WORKING_DIRECTORY ${_DIR}
+                    RESULT_VARIABLE RET
+                )
+            endif()
         endif()
 
         # check the return code
@@ -581,6 +669,148 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
     rocprofiler_systems_print_disabled_features()
 endfunction()
 
+# ----------------------------------------------------------------------------
+# function check_rocminfo()
+# Searches for a given regex in the output of rocminfo, returns true if found, false otherwise.
+# By default, returns a boolean, but if GET_OUTPUT is present, returns the output of rocminfo with the regex applied
+#
+# ARGS:
+#   _REGEX: The regex to search for
+#   _RESULT_VARIABLE: The variable to store the result
+#   GET_OUTPUT: If present, return the output of rocminfo
+#
+# Returns:
+#   Default: true if the regex is found, false otherwise
+#   GET_OUTPUT: output of rocminfo is returned in _RESULT_VARIABLE (empty string if error)
+#       Note: If regex empty, it is ignored
+#
+function(CHECK_ROCMINFO _REGEX _RESULT_VARIABLE)
+    cmake_parse_arguments(ARG "GET_OUTPUT" "" "" ${ARGN})
+    find_program(
+        rocminfo_EXECUTABLE
+        NAMES rocminfo
+        HINTS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATHS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+
+    if(NOT DEFINED ARG_GET_OUTPUT AND _REGEX STREQUAL "")
+        message(FATAL_ERROR "Regex is empty, but GET_OUTPUT is not defined")
+    endif()
+
+    set(_result FALSE)
+    set(_failure FALSE)
+
+    if(rocminfo_EXECUTABLE)
+        execute_process(
+            COMMAND ${rocminfo_EXECUTABLE}
+            RESULT_VARIABLE rocminfo_RET
+            OUTPUT_VARIABLE rocminfo_OUTPUT
+            ERROR_VARIABLE rocminfo_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+
+        if(rocminfo_RET EQUAL 0)
+            if(NOT _REGEX STREQUAL "")
+                string(REGEX MATCHALL "${_REGEX}" rocminfo_OUTPUT "${rocminfo_OUTPUT}")
+                if(rocminfo_OUTPUT)
+                    set(_result TRUE)
+                endif()
+            endif()
+        else()
+            message(
+                AUTHOR_WARNING
+                "${rocminfo_EXECUTABLE} failed with error code ${rocminfo_RET}\nstderr:\n${rocminfo_ERROR}\nstdout:\n${rocminfo_OUTPUT}"
+            )
+            set(_failure TRUE)
+        endif()
+    else()
+        message(AUTHOR_WARNING "rocminfo not found")
+        set(_failure TRUE)
+    endif()
+
+    if(ARG_GET_OUTPUT)
+        if(NOT _failure)
+            set(${_RESULT_VARIABLE} "${rocminfo_OUTPUT}" PARENT_SCOPE)
+        else()
+            set(${_RESULT_VARIABLE} "" PARENT_SCOPE)
+        endif()
+        return()
+    endif()
+
+    set(${_RESULT_VARIABLE} ${_result} PARENT_SCOPE)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_get_gfx_archs()
+# If a regex is provided, it will be used to filter the architectures.
+# Otherwise, all architectures will be returned.
+#
+# Arguments:
+#   _VAR      - Output variable to store detected architectures
+#   ECHO      - If present, print detected architectures to console
+#   PREFIX    - Prefix for echo message (default: [${PROJECT_NAME}])
+#   DELIM     - Delimiter between architectures (default: ", ")
+#   GFX_MATCH - Regex to filter architectures
+#
+function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX;DELIM;GFX_MATCH" "" ${ARGN})
+
+    if(NOT DEFINED ARG_DELIM)
+        set(ARG_DELIM ", ")
+    endif()
+
+    if(NOT DEFINED ARG_PREFIX)
+        set(ARG_PREFIX "[${PROJECT_NAME}] ")
+    endif()
+
+    # Match only "Name:" lines to avoid matching gfx in marketing names/descriptions.
+    check_rocminfo("Name:[ \t]+gfx[0-9A-Fa-f][0-9A-Fa-f]+" _RAW_GFXINFO GET_OUTPUT)
+    if(NOT _RAW_GFXINFO)
+        message(AUTHOR_WARNING "Could not get system architectures")
+        return()
+    endif()
+
+    # Extract just the gfx architecture from each "Name: gfxXXXX" match
+    set(_GFXINFO "")
+    foreach(_match IN LISTS _RAW_GFXINFO)
+        string(REGEX MATCH "gfx[0-9A-Fa-f]+" _arch "${_match}")
+        if(_arch)
+            list(APPEND _GFXINFO "${_arch}")
+        endif()
+    endforeach()
+
+    list(REMOVE_ITEM _GFXINFO "gfx000")
+    list(REMOVE_DUPLICATES _GFXINFO)
+
+    # Filter architectures if GFX_MATCH regex is provided
+    if(DEFINED ARG_GFX_MATCH)
+        set(_FILTERED_GFXINFO "")
+        foreach(_arch IN LISTS _GFXINFO)
+            if(_arch MATCHES "${ARG_GFX_MATCH}")
+                list(APPEND _FILTERED_GFXINFO "${_arch}")
+            endif()
+        endforeach()
+        set(_GFXINFO "${_FILTERED_GFXINFO}")
+    endif()
+
+    # Echo detected architectures if requested
+    if(ARG_ECHO)
+        string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFXINFO}")
+        if(DEFINED ARG_GFX_MATCH)
+            message(
+                STATUS
+                "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
+            )
+        else()
+            message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
+        endif()
+    endif()
+
+    set(${_VAR} "${_GFXINFO}" PARENT_SCOPE)
+endfunction()
+
 # ----------------------------------------------------------------------------------------#
 # this function is provided to easily select which files use alternative compiler:
 #
@@ -753,7 +983,7 @@ function(ROCPROFILER_SYSTEMS_DIRECTORY)
             rocprofiler_systems_message(FATAL_ERROR "Directory '${_PATH}' does not exist")
         elseif(NOT IS_DIRECTORY "${_PATH}" AND F_FAIL)
             rocprofiler_systems_message(FATAL_ERROR
-                                        "'${_PATH}' exists but is not a directory"
+                "'${_PATH}' exists but is not a directory"
             )
         elseif(NOT EXISTS "${_PATH}" AND F_MKDIR)
             execute_process(
@@ -960,7 +1190,7 @@ function(ROCPROFILER_SYSTEMS_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR _
 
     # build tree symbolic links
     rocprofiler_systems_buildtree_tpl("${_TPL_TARGET}" "${_NEW_NAME}"
-                                      "${_BUILD_TREE_DIR}" ${ARGN}
+        "${_BUILD_TREE_DIR}" ${ARGN}
     )
 
     install(
@@ -1001,6 +1231,81 @@ function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
     else()
         set(${_OUTPUT} "-1" PARENT_SCOPE)
     endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# function rocprofiler_systems_lookup_gfx()
+# Classifies AMD GPU architectures (gfx IDs) into instinct, radeon, and apu.
+#
+# ARGS:
+#   _TARGET: The gfx ID to classify
+#   _OUTPUT_LIST: The list of categories the target belongs to
+#                 (instinct, radeon, apu)
+#
+# Note: If architecture is unknown, defaults to instinct
+#
+function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
+    set(INSTINCT_LIST
+        "gfx900"
+        "gfx906" # MI50/MI60
+        "gfx908"
+        "gfx90a"
+        "gfx942"
+        "gfx950"
+    )
+
+    # Also includes PRO GPUs
+    # We ignore Radeon VII (gfx906)
+    set(RADEON_LIST
+        "gfx1012"
+        "gfx1011"
+        "gfx1010"
+        "gfx1032"
+        "gfx1031"
+        "gfx1030"
+        "gfx1102"
+        "gfx1101"
+        "gfx1100"
+        "gfx1200"
+        "gfx1201"
+        "gfx1202"
+    )
+
+    set(APU_LIST
+        "gfx1035"
+        "gfx1036"
+        "gfx1103"
+        "gfx1151"
+        "gfx1152"
+        "gfx1153"
+    )
+
+    set(_CATEGORIES "")
+
+    if(_TARGET IN_LIST INSTINCT_LIST)
+        list(APPEND _CATEGORIES "instinct")
+        # Some instinct GPUs may also be an APU (ex: MI300A)
+        check_rocminfo("APU" _is_apu)
+        if(_is_apu)
+            list(APPEND _CATEGORIES "apu")
+        endif()
+    endif()
+    if(_TARGET IN_LIST RADEON_LIST)
+        list(APPEND _CATEGORIES "radeon")
+    endif()
+    if(_TARGET IN_LIST APU_LIST)
+        list(APPEND _CATEGORIES "apu")
+    endif()
+
+    if(_CATEGORIES STREQUAL "")
+        rocprofiler_systems_message(
+            AUTHOR_WARNING
+            "Unknown GFX target: ${_TARGET}. Defaulting to instinct"
+        )
+        list(APPEND _CATEGORIES "instinct")
+    endif()
+
+    set(${_OUTPUT_LIST} "${_CATEGORIES}" PARENT_SCOPE)
 endfunction()
 
 cmake_policy(POP)

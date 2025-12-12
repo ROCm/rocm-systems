@@ -22,20 +22,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "shared_mutex.h"  // NOLINT(build/include)
-#include <errno.h>  // errno, ENOENT
-#include <fcntl.h>  // O_RDWR, O_CREATE
+
+#include <errno.h>         // errno, ENOENT
+#include <fcntl.h>         // O_RDWR, O_CREATE
 #include <linux/limits.h>  // NAME_MAX
-#include <sys/mman.h>  // shm_open, shm_unlink, mmap, munmap,
-                      // PROT_READ, PROT_WRITE, MAP_SHARED, MAP_FAILED
-#include <unistd.h>  // ftruncate, close
-#include <stdio.h>  // perror
+#include <sys/mman.h>      // shm_open, shm_unlink, mmap, munmap,
+                           // PROT_READ, PROT_WRITE, MAP_SHARED, MAP_FAILED
+#include <assert.h>
+#include <dirent.h>
+#include <stdio.h>   // perror
 #include <stdlib.h>  // malloc, free
 #include <string.h>  // strcpy
-#include <time.h>   // clock_gettime
-#include <assert.h>
-
 #include <sys/types.h>
-#include <dirent.h>
+#include <time.h>    // clock_gettime
+#include <unistd.h>  // ftruncate, close
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -47,7 +48,7 @@ THE SOFTWARE.
 #define MUTEX_TIME_OUT_ENV_VAR "RSMI_MUTEX_TIMEOUT"
 #define DEFAULT_MUTEX_TIMEOUT_SECONDS 5
 
-static int GetEnvVarUInteger(const char *ev_str) {
+static int GetEnvVarUInteger(const char* ev_str) {
   ev_str = getenv(ev_str);
 
   if (ev_str) {
@@ -60,8 +61,8 @@ static int GetEnvVarUInteger(const char *ev_str) {
 
 // find which processes are using the file by searching /proc/*/fd
 static std::vector<std::string> lsof(const char* filename) {
-  struct dirent *entry = nullptr;
-  DIR *dp = nullptr;
+  struct dirent* entry = nullptr;
+  DIR* dp = nullptr;
   std::vector<std::string> process_id;
 
   pid_t cur_pid = getpid();
@@ -80,30 +81,30 @@ static std::vector<std::string> lsof(const char* filename) {
   }
 
   std::vector<std::string> matched_process;
-  for (unsigned int i=0; i < process_id.size(); i++) {
-      std::string folder_name("/proc/");
-      folder_name += process_id[i]+"/fd/";
-      dp = opendir(folder_name.c_str());
-      if (dp == nullptr) continue;
-      while ((entry = readdir(dp))) {
-         std::string p(folder_name+entry->d_name);
-         char buf[512];
-         memset(buf, 0, 512);
-         if (readlink(p.c_str(), buf, sizeof(buf)-1) < 0) continue;
-         if (!strcmp(filename, buf)) matched_process.push_back(process_id[i]);
-      }
-      closedir(dp);
+  for (unsigned int i = 0; i < process_id.size(); i++) {
+    std::string folder_name("/proc/");
+    folder_name += process_id[i] + "/fd/";
+    dp = opendir(folder_name.c_str());
+    if (dp == nullptr) continue;
+    while ((entry = readdir(dp))) {
+      std::string p(folder_name + entry->d_name);
+      char buf[512];
+      memset(buf, 0, 512);
+      if (readlink(p.c_str(), buf, sizeof(buf) - 1) < 0) continue;
+      if (!strcmp(filename, buf)) matched_process.push_back(process_id[i]);
+    }
+    closedir(dp);
   }
   return matched_process;
 }
 
 // RSMI_MUTEX_THREAD_ONLY = 1 to enable thread safe mutex
-shared_mutex_t init_thread_safe_only(const char *name) {
+shared_mutex_t init_thread_safe_only(const char* name) {
   shared_mutex_t mutex = {nullptr, 0, nullptr, 0};
   errno = 0;
   mutex.shm_fd = -1;
   mutex.created = 0;
-  pthread_mutex_t *mutex_ptr =  new pthread_mutex_t();
+  pthread_mutex_t* mutex_ptr = new pthread_mutex_t();
 
   pthread_mutexattr_t attr;
   if (pthread_mutexattr_init(&attr)) {
@@ -129,12 +130,12 @@ shared_mutex_t init_thread_safe_only(const char *name) {
   }
 
   mutex.ptr = mutex_ptr;
-  mutex.name = reinterpret_cast<char *>(malloc(NAME_MAX+1));
+  mutex.name = reinterpret_cast<char*>(malloc(NAME_MAX + 1));
   (void)snprintf(mutex.name, NAME_MAX + 1, "%s", name);
   return mutex;
 }
 
-shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
+shared_mutex_t shared_mutex_init(const char* name, mode_t mode, bool retried) {
   shared_mutex_t mutex = {nullptr, 0, nullptr, 0};
   errno = 0;
 
@@ -149,7 +150,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   // for later initialization of pthread mutex.
   mutex.shm_fd = shm_open(name, O_RDWR, mode);
   if (errno == ENOENT) {
-    mutex.shm_fd = shm_open(name, O_RDWR|O_CREAT, mode);
+    mutex.shm_fd = shm_open(name, O_RDWR | O_CREAT, mode);
     mutex.created = 1;
     // Change permissions of shared memory, so everybody can access it.
     // Avoiding the umask of shm_open
@@ -170,27 +171,22 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   }
 
   // Map pthread mutex into the shared memory.
-  void *addr = mmap(
-    nullptr,
-    sizeof(pthread_mutex_t),
-    PROT_READ|PROT_WRITE,
-    MAP_SHARED,
-    mutex.shm_fd,
-    0);
+  void* addr =
+      mmap(nullptr, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED, mutex.shm_fd, 0);
 
   if (addr == MAP_FAILED) {
     perror("mmap");
     return mutex;
   }
 
-  pthread_mutex_t *mutex_ptr =  reinterpret_cast<pthread_mutex_t *>(addr);
+  pthread_mutex_t* mutex_ptr = reinterpret_cast<pthread_mutex_t*>(addr);
 
   // Make sure the mutex wasn't left in a locked state. If we can't
   // acquire it in 5 sec., re-do everything.
   struct timespec expireTime;
   clock_gettime(CLOCK_REALTIME, &expireTime);
   int time_out = GetEnvVarUInteger(MUTEX_TIME_OUT_ENV_VAR);
-  time_out = time_out < DEFAULT_MUTEX_TIMEOUT_SECONDS ? DEFAULT_MUTEX_TIMEOUT_SECONDS: time_out;
+  time_out = time_out < DEFAULT_MUTEX_TIMEOUT_SECONDS ? DEFAULT_MUTEX_TIMEOUT_SECONDS : time_out;
   expireTime.tv_sec += time_out;
 
   pid_t cur_pid = getpid();
@@ -224,7 +220,6 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
 
   ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
 
-
   if (ret == EOWNERDEAD) {
     ret = pthread_mutex_consistent(mutex_ptr);
     // This function should not fail unless mutex_ptr is not robust
@@ -242,14 +237,13 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
       return mutex;
     }
 
-    fprintf(stderr, "%d detected dead process, and making mutex %s consistent.\n",
-              cur_pid, name);
+    fprintf(stderr, "%d detected dead process, and making mutex %s consistent.\n", cur_pid, name);
     // The mutex is locked even if EOWNERDEAD was returned,and need to unlock it.
     if (pthread_mutex_unlock(mutex_ptr)) {
       perror("pthread_mutex_unlock");
     }
-  } else if (ret || (mutex.created == 0 &&
-                     reinterpret_cast<shared_mutex_t *>(addr)->ptr == nullptr)) {
+  } else if (ret ||
+             (mutex.created == 0 && reinterpret_cast<shared_mutex_t*>(addr)->ptr == nullptr)) {
     // Something is out of sync.
 
     // When process crash before unlock the mutex, the mutex is in bad status.
@@ -257,8 +251,8 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     if (!retried) {
       std::vector<std::string> ids = lsof(name);
       if (ids.size() == 0) {  // no process is using it
-        fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n",
-              cur_pid, name, ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
+        fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n", cur_pid,
+                name, ret, reinterpret_cast<shared_mutex_t*>(addr)->ptr);
         memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
         // Set mutex.created == 1 so that it can be initialized latter.
         mutex.created = 1;
@@ -268,10 +262,11 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     }
 
     fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
-    perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
-     "execution may not have shutdown cleanly. To fix problem, stop all "
-     "rocm_smi programs, and then delete the rocm_smi* shared memory files in"
-                                                                " /dev/shm.");
+    perror(
+        "Failed to initialize RSMI device mutex after 5 seconds. Previous "
+        "execution may not have shutdown cleanly. To fix problem, stop all "
+        "rocm_smi programs, and then delete the rocm_smi* shared memory files in"
+        " /dev/shm.");
     free(mutex.name);
 
     throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
@@ -284,21 +279,19 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     }
   }
 
-
-
   mutex.ptr = mutex_ptr;
-  mutex.name = reinterpret_cast<char *>(malloc(NAME_MAX+1));
+  mutex.name = reinterpret_cast<char*>(malloc(NAME_MAX + 1));
   (void)snprintf(mutex.name, NAME_MAX + 1, "%s", name);
   return mutex;
 }
 
 int shared_mutex_close(shared_mutex_t mutex) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
-          smi.is_thread_only_mutex();
+  const bool is_thread_only =
+      GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 || smi.is_thread_only_mutex();
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void*>(mutex.ptr), sizeof(pthread_mutex_t))) {
     perror("munmap");
     return -1;
   }
@@ -315,15 +308,15 @@ int shared_mutex_close(shared_mutex_t mutex) {
 
 int shared_mutex_destroy(shared_mutex_t mutex) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
-          smi.is_thread_only_mutex();
+  const bool is_thread_only =
+      GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 || smi.is_thread_only_mutex();
   if ((errno = pthread_mutex_destroy(mutex.ptr))) {
     perror("pthread_mutex_destroy");
     return -1;
   }
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void*>(mutex.ptr), sizeof(pthread_mutex_t))) {
     perror("munmap");
     return -1;
   }

@@ -40,32 +40,30 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 ```
 
 ```{note}
-The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
-control the internal GPU metrics cache duration (ms). 
-Default 1, set to 0 to disable.
+The following environment variables can be set to control internal cache
+durations. They must be set **before** the AMDSMI library loads.
 
-The environment variable ``AMDSMI_ASIC_INFO_CACHE_MS`` may be set to
-control the internal GPU asic info cache duration (ms). 
-Default 10000 ms, set to 0 to disable.
-
-You can apply them in one of two ways:
-
-1. In Python code (before the AMDSMI library loads):
+| Variable | Description | Default |
+|---|---|---|
+| ``AMDSMI_GPU_METRICS_CACHE_MS`` | GPU metrics cache duration (ms) | 1 ms (set to 0 to disable) |
+| ``AMDSMI_ASIC_INFO_CACHE_MS`` | GPU ASIC info cache duration (ms) | 10000 ms (set to 0 to disable) |
 ```
 
-```python
-import os
-os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "200"
-from amdsmi import *
-```
+You can set these in one of two ways:
 
-```{note}
-2. On the shell when invoking Python:
-```
+1. **In Python** (before the AMDSMI library loads):
 
-```shell
-AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
-```
+   ```python
+   import os
+   os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "200"
+   from amdsmi import *
+   ```
+
+2. **From the shell** (when invoking Python):
+
+   ```shell
+   AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
+   ```
 
 To get started, the `amdsmi` folder should be copied and placed next to
 the importing script. Import it as follows:
@@ -125,26 +123,36 @@ Exceptions that can be thrown by AMD SMI are:
   When this exception is thrown, `err_code` and `err_info` are set. `err_code` is an integer that corresponds to errors that can occur
   in amdsmi-lib and `err_info` is a string that explains the error that occurred.
 
+   ```python
+   try:
+       num_of_GPUs = len(amdsmi_get_processor_handles())
+   except amdsmi_exception.AmdSmiLibraryException as e:
+       print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
+   ```
+
+
+* `AmdSmiParameterException`: Derives base `AmdSmiException` class and
+  represents errors related to invalid parameters passed to functions. When this
+  exception is thrown, `err_msg` is set and it explains what is the actual and
+  expected type of the parameters.
+
    For example:
 
    ```python
    try:
-       num_of_GPUs = len(amdsmi_get_processor_handles())
-       if num_of_GPUs == 0:
-           print("No GPUs on machine")
-   except AmdSmiException as e:
-       print("Error code: {}".format(e.err_code))
-       if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
-           print("Error info: {}".format(e.err_info))
+       cpu_handles = amdsmi_get_cpu_handles()
+       cpu_count = cpu_handles["cpu_count"]
+       processor_handles = cpu_handles["processor_handles"]
+       if cpu_count == 0:
+           print("No CPU sockets on machine")
+       else:
+           for processor in processor_handles:
+               temperature = amdsmi_get_cpu_socket_temperature(processor)
+               print(temperature)
+   except amdsmi_exception.AmdSmiParameterException as e:
+       print("Invalid parameter error: {} {}".format(str(e.get_error_code()), e.err_msg))
+   except amdsmi_exception.AmdSmiLibraryException as e:
+       print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
    ```
 
-* `AmdSmiRetryException` : Derives `AmdSmiLibraryException` class and signals
-  device is busy and call should be retried.
-* `AmdSmiTimeoutException` : Derives `AmdSmiLibraryException` class and
-  represents that call had timed out.
-* `AmdSmiParameterException`: Derives base `AmdSmiException` class and
-  represents errors related to invaild parameters passed to functions. When this
-  exception is thrown, `err_msg` is set and it explains what is the actual and
-  expected type of the parameters.
-* `AmdSmiBdfFormatException`: Derives base `AmdSmiException` class and
-  represents invalid bdf format.
+

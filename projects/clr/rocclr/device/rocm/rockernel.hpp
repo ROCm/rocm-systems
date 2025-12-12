@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -29,7 +15,7 @@ namespace amd::roc {
 
 class Kernel : public device::Kernel {
  public:
-  Kernel(std::string name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
+  Kernel(const std::string& name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
 
   virtual ~Kernel() {
     if (program() != nullptr) {
@@ -48,20 +34,30 @@ class Kernel : public device::Kernel {
 
   //! Pull demangled name, used only for logging
   const std::string& getDemangledName() {
-    if (demangled_name_.empty()) {
-      initDemangledName();
-    }
+    std::call_once(demangle_once_, [this] {
+      amd::Os::CxaDemangle(name(), &demangled_name_);
+    });
     return demangled_name_;
   }
 
- private:
-  void initDemangledName() {
-    if (demangled_name_.empty()) {
-      amd::Os::CxaDemangle(name(), &demangled_name_);
-    }
+  //! Returns the cached metadata kernel descriptor, or nullptr if lookup failed.
+  const hsa_amd_metadata_kernel_descriptor_t* MetadataKernelDescriptor() const {
+    return metadataKernelDescriptor_;
   }
 
+  //! Kernarg preload length in DWORDs (from kernel descriptor)
+  uint16_t MetadataPreloadLength() const { return metadata_preload_length_; }
+
+  //! Kernarg preload offset in DWORDs (from kernel descriptor)
+  uint16_t MetadataPreloadOffset() const { return metadata_preload_offset_; }
+
   std::string demangled_name_;  //!< Cache demangled name
+  std::once_flag demangle_once_;
+
+ private:
+  const hsa_amd_metadata_kernel_descriptor_t* metadataKernelDescriptor_ = nullptr;
+  uint16_t metadata_preload_length_ = 0;
+  uint16_t metadata_preload_offset_ = 0;
 };
 
 }  // namespace amd::roc

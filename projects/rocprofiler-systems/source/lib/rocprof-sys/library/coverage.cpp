@@ -1,35 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/coverage.hpp"
 #include "api.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
+
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <map>
@@ -85,7 +69,7 @@ get_coverage_data()
 }
 //
 auto&
-get_coverage_count(int64_t _tid = tim::threading::get_id())
+get_coverage_count(std::int64_t _tid = tim::threading::get_id())
 {
     return coverage_thread_data::instance(construct_on_thread{ _tid });
 }
@@ -108,9 +92,7 @@ post_process()
 
     if(_coverage.size == 0)
     {
-        ROCPROFSYS_VERBOSE_F(
-            0,
-            "Warning! Code coverage enabled but no code coverage data is available!\n");
+        LOG_WARNING("Code coverage enabled but no code coverage data is available!");
         return;
     }
 
@@ -150,11 +132,9 @@ post_process()
                         }
                         else
                         {
-                            ROCPROFSYS_VERBOSE_F(0,
-                                                 "Warning! No matching coverage data for "
-                                                 "%s :: %s (0x%x)\n",
-                                                 func.first.data(), file.first.data(),
-                                                 (unsigned int) addr.first);
+                            LOG_WARNING("No matching coverage data for {} :: {} (0x{:X})",
+                                        func.first, file.first,
+                                        (unsigned int) addr.first);
                         }
                     }
                 }
@@ -208,26 +188,25 @@ post_process()
         std::swap(_coverage_data, _tmp);
     }
 
-    ROCPROFSYS_VERBOSE(0, "code coverage     :: %6.2f%s\n", _coverage() * 100.0, "%");
-    ROCPROFSYS_VERBOSE(0, "module coverage   :: %6.2f%s\n",
-                       _coverage(code_coverage::MODULE) * 100.0, "%");
-    ROCPROFSYS_VERBOSE(0, "function coverage :: %6.2f%s\n",
-                       _coverage(code_coverage::FUNCTION) * 100.0, "%");
-
-    if(get_verbose() >= 0) fprintf(stderr, "\n");
+    LOG_INFO("code coverage :: {:.2f}%", _coverage() * 100.0);
+    LOG_INFO("module coverage :: {:.2f}%", _coverage(code_coverage::MODULE) * 100.0);
+    LOG_INFO("function coverage :: {:.2f}%", _coverage(code_coverage::FUNCTION) * 100.0);
 
     std::sort(_coverage_data.begin(), _coverage_data.end(),
               std::greater<coverage_data>{});
 
     auto _get_setting = [](const std::string& _v) {
         auto&& _b = config::get_setting_value<bool>(_v);
-        ROCPROFSYS_CI_THROW(!_b, "Error! No configuration setting named '%s'",
-                            _v.c_str());
+        if(!_b)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! No configuration setting named '{}'", _v));
+        }
         return _b.value_or(true);
     };
 
-    auto _text_output = _get_setting("ROCPROFSYS_TEXT_OUTPUT");
-    auto _json_output = _get_setting("ROCPROFSYS_JSON_OUTPUT");
+    auto _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
+    auto _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
 
     if(_text_output)
     {
@@ -243,7 +222,7 @@ post_process()
                 // if(get_debug() && get_verbose() >= 2)
                 if(true)
                 {
-                    auto _addr = TIMEMORY_JOIN("", "0x", std::hex, itr.address);
+                    auto _addr = fmt::format("0x{:x}", itr.address);
                     ofs << std::setw(8) << itr.count << "  " << std::setw(8) << _addr
                         << "  " << itr.source << "\n";
                 }
@@ -255,7 +234,8 @@ post_process()
         }
         else
         {
-            ROCPROFSYS_THROW("Error opening coverage output file: %s", _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening coverage output file: {}", _fname));
         }
     }
 
@@ -287,11 +267,10 @@ post_process()
         }
         else
         {
-            ROCPROFSYS_THROW("Error opening coverage output file: %s", _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening coverage output file: {}", _fname));
         }
     }
-
-    if(get_verbose() >= 0) fprintf(stderr, "\n");
 }
 }  // namespace coverage
 }  // namespace rocprofsys
@@ -308,8 +287,8 @@ rocprofsys_register_source_hidden(const char* file, const char* func, size_t lin
 
     using coverage_data = coverage::coverage_data;
 
-    ROCPROFSYS_BASIC_VERBOSE_F(4, "[0x%x] :: %-20s :: %20s:%zu :: %s\n",
-                               (unsigned int) address, func, file, line, source);
+    LOG_DEBUG("[0x{:X}] :: {:20s} :: {:20s}:{} :: {}", (unsigned int) address, func, file,
+              line, source);
 
     coverage::get_coverage_data().emplace_back(
         coverage_data{ size_t{ 0 }, address, line, file, func,
@@ -339,8 +318,6 @@ rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t a
     else if(rocprofsys::get_state() >= rocprofsys::State::Finalized)
         return;
 
-    ROCPROFSYS_BASIC_VERBOSE_F(3, "[0x%x] %-20s :: %20s\n", (unsigned int) address, func,
-                               file);
     (*coverage::get_coverage_count())[file][func][address] += 1;
 }
 

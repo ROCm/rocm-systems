@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
@@ -27,6 +13,8 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "hrr/hip_capture.h"
+#include "profiler/hip_clr_profiler.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
 }  // namespace hip
@@ -38,82 +26,75 @@ std::vector<hip::Device*> g_devices ROCCLR_INIT_PRIORITY(101);
 thread_local TlsAggregator tls;
 amd::Context* host_context = nullptr;
 
+// ================================================================================================
 // init() is only to be called from the HIP_INIT macro only once
 void init(bool* status) {
+  // Configure HIP runtime mode
   amd::IS_HIP = true;
   GPU_NUM_MEM_DEPENDENCY = 0;
-#if DISABLE_DIRECT_DISPATCH
-  constexpr bool kDirectDispatch = false;
-#else
-#if defined(WITH_HSA_DEVICE)
-  constexpr bool kDirectDispatch = true;
-#else
-  constexpr bool kDirectDispatch = false;
-#endif
-#endif
-  AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? kDirectDispatch : AMD_DIRECT_DISPATCH;
+  // Initialize AMD runtime - critical for all subsequent operations
   if (!amd::Runtime::init()) {
     *status = false;
     return;
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d.%s, Direct Dispatch: %d",
-          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, HIP_VERSION_GITHASH,
-          AMD_DIRECT_DISPATCH);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d, Direct Dispatch: %d",
+          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, AMD_DIRECT_DISPATCH);
   // Print the current path of the library
   amd::Os::PrintLibraryLocation();
+  // Enumerate and initialize GPU devices
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
-  const size_t deviceCount = devices.size();
-  g_devices.reserve(deviceCount);  // Pre-allocate space for better performance
+  const size_t device_count = devices.size();
+  g_devices.reserve(device_count);
 
-  for (unsigned int i = 0; i < deviceCount; i++) {
-    // Enable active wait on the device by default
-    devices[i]->SetActiveWait(true);
-    // use the eternal contexts that already exist for new hip::Device's here
-    auto device = new Device(&devices[i]->context(), i);
-    if ((device == nullptr) || !device->Create()) {
+  for (size_t i = 0; i < device_count; ++i) {
+    amd::Device* const amd_device = devices[i];
+    amd_device->SetActiveWait(true);
+    // Use the eternal contexts that already exist in amd::Device for the new hip::Device
+    auto* device = new Device(&amd_device->context(), static_cast<unsigned int>(i));
+    if (!device || !device->Create()) {
       *status = false;
+      if (device) {
+        device->release();
+      }
       return;
     }
     g_devices.push_back(device);
     amd::RuntimeTearDown::RegisterObject(device);
   }
 
-  if (hip::GetHipToolsDispatchTable()->__hipReportDevices_fn != nullptr) {
-    size_t numDevices = g_devices.size();
+  // Register tool dispatch table to profiler v3.
+  // If app is attached by profiler, __hipTriggerReportDevices_fn() will be called
+  // by profiler.
+  const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
+  tools_dispatch_table->__hipTriggerReportDevices_fn();
 
-    std::vector<hipUUID> uuids(numDevices);
-
-    int i = 0;
-    for (const auto& dev : g_devices) {
-      auto* deviceHandle = dev->devices()[0];
-      const auto& info = deviceHandle->info();
-      memcpy(uuids[i].bytes, info.uuid_, sizeof(info.uuid_));
-      // if assert fails, the memcpy bytes param needs to be addressed
-      static_assert(sizeof(info.uuid_) == sizeof(uuids[0].bytes), "error ABI issue");
-      ++i;
+  // Create and initialize host context
+  host_context = new amd::Context(devices, amd::Context::Info());
+  if (!host_context || CL_SUCCESS != host_context->create(nullptr)) {
+    if (host_context) {
+      host_context->release();
     }
-
-    hip::GetHipToolsDispatchTable()->__hipReportDevices_fn(numDevices, uuids.data());
-  }
-
-  amd::Context* hContext = new amd::Context(devices, amd::Context::Info());
-  if (!hContext) {
     *status = false;
     return;
   }
 
-  if (CL_SUCCESS != hContext->create(nullptr)) {
-    hContext->release();
-  }
-  host_context = hContext;
-  amd::RuntimeTearDown::RegisterObject(hContext);
+  amd::RuntimeTearDown::RegisterObject(host_context);
 
-  PlatformState::instance().init();
+  // Complete platform initialization
+  PlatformState::Instance().Init();
+
+  // HRR in-tree capture — snapshot dispatch table, install shims, open writer when
+  // HIP_HRR_CAPTURE_OUTPUT is set (all deferred to hip_capture_init, not DSO ctor).
+  hip_capture_init();
+
+  // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
+  HipProfilerInitExt();
+
   *status = true;
-  return;
 }
 
+// ================================================================================================
 Device* getCurrentDevice() { return tls.device_; }
 
 void setCurrentDevice(unsigned int index) {
@@ -138,7 +119,7 @@ hip::Stream* getStream(hipStream_t stream, bool wait) {
 
 // ================================================================================================
 hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
-  for (auto& it : g_devices) {
+  for (const auto& it : g_devices) {
     if (it->asContext() == &ctx) {
       return it->NullStream(wait);
     }
@@ -150,16 +131,6 @@ hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
     return getNullStream(wait);
   }
   return nullptr;
-}
-
-// ================================================================================================
-int getDeviceID(amd::Context& ctx) {
-  for (auto& it : g_devices) {
-    if (it->asContext() == &ctx) {
-      return it->deviceId();
-    }
-  }
-  return -1;
 }
 
 // ================================================================================================
@@ -279,7 +250,7 @@ hipError_t hipCtxPopCurrent(hipCtx_t* ctx) {
     }
     tls.ctxt_stack_.pop();
   } else {
-    DevLogError("Context Stack empty");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API, "Context Stack empty");
     HIP_RETURN(hipErrorInvalidContext);
   }
 
@@ -417,6 +388,23 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags) {
     HIP_RETURN(hipErrorInvalidDevice);
   } else {
     HIP_RETURN(hipErrorContextAlreadyInUse);
+  }
+}
+
+void __hipTriggerReportDevices() {
+  const auto* tools_dispatch_table = hip::GetHipToolsDispatchTable();
+  if (tools_dispatch_table->__hipReportDevices_fn) {
+    // If app is started or attached by profiler, __hipReportDevices_fn must be valid
+    std::vector<hipUUID> uuids;
+    uuids.reserve(g_devices.size());
+
+    for (const auto* dev : g_devices) {
+      const auto& info = dev->devices()[0]->info();
+      static_assert(sizeof(info.cuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
+      uuids.emplace_back();
+      std::copy(std::begin(info.cuid_), std::end(info.cuid_), std::begin(uuids.back().bytes));
+    }
+    tools_dispatch_table->__hipReportDevices_fn(g_devices.size(), uuids.data());
   }
 }
 }  // namespace hip

@@ -1,94 +1,99 @@
 {
-  "version": 3,
-  "configurePresets": [
-    {
-      "name": "ci",
-      "displayName": "official CI build",
-      "description": "Official CI build parameters",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/ci",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "ROCPROFSYS_USE_ROCM": "ON",
-        "ROCPROFSYS_USE_PYTHON": "ON",
-        "ROCPROFSYS_BUILD_DYNINST": "ON",
-        "ROCPROFSYS_BUILD_TBB": "ON",
-        "ROCPROFSYS_BUILD_BOOST": "ON",
-        "ROCPROFSYS_BUILD_ELFUTILS": "ON",
-        "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
-        "ROCPROFSYS_BUILD_TESTING": "ON",
-        "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
-        "ROCPROFSYS_MAX_THREADS": "64",
-        "ROCPROFSYS_BUILD_CI": "ON"
-      }
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
     },
-    {
-      "name": "debug",
-      "displayName": "official debug build",
-      "description": "Debug build parameters with tests",
-      "binaryDir": "${sourceDir}/build/debug",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "ROCPROFSYS_USE_ROCM": "ON",
-        "ROCPROFSYS_USE_PYTHON": "ON",
-        "ROCPROFSYS_BUILD_DYNINST": "ON",
-        "ROCPROFSYS_BUILD_TBB": "ON",
-        "ROCPROFSYS_BUILD_BOOST": "ON",
-        "ROCPROFSYS_BUILD_ELFUTILS": "ON",
-        "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
-        "ROCPROFSYS_BUILD_TESTING": "ON",
-        "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
-        "ROCPROFSYS_BUILD_DEBUG": "ON"
-      }
-    },
-    {
-      "name": "debug-optimized",
-      "displayName": "release build with debug info",
-      "description": "Release build with debug info with tests",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/debug-optimized",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "ROCPROFSYS_USE_ROCM": "ON",
-        "ROCPROFSYS_USE_PYTHON": "ON",
-        "ROCPROFSYS_BUILD_DYNINST": "ON",
-        "ROCPROFSYS_BUILD_TBB": "ON",
-        "ROCPROFSYS_BUILD_BOOST": "ON",
-        "ROCPROFSYS_BUILD_ELFUTILS": "ON",
-        "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
-        "ROCPROFSYS_BUILD_TESTING": "ON",
-        "ROCPROFSYS_STRIP_LIBRARIES": "OFF"
-      }
-    },
-    {
-      "name": "release",
-      "displayName": "official release build",
-      "description": "Official release build",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
-        "CMAKE_C_COMPILER": "gcc",
-        "CMAKE_CXX_COMPILER": "g++",
-        "ROCPROFSYS_USE_ROCM": "ON",
-        "ROCPROFSYS_USE_PYTHON": "ON",
-        "ROCPROFSYS_BUILD_DYNINST": "ON",
-        "ROCPROFSYS_BUILD_TBB": "ON",
-        "ROCPROFSYS_BUILD_BOOST": "ON",
-        "ROCPROFSYS_BUILD_ELFUTILS": "ON",
-        "ROCPROFSYS_BUILD_LIBIBERTY": "ON"
-      }
-    }
-  ]
+    "configurePresets": [
+        {
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems",
+                "ROCPROFSYS_BUILD_DYNINST": "ON",
+                "ROCPROFSYS_BUILD_ELFUTILS": "ON",
+                "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
+                "ROCPROFSYS_BUILD_TBB": "ON",
+                "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
+                "ROCPROFSYS_USE_PYTHON": "ON"
+            },
+            "generator": "Ninja",
+            "hidden": true,
+            "name": "default"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/ci",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
+                "ROCPROFSYS_BUILD_GTEST": "ON",
+                "ROCPROFSYS_BUILD_TESTING": "ON",
+                "ROCPROFSYS_MAX_THREADS": "64"
+            },
+            "description": "Official CI build parameters",
+            "displayName": "Official CI build",
+            "inherits": "default",
+            "name": "ci"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ROCPROFSYS_BUILD_DEBUG": "ON",
+                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
+                "ROCPROFSYS_BUILD_TESTING": "ON"
+            },
+            "description": "Debug build parameters with tests",
+            "displayName": "Official debug build",
+            "inherits": "default",
+            "name": "debug"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/debug-optimized",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
+                "ROCPROFSYS_BUILD_TESTING": "ON"
+            },
+            "description": "Release build with debug info with tests",
+            "displayName": "Release build with debug info",
+            "inherits": "default",
+            "name": "debug-optimized"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "description": "Official release build",
+            "displayName": "Official release build",
+            "inherits": "default",
+            "name": "release"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/coverage",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocprofiler-systems-dev",
+                "ROCPROFSYS_BUILD_CI": "ON",
+                "ROCPROFSYS_BUILD_CODECOV": "ON",
+                "ROCPROFSYS_BUILD_ELFUTILS": "OFF",
+                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
+                "ROCPROFSYS_BUILD_GTEST": "ON",
+                "ROCPROFSYS_BUILD_HIDDEN_VISIBILITY": "OFF",
+                "ROCPROFSYS_BUILD_LIBIBERTY": "OFF",
+                "ROCPROFSYS_BUILD_TBB": "OFF",
+                "ROCPROFSYS_BUILD_TESTING": "ON",
+                "ROCPROFSYS_MAX_THREADS": "64",
+                "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
+                "ROCPROFSYS_USE_MPI": "ON",
+                "USE_CLANG_OMP": "OFF"
+            },
+            "description": "Build with GCC code coverage instrumentation",
+            "displayName": "Code coverage build",
+            "inherits": "default",
+            "name": "coverage"
+        }
+    ],
+    "version": 3
 }

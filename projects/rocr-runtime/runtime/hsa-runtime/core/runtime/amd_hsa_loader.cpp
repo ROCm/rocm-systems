@@ -50,6 +50,9 @@
 #include <linux/limits.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#include <cstdint>
 #else
 #include <cstdint>
 #endif
@@ -74,6 +77,39 @@ uintptr_t PAGE_SIZE_MASK{
   };
 #endif
 
+#if defined(_WIN32) || defined(_WIN64)
+// Convert a Win32 wide-character path into the UTF-8, forward-slash form used
+// in file:// URIs. Strips the \\?\ and \\?\UNC\ prefixes that
+// GetFinalPathNameByHandleW / GetMappedFileNameW may emit, and prepends a
+// leading '/' so the result composes into file:///C:/path/... (RFC 8089).
+// Returns an empty string on conversion failure.
+std::string NormalizeWindowsPathToUtf8(std::wstring wpath) {
+  if (wpath.compare(0, 8, L"\\\\?\\UNC\\") == 0) {
+    wpath = L"\\\\" + wpath.substr(8);  // \\?\UNC\srv\share -> \\srv\share
+  } else if (wpath.compare(0, 4, L"\\\\?\\") == 0) {
+    wpath.erase(0, 4);                  // \\?\C:\... -> C:\...
+  }
+
+  int u8len = WideCharToMultiByte(CP_UTF8, 0, wpath.data(),
+                                  static_cast<int>(wpath.size()),
+                                  nullptr, 0, nullptr, nullptr);
+  if (u8len <= 0) {
+    return {};
+  }
+  std::string path(static_cast<size_t>(u8len), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wpath.data(), static_cast<int>(wpath.size()),
+                      path.data(), u8len, nullptr, nullptr);
+
+  for (auto& c : path) {
+    if (c == '\\') c = '/';
+  }
+  if (!path.empty() && path.front() != '/') {
+    path.insert(path.begin(), '/');
+  }
+  return path;
+}
+#endif
+
 std::string EncodePathname(const char *file_path) {
   std::ostringstream ss;
   unsigned char c;
@@ -83,7 +119,8 @@ std::string EncodePathname(const char *file_path) {
 
   while ((c = *file_path++) != '\0') {
     if (isalnum(c) || c == '/' || c == '-' ||
-        c == '_' || c == '.' || c == '~') {
+        c == '_' || c == '.' || c == '~' ||
+	c == ':') {
       ss << c;
     } else {
       ss << std::uppercase;
@@ -105,7 +142,82 @@ std::string GetUriFromMemoryAddress(const void *memory, size_t size) {
 }
 
 std::string GetUriFromMemoryInExecutableFile(const void *memory, size_t size) {
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
+  // Find the loaded module (EXE or DLL) whose image contains `memory`.
+  // GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT avoids ref-counting the
+  // module so we don't have to FreeLibrary it.
+  HMODULE hModule = nullptr;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCWSTR>(memory), &hModule) ||
+      hModule == nullptr) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+
+  // Walk the PE headers of the mapped image to translate the memory address
+  // into a file offset. hModule == ImageBase, so:
+  //   RVA          = memory - hModule
+  //   file_offset  = RVA - section.VirtualAddress + section.PointerToRawData
+  // for the section that covers the RVA.
+  auto* base = reinterpret_cast<const BYTE*>(hModule);
+  auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+  if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+  auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+  uintptr_t rva = reinterpret_cast<const BYTE*>(memory) - base;
+  const IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(nt);
+
+  size_t file_offset = 0;
+  bool found = false;
+  for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+    const auto& s = sections[i];
+    DWORD vsize = s.Misc.VirtualSize ? s.Misc.VirtualSize : s.SizeOfRawData;
+    if (rva >= s.VirtualAddress && rva < s.VirtualAddress + vsize) {
+      // Sections with no backing on disk (e.g. .bss) can't yield a file URI.
+      if (s.PointerToRawData == 0) break;
+      file_offset = rva - s.VirtualAddress + s.PointerToRawData;
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+
+  // Resolve the module's on-disk path. Grow the buffer if MAX_PATH overflows
+  // (long paths or DLLs loaded via \\?\ prefixed names).
+  std::wstring wpath(MAX_PATH, L'\0');
+  for (;;) {
+    DWORD n = GetModuleFileNameW(hModule, wpath.data(),
+                                 static_cast<DWORD>(wpath.size()));
+    if (n == 0) {
+      return GetUriFromMemoryAddress(memory, size);
+    }
+    if (n < wpath.size()) {
+      wpath.resize(n);
+      break;
+    }
+    if (wpath.size() >= 32768) {
+      return GetUriFromMemoryAddress(memory, size);
+    }
+    wpath.resize(wpath.size() * 2);
+  }
+
+  std::string path = NormalizeWindowsPathToUtf8(std::move(wpath));
+  if (path.empty()) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+
+  std::ostringstream uri_stream;
+  uri_stream << EncodePathname(path.c_str())
+             << "#offset=" << file_offset
+             << "&size=" << size;
+  return uri_stream.str();
+#else
   uintptr_t address = reinterpret_cast<uintptr_t>(memory);
   struct callback_data_s {
     ElfW(Addr) address;
@@ -232,9 +344,32 @@ std::string GetUriFromMemoryInMmapedFile(const void *memory, size_t size) {
   return GetUriFromMemoryAddress(memory, size);
 }
 
-std::string GetUriFromFile(int file_descriptor, size_t offset, size_t size,
+std::string GetUriFromFile(hsa_file_t file_descriptor, size_t offset, size_t size,
     bool is_complete_file, const void *memory) {
-#if !defined(_WIN32) && !defined(_WIN64)
+  std::string path;
+
+#if defined(_WIN32) || defined(_WIN64)
+  // Resolve the HANDLE to a filesystem path via GetFinalPathNameByHandleW.
+  // First call sizes the buffer (return value includes the terminating NUL
+  // when the supplied buffer is too small).
+  DWORD wlen = GetFinalPathNameByHandleW(file_descriptor, nullptr, 0,
+                                         FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (wlen == 0) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+  std::wstring wpath(wlen, L'\0');
+  DWORD got = GetFinalPathNameByHandleW(file_descriptor, wpath.data(), wlen,
+                                        FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (got == 0 || got >= wlen) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+  wpath.resize(got);  // drop the trailing NUL from std::wstring length
+
+  path = NormalizeWindowsPathToUtf8(std::move(wpath));
+  if (path.empty()) {
+    return GetUriFromMemoryAddress(memory, size);
+  }
+#else
   std::ostringstream proc_fd_path;
   proc_fd_path << "/proc/self/fd/" << file_descriptor;
 
@@ -244,21 +379,19 @@ std::string GetUriFromFile(int file_descriptor, size_t offset, size_t size,
   if (readlink(proc_fd_path.str().c_str(), uri_file_path, PATH_MAX) == -1) {
     return GetUriFromMemoryAddress(memory, size);
   }
-
   if (uri_file_path[0] == '\0') {
     return GetUriFromMemoryAddress(memory, size);
   }
+  path = uri_file_path;
+#endif
 
   std::ostringstream uri_stream;
-  uri_stream << EncodePathname(uri_file_path);
+  uri_stream << EncodePathname(path.c_str());
   if (!is_complete_file) {
     uri_stream << "#offset=" << offset;
     uri_stream << "&size=" << size;
   }
   return uri_stream.str();
-#else
-  return GetUriFromMemoryAddress(memory, size);
-#endif  // !defined(_WIN32) && !defined(_WIN64)
 }
 
 }  // namespace
@@ -277,7 +410,8 @@ CodeObjectReaderImpl::~CodeObjectReaderImpl() {
     size_t adjusted_size = code_object_size + (address - adjusted_address);
     munmap(reinterpret_cast<void *>(adjusted_address), adjusted_size);
 #else
-    delete [] code_object_memory;
+    if (map_base) UnmapViewOfFile(map_base);
+    if (map_handle) CloseHandle(static_cast<HANDLE>(map_handle));
 #endif  // !defined(_WIN32) && !defined(_WIN64)
   }
 }
@@ -288,6 +422,7 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
     size_t _code_object_size) {
   assert(!code_object_memory && "Code object reader wrapper is already set");
 
+#if !defined(_WIN32) && !defined(_WIN64)
   if (_code_object_file_descriptor == -1) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -304,7 +439,6 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
   }
   bool is_complete_file = _code_object_offset == 0 && _code_object_size == file_size;
 
-#if !defined(_WIN32) && !defined(_WIN64)
   off_t adjusted_offset = _code_object_offset & PAGE_SIZE_MASK;
   size_t adjusted_size = _code_object_size + (_code_object_offset - adjusted_offset);
   void *memory = mmap(nullptr, adjusted_size, PROT_READ, MAP_PRIVATE,
@@ -316,12 +450,61 @@ hsa_status_t CodeObjectReaderImpl::SetFile(
                         (_code_object_offset & ~PAGE_SIZE_MASK);
   code_object_size = _code_object_size;
   is_mmap = true;
-#else
-  //@todo May need an implementation in Windows
-#endif  // !defined(_WIN32) && !defined(_WIN64)
 
   uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset,
                         _code_object_size, is_complete_file, code_object_memory);
+#else
+  if (_code_object_file_descriptor == INVALID_HANDLE_VALUE ||
+      _code_object_file_descriptor == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  LARGE_INTEGER file_size_li;
+  if (!GetFileSizeEx(_code_object_file_descriptor, &file_size_li)) {
+    return HSA_STATUS_ERROR_INVALID_FILE;
+  }
+  uint64_t file_size = static_cast<uint64_t>(file_size_li.QuadPart);
+  if (file_size <= _code_object_offset) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  if (_code_object_size == 0) {
+    _code_object_size = static_cast<size_t>(file_size - _code_object_offset);
+  }
+  bool is_complete_file = _code_object_offset == 0 && _code_object_size == file_size;
+
+  // MapViewOfFile requires the file offset to be aligned to the system
+  // allocation granularity (typically 64 KiB on Windows), not page size.
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  uint64_t granularity = si.dwAllocationGranularity;
+  uint64_t aligned_offset = _code_object_offset & ~(granularity - 1);
+  size_t slop = static_cast<size_t>(_code_object_offset - aligned_offset);
+  size_t adjusted_size = _code_object_size + slop;
+
+  HANDLE mapping = CreateFileMappingW(_code_object_file_descriptor, nullptr,
+                                      PAGE_READONLY, 0, 0, nullptr);
+  if (mapping == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_FILE;
+  }
+
+  void *base = MapViewOfFile(mapping, FILE_MAP_READ,
+                             static_cast<DWORD>(aligned_offset >> 32),
+                             static_cast<DWORD>(aligned_offset & 0xFFFFFFFFu),
+                             adjusted_size);
+  if (base == nullptr) {
+    CloseHandle(mapping);
+    return HSA_STATUS_ERROR_INVALID_FILE;
+  }
+
+  map_base = base;
+  map_handle = mapping;
+  code_object_memory = reinterpret_cast<unsigned char*>(base) + slop;
+  code_object_size = _code_object_size;
+  is_mmap = true;
+
+  uri = GetUriFromFile(_code_object_file_descriptor, _code_object_offset,
+                       _code_object_size, is_complete_file, code_object_memory);
+#endif  // !defined(_WIN32) && !defined(_WIN64)
 
   return HSA_STATUS_SUCCESS;
 }

@@ -576,5 +576,58 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
     ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtDisableLogging,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtEnableLogging,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtSetLoggingParams,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemSetMemPool,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetMemPool,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchBatchAsync,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGreenCtxCreate,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxDestroy,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxStreamCreate,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetDevResource,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDevSmResourceSplitByCount,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDevSmResourceSplit,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDevResourceGenerateDesc,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetExecutionCtx,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetDevResource,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetDevice,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetId,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetDevResource,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxRecordEvent,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxSynchronize,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxWaitEvent,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetGlobal,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetManaged,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

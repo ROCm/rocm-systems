@@ -34,6 +34,25 @@ class KFDSVMRangeTest : public KFDBaseComponentTest,
     KFDSVMRangeTest() {}
     ~KFDSVMRangeTest() {}
     void SplitRangeTest(int defaultGPUNode, int prefetch_location);
+    void BasicSystemMemTest(int gpuNode);
+    void SetGetAttributesTest(int gpuNode);
+    void InvalidRangeTest(int gpuNode);
+    void SplitSystemRangeTest(int gpuNode);
+    void EvictSystemRangeTest(int gpuNode);
+    void PartialUnmapSysMemTest(int gpuNode);
+    void BasicVramTest(int gpuNode);
+    void SplitVramRangeTest(int gpuNode);
+    void PrefetchTest(int gpuNode);
+    void MigrateTest(int gpuNode);
+    void MigrateAccessInPlaceTest(int gpuNode);
+    void MigrateGranularityTest(int gpuNode);
+    void MigrateLargeBufTest(int gpuNode);
+    void MigratePolicyTest(int gpuNode);
+    void MultiThreadMigrationTest(int gpuNode);
+    void MigrateFileBackedRangeTest(int gpuNode);
+    void HMMProfilingEvent(int gpuNode);
+    void VramOvercommitTest(int gpuNode);
+    void PrefaultPartialRangeTest(int gpuNode);
 
  protected:
     virtual void SetUp();

@@ -10,40 +10,35 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input_range.json)
-
-add_test(
-    NAME rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input_range.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/range_filter -- $<TARGET_FILE:transpose> 1 15)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-kernel-filtering "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute
-    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
-               "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-counter-collection-kernel-filtering-range-filter-validate
+# Range filtering test
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-counter-collection-kernel-filtering-range-filter
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-config
-        ${CMAKE_CURRENT_BINARY_DIR}/input_range.json --input-json-pass1
-        ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_1/out_results.json
-        --input-json-pass2
-        ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_2/out_results.json
-        --input-json-pass3
-        ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json)
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/input_range.json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/range_filter -- $<TARGET_FILE:transpose> 1 15
+    DEPENDS transpose
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-counter-collection-kernel-filtering-range-filter)
 
-set_tests_properties(
-    rocprofv3-test-counter-collection-kernel-filtering-range-filter-validate
-    PROPERTIES TIMEOUT 120 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-counter-collection-kernel-filtering-range-filter
+    TEST_PATHS validate.py
+    COPY conftest.py input_range.json
+    CONFIG pytest.ini
+    ARGS --json-config
+         ${CMAKE_CURRENT_BINARY_DIR}/input_range.json
+         --input-json-pass1
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_1/out_results.json
+         --input-json-pass2
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_2/out_results.json
+         --input-json-pass3
+         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json
+    TIMEOUT 120
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-range-filter)

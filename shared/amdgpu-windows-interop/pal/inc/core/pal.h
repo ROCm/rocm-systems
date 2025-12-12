@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -48,19 +48,19 @@ struct _SECURITY_ATTRIBUTES;
 namespace Pal
 {
 
-typedef Util::int8    int8;     ///< 8-bit integer.
-typedef Util::int16   int16;    ///< 16-bit integer.
-typedef Util::int32   int32;    ///< 32-bit integer.
-typedef Util::int64   int64;    ///< 64-bit integer.
-typedef Util::uint8   uint8;    ///< Unsigned 8-bit integer.
-typedef Util::uint16  uint16;   ///< Unsigned 16-bit integer.
-typedef Util::uint32  uint32;   ///< Unsigned 32-bit integer.
-typedef Util::uint64  uint64;   ///< Unsigned 64-bit integer.
-typedef Util::gpusize gpusize;  ///< Used to specify GPU addresses and sizes of GPU allocations.  This differs from
-                                ///  size_t since the GPU still uses 64-bit addresses on a 32-bit OS.
-typedef Util::Result  Result;   ///< The PAL core and utility companion share the same result codes for convenience.
-
-typedef Util::Rational Rational; ///< A ratio of two unsigned integers.
+// Alias a bunch of fundamental Util types from palUtil.h into Pal.
+using Util::int8;
+using Util::int16;
+using Util::int32;
+using Util::int64;
+using Util::uint8;
+using Util::uint16;
+using Util::uint32;
+using Util::uint64;
+using Util::gpusize;
+using Util::Result;
+using Util::Rational;
+using Util::StickyResult;
 
 #if defined(_WIN32)
 typedef HMONITOR__* OsDisplayHandle;  ///< OsDisplayHandle corresponds to an HMONITOR on Windows.
@@ -117,7 +117,7 @@ constexpr uint64 InternalApiPsoHash       = UINT64_MAX;  ///< Default Hash for P
 /// Device::GetProperties, returned in DeviceProperties.engineProperties[].
 enum EngineType : uint32
 {
-    /// Corresponds to the graphics hardware engine (a.k.a. graphcis ring a.k.a 3D).
+    /// Corresponds to the graphics hardware engine (a.k.a. graphics ring a.k.a 3D).
     EngineTypeUniversal,
 
     /// Corresponds to asynchronous compute engines (ACE).
@@ -170,16 +170,9 @@ enum QueueTypeSupport : uint32
 enum class SubEngineType : uint32
 {
     Primary        = 0, // Subqueue that is the queue itself, rather than an ancillary queue.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 914
     AsyncCompute   = 1, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
     ConstantEngine = 2, // CP constant update engine that runs in parallel with draw engine.
                         // Internal usage only.
-#else
-    ConstantEngine = 1, // CP constant update engine that runs in parallel with draw engine.
-    AsyncCompute   = 2, // Auxiliary ACE subqueue, together with a primary subqueue forms a "ganged" submit.
-    Pup            = 3, // Subqueue that is the queue itself but for PUP-style packets, rather than an
-                        // ancillary queue
-#endif
     Count,
 };
 
@@ -451,7 +444,7 @@ struct DirectCaptureInfo
             uint32 preflip              :  1;  ///< Requires pre-flip primary access
             uint32 postflip             :  1;  ///< Requires post-flip primary access. A DirectCapture resource cannot
                                                ///  have pre-flip and post-flip access at the same time
-            uint32 accessDesktop        :  1;  ///< Requires acces to the desktop
+            uint32 accessDesktop        :  1;  ///< Requires access to the desktop
             uint32 shared               :  1;  ///< This resource will be shared between APIs
             uint32 frameGenRatio        :  4;  ///< Frame generation ratio
             uint32 paceGeneratedFrame   :  1;  ///< Requires pacing the generated frames
@@ -464,7 +457,8 @@ struct DirectCaptureInfo
             uint32 initCamera           :  1;  ///< Initialize the DirectCapture resource to access camera matrix
             uint32 requestHudLessImage  :  1;  ///< Request DirectCapture access to HUD less image if available
             uint32 initHudLessImage     :  1;  ///< Initialize the DirectCapture resource to access HUD less image
-            uint32 reserved             : 14;
+            uint32 partialMpoSupport    :  1;  ///< Enable MPO. DirectCapture resource only contains the game's plane
+            uint32 reserved             : 13;
         };
         uint32 u32All;
     } usageFlags;

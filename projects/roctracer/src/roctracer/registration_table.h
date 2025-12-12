@@ -86,6 +86,17 @@ template <typename T, uint32_t N, typename IsStopped = detail::False> class Regi
                                                          : std::nullopt;
   }
 
+  // Like Get(), but skips the IsStopped check. Used to drain in-flight records
+  // that were already committed (counter incremented) before stop was signaled.
+  std::optional<T> GetForDrain(uint32_t operation_id) const {
+    assert(operation_id < N && "id is out of range");
+    const table_element_t& entry = table_.at(operation_id);
+    if (!entry.enabled.load(std::memory_order_relaxed)) return std::nullopt;
+    std::shared_lock lock(entry.mutex);
+    return entry.enabled.load(std::memory_order_relaxed) ? std::make_optional(entry.data)
+                                                         : std::nullopt;
+  }
+
   bool IsEmpty() const { return registered_count_.load(std::memory_order_relaxed) == 0; }
 
  private:

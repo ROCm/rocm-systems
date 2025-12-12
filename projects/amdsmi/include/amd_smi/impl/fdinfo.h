@@ -25,14 +25,17 @@
 
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid, amdsmi_proc_info_t &info);
+amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
+                                     amdsmi_proc_info_t& info);
 
 #ifdef __cplusplus
-} // extern "C"
+}  // extern "C"
 #endif
 
 #endif

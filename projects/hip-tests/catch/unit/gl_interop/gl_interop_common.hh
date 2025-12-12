@@ -1,35 +1,26 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
-#include <variant>
-
+#ifdef USE_GLEW
+#include <GL/glew.h>
+#elif defined(__linux__)
 #define GL_GLEXT_PROTOTYPES
-#include <GL/freeglut.h>
-#include <GL/freeglut_ext.h>
+#else
+#error "GLEW is required on non-Linux platforms. Define USE_GLEW and link" \
+       " against the GLEW library, or build on Linux."
+#endif
 
+#include <GL/freeglut.h>
+
+#ifdef USE_EGL
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#endif
 
 #include <hip_test_common.hh>
 
@@ -77,30 +68,36 @@ class GLImageObject {
   GLuint tex_;
 };
 
+class IContextScopeGuard {
+public:
+  virtual ~IContextScopeGuard() = default;
+};
+
 static std::once_flag glut_init_flag;
+static bool glut_init_failed = false;
 static void GlutError(const char *fmt, va_list ap)
 {
     // Print what error occurred
     fprintf(stderr, "GlutError:");
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
-
-    // Mark this test as skipped because this error could be
-    // due to system doesn't have display connected, e.g: Jenkins CI machine
-    HipTest::HIP_SKIP_TEST("GLUT Init Failed");
-
-    glutExit();
-    exit(1);
+    
+    glut_init_failed = true;
 }
 
-class GLUTContextScopeGuard {
+class GLUTContextScopeGuard : public IContextScopeGuard {
  public:
   GLUTContextScopeGuard() {
     std::call_once(glut_init_flag, &GLUTContextScopeGuard::init);
+    if (glut_init_failed) {
+      HIP_SKIP_TEST("GLUT Init Failed");
+    }
     glut_window_ = glutCreateWindow("");
   }
 
-  ~GLUTContextScopeGuard() { glutDestroyWindow(glut_window_); }
+  ~GLUTContextScopeGuard() override {
+    glutDestroyWindow(glut_window_);
+  }
 
   GLUTContextScopeGuard(const GLUTContextScopeGuard&) = delete;
   GLUTContextScopeGuard& operator=(const GLUTContextScopeGuard&) = delete;
@@ -117,12 +114,14 @@ class GLUTContextScopeGuard {
     static int glut_argc = 1;
     glutInitErrorFunc(&GlutError);
     glutInit(&glut_argc, glut_argv.data());
+    if (glut_init_failed) return;
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
     glutInitWindowSize(512, 512);
   }
 };
 
-class EGLContextScopeGuard {
+#ifdef USE_EGL
+class EGLContextScopeGuard : public IContextScopeGuard {
  public:
   EGLContextScopeGuard() {
 
@@ -156,7 +155,7 @@ class EGLContextScopeGuard {
     REQUIRE(eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_));
   }
 
-  ~EGLContextScopeGuard() {
+  ~EGLContextScopeGuard() override {
     // 6. Terminate EGL when finished
     eglTerminate(egl_display_);
   }
@@ -198,35 +197,42 @@ class EGLContextScopeGuard {
   EGLSurface egl_surface_;
   EGLContext egl_context_;
 };
+#endif
 
 class GLContextScopeGuard {
  public:
-  using GLUTContextScopeGuardPtr = std::unique_ptr<GLUTContextScopeGuard>;
-  using EGLContextScopeGuardPtr = std::unique_ptr<EGLContextScopeGuard>;
-  using GLContextScopeGuardVariant =
-      std::variant<GLUTContextScopeGuardPtr, EGLContextScopeGuardPtr>;
+  using GLContextScopeGuardPtr = std::unique_ptr<IContextScopeGuard>;
 
   static constexpr char kEnvarName[] = "GL_CONTEXT_TYPE";
 
   GLContextScopeGuard() {
-
-    if(!HipTest::isImageSupported()) {
-      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
-      exit(0);
-    }
 
     char* val = std::getenv(kEnvarName);
     std::string val_str = val == NULL ? "" : val;
 
     if (val_str.empty() || val_str == "GLUT") {
       gl_context_ = std::make_unique<GLUTContextScopeGuard>();
+#ifdef USE_EGL
     } else if (val_str == "EGL") {
       gl_context_ = std::make_unique<EGLContextScopeGuard>();
+#endif
     } else {
       INFO("Unsupported " << kEnvarName << " value '" << val_str << "'");
-      INFO("Supported values are ['GLUT', 'EGL']");
+      INFO("Supported values are ['GLUT'"
+#ifdef USE_EGL
+        << ", 'EGL'"
+#endif
+        << "]");
       REQUIRE(false);
     }
+
+#ifdef USE_GLEW
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+      fprintf(stderr, "GLEW initialization failed: %s\n", glewGetErrorString(err));
+      HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
+    }
+#endif
   }
 
   GLContextScopeGuard(const GLContextScopeGuard&) = delete;
@@ -236,5 +242,5 @@ class GLContextScopeGuard {
   GLContextScopeGuard& operator=(GLContextScopeGuard&&) = delete;
 
  private:
-  GLContextScopeGuardVariant gl_context_;
+  GLContextScopeGuardPtr gl_context_;
 };

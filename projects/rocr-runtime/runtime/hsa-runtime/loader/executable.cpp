@@ -93,7 +93,7 @@ namespace rocr {
   // Having a side effect prevents call site optimization that allows removal of a noinline function call
   // with no side effect.
 #if defined(__linux__)
-  __attribute__((noinline)) 
+  __attribute__((noinline))
 #else
   __declspec(noinline)
 #endif
@@ -118,6 +118,8 @@ public:
   const amd::options::ValueOption<std::string>* DumpDir() const { return &dump_dir; }
   const amd::options::PrefixOption* Substitute() const { return &substitute; }
 
+  bool TrampolineEnabled() const { return trampoline_enabled_; }
+
   bool ParseOptions(const std::string& options);
   void Reset();
   void PrintHelp(std::ostream& out) const;
@@ -137,6 +139,7 @@ private:
   amd::options::ValueOption<std::string> dump_dir;
   amd::options::PrefixOption substitute;
   amd::options::OptionParser option_parser;
+  bool trampoline_enabled_ = false;
 };
 
 LoaderOptions::LoaderOptions(std::ostream& error) :
@@ -156,6 +159,13 @@ LoaderOptions::LoaderOptions(std::ostream& error) :
   option_parser.AddOption(&dump_all);
   option_parser.AddOption(&dump_dir);
   option_parser.AddOption(&substitute);
+
+  // LOADER_ENABLE_TRAMPOLINE=1: enable gfx125x kernel-entry trampolines.
+  // Trampolines are disabled by default; this env var is for testing only.
+  const char* enable_trampoline = getenv("LOADER_ENABLE_TRAMPOLINE");
+  if (enable_trampoline && std::strcmp(enable_trampoline, "1") == 0) {
+    trampoline_enabled_ = true;
+  }
 }
 
 bool LoaderOptions::ParseOptions(const std::string& options)
@@ -175,6 +185,68 @@ void LoaderOptions::PrintHelp(std::ostream& out) const
 
 static const char *LOADER_DUMP_PREFIX = "amdcode";
 
+// Kernel-entry trampoline (gfx125x / RDNA4).
+//
+// We cannot reserve space immediately in front of each kernel entry: that would
+// require a non-uniform relayout of the loaded code segment, which breaks every
+// intra-segment PC-relative reference the compiler baked in. Instead we allocate
+// a separate *executable* region (AMDGPU_HSA_SEGMENT_CODE_AGENT, which carries
+// AllocateExecutable in the loader context) and, for each kernel, emit a stub
+// that jumps to the real entry; the kernel descriptor's entry offset is then
+// rewritten so dispatch lands in the stub first.
+//
+// The jump is absolute (the pool is not within S_BRANCH range of the code), so
+// the stub does a global cache writeback (SCOPE_CU) and a v_nop, then loads the
+// 64-bit entry address into a scratch SGPR pair and sets PC.
+// s[100:101] is a safe fixed scratch: RDNA gives every wave 128 physical SGPRs and
+// these indices are well above the preloaded user+system SGPRs (<= ~20), so they
+// are never a live kernel input -- the kernel writes them before it reads them.
+//
+// gfx1250 encodings verified with: llvm-mc --arch=amdgcn --mcpu=gfx1250 --show-encoding
+//   global_wb   <scope:SCOPE_CU>       ->   0xEE0B007C, 0x00000000, 0x00000000
+//   v_nop        (padding)              ->  0x7E000000
+//   s_mov_b32    s100, <lit> + literal  ->  0xBEE400FF
+//   s_mov_b32    s101, <lit> + literal  ->  0xBEE500FF
+//   s_set_pc_i64 s[100:101]             ->  0xBE804864
+//   s_code_end   (padding)              ->  0xBF9F0000
+static constexpr size_t kTrampolineStubStride =
+    AMD_ISA_ALIGN_BYTES;  // 256: one stub, entry-aligned
+
+// The CP (CPC) instruction-prefetches forward from a kernel's entry PC when it
+// dispatches. Because dispatch now lands on a stub inside our pool, that prefetch
+// reads ahead from the stub and would run off the end of the pool into the next,
+// unmapped page -- a CPC read page/permission fault (observed on gfx1250). The
+// prefetch length is per-kernel: COMPUTE_PGM_RSRC3.INST_PREF_SIZE (6 bits, GFX11+)
+// counts 128-byte instruction-cache lines to prefetch ahead of the entry. We size
+// a trailing guard from the largest INST_PREF_SIZE in the pool so the prefetch from
+// any stub always lands in mapped, readable memory inside this same allocation. The
+// guard is never executed (the stub sets PC away first); it only needs to be present
+// and readable, which the allocation's zero-fill already guarantees.
+static constexpr size_t kInstPrefUnitBytes = 128;  // GFX11+ CP I$ prefetch line size
+
+static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
+  auto* w = reinterpret_cast<uint32_t*>(buf);
+
+  w[0] = 0xEE0B007C;  // global_wb <scope:SCOPE_CU>
+  w[1] = 0x00000000;  // :
+  w[2] = 0x00000000;  // :
+  w[3] = 0x7E000000;  // v_nop (padding)
+  w[4] = 0xBEE400FF;  // s_mov_b32 s100, target_lo
+  w[5] = static_cast<uint32_t>(target);
+  w[6] = 0xBEE500FF;  // s_mov_b32 s101, target_hi
+  w[7] = static_cast<uint32_t>(target >> 32);
+  w[8] = 0xBE804864;  // s_set_pc_i64 s[100:101]
+  for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
+    w[i] = 0xBF9F0000;  // s_code_end (prefetch-safe padding)
+}
+
+// gfx12.5 family: CO v3+ reports either a generic mach name (gfx12-5-generic) or
+// discrete targets (gfx1250, gfx1251, …) in the amdgcn-amd-amdhsa--<target> ISA string.
+static bool CodeObjectIsaIsGfx125Family(const std::string& codeIsa) {
+  if (codeIsa.find("gfx12-5-generic") != std::string::npos) return true;
+  return codeIsa.find("gfx125") != std::string::npos;
+}
+
 Loader* Loader::Create(Context* context)
 {
   return new AmdHsaCodeLoader(context);
@@ -186,7 +258,6 @@ void Loader::Destroy(Loader *loader)
   _amdgpu_r_debug.r_map = nullptr;
   _amdgpu_r_debug.r_state = r_debug::RT_CONSISTENT;
   r_debug_tail() = nullptr;
-  delete loader;
 }
 
 Executable* AmdHsaCodeLoader::CreateExecutable(
@@ -194,8 +265,8 @@ Executable* AmdHsaCodeLoader::CreateExecutable(
 {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
 
-  executables.push_back(new ExecutableImpl(profile, context, executables.size(), default_float_rounding_mode));
-  return executables.back();
+  executables.push_back(std::make_shared<ExecutableImpl>(profile, context, executables.size(), default_float_rounding_mode));
+  return executables.back().get();
 }
 
 Executable* AmdHsaCodeLoader::CreateExecutable(
@@ -206,8 +277,8 @@ Executable* AmdHsaCodeLoader::CreateExecutable(
 {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
 
-  executables.push_back(new ExecutableImpl(profile, std::move(isolated_context), executables.size(), default_float_rounding_mode));
-  return executables.back();
+  executables.push_back(std::make_shared<ExecutableImpl>(profile, std::move(isolated_context), executables.size(), default_float_rounding_mode));
+  return executables.back().get();
 }
 
 static void AddCodeObjectInfoIntoDebugMap(link_map* map) {
@@ -238,7 +309,7 @@ static void RemoveCodeObjectInfoFromDebugMap(link_map* map) {
       map->l_next->l_prev = map->l_prev;
   }
 
-  free(map->l_name);
+  free(const_cast<char*>(map->l_name));
   memset(map, 0, sizeof(link_map));
 }
 
@@ -254,7 +325,7 @@ hsa_status_t AmdHsaCodeLoader::FreezeExecutable(Executable *executable, const ch
   atomic::Fence(std::memory_order_acq_rel);
   _loader_debug_state();
   atomic::Fence(std::memory_order_acq_rel);
-  for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
+  for (const auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     AddCodeObjectInfoIntoDebugMap(&(lco->r_debug_info));
   }
   atomic::Store(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT, std::memory_order_release);
@@ -270,14 +341,13 @@ void AmdHsaCodeLoader::DestroyExecutable(Executable *executable) {
   atomic::Fence(std::memory_order_acq_rel);
   _loader_debug_state();
   atomic::Fence(std::memory_order_acq_rel);
-  for (auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
+  for (const auto &lco : reinterpret_cast<ExecutableImpl*>(executable)->loaded_code_objects) {
     RemoveCodeObjectInfoFromDebugMap(&(lco->r_debug_info));
   }
   atomic::Store(&_amdgpu_r_debug.r_state, r_debug::RT_CONSISTENT, std::memory_order_release);
   _loader_debug_state();
 
-  executables[((ExecutableImpl*)executable)->id()] = nullptr;
-  delete executable;
+  executables[static_cast<ExecutableImpl*>(executable)->id()].reset();
 }
 
 hsa_status_t AmdHsaCodeLoader::IterateExecutables(
@@ -289,9 +359,9 @@ hsa_status_t AmdHsaCodeLoader::IterateExecutables(
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
   assert(callback);
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if(exec != nullptr){
-      hsa_status_t status = callback(Executable::Handle(exec), data);
+      hsa_status_t status = callback(Executable::Handle(exec.get()), data);
       if (status != HSA_STATUS_SUCCESS) {
         return status;
       }
@@ -318,7 +388,7 @@ hsa_status_t AmdHsaCodeLoader::QuerySegmentDescriptors(
   this->EnableReadOnlyMode();
 
   size_t actual_num_segment_descriptors = 0;
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
       actual_num_segment_descriptors += executable->GetNumSegmentDescriptors();
     }
@@ -335,7 +405,7 @@ hsa_status_t AmdHsaCodeLoader::QuerySegmentDescriptors(
   }
 
   size_t i = 0;
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
       i += executable->QuerySegmentDescriptors(segment_descriptors, actual_num_segment_descriptors, i);
     }
@@ -352,7 +422,7 @@ uint64_t AmdHsaCodeLoader::FindHostAddress(uint64_t device_address)
     return 0;
   }
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if (exec != nullptr) {
       uint64_t host_address = exec->FindHostAddress(device_address);
       if (host_address != 0) {
@@ -371,9 +441,9 @@ void AmdHsaCodeLoader::PrintHelp(std::ostream& out)
 void AmdHsaCodeLoader::EnableReadOnlyMode()
 {
   rw_lock_.ReaderLock();
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
-      ((ExecutableImpl*)executable)->EnableReadOnlyMode();
+      ((ExecutableImpl*)executable.get())->EnableReadOnlyMode();
     }
   }
 }
@@ -381,9 +451,9 @@ void AmdHsaCodeLoader::EnableReadOnlyMode()
 void AmdHsaCodeLoader::DisableReadOnlyMode()
 {
   rw_lock_.ReaderUnlock();
-  for (auto &executable : executables) {
+  for (const auto &executable : executables) {
     if (executable) {
-      ((ExecutableImpl*)executable)->DisableReadOnlyMode();
+      ((ExecutableImpl*)executable.get())->DisableReadOnlyMode();
     }
   }
 }
@@ -781,18 +851,10 @@ ExecutableImpl::ExecutableImpl(
 }
 
 ExecutableImpl::~ExecutableImpl() {
-  for (ExecutableObject* o : objects) {
+  for (const auto& o : objects) {
     o->Destroy();
-    delete o;
   }
   objects.clear();
-
-  for (auto &symbol_entry : program_symbols_) {
-    delete symbol_entry.second;
-  }
-  for (auto &symbol_entry : agent_symbols_) {
-    delete symbol_entry.second;
-  }
 }
 
 hsa_status_t ExecutableImpl::DefineProgramExternalVariable(
@@ -812,7 +874,7 @@ hsa_status_t ExecutableImpl::DefineProgramExternalVariable(
 
   program_symbols_.insert(
     std::make_pair(std::string(name),
-                   new VariableSymbol(true,
+                   std::make_shared<VariableSymbol>(true,
                                       "", // Only program linkage symbols can be
                                           // defined.
                                       std::string(name),
@@ -848,7 +910,7 @@ hsa_status_t ExecutableImpl::DefineAgentExternalVariable(
 
   auto insert_status = agent_symbols_.insert(
     std::make_pair(std::make_pair(std::string(name), agent),
-                   new VariableSymbol(true,
+                   std::make_shared<VariableSymbol>(true,
                                       "", // Only program linkage symbols can be
                                           // defined.
                                       std::string(name),
@@ -896,14 +958,14 @@ Symbol* ExecutableImpl::GetSymbolInternal(
   if (!agent) {
     auto program_symbol = program_symbols_.find(mangled_name);
     if (program_symbol != program_symbols_.end()) {
-      return program_symbol->second;
+      return program_symbol->second.get();
     }
     return nullptr;
   }
 
   auto agent_symbol = agent_symbols_.find(std::make_pair(mangled_name, *agent));
   if (agent_symbol != agent_symbols_.end()) {
-    return agent_symbol->second;
+    return agent_symbol->second.get();
   }
   return nullptr;
 }
@@ -916,14 +978,14 @@ hsa_status_t ExecutableImpl::IterateSymbols(
 
   for (auto &symbol_entry : program_symbols_) {
     hsa_status_t hsc =
-      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (HSA_STATUS_SUCCESS != hsc) {
       return hsc;
     }
   }
   for (auto &symbol_entry : agent_symbols_) {
     hsa_status_t hsc =
-      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+      callback(Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (HSA_STATUS_SUCCESS != hsc) {
       return hsc;
     }
@@ -948,7 +1010,7 @@ hsa_status_t ExecutableImpl::IterateAgentSymbols(
     }
 
     hsa_status_t status = callback(
-        Executable::Handle(this), agent, Symbol::Handle(symbol_entry.second),
+        Executable::Handle(this), agent, Symbol::Handle(symbol_entry.second.get()),
         data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
@@ -968,7 +1030,7 @@ hsa_status_t ExecutableImpl::IterateProgramSymbols(
 
   for (auto &symbol_entry : program_symbols_) {
     hsa_status_t status = callback(
-        Executable::Handle(this), Symbol::Handle(symbol_entry.second), data);
+        Executable::Handle(this), Symbol::Handle(symbol_entry.second.get()), data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
     }
@@ -987,10 +1049,10 @@ hsa_status_t ExecutableImpl::IterateLoadedCodeObjects(
   ReaderLockGuard<ReaderWriterLock> reader_lock(rw_lock_);
   assert(callback);
 
-  for (auto &loaded_code_object : loaded_code_objects) {
+  for (const auto& loaded_code_object : loaded_code_objects) {
     hsa_status_t status = callback(
         Executable::Handle(this),
-        LoadedCodeObject::Handle(loaded_code_object),
+        LoadedCodeObject::Handle(loaded_code_object.get()),
         data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
@@ -1004,7 +1066,7 @@ size_t ExecutableImpl::GetNumSegmentDescriptors()
 {
   // assuming we are in readonly mode.
   size_t actual_num_segment_descriptors = 0;
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     actual_num_segment_descriptors += obj->LoadedSegments().size();
   }
   return actual_num_segment_descriptors;
@@ -1020,7 +1082,7 @@ size_t ExecutableImpl::QuerySegmentDescriptors(
   assert(first_empty_segment_descriptor < total_num_segment_descriptors);
 
   size_t i = first_empty_segment_descriptor;
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     assert(i < total_num_segment_descriptors);
     for (auto &seg : obj->LoadedSegments()) {
       segment_descriptors[i].agent = seg->Agent();
@@ -1084,11 +1146,11 @@ hsa_executable_t AmdHsaCodeLoader::FindExecutable(uint64_t device_address)
     return execHandle;
   }
 
-  for (auto &exec : executables) {
+  for (const auto &exec : executables) {
     if (exec != nullptr) {
       uint64_t host_address = exec->FindHostAddress(device_address);
       if (host_address != 0) {
-        return Executable::Handle(exec);
+        return Executable::Handle(exec.get());
       }
     }
   }
@@ -1098,7 +1160,7 @@ hsa_executable_t AmdHsaCodeLoader::FindExecutable(uint64_t device_address)
 uint64_t ExecutableImpl::FindHostAddress(uint64_t device_address)
 {
   ReaderLockGuard<ReaderWriterLock> reader_lock(rw_lock_);
-  for (auto &obj : loaded_code_objects) {
+  for (const auto &obj : loaded_code_objects) {
     assert(obj);
     for (auto &seg : obj->LoadedSegments()) {
       assert(seg);
@@ -1189,6 +1251,17 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_FROZEN_EXECUTABLE;
   }
 
+  if (code_object_size == 0) {
+    const void* elf_data = reinterpret_cast<const void*>(code_object.handle);
+    if (!elf_data) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    code_object_size = amd::elf::ElfSize(elf_data, 0);
+    if (code_object_size == 0) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+  }
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1224,7 +1297,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   uint32_t codeNum = NextCodeObjectNum();
 
-  code.reset(new code::AmdHsaCode());
+  code = std::make_unique<code::AmdHsaCode>();
 
   std::string substituteFileName;
   for (const Substitute& ss : substitutes) {
@@ -1235,7 +1308,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
   std::vector<char> buffer;
   if (substituteFileName.empty()) {
-   if (!code->InitAsHandle(code_object)) {
+    if (!code->InitAsBuffer(reinterpret_cast<const void*>(code_object.handle),
+                            code_object_size)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
   } else {
@@ -1264,6 +1338,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     logger_ << "LoaderError: failed to determine code object's ISA\n";
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
+
+  // Kernel-entry trampolines (gfx125x). Disabled by default for gfx125x.
+  // Set LOADER_ENABLE_TRAMPOLINE=1 to enable (for testing only).
+  trampoline_enabled_gfx125x_ =
+      loaderOptions.TrampolineEnabled() && CodeObjectIsaIsGfx125Family(codeIsa);
+  kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
   if (!code->GetCodeObjectVersion(&majorVersion, &minorVersion)) {
@@ -1306,8 +1386,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   hsa_status_t status;
 
-  objects.push_back(new LoadedCodeObjectImpl(this, agent, code->ElfData(), code->ElfSize()));
-  loaded_code_objects.push_back((LoadedCodeObjectImpl*)objects.back());
+  objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
+  loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
   status = LoadSegments(agent, code.get(), majorVersion);
   if (status != HSA_STATUS_SUCCESS) return status;
@@ -1325,6 +1405,16 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   status = ApplyRelocations(agent, code.get());
   if (status != HSA_STATUS_SUCCESS) { return status; }
 
+  // Emit kernel-entry trampolines into the host shadow now that the image is
+  // final (post-relocation) and still unfrozen. The single Freeze DMA carries
+  // them to device along with the rewritten descriptors.
+  if (trampoline_enabled_gfx125x_ && !kd_fixups_.empty()) {
+    status = InstallTrampolinesGfx125x(agent);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+  }
+
   code.reset();
 
   if (loaderOptions.DumpAll()->is_set() || loaderOptions.DumpExec()->is_set()) {
@@ -1333,12 +1423,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  loaded_code_objects.back()->r_debug_info.l_addr = loaded_code_objects.back()->getDelta();
+  loaded_code_objects.back()->r_debug_info.l_addr = (decltype(link_map::l_addr))loaded_code_objects.back()->getDelta();
   loaded_code_objects.back()->r_debug_info.l_name = strdup(uri.c_str());
   loaded_code_objects.back()->r_debug_info.l_prev = nullptr;
   loaded_code_objects.back()->r_debug_info.l_next = nullptr;
 
-  if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back()); }
+  if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back().get()); }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1376,18 +1466,18 @@ hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
       AMD_ISA_ALIGN_BYTES, true);
   if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  Segment *load_segment = new Segment(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
+  std::shared_ptr<Segment> load_segment = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
       ptr, size, vaddr, c->DataSegment(0)->offset());
   if (!load_segment) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   hsa_status_t status = HSA_STATUS_SUCCESS;
   for (size_t i = 0; i < c->DataSegmentCount(); ++i) {
-    status = LoadSegmentV2(c->DataSegment(i), load_segment);
+    status = LoadSegmentV2(c->DataSegment(i), load_segment.get());
     if (status != HSA_STATUS_SUCCESS) return status;
   }
 
   objects.push_back(load_segment);
-  loaded_code_objects.back()->LoadedSegments().push_back(load_segment);
+  loaded_code_objects.back()->LoadedSegments().push_back(load_segment.get());
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1398,17 +1488,26 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
   if (s->memSize() == 0)
     return HSA_STATUS_SUCCESS;
   amdgpu_hsa_elf_segment_t segment = (amdgpu_hsa_elf_segment_t)(s->type() - PT_LOOS);
-  Segment *new_seg = nullptr;
+  std::shared_ptr<Segment> new_seg;
   bool need_alloc = true;
   if (segment == AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM && nullptr != program_allocation_segment) {
     new_seg = program_allocation_segment;
     need_alloc = false;
   }
   if (need_alloc) {
+    if (s->imageSize() > s->memSize()) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    // Reject a segment whose file contents cannot be sourced from within the
+    // backing image (crafted p_offset). See ROCM-26177 finding #1.
+    const char* segment_data = s->data();
+    if (s->imageSize() > 0 && segment_data == nullptr) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
-    new_seg = new Segment(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
-    new_seg->Copy(s->vaddr(), s->data(), s->imageSize());
+    new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
+    new_seg->Copy(s->vaddr(), segment_data, s->imageSize());
     objects.push_back(new_seg);
 
     if (segment == AMDGPU_HSA_SEGMENT_GLOBAL_PROGRAM) {
@@ -1416,16 +1515,97 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     }
   }
   assert(new_seg);
-  loaded_code_objects.back()->LoadedSegments().push_back(new_seg);
+  loaded_code_objects.back()->LoadedSegments().push_back(new_seg.get());
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
                                            loader::Segment *load_segment) {
   assert(data_segment && load_segment);
-  load_segment->Copy(data_segment->vaddr(), data_segment->data(),
+  if (data_segment->imageSize() > data_segment->memSize()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  // The combined code segment allocation is sized from the last data segment
+  // only (see LoadSegmentsV2). A crafted code object with non-monotonic,
+  // overlapping, or out-of-range p_vaddr values could otherwise drive the copy
+  // below past the end of that allocation (heap OOB write). Bound the copy
+  // destination [offset, offset + imageSize) against the allocation explicitly,
+  // since Segment::Offset() only asserts the start address and compiles out
+  // under NDEBUG. See ROCM-26177 finding #1.
+  const uint64_t seg_vaddr = data_segment->vaddr();
+  const uint64_t base_vaddr = load_segment->VAddr();
+  const size_t alloc_size = load_segment->Size();
+  if (seg_vaddr < base_vaddr) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  const uint64_t offset = seg_vaddr - base_vaddr;
+  if (offset > alloc_size ||
+      data_segment->imageSize() > alloc_size - offset) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // Reject a segment whose file contents cannot be sourced from within the
+  // backing image (crafted p_offset). See ROCM-26177 finding #1.
+  const char* segment_data = data_segment->data();
+  if (data_segment->imageSize() > 0 && segment_data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  load_segment->Copy(data_segment->vaddr(), segment_data,
                      data_segment->imageSize());
 
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ExecutableImpl::InstallTrampolinesGfx125x(hsa_agent_t agent) {
+  const size_t n = kd_fixups_.size();
+
+  // Size the trailing prefetch guard from the largest CP instruction-prefetch
+  // window among this pool's kernels (INST_PREF_SIZE lines * 128 B). The forward
+  // prefetch from the last stub reaches its_entry + INST_PREF_SIZE*128; since that
+  // stub's own slot (one stub stride) already lies inside the pool, only the
+  // remainder, (INST_PREF_SIZE*128 - stub_size), can spill past the pool and needs
+  // a guard. (Clamp to 0 when the window fits within a stub slot.)
+  uint32_t max_pref_lines = 0;
+  for (const auto& f : kd_fixups_) max_pref_lines = std::max(max_pref_lines, f.inst_pref);
+  const size_t pref_bytes = static_cast<size_t>(max_pref_lines) * kInstPrefUnitBytes;
+  const size_t guard = pref_bytes > kTrampolineStubStride ? pref_bytes - kTrampolineStubStride : 0;
+  const size_t pool = n * kTrampolineStubStride + guard;
+
+  // AMDGPU_HSA_SEGMENT_CODE_AGENT yields *executable* device memory: the loader
+  // context backs it with RegionMemory(..., is_code=true), which sets
+  // core::MemoryRegion::AllocateExecutable (see amd_loader_context.cpp).
+  void* ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, pool,
+                                     AMD_ISA_ALIGN_BYTES, /*zero=*/true);
+  if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // vaddr == 0: Address()/Copy() index by raw byte offset into the pool.
+  auto tramp = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT, ptr, pool,
+                                         /*vaddr=*/0, /*storage_offset=*/0);
+  objects.push_back(tramp);               // freed via Destroy() in ~ExecutableImpl
+  trampoline_segments_.push_back(tramp);  // frozen in ExecutableImpl::Freeze
+
+  for (size_t i = 0; i < n; ++i) {
+    const KdFixup& f = kd_fixups_[i];
+    const uint64_t stub_off = i * kTrampolineStubStride;
+    // Device addresses are valid pre-Freeze (RegionMemory::ptr_ is set at alloc).
+    const uint64_t kd_dev = reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr));
+    const uint64_t entry_dev =
+        reinterpret_cast<uint64_t>(f.code_seg->Address(f.kd_vaddr + f.entry_off));
+    const uint64_t stub_dev = reinterpret_cast<uint64_t>(tramp->Address(stub_off));
+
+    uint8_t blob[kTrampolineStubStride];
+    BuildTrampolineGfx1250(blob, entry_dev);    // stub jumps to the real entry
+    tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
+
+    // Redirect dispatch onto the stub: kernel_object(kd_dev) + new_off == stub.
+    int64_t new_off = static_cast<int64_t>(stub_dev) - static_cast<int64_t>(kd_dev);
+    f.code_seg->Copy(f.kd_vaddr + llvm::amdhsa::KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET, &new_off,
+                     sizeof(new_off));  // -> code host shadow
+  }
+
+  // The prefetch guard is left as the allocation's zero-fill (zero=true): it is
+  // committed and readable -- all the CP prefetch needs -- and is never executed.
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1471,11 +1651,22 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
   }
 
   uint64_t address = SymbolAddress(agent, sym);
-  SymbolImpl *symbol = nullptr;
+  std::shared_ptr<SymbolImpl> symbol;
   if (string_ends_with(sym->GetSymbolName(), ".kd")) {
     // V3.
     llvm::amdhsa::kernel_descriptor_t kd;
     sym->GetSection()->getData(sym->SectionOffset(), &kd, sizeof(kd));
+
+    if (trampoline_enabled_gfx125x_) {
+      // Record this descriptor; the trampoline is installed after relocations.
+      // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
+      // INST_PREF_SIZE = number of 128B I$ lines the CP prefetches ahead of the
+      // entry; captured here to size the trampoline's prefetch guard.
+      uint32_t inst_pref = AMDHSA_BITS_GET(
+          kd.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE);
+      kd_fixups_.push_back(
+          {SymbolSegment(agent, sym), sym->VAddr(), kd.kernel_code_entry_byte_offset, inst_pref});
+    }
 
     uint32_t kernarg_segment_size = kd.kernarg_size; // FIXME: If 0 then the compiler is not specifying the size.
     uint32_t kernarg_segment_alignment = 16;         // FIXME: Use the minumum HSA required alignment.
@@ -1486,7 +1677,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
 
     uint64_t size = sym->Size();
 
-    KernelSymbol *kernel_symbol = new KernelSymbol(true,
+    std::shared_ptr<KernelSymbol> kernel_symbol = std::make_shared<KernelSymbol>(true,
                                     sym->GetModuleName(),
                                     sym->GetSymbolName(),
                                     sym->Linkage(),
@@ -1502,7 +1693,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
                                     address);
     symbol = kernel_symbol;
   } else if (sym->IsVariableSymbol()) {
-    symbol = new VariableSymbol(true,
+    symbol = std::make_shared<VariableSymbol>(true,
                        sym->GetModuleName(),
                        sym->GetSymbolName(),
                        sym->Linkage(),
@@ -1537,7 +1728,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
         // calculate end of segment - symbol value.
         size = sym->GetSection()->size() - sym->SectionOffset();
       }
-      KernelSymbol *kernel_symbol = new KernelSymbol(true,
+      std::shared_ptr<KernelSymbol> kernel_symbol = std::make_shared<KernelSymbol>(true,
                                       sym->GetModuleName(),
                                       sym->GetSymbolName(),
                                       sym->Linkage(),
@@ -1615,7 +1806,7 @@ uint64_t ExecutableImpl::SymbolAddress(hsa_agent_t agent, elf::Symbol* sym)
 {
   elf::Section* sec = sym->section();
   if(!sec) { return NULL; }
-  
+
   Segment* seg = SectionSegment(agent, sec);
   uint64_t vaddr = sec->addr() + sym->value();
   return nullptr == seg ? 0 : (uint64_t) (uintptr_t) seg->Address(vaddr);
@@ -1958,6 +2149,13 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
     }
   }
 
+  // Trampoline pools are not part of any LoadedCodeObject's segment list
+  // (that must stay size==1 for v2+); freeze them explicitly so their host->device
+  // DMA and code-cache invalidation happen alongside the code segments.
+  for (auto& ts : trampoline_segments_) {
+    ts->Freeze();
+  }
+
   state_ = HSA_EXECUTABLE_STATE_FROZEN;
   return HSA_STATUS_SUCCESS;
 }
@@ -1970,7 +2168,7 @@ void ExecutableImpl::Print(std::ostream& out)
       << std::endl << std::endl;
   out << "Loaded Objects (total " << objects.size() << ")" << std::endl;
   size_t i = 0;
-  for (ExecutableObject* o : objects) {
+  for (const auto& o : objects) {
     out << "Loaded Object " << i++ << ": ";
     o->Print(out);
     out << std::endl;

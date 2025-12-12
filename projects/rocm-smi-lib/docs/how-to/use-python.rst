@@ -30,7 +30,7 @@ The SMI will report two "versions": the ``ROCM-SMI`` version and the ``ROCM-SMI-
 - ``ROCM-SMI`` version is the CLI/tool version number with commit ID appended after + sign.
 
 - ``ROCM-SMI-LIB`` version is the library package version number.
-  
+
 .. code-block:: shell-session
 
    ROCM-SMI version: 2.0.0+8e78352
@@ -192,13 +192,13 @@ The following is the output from the ``-h`` flag:
      --rasenable BLOCK ERRTYPE                                        Enable RAS for specified block and error type
      --rasdisable BLOCK ERRTYPE                                       Disable RAS for specified block and error type
      --rasinject BLOCK                                                Inject RAS poison for specified block (ONLY WORKS ON
-                                                                       UNSECURE BOARDS)
+                                                                       UNSECURED BOARDS)
 
    Reset options:
      -r, --resetclocks                                                Reset clocks and OverDrive to default
      --resetfans                                                      Reset fans to automatic (driver) control
      --resetprofile                                                   Reset Power Profile back to default
-     --resetpoweroverdrive                                            Set the maximum GPU power back to the device deafult
+     --resetpoweroverdrive                                            Set the maximum GPU power back to the device default
                                                                       state
      --resetxgmierr                                                   Reset XGMI error count
      --resetperfdeterminism                                           Disable performance determinism
@@ -219,7 +219,7 @@ Detailed option descriptions
 ============================
 
 --setextremum <[min or max] [sclk or mclk] [value in MHz to set to]>
-    Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.  
+    Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.
 
     .. code-block:: shell-session
 
@@ -287,7 +287,7 @@ Detailed option descriptions
 
 --setoverdrive, --setmemoverdrive <#>
     .. warning::
-      
+
        DEPRECATED IN NEWER KERNEL VERSIONS. Use ``--setslevel`` or ``--setmlevel`` instead.
 
     This sets the percentage above maximum for the max Performance Level.
@@ -432,6 +432,16 @@ Clock type descriptions
   This flag will attempt to reset the GPU for a specified device. This will invoke the GPU reset through
   the kernel debugfs file ``amdgpu_gpu_recover``. Note that GPU reset will not always work, depending on the
   manner in which the GPU is hung.
+
+  .. warning::
+
+   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+     GPU resets all GPUs in the same XGMI hive. Use ``rocm-smi --showtopo`` to find the XGMI link connected GPUs or check ``/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id`` to identify GPUs having the same hive id, before issuing a reset.
+
+   * Any process with an open ``/dev/kfd`` handle will be terminated when a GPU reset occurs,
+     even if that process is not using the GPU being reset. GPU isolation techniques using the
+     environment variables ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES`` do not
+     prevent this.
 
 --showdriverversion
   This flag will print out the AMDGPU module version for amdgpu-pro or ROCm kernels. For other kernels,

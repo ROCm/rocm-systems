@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "common_utility.h"
 
 
@@ -14,7 +14,7 @@ double CalcMedian(vector<double> scores)
 
 	if (size  % 2 == 0)
 		median = (scores[size / 2 - 1] + scores[size / 2]) / 2;
-	else 
+	else
 		median = scores[size / 2];
 
 	return median;
@@ -49,13 +49,13 @@ int CalcConcurrentQueues(vector<double> scores)
 {
     int num_of_concurrent_queues = 0;
     vector<double>execpted_exec_time_array;
-    
+
     for (int i=0; i<scores.size(); ++i)
     {
         execpted_exec_time_array.push_back(scores[0]/(1<<i));
     }
 
-   
+
    for (int i=0; i<scores.size(); ++i)
    {
 	   cout << "expected exe time = " << execpted_exec_time_array[i] << endl;

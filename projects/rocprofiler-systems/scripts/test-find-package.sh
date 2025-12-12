@@ -134,12 +134,12 @@ verbose-run cp -v -r ${EXAMPLE_DIR}/${EXAMPLE_NAME}/* ${SOURCE_DIR}/
 verbose-run pushd ${SOURCE_DIR}
 
 cat << EOF > CMakeLists.txt
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(test LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

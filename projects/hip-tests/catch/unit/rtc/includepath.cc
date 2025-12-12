@@ -17,7 +17,7 @@ static constexpr auto NUM_BLOCKS{32};
 // This test verifies hiprtc compilation by passing include path option using -I with spaces
 // before the path. eg: -I   ../ or -I /path/to/headers etc.
 
-TEST_CASE("Unit_hiprtc_includepath") {
+HIP_TEST_CASE(Unit_hiprtc_includepath) {
   using namespace std;
 
   string saxpy = "";

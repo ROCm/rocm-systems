@@ -1,28 +1,7 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
+import json
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -32,19 +11,18 @@ import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data, schema
+from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_log,
+    console_warning,
+    demarcate,
+)
+from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
-
-
-def load_sys_info(f: str) -> pd.DataFrame:
-    """
-    Load sys running info from csv file to a df.
-    """
-    return pd.read_csv(f)
 
 
 def load_panel_configs(
@@ -56,7 +34,7 @@ def load_panel_configs(
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
         for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file) as file:
+            with open(yaml_file, encoding="utf-8") as file:
                 config_yml = yaml.safe_load(file)
                 # metric key can be None due to some metric-
                 # tables not having any metrics
@@ -79,7 +57,7 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
     """
     config_path = Path(config_dir) / "profiling_config.yaml"
     try:
-        with open(config_path) as file:
+        with open(config_path, encoding="utf-8") as file:
             return yaml.safe_load(file) or {}
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
@@ -88,32 +66,30 @@ def load_profiling_config(config_dir: str) -> dict[str, Any]:
 
 @demarcate
 def create_df_kernel_top_stats(
-    df_in: dict[str, pd.DataFrame],
+    df_in: pd.DataFrame,
     raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
-    filter_nodes: Optional[str],
     time_unit: str,
     kernel_verbose: int,
     sortby: str = "sum",
-) -> None:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
+
+    Returns:
+        A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in["pmc_perf"].copy()
-
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
+    df = df_in.copy()
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
 
-    if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
-
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -133,8 +109,6 @@ def create_df_kernel_top_stats(
     dispatch_columns = ["Kernel_Name", "GPU_ID"]
     if "Dispatch_ID" in df.columns:
         dispatch_columns.insert(0, "Dispatch_ID")
-    if "Node" in df.columns:
-        dispatch_columns.insert(0, "Node")
 
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
@@ -206,9 +180,9 @@ def create_df_kernel_top_stats(
     if "Dispatch_ID" in df.columns:
         grouped = grouped.reset_index()
 
-    # Calculate percentage
+    # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
-    grouped["Pct"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
     #   Sort by total time as default.
     if sortby == "sum":
@@ -218,12 +192,101 @@ def create_df_kernel_top_stats(
         grouped = grouped.sort_values("Kernel_Name")
         grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
+    return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
+
+
+def build_agent_to_gpu_map_from_json(
+    agents: list[dict[str, Any]],
+) -> dict[int, int]:
+    """
+    Map agent ``id.handle`` values to 0-indexed GPU IDs.
+
+    GPU agents are identified by the rocprofiler-sdk agent ``type`` enum
+    value 2 in the ``agents`` array of ``ps_file_results.json``.  They are
+    sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
+    the second to GPU 1, etc.
+    """
+    rocprofiler_agent_type_gpu = 2
+    gpu_agents = sorted(
+        (agent for agent in agents if agent.get("type") == rocprofiler_agent_type_gpu),
+        key=lambda agent: agent["node_id"],
+    )
+    return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
+
+
+@demarcate
+def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
+    """
+    Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
+    record. Returns ``None`` if the file is absent or fails to parse (a
+    warning is logged in the latter case).
+
+    The json can be multiple GB: parse once here and pass the dict to every
+    PC sampling consumer instead of re-reading the file.
+    """
+    json_path = Path(workload_path) / "ps_file_results.json"
+    if not json_path.exists():
+        return None
+    try:
+        with json_path.open(encoding="utf-8") as json_file:
+            return json.load(json_file)["rocprofiler-sdk-tool"][0]
+    except (json.JSONDecodeError, KeyError, IndexError) as error:
+        console_warning(f"PC sampling: failed to parse {json_path}: {error}")
+        return None
+
+
+def process_pc_sampling_kernel_trace(
+    tool_data: Optional[dict[str, Any]],
+) -> pd.DataFrame:
+    """
+    Build kernel and dispatch info from the kernel dispatch records.
+
+    Used for PC-sampling-only runs where ``pmc_perf`` data is not
+    available.  Consumes a parsed ``rocprofiler-sdk-tool[0]`` dict
+    (see ``load_pc_sampling_results``): kernel dispatch buffer records for
+    timestamps and dispatch info, ``kernel_symbols`` for kernel names, and
+    ``agents`` for the GPU ID mapping.  Returns an empty frame when
+    *tool_data* is ``None`` (results json absent).
+    """
+    columns = [
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "GPU_ID",
+    ]
+    if tool_data is None:
+        console_warning("PC sampling results not found. Cannot build dispatch data.")
+        return pd.DataFrame(columns=columns)
+
+    dispatches = tool_data["buffer_records"]["kernel_dispatch"]
+    kernel_id_to_name = {
+        symbol["kernel_id"]: symbol["formatted_kernel_name"]
+        for symbol in tool_data["kernel_symbols"]
+    }
+    agent_to_gpu = build_agent_to_gpu_map_from_json(tool_data["agents"])
+
+    rows = [
+        {
+            "Dispatch_Id": dispatch["dispatch_info"]["dispatch_id"],
+            "Kernel_Name": kernel_id_to_name.get(
+                dispatch["dispatch_info"]["kernel_id"]
+            ),
+            "Start_Timestamp": dispatch["start_timestamp"],
+            "End_Timestamp": dispatch["end_timestamp"],
+            "GPU_ID": agent_to_gpu.get(
+                dispatch["dispatch_info"]["agent_id"]["handle"], 0
+            ),
+        }
+        for dispatch in dispatches
+    ]
+
+    return pd.DataFrame(rows, columns=columns)
+
 
 @demarcate
 def create_df_pmc(
-    raw_data_root_dir: str,
-    nodes: Optional[list[str]],
-    spatial_multiplexing: bool,
+    raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
     config_dict: dict[str, Any],
@@ -231,91 +294,25 @@ def create_df_pmc(
     """
     Load all raw pmc counters and join into one df.
     """
+    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    if not pmc_perf_path.is_file():
+        return pd.DataFrame()
 
-    def create_single_df_pmc(
-        raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
-    ) -> pd.DataFrame:
-        dfs: list[pd.DataFrame] = []
-        coll_levels: list[str] = []
+    df = pd.read_csv(pmc_perf_path)
 
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
+    if config_dict.get("format_rocprof_output") == "rocpd":
+        df = utils_analysis.process_rocpd_csv(df)
 
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    # Demangle original KernelNames
+    # Skip for Standalone Roofline with -1 to keep full kernel names
+    if kernel_verbose >= 0:
+        kernel_name_shortener(df, kernel_verbose)
 
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
+    utils_analysis.add_unit_counter(df)
 
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
-
-                # Demangle original KernelNames
-                kernel_name_shortener(tmp_df, kernel_verbose)
-
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
-
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
-
-        if not dfs:
-            return pd.DataFrame()
-
-        # TODO: double check the case if all tmp_df.shape[0] are not on the same page
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
-        if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {final_df.info}")
-        return final_df
-
-    root_path = Path(raw_data_root_dir)
-
-    # 1. spatial multiplexing case
-    if spatial_multiplexing:
-        dfs: list[pd.DataFrame] = []
-
-        for subdir in root_path.iterdir():
-            if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
-                )
-                if not new_df.empty:
-                    dfs.append(new_df)
-        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
-    # 2. regular single node case (nodes=None)
-    if nodes is None:
-        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
-
-    # 3. all nodes case (nodes=[])
-    if not nodes:
-        dfs: list[pd.DataFrame] = []
-
-        for subdir in root_path.iterdir():
-            if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
-                )
-                if not new_df.empty:
-                    dfs.append(new_df)
-        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
-    # 4. specified node list case (nodes=[...])
-    dfs: list[pd.DataFrame] = []
-
-    for node in nodes:
-        node_path = root_path / node
-        if node_path.exists():
-            new_df = create_single_df_pmc(str(node_path), node, kernel_verbose, verbose)
-            if not new_df.empty:
-                dfs.append(new_df)
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    if verbose >= 2:
+        console_debug(f"pmc_raw_data final_single_df {df.info}")
+    return df
 
 
 def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
@@ -365,7 +362,9 @@ def is_single_panel_config(
     archs, or one for each arch.
     """
     # If not single config, verify all supported archs have defined configs
-    arch_names = list(supported_archs.keys())
+    arch_names = {
+        canonical_config_arch(arch) or arch for arch in supported_archs.keys()
+    }
     root_path = Path(root_dir)
     arch_count = sum(1 for arch in arch_names if (root_path / arch).exists())
 
@@ -374,19 +373,6 @@ def is_single_panel_config(
     elif arch_count == len(arch_names):
         return False
     else:
-        console_error("Found multiple panel config sets but incomplete for all archs.")
-
-
-def find_1st_sub_dir(directory: str) -> Optional[str]:
-    """
-    Find the first sub dir in a directory
-    """
-    dir_path = Path(directory)
-    try:
-        # Iterate over entries in the directory
-        for entry in dir_path.iterdir():
-            if entry.is_dir():  # Check if it's a directory
-                return str(entry)
-        return None
-    except FileNotFoundError:
-        console_error(f'The directory "{directory}" does not exist.', exit=False)
+        console_warning(
+            "Found multiple panel config sets but incomplete for all archs."
+        )

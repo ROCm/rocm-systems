@@ -340,3 +340,115 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask) {
 
   return rsp->ret;
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtModelEnabled(bool* enable) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  // pre-silicon models are not supported in virtio mode
+  *enable = false;
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenSMI(HSAuint32 NodeId, int* fd) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  // not supported yet in virtio mode
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetXNACKMode(HSAint32 enable) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_query_info_rsp* rsp;
+  struct vhsakmt_ccmd_query_info_req req = {
+      .hdr = VHSAKMT_CCMD(QUERY_INFO, sizeof(struct vhsakmt_ccmd_query_info_req)),
+      .xnack_mode = enable,
+      .type = VHSAKMT_CCMD_QUERY_SET_XNACK_MODE,
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_query_info_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMAcquire(HSAuint32 PreferredNode) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_query_info_rsp* rsp;
+  struct vhsakmt_ccmd_query_info_req req = {
+      .hdr = VHSAKMT_CCMD(QUERY_INFO, sizeof(struct vhsakmt_ccmd_query_info_req)),
+      .NodeID = PreferredNode,
+      .type = VHSAKMT_CCMD_QUERY_SPM_ACQUIRE,
+  };
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_query_info_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMRelease(HSAuint32 PreferredNode) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_query_info_rsp* rsp;
+  struct vhsakmt_ccmd_query_info_req req = {
+      .hdr = VHSAKMT_CCMD(QUERY_INFO, sizeof(struct vhsakmt_ccmd_query_info_req)),
+      .NodeID = PreferredNode,
+      .type = VHSAKMT_CCMD_QUERY_SPM_RELEASE,
+  };
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_query_info_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode, HSAuint32 SizeInBytes,
+                                                HSAuint32* timeout, HSAuint32* SizeCopied,
+                                                void* DestMemoryAddress, bool* isSPMDataLoss) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  bool use_userptr = false;
+  struct vhsakmt_ccmd_query_info_rsp* rsp;
+  struct vhsakmt_ccmd_query_info_req req = {
+      .hdr = VHSAKMT_CCMD(QUERY_INFO, sizeof(struct vhsakmt_ccmd_query_info_req)),
+      .type = VHSAKMT_CCMD_QUERY_SPM_SET_DST_BUFFER,
+      .spm_set_dst_buffer_args = {
+          .PreferredNode = PreferredNode,
+          .SizeInBytes = SizeInBytes,
+          .timeout = *timeout,
+          .DestMemoryAddress = (uint64_t)DestMemoryAddress,
+      }};
+
+  bo = vhsakmt_find_bo_by_addr(dev, DestMemoryAddress);
+  if (!bo) {
+    use_userptr = true;
+    if (SizeInBytes > (dev->shmem_bo->size >> 2)) return HSAKMT_STATUS_INVALID_PARAMETER;
+  } else
+    req.spm_set_dst_buffer_args.res_id = bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_query_info_rsp) + SizeInBytes);
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  if (use_userptr) memcpy(DestMemoryAddress, rsp->payload, SizeInBytes);
+
+  *SizeCopied = rsp->spm_set_dst_buffer_rsp.SizeCopied;
+  *timeout = rsp->spm_set_dst_buffer_rsp.timeout;
+  *isSPMDataLoss = rsp->spm_set_dst_buffer_rsp.IsTileDataLoss;
+
+  return rsp->ret;
+}

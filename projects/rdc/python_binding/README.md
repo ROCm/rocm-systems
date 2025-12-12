@@ -24,7 +24,7 @@ Verify the plugin is running:
 
     $ curl localhost:5000
 
-In the managment computer, install the Prometheus from
+In the management computer, install the Prometheus from
 https://github.com/prometheus/prometheus
 
 Modify the file prometheus_targets.json to add the compute nodes running the plugin.

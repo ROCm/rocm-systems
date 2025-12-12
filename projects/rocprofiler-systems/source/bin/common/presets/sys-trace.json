@@ -1,0 +1,49 @@
+{
+    "domains": {
+        "rocm": {
+            "api_domains": {
+                "hip_compiler_api": {
+                    "enabled": true
+                },
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "hsa_api": {
+                    "enabled": true
+                },
+                "hsa_core_api": {
+                    "enabled": true
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                },
+                "rccl_api": {
+                    "enabled": true
+                },
+                "scratch_memory": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "tracing",
+        "cli_flag": "--sys-trace",
+        "description": "Comprehensive system API tracing: HIP API, HSA API, ROCTx, RCCL, memory operations, and kernel dispatches",
+        "name": "sys-trace",
+        "use_case": "Full system API visibility for debugging interactions between runtime layers"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "tracing": {
+        "enabled": true
+    }
+}

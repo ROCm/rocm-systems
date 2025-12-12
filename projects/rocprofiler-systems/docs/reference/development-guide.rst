@@ -49,10 +49,9 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-instrument <options> -- <command> <command-args>``
-* Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or
-  attach to process
-* Either opens the instrumentation target (for binary rewrite), launches the target and stops it
-  before it starts executing ``main``, or attaches to a running executable and pauses it
+* Allows the user to provide options specifying whether to perform runtime instrumentation, or use binary rewrite
+* Either opens the instrumentation target (for binary rewrite), or launches the target and stops it
+  before it starts executing ``main``
 * Finds all functions in the targets
 * Finds ``librocprof-sys-dl`` and locates the functions
 * Iterates over and instruments all the functions, provided they satisfy the
@@ -64,8 +63,8 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
   but it diverges after instrumentation is complete:
 
   * For a binary rewrite: it produces a new instrumented binary and exits
-  * For runtime instrumentation or attaching to a process: it instructs the application
-    to resume and then waits for it to exit
+  * For runtime instrumentation: it instructs the application to resume and
+    then waits for it to exit
 
 Libraries
 ========================================
@@ -327,14 +326,47 @@ Thread-data class
 
 Currently, most thread data is effectively stored in a static
 ``std::array<std::unique_ptr<T>, ROCPROFSYS_MAX_THREADS>`` instance.
-``ROCPROFSYS_MAX_THREADS`` is a value defined a compile-time and set to ``2048``
-for release builds. During finalization,
+``ROCPROFSYS_MAX_THREADS`` is a value defined at compile-time for release builds. During finalization,
 ROCm Systems Profiler iterates through the thread-data and transforms that data
 into something that can be passed along to Perfetto and/or Timemory.
-The downside of the current model is that if the user exceeds ``ROCPROFSYS_MAX_THREADS``,
-a segmentation fault occurs. To fix this issue,
-a new model is being adopted which has all the benefits of this model
-but permits dynamic expansion.
+In the current model, if the user exceeds ``ROCPROFSYS_MAX_THREADS`` at runtime,
+thread creation fails gracefully with a warning message, excess threads operate with thread-local fallback,
+and profiling is skipped and not persisted to output files for threads beyond ``ROCPROFSYS_MAX_THREADS``.
+To support truly dynamic thread limits without compile-time constraints, a new model is being adopted which
+has all the benefits of static allocation but permits dynamic expansion beyond ``ROCPROFSYS_MAX_THREADS``.
+Currently, the thread limit can be increased at compile-time using the ``ROCPROFSYS_MAX_THREADS`` CMake configuration option.
+
+Configuring thread limits
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
+
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``128`` if nproc < 8, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
+
+This setting controls:
+
+* Thread ID manager capacity (maximum thread IDs that can be tracked)
+* Storage array sizes for thread-local data across the codebase
+* Timemory's internal thread storage (``TIMEMORY_MAX_THREADS``)
+
+**Build-time validation:**
+
+CMake enforces that ``ROCPROFSYS_MAX_THREADS`` must be a power of 2:
+
+.. code-block:: cmake
+
+   # Valid: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ... any power of 2
+   # Invalid: 100, 3000, 5000, 10000, ... (FATAL_ERROR)
+
+**Example: Building with custom thread limit**
+
+.. code-block:: shell
+
+   # Build with support for 8192 threads
+   cmake -B build \
+         -DROCPROFSYS_MAX_THREADS=8192 \
+         ..
+   cmake --build build
 
 Sampling model
 ========================================

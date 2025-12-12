@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 # ROCclr abstracts the usage of multiple AMD compilers and runtimes.
 # It is possible to support multiple backends concurrently in the same binary.
@@ -45,10 +29,15 @@ set(ROCCLR_INCLUDE_DIR "${ROCCLR_SRC_DIR}/include" PARENT_SCOPE)
 mark_as_advanced(ROCCLR_INCLUDE_DIR)
 
 set_target_properties(rocclr PROPERTIES
-    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
+
+if(WIN32)
+  set_target_properties(rocclr PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(rocclr PROPERTIES CXX_STANDARD 17)
+endif()
 
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/compiler/lib/utils/options.cpp
@@ -104,7 +93,10 @@ if(WIN32)
   target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/platform/interop_d3d9.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d10.cpp
-  ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
+  ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocd3d10interop.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocd3d11interop.cpp)
+  target_link_libraries(rocclr PRIVATE dxguid.lib)
   target_compile_definitions(rocclr PUBLIC ATI_OS_WIN)
 else()
   target_compile_definitions(rocclr PUBLIC ATI_OS_LINUX)

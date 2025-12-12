@@ -1,0 +1,53 @@
+# AMD Infinity Storage C/C++ clang-format file
+#
+# For v18 formatting options:
+#   https://releases.llvm.org/18.1.6/tools/clang/docs/ClangFormatStyleOptions.html
+
+BasedOnStyle: LLVM
+
+AccessModifierOffset: -4
+
+AlignConsecutiveAssignments:  Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros:       Consecutive
+
+AllowShortFunctionsOnASingleLine:    None
+AllowShortIfStatementsOnASingleLine: Never
+
+AlwaysBreakAfterReturnType: TopLevelDefinitions
+
+BraceWrapping:
+  BeforeCatch: true
+  BeforeElse:  true
+
+BreakBeforeBraces: Stroustrup
+
+BreakStringLiterals: true
+
+ColumnLimit:     110
+
+FixNamespaceComments: false
+
+IndentAccessModifiers: false
+IndentCaseLabels:      true
+IndentGotoLabels:      false
+IndentWidth:           4
+
+NamespaceIndentation: Inner
+
+PointerAlignment: Right
+
+ReflowComments: true
+
+SortIncludes: false
+
+StatementMacros:
+  - HIPFILE_WARN_FORMAT_NONLITERAL_OFF
+  - HIPFILE_WARN_FORMAT_NONLITERAL_ON
+  - HIPFILE_WARN_NO_EXIT_DTOR_OFF
+  - HIPFILE_WARN_NO_EXIT_DTOR_ON
+  - HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
+  - HIPFILE_WARN_NO_GLOBAL_CTOR_ON
+
+TabWidth: 4
+UseTab:   Never

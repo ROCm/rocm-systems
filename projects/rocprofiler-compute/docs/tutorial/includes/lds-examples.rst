@@ -5,7 +5,7 @@ LDS examples
 
 For this example, consider the
 :dev-sample:`LDS sample <lds.hip>` distributed as a part of ROCm Compute Profiler. This
-code contains two kernels to explore how both :doc:`LDS </conceptual/local-data-share>` bandwidth and
+code contains two kernels to explore how both :doc:`LDS </conceptual/cdna/local-data-share>` bandwidth and
 bank conflicts are calculated in ROCm Compute Profiler.
 
 This example was compiled and run on an MI250 accelerator using ROCm
@@ -46,7 +46,7 @@ kernel:
 
 Here we:
 
-* Create an array of 256 integers in :doc:`LDS </conceptual/local-data-share>`
+* Create an array of 256 integers in :doc:`LDS </conceptual/cdna/local-data-share>`
 
 * Fake a write to the LDS using the ``flag`` variable (always set to zero on the
   host) to avoid dead-code elimination
@@ -143,7 +143,7 @@ kernel:
 
 Here we:
 
-* Allocate an :doc:`LDS </conceptual/local-data-share>` array of size
+* Allocate an :doc:`LDS </conceptual/cdna/local-data-share>` array of size
   :math:`32*256*4{B}=32{KiB}`
 
 * Fake a write to the LDS using the ``flag``
@@ -187,7 +187,7 @@ see:
 
 In our :ref:`previous example <lds-bank-conflicts>`, we showed how a load
 from a single work-item is considered to have a theoretical bandwidth of
-256B. Recall, the :doc:`LDS </conceptual/local-data-share>` can load up to :math:`128B` per
+256B. Recall, the :doc:`LDS </conceptual/cdna/local-data-share>` can load up to :math:`128B` per
 cycle (i.e, 32 banks x 4B / bank / cycle). Hence, we see that loading an 4B
 integer spends two cycles accessing the LDS
 (:math:`2\ {cycle} = (256B) / (128\ B/{cycle})`).
@@ -223,7 +223,7 @@ such that each work-item we add to the dispatch results in another bank
 conflict!
 
 Recalling our discussion of bank conflicts in our
-:doc:`LDS </conceptual/local-data-share>` description:
+:doc:`LDS </conceptual/cdna/local-data-share>` description:
 
 A bank conflict occurs when two (or more) work-items in a wavefront
 want to read, write, or atomically update different addresses that

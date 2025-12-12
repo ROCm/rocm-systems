@@ -49,11 +49,11 @@ class KFDExceptionTest : public KFDBaseComponentTest {
         }
     }
 
-    friend void AddressFault(KFDTEST_PARAMETERS* pTestParamters);
-    friend void PermissionFault(KFDTEST_PARAMETERS* pTestParamters);
-    friend void PermissionFaultUserPointer(KFDTEST_PARAMETERS* pTestParamters);
-    friend void FaultStorm(KFDTEST_PARAMETERS* pTestParamters);
-    friend void SdmaQueueException(KFDTEST_PARAMETERS* pTestParamters);
+    void AddressFault(int gpuNode);
+    void PermissionFault(int gpuNode);
+    void PermissionFaultUserPointer(int gpuNode);
+    void FaultStorm(int gpuNode);
+    void SdmaQueueException(int gpuNode);
 
  protected:
     virtual void SetUp();

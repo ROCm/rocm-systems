@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -45,6 +31,16 @@
 #define ROCCLR_MEM_PHYMEM (1u << 25)
 #define ROCCLR_MEM_HSA_CONTIGUOUS (1u << 24)
 #define ROCCLR_MEM_IO_MEMORY (1u << 23)
+
+//! Host-NUMA VMM encoding in the upper 32 bits of the 64-bit cl_svm_mem_flags.
+//! The low 32 bits hold the existing CL_MEM_*/ROCCLR_MEM_* flags; host-NUMA VMM
+//! allocations pack a marker plus the target NUMA node here so the node reaches
+//! roc::Memory::create without changing the svmAlloc/malloc signatures.
+//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 1); a stored
+//! value of 0 means "resolve current node" (HostNumaCurrent).
+#define ROCCLR_MEM_HOST_NUMA (1ull << 32)
+#define ROCCLR_MEM_HOST_NUMA_NODE_SHIFT 33
+#define ROCCLR_MEM_HOST_NUMA_NODE_MASK (0x7FFFull << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT)
 
 namespace amd::device {
 class Memory;
@@ -146,14 +142,26 @@ class Memory : public amd::RuntimeObject {
     kArenaMemoryPtr = 0x100,
   };
 
+  //<! Enum for Handle type for vmm
+  enum HandleType : uint32_t {
+      kHandleNone      = 0x0,
+      kHandlePosixFD   = 0x1,
+      kHandleWin32     = 0x2,
+      kHandleWin32Kmt  = 0x4,
+      kHandleFabric    = 0x8
+  };
+
   struct UserData {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
         0;  //!< The type of the location (i.e. device or host) memory is allocated on
+    //!< NUMA node for host-NUMA VMM allocations; -1 means default/current node or N/A
+    int numaNode = -1;
     void* data = nullptr;                  //!< Opaque user data from CL or HIP or etc.
     amd::Memory* phys_mem_obj = nullptr;   //<! Physical mem obj, only set on virtual mem
     amd::Memory* vaddr_mem_obj = nullptr;  //<! Virtual address mem obj, only set on virtual mem
     uint64_t hsa_handle = 0;               //!< Opaque hsa handle saved for Virtual memories
+    HandleType hsa_handle_type = kHandleNone; //!<Handle type for VMM
     unsigned int flags = 0;                //!< HIP memory flags
     //! hipMallocPitch allocates buffer using width & height and returns pitch & device pointer.
     //! Since device pointer is void*, It looses the values of width & height used for allocation.
@@ -209,6 +217,7 @@ class Memory : public amd::RuntimeObject {
       uint32_t canBeCached_ : 1;       //!< flag to if the object can be cached
       uint32_t p2pAccess_ : 1;         //!< Memory object allows P2P access
       uint32_t ipcShared_ : 1;         //!< Memory shared between processes
+      uint32_t vmmImported_ : 1;       //!< VMM buffer whose physical memory may be on another device
       uint32_t largeBarSystem_ : 1;    //!< VRAM is visiable for host
       uint32_t image_view_ : 1;        //!< Memory object is an image view
     };
@@ -226,7 +235,7 @@ class Memory : public amd::RuntimeObject {
   //! Disable default copy operator
   Memory(const Memory&);
 
-  Monitor lockMemoryOps_;         //!< Lock to serialize memory operations
+  std::recursive_mutex lockMemoryOps_;  //!< Lock to serialize memory operations
   std::set<Memory*> subBuffers_;  //!< List of all subbuffers for this memory object
   device::Memory* svmBase_;       //!< svmBase allocation for MGPU case
   size_t alignment_ = 0;          //!< alignment for allocation address
@@ -278,7 +287,7 @@ class Memory : public amd::RuntimeObject {
   );
 
   //! Returns the memory lock object
-  amd::Monitor& lockMemoryOps() { return lockMemoryOps_; }
+  std::recursive_mutex& lockMemoryOps() { return lockMemoryOps_; }
 
   //! Adds a view into the list
   void addSubBuffer(Memory* item);
@@ -412,6 +421,11 @@ class Memory : public amd::RuntimeObject {
   void setIpcShared(bool ipcShared) { ipcShared_ = ipcShared; }
   //! Check if this object allows IPC
   bool ipcShared() const { return ipcShared_; }
+
+  //! Set vmmImported status (VMM buffer backed by imported physical memory)
+  void setVmmImported(bool vmmImported) { vmmImported_ = vmmImported; }
+  //! Check if this VMM buffer's physical memory may reside on another device
+  bool vmmImported() const { return vmmImported_; }
 
   //! Returns the base device memory object for possible P2P access
   device::Memory* BaseP2PMemory() const { return deviceMemories_[0].value_; }
@@ -660,10 +674,10 @@ class Image : public Memory {
   //! Returns image's slice pitch in bytes
   size_t getSlicePitch() const { return impl_.sp_; }
 
-  //! Returns image's slice pitch in bytes
+  //! Returns image's mipmap levels
   uint getMipLevels() const { return mipLevels_; }
 
-  //! Returns image's slice pitch in bytes
+  //! Returns image's mipmap base level
   uint getBaseMipLevel() const { return baseMipLevel_; }
 
   //! Get the image covered region
@@ -696,7 +710,7 @@ class SvmBuffer : AllStatic {
   static bool Contains(uintptr_t ptr);
 
   static std::map<uintptr_t, uintptr_t> Allocated_;  // !< Allocated buffers
-  static Monitor AllocatedLock_;
+  static std::recursive_mutex AllocatedLock_;
 };
 
 class ArenaMemory : public Buffer {

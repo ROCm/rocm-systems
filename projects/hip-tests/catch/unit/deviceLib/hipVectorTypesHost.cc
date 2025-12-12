@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip/hip_vector_types.h>
 
@@ -92,41 +80,41 @@ template <typename V> bool TestVectorType() {
   V f1 = MakeVector<V>(1);
   V f2 = MakeVector<V>(1);
   V f3 = f1 + f2;
-  REQUIRE(f3 == v2);
+  REQUIRE((f3 == v2));
   f2 = f3 - f1;
-  REQUIRE(f2 == v1);
+  REQUIRE((f2 == v1));
   f1 = f2 * f3;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f2 = f1 / f3;
-  REQUIRE(f2 == v1);
+  REQUIRE((f2 == v1));
   integer_binary_tests(f1, f2, f3);
 
   f1 = MakeVector<V>(2);
   f2 = MakeVector<V>(1);
   f1 += f2;
-  REQUIRE(f1 == v3);
+  REQUIRE((f1 == v3));
   f1 -= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f1 *= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
   f1 /= f2;
-  REQUIRE(f1 == v2);
+  REQUIRE((f1 == v2));
 
   integer_unary_tests(f1, f2);
 
   f1 = v2;
   f2 = f1++;
-  REQUIRE(f1 == v3);
-  REQUIRE(f2 == v2);
+  REQUIRE((f1 == v3));
+  REQUIRE((f2 == v2));
   f2 = f1--;
-  REQUIRE(f2 == v3);
-  REQUIRE(f1 == v2);
+  REQUIRE((f2 == v3));
+  REQUIRE((f1 == v2));
   f2 = ++f1;
-  REQUIRE(f1 == v3);
-  REQUIRE(f2 == v3);
+  REQUIRE((f1 == v3));
+  REQUIRE((f2 == v3));
   f2 = --f1;
-  REQUIRE(f1 == v2);
-  REQUIRE(f2 == v2);
+  REQUIRE((f1 == v2));
+  REQUIRE((f2 == v2));
 
   REQUIRE(constructor_tests<V>() == true);
 
@@ -134,7 +122,7 @@ template <typename V> bool TestVectorType() {
   f2 = v4;
   f3 = v3;
   REQUIRE(!(f1 == f2));
-  REQUIRE(f1 != f2);
+  REQUIRE((f1 != f2));
 
   using T = typename V::value_type;
 
@@ -174,7 +162,7 @@ bool CheckVectorTypes() {
                          ulonglong2, ulonglong3, ulonglong4, float1, float2, float3, float4,
                          double1, double2, double3, double4>();
 }
-TEST_CASE("Unit_hipVectorTypes_test_on_host") {
+HIP_TEST_CASE(Unit_hipVectorTypes_test_on_host) {
   REQUIRE(sizeof(float1) == 4);
   REQUIRE(sizeof(float2) >= 8);
   REQUIRE(sizeof(float3) == 12);

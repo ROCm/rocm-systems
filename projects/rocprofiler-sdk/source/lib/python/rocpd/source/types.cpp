@@ -66,6 +66,16 @@ agent::load_extdata()
             extdata, [](auto& _ar, base_type& _base) { cereal::load(_ar, _base); }, base());
 }
 
+event::decoded_extdata
+event::get_extdata() const
+{
+    auto _msg = decoded_extdata{};
+    if(has_extdata())
+        common::read_json_string(
+            extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
+    return _msg;
+}
+
 region::decoded_extdata
 region::get_extdata() const
 {
@@ -85,5 +95,6 @@ sample::get_extdata() const
             extdata, [](auto& ar, auto& msg) { cereal::load(ar, msg); }, _msg);
     return _msg;
 }
+
 }  // namespace types
 }  // namespace rocpd

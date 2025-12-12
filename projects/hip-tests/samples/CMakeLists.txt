@@ -1,23 +1,8 @@
 
-# Copyright (c) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.16.8)
 project(hip-samples)
 
@@ -49,12 +34,27 @@ endif()
 
 # both are not set
 if(NOT DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
-    set(HIP_PATH "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm")
+    if(WIN32)
+        # On Windows, default to HIP_PATH from environment or fail
+        if(DEFINED ENV{HIP_PATH})
+            set(HIP_PATH $ENV{HIP_PATH} CACHE STRING "HIP Path")
+            set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
+        else()
+            message(FATAL_ERROR "HIP_PATH environment variable not set. Please set HIP_PATH to your ROCm installation.")
+        endif()
+    else()
+        set(HIP_PATH "/opt/rocm")
+        set(ROCM_PATH "/opt/rocm")
+    endif()
 elseif(DEFINED HIP_PATH AND NOT DEFINED ROCM_PATH)
-    execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --rocmpath
-                OUTPUT_VARIABLE ROCM_PATH
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(WIN32)
+        # On Windows, ROCM_PATH is typically the same as HIP_PATH
+        set(ROCM_PATH ${HIP_PATH} CACHE STRING "ROCM Path")
+    else()
+        execute_process(COMMAND ${HIP_PATH}/bin/${HIPCONFIG_EXEC} --rocmpath
+                    OUTPUT_VARIABLE ROCM_PATH
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
 elseif(DEFINED ROCM_PATH AND NOT DEFINED HIP_PATH)
     set(HIP_PATH ${ROCM_PATH})
 endif()

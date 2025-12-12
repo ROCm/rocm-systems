@@ -1,0 +1,66 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_info_pmc",
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for RCCL Comm PMC descriptions (Send or Recv)",
+                    "error_message": "Did not find any RCCL Comm PMC descriptions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'RCCL Comm%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that RCCL PMCs have valid agent_id",
+                    "error_message": "Found RCCL PMCs with NULL agent_id",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'RCCL Comm%' AND agent_id IS NOT NULL"
+                }
+            ]
+        },
+        {
+            "min_rows": 1,
+            "name_prefix": "rocpd_pmc_event",
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value",
+                "extdata"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check for RCCL Comm events (Send or Recv)",
+                    "error_message": "No RCCL Comm events found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'RCCL Comm%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that RCCL events have transfer_bytes in extdata",
+                    "error_message": "RCCL events missing transfer_bytes in extdata",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'RCCL Comm%' AND event.extdata LIKE '%transfer_bytes%'"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that RCCL events have positive cumulative values",
+                    "error_message": "RCCL events have no positive cumulative values",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'RCCL Comm%' AND event.value > 0"
+                }
+            ]
+        }
+    ]
+}

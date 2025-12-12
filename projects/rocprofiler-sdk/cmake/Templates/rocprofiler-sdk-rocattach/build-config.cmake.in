@@ -1,0 +1,9 @@
+# Config file for @PACKAGE_NAME@ and its component libraries in the build tree
+#
+
+list(APPEND @PACKAGE_NAME@_INCLUDE_DIR @CMAKE_BINARY_DIR@/source/include)
+
+foreach(COMP @PROJECT_BUILD_TREE_TARGETS@)
+    list(APPEND @PACKAGE_NAME@_LIBRARIES ${COMP})
+    target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${COMP})
+endforeach()

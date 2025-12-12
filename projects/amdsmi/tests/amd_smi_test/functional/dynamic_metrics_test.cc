@@ -27,6 +27,7 @@
 #include <fstream>
 #include <vector>
 
+#include "../test_common.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 
 namespace amd::smi {
@@ -59,16 +60,26 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
   } else {  // GPU metrics
     if (major == 1) {
       switch (minor) {
-        case 0: return Flag::kGpuMetricNone;
-        case 1: return Flag::kGpuMetricV11;
-        case 2: return Flag::kGpuMetricV12;
-        case 3: return Flag::kGpuMetricV13;
-        case 4: return Flag::kGpuMetricV14;
-        case 5: return Flag::kGpuMetricV15;
-        case 6: return Flag::kGpuMetricV16;
-        case 7: return Flag::kGpuMetricV17;
-        case 8: return Flag::kGpuMetricV18;
-        default: return Flag::kGpuMetricDynV19Plus;
+        case 0:
+          return Flag::kGpuMetricV10;
+        case 1:
+          return Flag::kGpuMetricV11;
+        case 2:
+          return Flag::kGpuMetricV12;
+        case 3:
+          return Flag::kGpuMetricV13;
+        case 4:
+          return Flag::kGpuMetricV14;
+        case 5:
+          return Flag::kGpuMetricV15;
+        case 6:
+          return Flag::kGpuMetricV16;
+        case 7:
+          return Flag::kGpuMetricV17;
+        case 8:
+          return Flag::kGpuMetricV18;
+        default:
+          return Flag::kGpuMetricDynV19Plus;
       }
     }
   }
@@ -76,8 +87,7 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
 }
 
 // pass a header we want to test against
-auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header)
-  -> std::vector<uint8_t> {
+auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std::vector<uint8_t> {
   if (new_header.m_structure_size < sizeof(new_header)) {
     throw std::runtime_error("Header size too small");
   }
@@ -107,13 +117,14 @@ auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
 }  // namespace
 
 TEST(AmdSmiDynamicMetricTest, GPUMetricDynamicVersionSupported) {
+  PRINT_VERBOSITY();
   const bool is_partition_metrics = false;
   for (auto ver : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}) {
     std::string test_detail = "[GPUMetric";
     if (ver >= 9) {
       test_detail += "Dynamic] ";
     } else {
-      test_detail += "] ";
+      test_detail += "Static] ";
     }
     std::cout << test_detail << "Checking version 1." << ver << std::endl;
     SCOPED_TRACE(testing::Message() << "Subtest for minor version: 1." << ver);
@@ -129,23 +140,17 @@ TEST(AmdSmiDynamicMetricTest, GPUMetricDynamicVersionSupported) {
     ASSERT_TRUE(std::filesystem::exists(fake_path));
 
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
-
     const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
                                                                  fake_path.string());
-
-    EXPECT_EQ(flag, GetExpectedMetricVersionFlag(1, ver, is_partition_metrics))
+    EXPECT_EQ(flag,
+              GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
         << "Version 1." << ver << " should be treated as supported";
 
     auto gpu_metrics_ptr =
         amd::smi::amdgpu_metrics_factory(flag, is_partition_metrics, fake_path.string());
+    EXPECT_NE(gpu_metrics_ptr, nullptr)
+        << "Factory must create metrics object for supported version";
 
-    if (ver != 0) {
-      EXPECT_NE(gpu_metrics_ptr, nullptr)
-          << "Factory must create metrics object for supported version";
-    } else {
-      EXPECT_EQ(gpu_metrics_ptr, nullptr)
-          << "Factory must not create metrics object for unsupported versions";
-    }
     if (gpu_metrics_ptr) {
       std::cout << test_detail << "Created valid object for version 1." << ver << std::endl;
     } else {
@@ -158,13 +163,14 @@ TEST(AmdSmiDynamicMetricTest, GPUMetricDynamicVersionSupported) {
 }
 
 TEST(AmdSmiDynamicMetricTest, XCPMetricDynamicVersionSupported) {
+  PRINT_VERBOSITY();
   const bool is_partition_metrics = true;
   for (auto ver : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}) {
     std::string test_detail = "[XCPMetric";
     if (ver >= 1) {
       test_detail += "Dynamic] ";
     } else {
-      test_detail += "] ";
+      test_detail += "Static] ";
     }
     std::cout << test_detail << "Checking version 1." << ver << std::endl;
     SCOPED_TRACE(testing::Message() << "Subtest for minor version: 1." << ver);
@@ -180,18 +186,17 @@ TEST(AmdSmiDynamicMetricTest, XCPMetricDynamicVersionSupported) {
     ASSERT_TRUE(std::filesystem::exists(fake_path));
 
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
-
     const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
                                                                  fake_path.string());
-
-    EXPECT_EQ(flag, GetExpectedMetricVersionFlag(1, ver, is_partition_metrics))
+    EXPECT_EQ(flag,
+              GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
         << "Version 1." << ver << " should be treated as supported";
 
     auto xcp_metrics_ptr =
         amd::smi::amdgpu_metrics_factory(flag, is_partition_metrics, fake_path.string());
-
     EXPECT_NE(xcp_metrics_ptr, nullptr)
         << "Factory must create metrics object for supported version";
+
     if (xcp_metrics_ptr) {
       std::cout << test_detail << "Created valid object for version 1." << ver << std::endl;
     } else {

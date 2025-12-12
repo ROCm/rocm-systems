@@ -1,0 +1,133 @@
+name: update_CI_image
+run-name: Update latest hipFile CI image
+
+env:
+  AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
+
+on:
+  pull_request_target: # A.K.A. This is a privileged action. See `pull_request`.
+    types:
+      - closed # CAUTION: Includes un-merged PRs
+    branches:
+      - develop
+    paths:
+      - projects/hipfile/util/docker/**
+      - projects/hipfile/util/files-changed.sh
+      - .github/workflows/hipfile-image-build.yml
+      - .github/workflows/hipfile-image-update.yml
+  workflow_dispatch:
+    # Requires write access to trigger
+    inputs:
+      pull_from_cache:
+        description: Build image with 'latest' cache
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+
+  update_AIS_CI_image:
+    env:
+      AIS_CI_IMAGE_NAME: ais_ci_${{ matrix.supported_platforms }}
+      AIS_INPUT_PLATFORM: ${{ matrix.supported_platforms }}
+    if: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
+    runs-on: [ubuntu-24.04]
+    container: docker:28.5
+    # NOTE: nightly is intentionally absent here. This job refreshes the static
+    # latest-rocm<ver> images post-merge, but the nightly target moves daily, so
+    # nightly images are refreshed by hipfile-image-update-nightly.yml (daily and
+    # on Dockerfile-change merge) instead. Keep this matrix in sync with
+    # hipfile-ci-toplevel.yml's SUPPORTED_PLATFORMS/ROCM_VERSIONS/MATRIX_EXCLUDE
+    # (and MATRIX_INCLUDE if used) for the non-nightly rows.
+    strategy:
+      matrix:
+        supported_platforms:
+          - rocky
+          - rocky8
+          - suse
+          - ubuntu
+        rocm_versions:
+          - 7.2.2
+        include:
+          - supported_platforms: ubuntu
+            rocm_versions: 7.13.0
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+
+      - name: Authenticating to GitHub Container Registry.
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set target AIS CI Image
+        id: ci-image
+        run: |
+          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${{ matrix.rocm_versions }}"
+          echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${{ matrix.rocm_versions }}-nvidia"
+          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
+
+      - name: Set Docker Cache Instruction
+        id: use-cache
+        # If triggered by a pull_request, pull_from_cache will be null. Note
+        # however `false == null` resolves to `true`. Use empty string to check
+        # for 'null'.
+        # See: https://docs.github.com/en/actions/reference/workflows-and-actions/expressions
+        # for how null gets converted when compared to non-null, and converted into a string.
+        run: |
+          echo "CACHE_FROM_CMD=${{
+            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
+            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE) ||
+            ''
+          }}" >> "${GITHUB_OUTPUT}"
+          echo "CACHE_FROM_CMD_NVIDIA=${{
+            ( format('{0}', inputs.pull_from_cache) == '' || inputs.pull_from_cache ) &&
+            format('--cache-from=type=registry,ref=\"{0}-cache\"', steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA) ||
+            ''
+          }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Docker Builder
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          name: ais-builder
+          driver: docker-container
+          cache-binary: false # True uses the GHA Cache Backend
+
+      - name: Build & Push latest base image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target base \
+            --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
+            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}-cache" \
+            ${{ steps.use-cache.outputs.CACHE_FROM_CMD }} \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
+
+      - name: Build & Push latest NVIDIA image for AIS CI
+        run: |
+          docker buildx build \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            --target nvidia \
+            --build-arg ROCM_VERSION=${{ matrix.rocm_versions }} \
+            --cache-to=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}-cache" \
+            ${{ steps.use-cache.outputs.CACHE_FROM_CMD_NVIDIA }} \
+            --push \
+            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

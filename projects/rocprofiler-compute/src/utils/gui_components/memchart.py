@@ -1,36 +1,14 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
-from typing import Any
+from typing import Any, Optional, Union
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
 from utils import schema
 from utils.logger import console_error
-from utils.utils import format_scientific_notation_if_needed
+from utils.utils_common import format_scientific_notation_if_needed
 
 # Constants for display formatting
 DEFAULT_MAX_LENGTH = 6
@@ -39,10 +17,14 @@ DEFAULT_SCIENTIFIC_WIDTH = 8
 
 
 def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> G:
+    if not mem_data:
+        return G()
     if len(mem_data) != 1:
         console_error("Memory Chart config doesn't follow expected formatting")
 
     table_config = mem_data[0]["metric_table"]
+    if table_config["id"] not in base_data.dfs:
+        return G()
     original_df = base_data.dfs[table_config["id"]]
     display_columns = original_df.columns.values.tolist().copy()
     display_df = original_df[display_columns]
@@ -109,10 +91,10 @@ def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload
             Text(
                 x="386",
                 y="196",
-                id="mfma",
+                id="matrix_ops",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values.get("MFMA")),
+                children=format_value_for_display(memchart_values.get("Matrix Ops")),
             ),
             Text(
                 x="386",
@@ -1440,7 +1422,7 @@ def get_memchart(
                                                 fill="rgb(0, 0, 0)",
                                                 fontSize="12px",
                                                 textAnchor="end",
-                                                children="MFMA:",
+                                                children="Matrix Ops:",
                                             ),
                                             Text(
                                                 x="360",
@@ -2047,7 +2029,9 @@ def get_memchart(
     )
 
 
-def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:  # noqa: ANN401
+def format_value_for_display(
+    value: Optional[Union[int, float, str]], max_length: int = DEFAULT_MAX_LENGTH
+) -> str:
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 

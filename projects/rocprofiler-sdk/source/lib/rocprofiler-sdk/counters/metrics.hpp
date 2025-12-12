@@ -30,6 +30,7 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -106,8 +107,6 @@ loadMetrics(bool reload = false, std::optional<ArchMetric> add_metric = std::nul
 
 /**
  * Get the metrics that apply to a specific agent.
- * The returned metrics will have counter IDs that are unique per agent
- * (encoding both base metric ID and agent's logical_node_id).
  */
 std::vector<Metric>
 getMetricsForAgent(const rocprofiler_agent_t* agent);
@@ -130,6 +129,9 @@ checkValidMetric(const std::string& agent, const Metric& metric);
  */
 rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
+
+bool
+has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id);
 }  // namespace counters
 }  // namespace rocprofiler
 

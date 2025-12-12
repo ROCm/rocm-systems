@@ -41,13 +41,9 @@ if (NOT DEFINED ENV{LLVM_DIR})
   message("LLVM_DIR define is not set. Kernels cannot be built.")
   return()
 endif()
+# No longer using environment variables
+# We use find_package to locate device libraries instead
 
-#
-# Validate Opencl related resources are available
-#
-if (NOT DEFINED ENV{OCL_BITCODE_DIR})
-  message(FATAL_ERROR "OCL_BITCODE_DIR define is not set. Kernels cannot be built.")
-endif()
 
 set(CLANG $ENV{LLVM_DIR}/clang)
 if (NOT EXISTS ${CLANG})
@@ -79,8 +75,44 @@ set (ROCM_CODEOBJ_LIST "" CACHE INTERNAL ROCM_CODEOBJ_LIST)
 # Options that are passed along to Clang to enable code object generation
 #
 set(KERN_SUFFIX "kernels.hsaco")
-# Check if device-libs bitcode is following old or new layout
-set(BITCODE_DIR "$ENV{OCL_BITCODE_DIR}")
+# Find BITCODE_DIR if not already defined by parent CMakeLists.txt
+if(NOT DEFINED BITCODE_DIR)
+  # Try to find via AMDDeviceLibs package
+  find_package(AMDDeviceLibs QUIET CONFIG)
+  
+  if(AMDDeviceLibs_FOUND)
+    if(TARGET AMDDeviceLibs::oclc_isa_version_803)
+      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
+      get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+    elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
+      get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
+      get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+    else()
+      set(AMDDeviceLibs_FOUND FALSE)
+    endif()
+  endif()
+  
+  if(NOT AMDDeviceLibs_FOUND)
+    # Find LLVM first
+    find_package(LLVM QUIET CONFIG)
+    
+    # Search for bitcode directory
+    find_path(BITCODE_DIR 
+      NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
+      HINTS
+        "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
+        "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
+        "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
+        "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
+      NO_DEFAULT_PATH
+      REQUIRED
+    )
+  endif()
+  
+  message(STATUS "Kernels - Found BITCODE_DIR: ${BITCODE_DIR}")
+endif()
+
+# Check for old vs new device-libs layout
 if(EXISTS "${BITCODE_DIR}/opencl.amdgcn.bc")
   set(BITCODE_ARGS "-nogpulib
     -Xclang -mlink-bitcode-file -Xclang ${BITCODE_DIR}/opencl.amdgcn.bc

@@ -9,11 +9,29 @@ on:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,11 +45,11 @@ jobs:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies

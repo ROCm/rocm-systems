@@ -1,28 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include "core/defines.hpp"
+#include "common/defines.h"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/compat/macros.h>
@@ -51,10 +32,15 @@ extern "C"
     void rocprofsys_set_env(const char*, const char*) ROCPROFSYS_PUBLIC_API;
 
     /// sets whether MPI should be used
-    void rocprofsys_set_mpi(bool, bool) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_set_mpi(bool) ROCPROFSYS_PUBLIC_API;
 
     /// starts an instrumentation region
     void rocprofsys_push_trace(const char*) ROCPROFSYS_PUBLIC_API;
+
+    /// starts an instrumentation region that carries serialized arguments
+    /// serialized arguments are of the form:
+    /// <arg_number>;;<arg_type>;;<arg_name>;;<arg_value>;;
+    void rocprofsys_push_trace_with_args(const char*, const char*) ROCPROFSYS_PUBLIC_API;
 
     /// stops an instrumentation region
     void rocprofsys_pop_trace(const char*) ROCPROFSYS_PUBLIC_API;
@@ -98,11 +84,16 @@ extern "C"
     bool rocprofsys_init_tooling_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_init_hidden(const char*, bool, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_finalize_hidden(void) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_set_finalization_done_hidden(void) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_reset_for_reattach_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_preload_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_env_hidden(const char*, const char*) ROCPROFSYS_HIDDEN_API;
-    void rocprofsys_set_mpi_hidden(bool, bool) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_set_mpi_hidden(bool) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_push_trace_with_args_hidden(const char*,
+                                                const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_flush_pending_region_cache_hidden() ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_category_region_hidden(rocprofsys_category_t, const char*,
@@ -118,4 +109,8 @@ extern "C"
     void rocprofsys_progress_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_annotated_progress_hidden(const char*, rocprofsys_annotation_t*,
                                               size_t) ROCPROFSYS_HIDDEN_API;
+
+    /// registers external pause/resume callbacks (e.g. from the Python profiler).
+    void rocprofsys_external_register_pause_callbacks(void (*)(),
+                                                      void (*)()) ROCPROFSYS_PUBLIC_API;
 }

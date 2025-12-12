@@ -1,32 +1,15 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/causal/experiment.hpp"
 #include "binary/analysis.hpp"
 #include "binary/dwarf_entry.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/units.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
@@ -36,6 +19,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/hash/types.hpp>
@@ -44,8 +28,9 @@
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
+
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <ratio>
@@ -63,17 +48,17 @@ namespace
 using backtrace_causal = rocprofsys::causal::component::backtrace;
 namespace cereal       = ::tim::cereal;
 
-auto    current_experiment_value  = experiment{};
-auto    current_selected_count    = std::atomic<uint64_t>{ 0 };
-auto    current_experiment        = std::atomic<experiment*>{ nullptr };
-auto    experiment_history        = std::vector<experiment>{};
-int64_t global_scaling            = 1;
-int64_t global_scaling_increments = 0;
-bool    use_exp_speedup_scaling =
-    get_env<bool>("ROCPROFSYS_CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP", false);
+auto         current_experiment_value  = experiment{};
+auto         current_selected_count    = std::atomic<std::uint64_t>{ 0 };
+auto         current_experiment        = std::atomic<experiment*>{ nullptr };
+auto         experiment_history        = std::vector<experiment>{};
+std::int64_t global_scaling            = 1;
+std::int64_t global_scaling_increments = 0;
+bool         use_exp_speedup_scaling =
+    get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
 }  // namespace
 
-experiment::sample::sample(const base_type& _b, uint64_t _c)
+experiment::sample::sample(const base_type& _b, std::uint64_t _c)
 : base_type{ _b }
 , count{ _c }
 {
@@ -127,7 +112,7 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
     {
-        ar(cereal::make_nvp("dfunc", demangle(name)),
+        ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(name)),
            cereal::make_nvp("dwarf_info", std::vector<binary::dwarf_entry>{}));
     }
     ar(cereal::make_nvp("inlines", inlines));
@@ -139,8 +124,8 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 std::string
 experiment::sample::get_identifier() const
 {
-    return (lineno > 0 && !location.empty()) ? join(":", location, lineno)
-                                             : demangle(name);
+    return (lineno > 0 && !location.empty()) ? fmt::format("{}:{}", location, lineno)
+                                             : rocprofsys::utility::demangle(name);
 }
 
 template <typename ArchiveT>
@@ -251,8 +236,7 @@ experiment::start()
     init_progress   = component::progress_point::get_progress_points();
     start_time      = tracing::now();
 
-    ROCPROFSYS_VERBOSE(0, "Starting causal experiment #%-3u: %s\n", index,
-                       as_string().c_str());
+    LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
     if(get_state() < State::Finalized)
     {
@@ -270,7 +254,7 @@ experiment::wait() const
     auto _now  = tracing::now();
     auto _wait = experiment_time - (_now - start_time);
     auto _end  = _now + _wait;
-    auto _incr = std::min<uint64_t>(_wait / 100, 1000000);
+    auto _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
     while(tracing::now() < _end && get_state() < State::Finalized)
     {
         std::this_thread::yield();
@@ -299,13 +283,13 @@ experiment::stop()
     delay::sync();
 
     auto _prog_stats = tim::statistics<double>{};
-    auto _prog_vals  = std::vector<int64_t>{};
+    auto _prog_vals  = std::vector<std::int64_t>{};
     _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
-        auto    _pt = fitr.second - init_progress[fitr.first];
-        int64_t _num =
-            std::max<int64_t>({ _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
+        auto         _pt  = fitr.second - init_progress[fitr.first];
+        std::int64_t _num = std::max<std::int64_t>(
+            { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0) _prog_vals.emplace_back(_num);
     }
     std::sort(_prog_vals.begin(), _prog_vals.end());
@@ -320,34 +304,30 @@ experiment::stop()
 
     if(_lowv <= 3 && (_mean < 5 || _medi < 5))
     {
-        ROCPROFSYS_VERBOSE(2,
-                           "[progress points] increasing experiment time :: low: %6.3f, "
-                           "high: %6.3f, mean: %6.3f, median: %zi\n",
-                           _lowv, _high, _mean, _medi);
+        LOG_DEBUG("[progress points] increasing experiment time :: low: {}, high: {}, "
+                  "mean: {}, median: {}",
+                  _lowv, _high, _mean, _medi);
         global_scaling *= 2;
         ++global_scaling_increments;  // keep track of how many successive increments have
                                       // been performed
     }
     else if(_mean > 10 && _lowv >= 8 && global_scaling > 1)
     {
-        ROCPROFSYS_VERBOSE(2,
-                           "[progress points] decreasing experiment time :: low: %6.3f, "
-                           "high: %6.3f, mean: %6.3f, median: %zi\n",
-                           _lowv, _high, _mean, _medi);
+        LOG_DEBUG("[progress points] decreasing experiment time :: low: {}, high: {}, "
+                  "mean: {}, median: {}",
+                  _lowv, _high, _mean, _medi);
         global_scaling /= 2;
         global_scaling_increments = 0;
     }
 
     if(ROCPROFSYS_UNLIKELY(global_scaling_increments >= 5))
     {
-        ROCPROFSYS_WARNING(
-            0,
-            "Warning! causal experimentation hasn't seen at least 5 progress points "
-            "in the last %li experiments. Progress points are necessary for measuring "
+        LOG_WARNING(
+            "causal experimentation hasn't seen at least 5 progress points "
+            "in the last {} experiments. Progress points are necessary for measuring "
             "the effect of the virtual speed-up. Please visit "
             "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/ for "
-            "documentation on progress "
-            "points and how to add them\n",
+            "documentation on progress points and how to add them",
             global_scaling_increments);
     }
 
@@ -370,9 +350,9 @@ experiment::as_string() const
     if(!config::get_causal_end_to_end())
         _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
             << _dur << " sec";
-    _ss << " :: experiment: " << as_hex(selection.address) << " ";
+    _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
-        _ss << "(symbol@" << as_hex(selection.symbol_address) << ") ";
+        _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
         _ss << "[" << filepath::basename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
@@ -391,14 +371,14 @@ experiment::as_string() const
         }
         return _v;
     };
-    auto _func = _patch(demangle(selection.symbol.func));
+    auto _func = _patch(rocprofsys::utility::demangle(selection.symbol.func));
     _ss << "['" << _func << "']";
 
     return _ss.str();
 }
 
 // in nanoseconds
-uint64_t
+std::uint64_t
 experiment::get_delay()
 {
     if(!current_experiment.load()) return 0;
@@ -412,7 +392,7 @@ experiment::get_delay_scaling()
     return current_experiment_value.delay_scaling;
 }
 
-uint32_t
+std::uint32_t
 experiment::get_index()
 {
     if(!is_active()) return 0;
@@ -426,7 +406,7 @@ experiment::is_active()
 }
 
 bool
-experiment::is_selected(uint64_t _addr)
+experiment::is_selected(std::uint64_t _addr)
 {
     return (is_active() && current_experiment_value.selection.contains(_addr));
 }
@@ -443,7 +423,7 @@ experiment::is_selected(unwind_addr_t _stack)
 }
 
 bool
-experiment::is_selected(container::c_array<uint64_t> _stack)
+experiment::is_selected(container::c_array<std::uint64_t> _stack)
 {
     if(is_active())
     {
@@ -495,14 +475,14 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
     // update runtime value
     {
-        uint64_t _beg_runtime = std::numeric_limits<uint64_t>::max();
-        uint64_t _end_runtime = std::numeric_limits<uint64_t>::min();
+        std::uint64_t _beg_runtime = std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t _end_runtime = std::numeric_limits<std::uint64_t>::min();
         for(auto& itr : current_record.experiments)
         {
             if(itr.duration == 0) continue;
             if(itr.experiment_time == 0) continue;
-            _beg_runtime = std::min<uint64_t>(_beg_runtime, itr.start_time);
-            _end_runtime = std::max<uint64_t>(_end_runtime, itr.end_time);
+            _beg_runtime = std::min<std::uint64_t>(_beg_runtime, itr.start_time);
+            _end_runtime = std::max<std::uint64_t>(_end_runtime, itr.end_time);
         }
         current_record.runtime = (_end_runtime - _beg_runtime);
     }
@@ -522,8 +502,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             }
         }
 
-        ROCPROFSYS_VERBOSE_F(1, "Processing line info for %zu sampled addresses...\n",
-                             _total_samples.size());
+        LOG_DEBUG("Processing line info for {} sampled addresses...",
+                  _total_samples.size());
 
         for(const auto& itr : _total_samples)
         {
@@ -538,7 +518,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     }
 
     bool _causal_output_reset =
-        config::get_setting_value<bool>("ROCPROFSYS_CAUSAL_FILE_RESET").value_or(false);
+        config::get_setting_value<bool>(std::string{ env_vars::CAUSAL_FILE_RESET })
+            .value_or(false);
 
     {
         auto _saved_experiments = (_causal_output_reset)
@@ -570,8 +551,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         }
         else
         {
-            ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
-                             _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening causal experiments output file: %s", _fname));
         }
     }
 
@@ -609,18 +590,22 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             auto& _selection = itr.selection;
             auto& _line_info = _selection.symbol;
 
-            std::string _name = (_selection.symbol_address > 0)
-                                    ? _line_info.func
-                                    : join(":", _line_info.file, _line_info.line);
+            std::string _name =
+                (_selection.symbol_address > 0)
+                    ? _line_info.func
+                    : fmt::format("{}:{}", _line_info.file, _line_info.line);
 
-            ROCPROFSYS_CONDITIONAL_THROW(
-                _name.empty(),
-                "Error! causal experiment selection has no name: address=%s, file=%s, "
-                "line=%u, func=%s",
-                as_hex(_line_info.address).c_str(), _line_info.file.c_str(),
-                _line_info.line, _line_info.func.c_str());
+            if(_name.empty())
+            {
+                throw std::runtime_error(fmt::format("Error! causal experiment selection "
+                                                     "has no name: address={}, file={}, "
+                                                     "line={}, func={}",
+                                                     _line_info.address.as_hex(),
+                                                     _line_info.file, _line_info.line,
+                                                     _line_info.func));
+            }
 
-            ofs << "experiment\tselected=" << demangle(_name)
+            ofs << "experiment\tselected=" << rocprofsys::utility::demangle(_name)
                 << "\tspeedup=" << std::setprecision(2)
                 << static_cast<double>(itr.virtual_speedup / 100.0)
                 << "\tduration=" << itr.duration << "\tselected-samples=" << itr.selected
@@ -637,16 +622,19 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 if(pitr.second.is_throughput_point() && pitr.second.get_delta() != 0)
                 {
                     ofs << "throughput-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tdelta=" << pitr.second.get_delta() << "\n";
                     if(get_causal_end_to_end()) break;
                 }
                 if(pitr.second.is_latency_point())
                 {
                     if(get_causal_end_to_end()) continue;
-                    auto _delta = std::max<int64_t>(pitr.second.get_latency_delta(), 1);
+                    auto _delta =
+                        std::max<std::int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tarrivals=" << pitr.second.get_arrival()
                         << "\tdepartures=" << pitr.second.get_departure()
                         << "\tdifference=" << _delta << "\n";
@@ -660,14 +648,15 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         {
             ofs << "samples\tlocation=" << itr.get_identifier()
                 << "\tcount=" << itr.count;
-            if(config::get_debug()) ofs << "\taddress=" << as_hex(itr.address);
+            if(config::get_debug())
+                ofs << "\taddress=" << fmt::format("0x{:X}", itr.address);
             ofs << "\n";
         }
     }
     else
     {
-        ROCPROFSYS_THROW("Error opening causal experiments output file: %s",
-                         _fname.c_str());
+        throw std::runtime_error(
+            fmt::format("Error opening causal experiments output file: {}", _fname));
     }
 }
 
@@ -704,8 +693,8 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
     {
         if(_throw_on_error)
         {
-            ROCPROFSYS_THROW("Error opening causal experiments input file: %s",
-                             _fname.c_str());
+            throw std::runtime_error(
+                fmt::format("Error opening causal experiments input file: %s", _fname));
         }
     }
 

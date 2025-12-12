@@ -27,7 +27,6 @@
 : ${BUILD_DIR:=build-release}
 : ${VERSION:=0.0.4}
 : ${ROCM_VERSION:=4.5.0}
-: ${BOOST_VERSION:=1.79.0}
 : ${NJOBS:=12}
 : ${DISTRO:=""}
 : ${LTO:="OFF"}
@@ -35,17 +34,15 @@
 : ${LIBGCC:="ON"}
 : ${LIBSTDCXX:="ON"}
 : ${MAX_THREADS:=2048}
-: ${PERFETTO_TOOLS:="ON"}
+: ${PERFETTO_TOOLS:="OFF"}
 : ${HIDDEN_VIZ:="ON"}
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${GENERATORS:="STGZ DEB RPM"}
 : ${MPI_IMPL:="openmpi"}
 : ${CLEAN:=0}
 : ${FRESH:=0}
-: ${WITH_CORE:=0}
+: ${WITH_BASE:=0}
 : ${WITH_MPI:=0}
-: ${WITH_ROCM:=0}
-: ${WITH_ROCM_MPI:=0}
 : ${IS_DOCKER:=0}
 : ${CONDA_ROOT:=/opt/conda}
 
@@ -71,11 +68,9 @@ usage()
 {
     print_option() { printf "    --%-10s %-36s     %s\n" "${1}" "${2}" "${3}"; }
     echo "Options:"
-    python_info="(Use '+nopython' to build w/o python, use '+python' to python build with python)"
-    print_option core "[+nopython] [+python]" "Core ${python_info}"
-    print_option mpi "[+nopython] [+python]" "MPI ${python_info}"
-    print_option rocm "[+nopython] [+python]" "ROCm ${python_info}"
-    print_option rocm-mpi "[+nopython] [+python]" "ROCm + MPI ${python_info}"
+    python_info="(Use '+nopython' to build w/o python, use '+python' to build with python)"
+    print_option base "[+nopython] [+python]" "Base build (no MPI) ${python_info}"
+    print_option mpi "[+nopython] [+python]" "MPI build ${python_info}"
     print_option mpi-impl "[openmpi|mpich]" "MPI implementation"
 
     echo ""
@@ -142,20 +137,12 @@ do
             usage
             exit 0
             ;;
-        --core)
-            WITH_CORE=${VAL}
+        --base)
+            WITH_BASE=${VAL}
             reset-last
             ;;
         --mpi)
             WITH_MPI=${VAL}
-            reset-last
-            ;;
-        --rocm)
-            WITH_ROCM=${VAL}
-            reset-last
-            ;;
-        --rocm-mpi)
-            WITH_ROCM_MPI=${VAL}
             reset-last
             ;;
         --mpi-impl)
@@ -222,7 +209,7 @@ ROCPROFSYS_GENERAL_ARGS="-DROCPROFSYS_CPACK_SYSTEM_NAME=${DISTRO} -DROCPROFSYS_R
 ROCPROFSYS_BUILD_ARGS="-DROCPROFSYS_BUILD_TESTING=OFF -DROCPROFSYS_BUILD_EXAMPLES=OFF -DROCPROFSYS_BUILD_PAPI=ON -DROCPROFSYS_BUILD_LTO=${LTO} -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${HIDDEN_VIZ} -DROCPROFSYS_BUILD_STATIC_LIBGCC=${LIBGCC} -DROCPROFSYS_BUILD_STATIC_LIBSTDCXX=${LIBSTDCXX} -DROCPROFSYS_BUILD_RELEASE=ON"
 ROCPROFSYS_USE_ARGS="-DROCPROFSYS_USE_MPI_HEADERS=ON -DROCPROFSYS_USE_OMPT=ON -DROCPROFSYS_USE_PAPI=ON"
 TIMEMORY_ARGS="-DTIMEMORY_USE_LIBUNWIND=ON -DTIMEMORY_BUILD_LIBUNWIND=ON -DTIMEMORY_BUILD_PORTABLE=ON"
-DYNINST_ARGS="-DROCPROFSYS_BUILD_DYNINST=ON $(echo -DROCPROFSYS_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON) -DROCPROFSYS_BOOST_DOWNLOAD_VERSION=${BOOST_VERSION}"
+DYNINST_ARGS="-DROCPROFSYS_BUILD_DYNINST=ON $(echo -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON)"
 STANDARD_ARGS="${CMAKE_ARGS} ${ROCPROFSYS_GENERAL_ARGS} ${ROCPROFSYS_USE_ARGS} ${ROCPROFSYS_BUILD_ARGS} ${TIMEMORY_ARGS} ${DYNINST_ARGS} ${EXTRA_ARGS}"
 
 SCRIPT_DIR=$(realpath $(dirname ${BASH_SOURCE[0]}))
@@ -394,7 +381,5 @@ if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD
 
 verbose-run echo "Build rocprofiler-systems installers with generators: ${GENERATORS}"
 
-build-and-package ${WITH_CORE} ${DISTRO}-core -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=ON
-build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_ROCM_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=ON
+build-and-package ${WITH_BASE} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_MPI=OFF
+build-and-package ${WITH_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_MPI=ON

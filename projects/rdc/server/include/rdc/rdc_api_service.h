@@ -74,6 +74,10 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                                   const ::rdc::CreateFieldGroupRequest* request,
                                   ::rdc::CreateFieldGroupResponse* reply) override;
 
+  ::grpc::Status AddFieldToFieldGroup(::grpc::ServerContext* context,
+                                      const ::rdc::AddFieldToFieldGroupRequest* request,
+                                      ::rdc::AddFieldToFieldGroupResponse* reply) override;
+
   ::grpc::Status GetFieldGroupInfo(::grpc::ServerContext* context,
                                    const ::rdc::GetFieldGroupInfoRequest* request,
                                    ::rdc::GetFieldGroupInfoResponse* reply) override;

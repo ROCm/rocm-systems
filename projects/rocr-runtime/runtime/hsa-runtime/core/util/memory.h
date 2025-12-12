@@ -50,9 +50,10 @@
 #include <sys/mman.h>
 #endif
 
+#include "os.h"
 namespace rocr {
 
-#ifdef __linux__
+#if defined(__linux__)
 /// @brief Converts @ref hsa_access_permission_t to mmap memory protection
 ///        flags.
 __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {
@@ -69,7 +70,20 @@ __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {
   }
 }
 #endif
-
+__forceinline rocr::os::MemProt PermissionsToMemProt(hsa_access_permission_t perms) {
+  switch (perms) {
+    case HSA_ACCESS_PERMISSION_RO:
+      return rocr::os::MEM_PROT_READ;
+    case HSA_ACCESS_PERMISSION_WO:
+      return rocr::os::MEM_PROT_RW;
+    case HSA_ACCESS_PERMISSION_RW:
+      return rocr::os::MEM_PROT_RW;
+    case HSA_ACCESS_PERMISSION_NONE:
+      return rocr::os::MEM_PROT_NONE;
+    default:
+      return rocr::os::MEM_PROT_NONE;
+  }
+}
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_UTIL_MEMORY_H_

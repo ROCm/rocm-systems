@@ -23,6 +23,7 @@
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -67,4 +68,53 @@ TEST(parse, strip)
                        expected_message,
                        test_message,
                        stripped_message);
+}
+
+TEST(parse, cpu_info_model_name)
+{
+    // Simulate the logic in agent.cpp
+    auto parse_line = [](std::string_view line) -> std::string {
+        auto        match = sdk::parse::tokenize(line, std::vector<std::string_view>{": "});
+        std::string model_name;
+
+        if(match.size() >= 2)
+        {
+            std::string value;
+            if(match.size() == 2)
+            {
+                value = match.back();
+            }
+            else
+            {
+                // Join all tokens after the first one with ": " separator
+                for(size_t i = 1; i < match.size(); ++i)
+                {
+                    if(i > 1) value += ": ";
+                    value += match[i];
+                }
+            }
+
+            if(line.find("model name") == 0)
+            {
+                model_name = value;
+                // Remove leading and trailing whitespaces
+                model_name = sdk::parse::strip(std::string{model_name}, " \t\n\v\f\r");
+            }
+        }
+        return model_name;
+    };
+
+    // Case 1: Normal model name
+    {
+        const auto* line = "model name : AMD EPYC 7742 64-Core Processor";
+        auto        name = parse_line(line);
+        EXPECT_EQ(name, "AMD EPYC 7742 64-Core Processor");
+    }
+
+    // Case 2: Model name with colons (The bug fix case)
+    {
+        const auto* line = "model name : AMD EPYC : 100-000000248";
+        auto        name = parse_line(line);
+        EXPECT_EQ(name, "AMD EPYC : 100-000000248");
+    }
 }

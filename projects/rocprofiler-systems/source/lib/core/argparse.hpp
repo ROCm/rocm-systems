@@ -1,33 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
+
+#include "common/environment.hpp"
 
 #include <timemory/settings/vsettings.hpp>
 #include <timemory/utility/argparse.hpp>
 
 #include <functional>
 #include <set>
+#include <string>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -54,24 +40,75 @@ default_environ_filter(std::string_view, const parser_data&);
 bool
 default_grouping_filter(std::string_view, const parser_data&);
 
+struct output_format_selection
+{
+    bool perfetto = false;  // ROCPROFSYS_TRACE
+    bool rocpd    = false;  // ROCPROFSYS_USE_ROCPD
+    bool json     = false;  // ROCPROFSYS_JSON_OUTPUT
+    bool text     = false;  // ROCPROFSYS_TEXT_OUTPUT
+
+    // ROCPROFSYS_PROFILE: derived — any Timemory profile sub-format implies profiling.
+    [[nodiscard]] bool profile() const { return json || text; }
+};
+
+/**
+ * Map selected --output-format tokens to the authoritative backend/sub-format set.
+ * Unlisted formats resolve to false so the returned selection fully defines the
+ * active outputs, which is required because ROCPROFSYS_TRACE and ROCPROFSYS_PROFILE
+ * otherwise derive their defaults from each other.
+ * @param tokens proto | rocpd | json | text | txt (txt aliases text)
+ */
+[[nodiscard]] output_format_selection
+resolve_output_format(const strset_t& tokens);
+
+struct env_snapshot
+{
+    std::unordered_set<std::string> initial = {};
+    std::vector<std::string>        current = {};
+    // Owns its keys: callers may pass temporaries (e.g. std::string{key}) into
+    // update_env, so storing string_view here would dangle once they die.
+    std::unordered_set<std::string> updated      = {};
+    std::string                     dl_libpath   = {};
+    std::string                     omni_libpath = {};
+
+    // Convenience wrapper: hides the (current, updated, initial) plumbing
+    // and the join delimiter, so callers stop reaching into three fields.
+    template <typename Tp>
+    void set(
+        std::string_view key, Tp&& value,
+        rocprofsys::common::update_mode mode = rocprofsys::common::update_mode::REPLACE,
+        std::string_view                join_delim = ":")
+    {
+        rocprofsys::common::update_env(current, key, std::forward<Tp>(value), mode,
+                                       join_delim, updated, initial);
+    }
+};
+
+struct parse_outcome
+{
+    std::vector<std::string> command    = {};
+    std::string              launcher   = {};
+    bool                     monochrome = false;
+    bool                     debug      = false;
+    bool                     fork_exec  = false;
+    int                      verbose    = 0;
+};
+
+struct registration_config
+{
+    vsettings_set_t                 processed_settings = {};
+    std::unordered_set<std::string> processed_environs = {};
+    std::unordered_set<std::string> processed_groups   = {};
+    grouping_filter_t               grouping_filter    = default_grouping_filter;
+    setting_filter_t                setting_filter     = default_setting_filter;
+    environ_filter_t                environ_filter     = default_environ_filter;
+};
+
 struct parser_data
 {
-    bool                                 monochrome         = false;
-    bool                                 debug              = false;
-    int                                  verbose            = 0;
-    std::string                          dl_libpath         = {};
-    std::string                          omni_libpath       = {};
-    std::string                          launcher           = {};
-    vsettings_set_t                      processed_settings = {};
-    std::unordered_set<std::string>      processed_environs = {};
-    std::unordered_set<std::string>      processed_groups   = {};
-    std::vector<char*>                   current            = {};
-    std::vector<char*>                   command            = {};
-    std::unordered_set<std::string_view> updated            = {};
-    std::unordered_set<std::string>      initial            = {};
-    grouping_filter_t                    grouping_filter    = default_grouping_filter;
-    setting_filter_t                     setting_filter     = default_setting_filter;
-    environ_filter_t                     environ_filter     = default_environ_filter;
+    env_snapshot        env = {};
+    parse_outcome       out = {};
+    registration_config reg = {};
 };
 
 parser_data&
@@ -82,6 +119,9 @@ add_ld_preload(parser_data&);
 
 parser_data&
 add_ld_library_path(parser_data&);
+
+parser_data&
+add_torch_library_path(parser_data&);
 
 parser_data&
 add_core_arguments(parser_t&, parser_data&);

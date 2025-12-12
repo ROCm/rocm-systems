@@ -12,19 +12,17 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
+          value: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          unit: Percent
         Access Rate:
-          value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
+          value: 200 * SUM(SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          unit: Percent
         Theoretical Bandwidth Utilization:
-          value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
-          unit: Pct of Peak
+          value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / (0.00128 * SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu))
+          unit: Percent
         Bank Conflict Rate:
-          value: AVG((((SQ_LDS_BANK_CONFLICT * 3.125) / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Pct of Peak
+          value: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
+          unit: Percent
       comparable: false
       cli_style: simple_bar
       tui_style: simple_bar
@@ -39,104 +37,94 @@ Panel Config:
         unit: Unit
       metric:
         LDS Instructions:
-          avg: AVG((SQ_INSTS_LDS / $denom))
-          min: MIN((SQ_INSTS_LDS / $denom))
-          max: MAX((SQ_INSTS_LDS / $denom))
-          unit: (Instr + $normUnit)
+          avg: SUM(SQ_INSTS_LDS) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS / $denom)
+          max: MAX(SQ_INSTS_LDS / $denom)
+          unit: (Instructions + $normUnit)
         LDS LOAD:
-          avg: AVG((SQ_INSTS_LDS_LOAD / $denom))
-          min: MIN((SQ_INSTS_LDS_LOAD / $denom))
-          max: MAX((SQ_INSTS_LDS_LOAD / $denom))
-          unit: (instr + $normUnit)
+          avg: SUM(SQ_INSTS_LDS_LOAD) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_LOAD / $denom)
+          max: MAX(SQ_INSTS_LDS_LOAD / $denom)
+          unit: (Instructions + $normUnit)
         LDS STORE:
-          avg: AVG((SQ_INSTS_LDS_STORE / $denom))
-          min: MIN((SQ_INSTS_LDS_STORE / $denom))
-          max: MAX((SQ_INSTS_LDS_STORE / $denom))
-          unit: (instr + $normUnit)
+          avg: SUM(SQ_INSTS_LDS_STORE) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_STORE / $denom)
+          max: MAX(SQ_INSTS_LDS_STORE / $denom)
+          unit: (Instructions + $normUnit)
         LDS ATOMIC:
-          avg: AVG((SQ_INSTS_LDS_ATOMIC / $denom))
-          min: MIN((SQ_INSTS_LDS_ATOMIC / $denom))
-          max: MAX((SQ_INSTS_LDS_ATOMIC / $denom))
-          unit: (instr + $normUnit)
+          avg: SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_ATOMIC / $denom)
+          max: MAX(SQ_INSTS_LDS_ATOMIC / $denom)
+          unit: (Instructions + $normUnit)
         LDS LOAD Bandwidth:
-          avg: AVG(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          min: MIN(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          max: MAX(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          avg: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+          min: 64 * MIN(SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          max: 64 * MAX(SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           units: Gbps
         LDS STORE Bandwidth:
-          avg: AVG(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          min: MIN(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          max: MAX(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          avg: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+          min: 64 * MIN(SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          max: 64 * MAX(SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           units: Gbps
         LDS ATOMIC Bandwidth:
-          avg: AVG(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          min: MIN(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
-          max: MAX(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          avg: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+          min: 64 * MIN(SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+          max: 64 * MAX(SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
           units: Gbps
         Theoretical Bandwidth:
-          avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
+          avg: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu) / (End_Timestamp - Start_Timestamp))
+          max: MAX((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         LDS Latency:
-          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
+          avg: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
+          min: MIN(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
+          max: MAX(SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS)
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_LDS
         Bank Conflicts/Access:
-          avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          max: MAX(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Conflicts/Access
+          avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
+          min: MIN(SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+          max: MAX(SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+          unit: Conflicts per Access
         Index Accesses:
-          avg: AVG((SQ_LDS_IDX_ACTIVE / $denom))
-          min: MIN((SQ_LDS_IDX_ACTIVE / $denom))
-          max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
+          avg: SUM(SQ_LDS_IDX_ACTIVE) / SUM($denom)
+          min: MIN(SQ_LDS_IDX_ACTIVE / $denom)
+          max: MAX(SQ_LDS_IDX_ACTIVE / $denom)
           unit: (Cycles + $normUnit)
         Atomic Return Cycles:
-          avg: AVG((SQ_LDS_ATOMIC_RETURN / $denom))
-          min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
-          max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
+          avg: SUM(SQ_LDS_ATOMIC_RETURN) / SUM($denom)
+          min: MIN(SQ_LDS_ATOMIC_RETURN / $denom)
+          max: MAX(SQ_LDS_ATOMIC_RETURN / $denom)
           unit: (Cycles + $normUnit)
         Bank Conflict:
-          avg: AVG((SQ_LDS_BANK_CONFLICT / $denom))
-          min: MIN((SQ_LDS_BANK_CONFLICT / $denom))
-          max: MAX((SQ_LDS_BANK_CONFLICT / $denom))
+          avg: SUM(SQ_LDS_BANK_CONFLICT) / SUM($denom)
+          min: MIN(SQ_LDS_BANK_CONFLICT / $denom)
+          max: MAX(SQ_LDS_BANK_CONFLICT / $denom)
           unit: (Cycles + $normUnit)
         Addr Conflict:
-          avg: AVG((SQ_LDS_ADDR_CONFLICT / $denom))
-          min: MIN((SQ_LDS_ADDR_CONFLICT / $denom))
-          max: MAX((SQ_LDS_ADDR_CONFLICT / $denom))
+          avg: SUM(SQ_LDS_ADDR_CONFLICT) / SUM($denom)
+          min: MIN(SQ_LDS_ADDR_CONFLICT / $denom)
+          max: MAX(SQ_LDS_ADDR_CONFLICT / $denom)
           unit: (Cycles + $normUnit)
         Unaligned Stall:
-          avg: AVG((SQ_LDS_UNALIGNED_STALL / $denom))
-          min: MIN((SQ_LDS_UNALIGNED_STALL / $denom))
-          max: MAX((SQ_LDS_UNALIGNED_STALL / $denom))
+          avg: SUM(SQ_LDS_UNALIGNED_STALL) / SUM($denom)
+          min: MIN(SQ_LDS_UNALIGNED_STALL / $denom)
+          max: MAX(SQ_LDS_UNALIGNED_STALL / $denom)
           unit: (Cycles + $normUnit)
         Mem Violations:
-          avg: AVG((SQ_LDS_MEM_VIOLATIONS / $denom))
-          min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))
-          max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
+          avg: SUM(SQ_LDS_MEM_VIOLATIONS) / SUM($denom)
+          min: MIN(SQ_LDS_MEM_VIOLATIONS / $denom)
+          max: MAX(SQ_LDS_MEM_VIOLATIONS / $denom)
           unit: (Accesses + $normUnit)
         LDS Command FIFO Full Rate:
-          avg: AVG((SQ_LDS_CMD_FIFO_FULL / $denom))
-          min: MIN((SQ_LDS_CMD_FIFO_FULL / $denom))
-          max: MAX((SQ_LDS_CMD_FIFO_FULL / $denom))
+          avg: SUM(SQ_LDS_CMD_FIFO_FULL) / SUM($denom)
+          min: MIN(SQ_LDS_CMD_FIFO_FULL / $denom)
+          max: MAX(SQ_LDS_CMD_FIFO_FULL / $denom)
           unit: (Cycles + $normUnit)
         LDS Data FIFO Full Rate:
-          avg: AVG((SQ_LDS_DATA_FIFO_FULL / $denom))
-          min: MIN((SQ_LDS_DATA_FIFO_FULL / $denom))
-          max: MAX((SQ_LDS_DATA_FIFO_FULL / $denom))
+          avg: SUM(SQ_LDS_DATA_FIFO_FULL) / SUM($denom)
+          min: MIN(SQ_LDS_DATA_FIFO_FULL / $denom)
+          max: MAX(SQ_LDS_DATA_FIFO_FULL / $denom)
           unit: (Cycles + $normUnit)
   metrics_description:
     Utilization: Indicates what percent of the kernel's duration the LDS was actively
@@ -155,6 +143,24 @@ Panel Config:
       loaded from, stored to, or atomically updated in the LDS divided by total duration.
       Does not take into account the execution mask of the wavefront when the instruction
       was executed.
+    LDS LOAD Bandwidth: >-
+      The effective bandwidth of LDS load operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes loaded from LDS
+      divided by the kernel duration.
+    LDS STORE Bandwidth: >-
+      The effective bandwidth of LDS store operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes stored to LDS
+      divided by the kernel duration.
+    LDS ATOMIC Bandwidth: >-
+      The effective bandwidth of LDS atomic operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes accessed by LDS
+      atomic operations divided by the kernel duration.
+    LDS LOAD: >-
+      The total number of LDS load instructions issued per normalization unit.
+    LDS STORE: >-
+      The total number of LDS store instructions issued per normalization unit.
+    LDS ATOMIC: >-
+      The total number of LDS atomic instructions issued per normalization unit.
     Bank Conflict Rate: Indicates the percentage of active LDS cycles that were spent
       servicing bank conflicts. Calculated as the ratio of LDS cycles spent servicing
       bank conflicts over the number of LDS cycles that would have been required to
@@ -184,3 +190,11 @@ Panel Config:
       The total number of out-of-bounds accesses made to the LDS, per normalization
       unit. This is unused and expected to be zero in most configurations for
       modern CDNA\u2122 accelerators.
+    LDS Command FIFO Full Rate: >-
+      The number of cycles where the LDS command FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS instruction dispatch, which
+      may stall wavefronts waiting to issue LDS operations.
+    LDS Data FIFO Full Rate: >-
+      The number of cycles where the LDS data FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS data return path, which may
+      stall wavefronts waiting for LDS read/atomic results.

@@ -50,7 +50,7 @@
 namespace rocr {
 namespace core {
 
-KernelMutex IPCSignal::lock_;
+std::mutex IPCSignal::lock_;
 
 SharedMemory::SharedMemory(const hsa_amd_ipc_memory_t* handle, size_t len) {
   hsa_status_t err = Runtime::runtime_singleton_->IPCAttach(handle, len, 0, NULL, &ptr_);
@@ -85,7 +85,7 @@ Signal* IPCSignal::Attach(const hsa_amd_ipc_signal_t* ipc_signal_handle) {
 
   hsa_signal_t handle = SharedSignal::Convert(shared.signal());
 
-  ScopedAcquire<KernelMutex> lock(&lock_);
+  std::lock_guard<std::mutex> lock(lock_);
   Signal* ret = core::Signal::DuplicateHandle(handle);
   if (ret == nullptr) ret = new IPCSignal(std::move(shared));
   return ret;

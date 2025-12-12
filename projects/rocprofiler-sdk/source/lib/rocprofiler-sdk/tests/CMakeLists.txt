@@ -17,7 +17,9 @@ set(rocprofiler_lib_sources
     contexts.cpp
     enum_string.cpp
     hsa.cpp
+    late_start.cpp
     naming.cpp
+    queue_interposition.cpp
     timestamp.cpp
     version.cpp
     hsa_barrier.cpp)
@@ -35,15 +37,18 @@ target_link_libraries(
             GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+file(GLOB _NODE_PROPERTIES ${CMAKE_CURRENT_LIST_DIR}/data/topology/nodes/*/properties)
+rocprofiler_add_unit_test(
     TARGET rocprofiler-sdk-lib-tests
     SOURCES ${rocprofiler_lib_sources}
     TEST_LIST lib_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${lib_TESTS} PROPERTIES TIMEOUT 30 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-                            "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 30
+    LABELS "unittests"
+    DATA "data/topology/nodes" # copy over and install
+    CONFIGURE_FILES "${_NODE_PROPERTIES}" # ensure cmake re-runs when files are updated
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -68,17 +73,15 @@ target_link_libraries(
 set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
                                                                   "\$ORIGIN/../lib")
 
-gtest_add_tests(
+set(rocprofiler-sdk-lib-tests-env
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )
+
+rocprofiler_add_unit_test(
     TARGET rocprofiler-sdk-lib-tests-shared
     SOURCES ${rocprofiler_shared_lib_sources}
     TEST_LIST shared_lib_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set(rocprofiler-sdk-lib-tests-env
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
-
-set_tests_properties(
-    ${shared_lib_TESTS}
-    PROPERTIES TIMEOUT 120 LABELS "unittests" ENVIRONMENT
-               "${rocprofiler-sdk-lib-tests-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    TIMEOUT 120
+    LABELS "unittests"
+    ENVIRONMENT "${rocprofiler-sdk-lib-tests-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -396,7 +396,7 @@ impl AmdsmiCollectors {
 /// add_metric!(
 ///     collectors,
 ///     "AMDSMI_FI_TEMPERATURE_EDGE",
-///     "Currnt edge temperature",
+///     "Current edge temperature",
 ///     Unit::Celsius,
 ///     amdsmi_func!(amdsmi_get_temp_metric, AmdsmiTemperatureTypeT::AmdsmiTemperatureTypeEdge, AmdsmiTemperatureMetricT::AmdsmiTempCurrent)
 /// );

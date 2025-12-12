@@ -1,31 +1,12 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/causal/sampling.hpp"
 #include "binary/analysis.hpp"
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -33,11 +14,11 @@
 #include "library/causal/data.hpp"
 #include "library/causal/sample_data.hpp"
 #include "library/perf.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/macros.hpp>
 #include <timemory/mpl/types.hpp>
@@ -45,9 +26,10 @@
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
+
+#include "logger/debug.hpp"
 
 #include <csignal>
 #include <cstring>
@@ -102,7 +84,7 @@ struct causal_sampling
 {};
 
 std::set<int>
-configure(bool _setup, int64_t _tid = threading::get_id());
+configure(bool _setup, std::int64_t _tid = threading::get_id());
 
 std::shared_ptr<causal_sampler_allocator_t>&
 get_causal_sampler_allocator(bool _construct)
@@ -138,7 +120,7 @@ get_causal_samplers()
 }
 
 std::set<int>&
-get_causal_sampler_signals(int64_t _tid)
+get_causal_sampler_signals(std::int64_t _tid)
 {
     auto& _data = get_causal_sampler_signals();
     if(static_cast<size_t>(_tid) >= _data->size())
@@ -147,7 +129,7 @@ get_causal_sampler_signals(int64_t _tid)
 }
 
 bool&
-get_causal_sampler_running(int64_t _tid)
+get_causal_sampler_running(std::int64_t _tid)
 {
     auto& _data = get_causal_sampler_running();
     if(static_cast<size_t>(_tid) >= _data->size()) _data->resize(_tid + 1, false);
@@ -155,7 +137,7 @@ get_causal_sampler_running(int64_t _tid)
 }
 
 auto&
-get_causal_sampler(int64_t _tid)
+get_causal_sampler(std::int64_t _tid)
 {
     auto& _data = get_causal_samplers();
     if(static_cast<size_t>(_tid) >= _data->size()) _data->resize(_tid + 1);
@@ -163,10 +145,10 @@ get_causal_sampler(int64_t _tid)
 }
 
 void
-causal_offload_buffer(int64_t, causal_sampler_buffer_t&& _buf)
+causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
 {
     auto _data      = std::move(_buf);
-    auto _processed = std::map<uint32_t, std::map<uintptr_t, uint64_t>>{};
+    auto _processed = std::map<std::uint32_t, std::map<uintptr_t, std::uint64_t>>{};
     while(!_data.is_empty())
     {
         auto _bundle = causal_sampler_bundle_t{};
@@ -211,7 +193,7 @@ causal_offload_buffer(int64_t, causal_sampler_buffer_t&& _buf)
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid)
+configure(bool _setup, std::int64_t _tid)
 {
     const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _causal       = get_causal_sampler(_tid);
@@ -219,9 +201,11 @@ configure(bool _setup, int64_t _tid)
     auto&       _running      = get_causal_sampler_running(_tid);
     auto&       _signal_types = get_causal_sampler_signals(_tid);
 
-    ROCPROFSYS_CONDITIONAL_THROW(get_use_sampling(),
-                                 "Internal error! configuring causal profiling not "
+    if(get_use_sampling())
+    {
+        throw std::runtime_error("Internal error! configuring causal profiling not "
                                  "permitted when sampling is enabled");
+    }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
@@ -276,18 +260,18 @@ configure(bool _setup, int64_t _tid)
                 backtrace_enabled::set(false);
                 backtrace_enabled::set(scope::thread_scope{}, false);
                 _causal->configure(overflow{ get_sampling_overflow_signal(),
-                                             [](int, pid_t, long, int64_t) {
+                                             [](int, pid_t, long, std::int64_t) {
                                                  // perf::get_instance(_idx)->set_ready_signal(_sig);
                                                  return true;
                                              },
-                                             [](int, pid_t, long, int64_t _idx) {
+                                             [](int, pid_t, long, std::int64_t _idx) {
                                                  return perf::get_instance(_idx)->start();
                                              },
-                                             [](int, pid_t, long, int64_t _idx) {
+                                             [](int, pid_t, long, std::int64_t _idx) {
                                                  return perf::get_instance(_idx)->stop();
                                              },
                                              _tid, threading::get_sys_tid() });
-                if(_tid == 0) ROCPROFSYS_VERBOSE(1, "causal profiling backend: perf\n");
+                if(_tid == 0) LOG_DEBUG("Causal profiling backend: perf");
             }
 
             return _open_error;
@@ -301,11 +285,16 @@ configure(bool _setup, int64_t _tid)
             _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                       SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                       threading::get_sys_tid() });
-            if(_tid == 0) ROCPROFSYS_VERBOSE(1, "causal profiling backend: timer\n");
+            if(_tid == 0) LOG_DEBUG("Causal profiling backend: timer");
             return true;
         };
 
-        TIMEMORY_REQUIRE(_causal) << "nullptr to causal profiling instance";
+        if(!_causal)
+        {
+            LOG_CRITICAL("nullptr to causal profiling instance");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            std::abort();
+        }
 
         _causal->set_flags(SA_RESTART);
         _causal->set_verbose(_verbose);
@@ -314,33 +303,41 @@ configure(bool _setup, int64_t _tid)
         if(get_causal_backend() == CausalBackend::Perf)
         {
             auto _perf_error = _activate_perf_backend();
-            ROCPROFSYS_REQUIRE(!_perf_error)
-                << "perf backend for causal profiling failed to activate: "
-                << *_perf_error << "\n";
+            if(_perf_error)
+            {
+                LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
+                          *_perf_error);
+                std::exit(1);
+            }
         }
         else if(get_causal_backend() == CausalBackend::Timer)
         {
-            ROCPROFSYS_REQUIRE(_activate_timer_backend())
-                << "timer backend for causal profiling failed to activate\n";
+            if(!_activate_timer_backend())
+            {
+                LOG_ERROR("Timer backend for causal profiling failed to activate");
+                std::exit(1);
+            }
         }
         else if(get_causal_backend() == CausalBackend::Auto)
         {
             auto _perf_error = _activate_perf_backend();
             if(!_perf_error)
             {
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "perf" });
             }
             else
             {
-                ROCPROFSYS_WARNING_F(
-                    0, "perf backend for causal profiling failed to activate: %s\n",
-                    _perf_error->c_str());
+                LOG_WARNING("Perf backend for causal profiling failed to activate: {}",
+                            _perf_error->c_str());
 
-                ROCPROFSYS_REQUIRE(_activate_timer_backend())
-                    << "timer backend for causal profiling failed to activate\n";
+                if(!_activate_timer_backend())
+                {
+                    LOG_ERROR("Timer backend for causal profiling failed to activate");
+                    std::exit(1);
+                }
 
-                config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
+                config::set_setting_value(std::string{ env_vars::CAUSAL_BACKEND },
                                           std::string{ "timer" });
             }
         }
@@ -354,7 +351,7 @@ configure(bool _setup, int64_t _tid)
     }
     else if(!_setup && _causal && _running)
     {
-        ROCPROFSYS_DEBUG("Destroying causal sampler for thread %lu...\n", _tid);
+        LOG_DEBUG("Destroying causal sampler for thread {}...", _tid);
         _running = false;
 
         if(_tid == threading::get_id() && !_signal_types.empty())
@@ -367,7 +364,7 @@ configure(bool _setup, int64_t _tid)
             // this propagates to all threads
             _causal->ignore(_signal_types);
 
-            for(int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
+            for(std::int64_t i = 1; i < ROCPROFSYS_MAX_THREADS; ++i)
             {
                 if(get_causal_sampler(i))
                 {
@@ -390,18 +387,18 @@ configure(bool _setup, int64_t _tid)
             _causal_perf.reset();
         }
 
-        ROCPROFSYS_DEBUG("Causal sampler destroyed for thread %lu\n", _tid);
+        LOG_DEBUG("Causal sampler destroyed for thread {}...", _tid);
     }
 
     return _signal_types;
 }
 
 void
-post_process_causal(int64_t _tid, const std::vector<causal_bundle_t>& _data);
+post_process_causal(std::int64_t _tid, const std::vector<causal_bundle_t>& _data);
 }  // namespace
 
 std::set<int>
-get_signal_types(int64_t _tid)
+get_signal_types(std::int64_t _tid)
 {
     return (get_causal_sampler_signals()) ? get_causal_sampler_signals(_tid)
                                           : std::set<int>{};
@@ -462,14 +459,10 @@ sampling_signals()
 }  // namespace
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 pause(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = false;
@@ -502,14 +495,10 @@ pause(ScopeT)
 }
 
 template <typename ScopeT>
+    requires sampling_scope<ScopeT>
 void
 resume(ScopeT)
 {
-    static_assert(
-        tim::is_one_of<ScopeT,
-                       type_list<scope::thread_scope, scope::process_scope>>::value,
-        "Unsupported scope");
-
     if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
     {
         if(!_thread_paused) _thread_paused = true;
@@ -570,8 +559,10 @@ post_process()
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    ROCPROFSYS_VERBOSE(2 || get_debug_sampling(),
-                       "Stopping causal sampling components...\n");
+    if(get_debug_sampling())
+    {
+        LOG_DEBUG("Stopping causal sampling components...");
+    }
 
     block_samples();
 
@@ -614,7 +605,7 @@ post_process()
 namespace
 {
 void
-post_process_causal(int64_t, const std::vector<causal_bundle_t>& _data)
+post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
 {
     for(const auto& itr : _data)
     {

@@ -22,6 +22,8 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
+#include <unistd.h>
+#include <xf86drm.h>
 
 #define VHSA_GL_METADATA_MAX_SIZE (0x50)
 
@@ -29,9 +31,11 @@ vhsakmt_bo_handle vhsakmt_entry_to_bo_handle(bo_entry e) { return (vhsakmt_bo_ha
 bo_entry vhsakmt_bo_handle_to_entry(vhsakmt_bo_handle bo) { return &bo->rbtn; }
 static inline bool vhsakmt_is_mem_bo(vhsakmt_bo_handle bo) { return (!bo->queue_id && !bo->event); }
 
-static bool vhsakmt_mappable(HsaMemFlags flags) { return (!flags.ui32.Scratch); }
+static bool vhsakmt_mappable(HsaMemFlags flags) {
+  if (flags.ui32.Scratch || flags.ui32.NoAddress) return false;
 
-static bool vhsakmt_bo_mappable(vhsakmt_bo_handle bo) { return vhsakmt_mappable(bo->flags); }
+  return flags.ui32.HostAccess;
+}
 
 void vhsakmt_insert_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle bo, void* addr, uint64_t size) {
   bo->rbtn.key.addr = (unsigned long)addr;
@@ -90,6 +94,51 @@ vhsakmt_bo_handle vhsakmt_find_bo_by_addr(vhsakmt_device_handle dev, void* addr)
   return NULL;
 }
 
+static void vhsakmt_insert_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle userptr) {
+  if (!(userptr->bo_type & VHSA_BO_USERPTR)) return;
+
+  interval_tree_node_init(&userptr->itn, (unsigned long)userptr->cpu_addr,
+                          (unsigned long)userptr->cpu_addr + userptr->size - 1UL);
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+  hsakmt_interval_tree_insert(&dev->userptr_tree, &userptr->itn);
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+}
+
+static vhsakmt_bo_handle vhsakmt_find_userptr(vhsakmt_device_handle dev, unsigned long addr,
+                                              unsigned long last) {
+  interval_tree_node_t* n;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+
+  n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, addr, last);
+
+  while (n) {
+    vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+    if ((unsigned long)bo->cpu_addr <= addr &&
+        ((unsigned long)bo->cpu_addr + bo->size - 1UL) >= last) {
+      pthread_mutex_unlock(&dev->bo_handles_mutex);
+      return bo;
+    }
+    n = hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, addr, last);
+  }
+
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+  return NULL;
+}
+
+static void vhsakmt_destroy_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
+  pthread_mutex_destroy(&bo->map_mutex);
+  pthread_mutex_destroy(&bo->amdgpu_bo.lock);
+
+  struct drm_gem_close drm_req = {
+      .handle = bo->real.handle,
+  };
+  drmIoctl(dev->vgdev->fd, DRM_IOCTL_GEM_CLOSE, &drm_req);
+  free(bo);
+}
+
 void* vhsakmt_gpu_va(vhsakmt_device_handle dev, void* va) {
   if (!vhsakmt_is_userptr(dev, va)) return va;
 
@@ -102,8 +151,6 @@ void* vhsakmt_gpu_va(vhsakmt_device_handle dev, void* va) {
 
 int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
   int r;
-
-  if (!vhsakmt_bo_mappable(bo)) return 0;
 
   pthread_mutex_lock(&bo->map_mutex);
 
@@ -123,8 +170,6 @@ int vhsakmt_bo_cpu_map(vhsakmt_bo_handle bo, void** cpu, void* fixed_cpu) {
 
 int vhsakmt_bo_cpu_unmap(vhsakmt_bo_handle bo) {
   int r = 0;
-
-  if (!vhsakmt_bo_mappable(bo)) return 0;
 
   pthread_mutex_lock(&bo->map_mutex);
 
@@ -179,6 +224,7 @@ int vhsakmt_init_host_blob(vhsakmt_device_handle dev, size_t size, uint32_t blob
   bo->bo_type = bo_type;
   bo->host_addr = va_handle;
   pthread_mutex_init(&bo->map_mutex, NULL);
+  pthread_mutex_init(&bo->amdgpu_bo.lock, NULL);
   atomic_store(&bo->real.map_count, 0);
   atomic_store(&bo->refcount, 1);
   bo->real.handle = args.bo_handle;
@@ -215,6 +261,7 @@ static int vhsakmt_init_userptr_blob(vhsakmt_device_handle dev, void* addr, size
   userptr->bo_type = VHSA_BO_USERPTR;
   userptr->cpu_addr = addr;
   pthread_mutex_init(&userptr->map_mutex, NULL);
+  pthread_mutex_init(&userptr->amdgpu_bo.lock, NULL);
   atomic_store(&userptr->real.map_count, 0);
   atomic_store(&userptr->refcount, 1);
   userptr->real.handle = args.bo_handle;
@@ -250,8 +297,9 @@ int vhsakmt_create_mappable_blob_bo(vhsakmt_device_handle dev, size_t size, uint
   return r;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
-                                           HsaMemFlags MemFlags, void** MemoryAddress) {
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                                HSAuint64 Alignment, HsaMemFlags MemFlags,
+                                                void** MemoryAddress) {
   vhsakmt_device_handle dev = vhsakmt_dev();
   struct vhsakmt_ccmd_memory_rsp* rsp;
   vhsakmt_bo_handle bo;
@@ -265,6 +313,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
               .PreferredNode = PreferredNode,
               .SizeInBytes = SizeInBytes,
               .MemFlags = MemFlags,
+              .Alignment = Alignment,
           },
   };
 
@@ -280,6 +329,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
                              vhsakmt_mappable(MemFlags) ? VIRTGPU_BLOB_FLAG_USE_MAPPABLE : 0,
                              req.blob_id, VHSA_BO_KFD_MEM, (void*)rsp->memory_handle, &bo);
   if (r) return r;
+  bo->flags = MemFlags;
 
   if (!vhsakmt_mappable(MemFlags)) {
     bo->cpu_addr = bo->host_addr;
@@ -305,6 +355,11 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 Si
   return rsp->ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocMemory(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
+                                           HsaMemFlags MemFlags, void** MemoryAddress) {
+  return vhsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, 0, MemFlags, MemoryAddress);
+}
+
 int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
   bo_entry entry;
   int r;
@@ -326,9 +381,10 @@ int vhsakmt_bo_free(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
 
   if (bo->event) free(bo->event);
 
-  if (bo->gl_meta_data) free(bo->gl_meta_data);
+  if (bo->amdgpu_bo.gl_meta_data) free(bo->amdgpu_bo.gl_meta_data);
 
   pthread_mutex_destroy(&bo->map_mutex);
+  pthread_mutex_destroy(&bo->amdgpu_bo.lock);
 
   r = vhsakmt_destroy_handle(dev, bo);
 
@@ -366,6 +422,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint6
   struct vhsakmt_ccmd_memory_req* req;
   struct vhsakmt_ccmd_memory_rsp* rsp;
   vhsakmt_bo_handle bo;
+  uint64_t addr_offset = 0;
 
   req = (void*)calloc(1, req_len);
   if (!req) return -ENOMEM;
@@ -379,8 +436,22 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint6
   if (bo) {
     req->map_to_GPU_nodes_args.MemoryAddress = (uint64_t)bo->host_addr;
     if (bo->bo_type & VHSA_BO_USERPTR) vhsakmt_remove_userptr_bo(dev, bo);
-  } else
-    req->map_to_GPU_nodes_args.MemoryAddress = (uint64_t)MemoryAddress;
+  } else if (!dev->use_svm) {
+    bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                              (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo) {
+      req->res_id = bo->real.res_id;
+      req->map_to_GPU_nodes_args.MemoryAddress = (uint64_t)bo->host_addr;
+      req->map_to_GPU_nodes_args.MemorySizeInBytes = (uint64_t)bo->size;
+      addr_offset = (uint64_t)MemoryAddress - (uint64_t)bo->cpu_addr;
+    }
+
+  }
+
+  if (!bo) {
+    free(req);
+    return HSAKMT_STATUS_INVALID_HANDLE;
+  }
 
   memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(*NodeArray));
 
@@ -391,6 +462,13 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPUNodes(void* MemoryAddress, HSAuint6
   }
 
   vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
+  if (rsp->ret) {
+    free(req);
+    return rsp->ret;
+  }
+
+  if (!dev->use_svm)
+    rsp->alternate_vagpu += addr_offset;
 
   *AlternateVAGPU = rsp->alternate_vagpu;
 
@@ -477,6 +555,7 @@ static int vhsakmt_create_scratch_map_memory(vhsakmt_device_handle dev, void* Me
 
   // TODO: insert scratch bo into rbtree, or insert it in dev nodes.
 
+  out->flags.ui32.Scratch = 1;
   out->cpu_addr = MemoryAddress;
   out->host_addr = (void*)rsp->memory_handle;
   *AlternateVAGPU = rsp->alternate_vagpu;
@@ -509,7 +588,17 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPU(void* MemoryAddress, HSAuint64 Mem
           },
   };
 
-  if (bo && (bo->bo_type & VHSA_BO_USERPTR)) vhsakmt_remove_userptr_bo(dev, bo);
+  if (bo && (bo->bo_type & VHSA_BO_USERPTR)) {
+    vhsakmt_remove_userptr_bo(dev, bo);
+  } else if (!bo) {
+    bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                              (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo)
+      req.map_to_GPU_args.MemoryAddress =
+          (uint64_t)bo->host_addr + ((char*)MemoryAddress - (char*)bo->cpu_addr);
+  }
+
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
 
   rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
   if (!rsp) return -ENOMEM;
@@ -542,31 +631,46 @@ static int vhsakmt_map_userptr(vhsakmt_device_handle dev, void* addr, size_t siz
   return rsp->ret;
 }
 
-static void* vhsakmt_map_to_gpu(void* addr, size_t size) {
+static vhsakmt_bo_handle vhsakmt_map_to_gpu(void* addr, size_t size, bool use_svm) {
   vhsakmt_device_handle dev = vhsakmt_dev();
-  size_t offset = (uint64_t)addr % getpagesize();
-  size_t map_size = (VHSA_ALIGN_UP(size + offset, getpagesize()) / getpagesize()) * getpagesize();
-  uint64_t userptr_offset, userptr_handle = 0;
+  size_t page_size = getpagesize();
+  size_t addr_offset = (uint64_t)addr % page_size;
+  void* blob_addr;
+  size_t blob_size;
+  uint64_t userptr_offset = 0, userptr_handle = 0;
   vhsakmt_bo_handle userptr;
   int r;
 
-  vhsa_debug("%s: addr: %p, size: 0x%lx, size + offset: 0x%lx, map_size: 0x%lx\n", __FUNCTION__,
-             addr, size, size + offset, map_size);
+  if (use_svm) {
+    blob_addr = addr;
+    blob_size = size;
+  } else {
+    blob_addr = (void*)((uint64_t)addr - addr_offset);
+    blob_size = VHSA_ALIGN_UP(size + addr_offset, page_size);
+  }
 
-  r = vhsakmt_init_userptr_blob(dev, addr, size, &userptr, &userptr_offset);
+  vhsa_debug("%s: addr: %p, size: 0x%lx, offset: 0x%lx, blob_addr: %p, blob_size: 0x%lx, svm: %d\n",
+             __FUNCTION__, addr, size, addr_offset, blob_addr, blob_size, use_svm);
+
+  r = vhsakmt_init_userptr_blob(dev, blob_addr, blob_size, &userptr, &userptr_offset);
   if (r < 0) {
     vhsa_debug("%s: userptr create failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
     return NULL;
   }
 
-  vhsakmt_map_userptr(dev, addr, size, userptr->real.res_id, &userptr_handle);
+  r = vhsakmt_map_userptr(dev, addr, size, userptr->real.res_id, &userptr_handle);
   if (!userptr_handle) {
     vhsa_debug("%s: map userptr failed at address: %p, ret = %d\n", __FUNCTION__, addr, r);
     vhsakmt_destroy_handle(dev, userptr);
     vhsakmt_remove_userptr_bo(dev, userptr);
     return NULL;
   }
-  userptr->host_addr = VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr_handle) + offset);
+
+  if (use_svm) {
+    userptr->host_addr = VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr_handle) + addr_offset);
+  } else {
+    userptr->host_addr = VHSA_UINT64_TO_VPTR(userptr_handle);
+  }
 
   if (r > 0) {
     vhsa_debug("%s: userptr: %p already registered, offset: %lx\n", __FUNCTION__, addr,
@@ -574,12 +678,17 @@ static void* vhsakmt_map_to_gpu(void* addr, size_t size) {
     userptr->host_addr =
         VHSA_UINT64_TO_VPTR(VHSA_VPTR_TO_UINT64(userptr->host_addr) + userptr_offset);
   }
-  vhsakmt_insert_bo(dev, userptr, userptr->cpu_addr, userptr->size);
 
-  vhsa_debug("%s: real gva: %p, gva: %p, hva: %p, size: %lx, offset: %" PRIu64
-             ", map_size: 0x%lx\n",
-             __FUNCTION__, addr, userptr->cpu_addr, userptr->host_addr, size, offset, map_size);
-  return userptr->host_addr;
+  if (use_svm) {
+    vhsakmt_insert_bo(dev, userptr, userptr->cpu_addr, userptr->size);
+  } else {
+    vhsakmt_insert_userptr(dev, userptr);
+  }
+
+  vhsa_debug("%s: gva: %p, cpu_addr: %p, hva: %p, size: %lx, offset: %lx, blob_size: 0x%lx\n",
+             __FUNCTION__, addr, userptr->cpu_addr, userptr->host_addr, size, addr_offset,
+             blob_size);
+  return userptr;
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
@@ -589,7 +698,7 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   struct vhsakmt_ccmd_memory_rsp* rsp;
-  void* addr;
+  vhsakmt_bo_handle userptr;
   struct vhsakmt_ccmd_memory_req req = {
       .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
       .type = VHSAKMT_CCMD_MEMORY_REG_MEM_WITH_FLAG,
@@ -603,20 +712,56 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
   /* no need to register memory from lihsakmt / not a userptr */
   if (!vhsakmt_is_userptr(dev, MemoryAddress)) return HSAKMT_STATUS_SUCCESS;
 
-  addr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes);
-  if (!addr) {
-    vhsa_debug("%s: register memory failed, gva: %p, size: %lx\n", __FUNCTION__, MemoryAddress,
-               MemorySizeInBytes);
+  if (!dev->use_svm) {
+    vhsakmt_bo_handle bo = vhsakmt_find_userptr(dev, (uint64_t)MemoryAddress,
+                                                (uint64_t)MemoryAddress + MemorySizeInBytes - 1UL);
+    if (bo) {
+      vhsa_debug(
+          "%s: memory already registered, MemoryAddress:%p, bo address: %p, size: %x, "
+          "res_id: %d, count: %d\n",
+          __FUNCTION__, MemoryAddress, bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
+      (void)vhsakmt_atomic_inc_return(&bo->refcount);
+      return HSAKMT_STATUS_SUCCESS;
+    }
+  }
+
+  userptr = vhsakmt_map_to_gpu(MemoryAddress, MemorySizeInBytes, dev->use_svm);
+
+  if (!userptr) {
+    vhsa_debug(
+        "%s: register memory failed at address: %p, size: %lx (vhsakmt_map_to_gpu returned %p)\n",
+        __FUNCTION__, MemoryAddress, MemorySizeInBytes, userptr);
     return HSAKMT_STATUS_ERROR;
   }
 
-  req.reg_mem_with_flag.MemoryAddress = (uint64_t)addr;
+  req.reg_mem_with_flag.MemoryAddress = (uint64_t)userptr->host_addr;
+  req.res_id = userptr->real.res_id;
 
   rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
   if (!rsp) return -ENOMEM;
 
   vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
   return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemory(void* MemoryAddress, HSAuint64 MemorySizeInBytes) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  HsaMemFlags flags = {0};
+  flags.ui32.CoarseGrain = 1;
+  flags.ui32.ExtendedCoherent = 0;
+
+  return vhsaKmtRegisterMemoryWithFlags(MemoryAddress, MemorySizeInBytes, flags);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryToNodes(void* MemoryAddress,
+                                                     HSAuint64 MemorySizeInBytes,
+                                                     HSAuint32 NumberOfNodes,
+                                                     HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  // Not used in ROCR so no implementation is performed here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
 
 static int vhsakmt_remove_clgl_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
@@ -640,21 +785,90 @@ static int vhsakmt_remove_clgl_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle b
   return rsp->ret;
 }
 
+static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* MemoryAddress) {
+  size_t page_size = getpagesize();
+  unsigned long aligned_addr = ((uint64_t)MemoryAddress / page_size) * page_size;
+  interval_tree_node_t* n;
+  vhsakmt_bo_handle* bos_to_free = NULL;
+  int free_count = 0;
+  int free_capacity = 0;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+
+  /* First pass: Decrement refcounts and check if all can be freed */
+  bool can_free_all = true;
+  n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, aligned_addr, aligned_addr);
+  while (n) {
+    vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+    if (bo->cpu_addr == (void*)aligned_addr) {
+      vhsa_debug("%s: found userptr: %p, size: %x, res_id: %d, count: %d\n", __FUNCTION__,
+                 bo->cpu_addr, bo->size, bo->real.res_id, bo->refcount);
+
+      if (vhsakmt_atomic_dec_return(&bo->refcount) > 0) {
+        can_free_all = false;
+      }
+    }
+    n = hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
+  }
+
+  /* Second pass: Collect BOs to free and remove from tree */
+  if (can_free_all) {
+    n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, aligned_addr, aligned_addr);
+    while (n) {
+      vhsakmt_bo_handle bo = (vhsakmt_bo_handle)((char*)n - offsetof(struct vhsakmt_bo, itn));
+      interval_tree_node_t* next =
+          hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
+
+      if (bo->cpu_addr == (void*)aligned_addr) {
+        vhsa_debug("%s: destroying userptr: %p, size: %x, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
+                   bo->size, bo->real.res_id);
+
+        hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
+
+        if (free_count >= free_capacity) {
+          int new_capacity = free_capacity == 0 ? 32 : free_capacity * 2;
+          vhsakmt_bo_handle* new_array = realloc(bos_to_free, new_capacity * sizeof(vhsakmt_bo_handle));
+          if (!new_array) {
+            vhsa_err("%s: failed to allocate memory for BO array, freeing %d BOs\n", __FUNCTION__, free_count);
+            pthread_mutex_unlock(&dev->bo_handles_mutex);
+            goto cleanup;
+          }
+          bos_to_free = new_array;
+          free_capacity = new_capacity;
+        }
+
+        bos_to_free[free_count++] = bo;
+      }
+
+      n = next;
+    }
+  }
+
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+cleanup:
+  for (int i = 0; i < free_count; i++) {
+    vhsakmt_bo_handle bo = bos_to_free[i];
+    vhsakmt_destroy_userptr(dev, bo);
+  }
+
+  if (bos_to_free) {
+    free(bos_to_free);
+  }
+
+  return 0;
+}
+
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDeregisterMemory(void* MemoryAddress) {
   CHECK_VIRTIO_KFD_OPEN();
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);
-  if (!bo) return HSAKMT_STATUS_SUCCESS;
 
-  vhsa_debug("%s: remove userptr %p size: 0x%lx, res id: %d\n", __FUNCTION__, MemoryAddress,
-             (size_t)bo->size, bo->real.res_id);
+  if (bo && (bo->bo_type & VHSA_BO_AMDGPU)) return vhsakmt_remove_clgl_bo(dev, bo);
 
-  if (bo->bo_type & VHSA_BO_CLGL)
-    return vhsakmt_remove_clgl_bo(dev, bo);
-  else {
-    vhsakmt_remove_bo(dev, bo);
-    free(bo);
+  if (!dev->use_svm) {
+    return vhsakmt_deregister_userptr_non_svm(dev, MemoryAddress);
   }
 
   return 0;
@@ -733,13 +947,14 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetTileConfig(HSAuint32 NodeId, HsaGpuTileConfig*
   return rsp->ret;
 }
 
-static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t size,
-                                  uint32_t res_id, uint32_t bo_handle, void* meta_data) {
+static int vhsakmt_create_amdgpu_bo(vhsakmt_device_handle dev, void* addr, size_t size,
+                                    uint32_t res_id, uint32_t bo_handle, void* meta_data) {
   vhsakmt_bo_handle out = calloc(1, sizeof(struct vhsakmt_bo));
   if (!out) return -ENOMEM;
 
   out->dev = dev;
   out->size = size;
+  pthread_mutex_init(&out->amdgpu_bo.lock, NULL);
   atomic_store(&out->real.map_count, 0);
   atomic_store(&out->refcount, 1);
 
@@ -751,8 +966,8 @@ static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t 
 
   /* GL bo handle from GL context*/
   out->real.handle = bo_handle;
-  out->bo_type |= VHSA_BO_CLGL;
-  if (meta_data) out->gl_meta_data = meta_data;
+  out->bo_type |= VHSA_BO_AMDGPU;
+  if (meta_data) out->amdgpu_bo.gl_meta_data = meta_data;
 
   out->host_addr = addr;
 
@@ -761,25 +976,25 @@ static int vhsakmt_create_clgl_bo(vhsakmt_device_handle dev, void* addr, size_t 
   return 0;
 }
 
-static int vhsakmt_gfxhandle_to_resid(vhsakmt_device_handle dev, uint32_t gfx_handle,
-                                      uint32_t* res_id, uint32_t* bo_handle) {
-  int r = drmPrimeFDToHandle(dev->vgdev->fd, gfx_handle, bo_handle);
+int vhsakmt_handle_to_resid(vhsakmt_device_handle dev, uint32_t handle,
+                            uint32_t* res_id, uint32_t* bo_handle) {
+  int r = drmPrimeFDToHandle(dev->vgdev->fd, handle, bo_handle);
   if (r) {
-    vhsa_err("%s: drmPrimeFDToHandle failed for handle: %u\n", __FUNCTION__, gfx_handle);
+    vhsa_err("%s: drmPrimeFDToHandle failed for handle: %u\n", __FUNCTION__, handle);
     return r;
   }
 
   virtio_gpu_res_id(dev->vgdev, *bo_handle, res_id);
 
-  vhsa_debug("%s: register praphics handle: handle: %d, bo_handle: %d, res_id: %d\n", __FUNCTION__,
-             gfx_handle, *bo_handle, *res_id);
+  vhsa_debug("%s: drm handle: %d, bo_handle: %d, res_id: %d\n", __FUNCTION__,
+             handle, *bo_handle, *res_id);
 
   return 0;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
-    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags) {
   CHECK_VIRTIO_KFD_OPEN();
 
   vhsakmt_device_handle dev = vhsakmt_dev();
@@ -801,12 +1016,14 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
 #ifdef CLGL_EXPORT_RESID
   req->reg_ghd_to_nodes.GraphicsResourceHandle = GraphicsResourceHandle;
 #else
-  r = vhsakmt_gfxhandle_to_resid(dev, GraphicsResourceHandle, &res_id, &bo_handle);
+  r = vhsakmt_handle_to_resid(dev, GraphicsResourceHandle, &res_id, &bo_handle);
   if (r) return r;
 
   req->reg_ghd_to_nodes.GraphicsResourceHandle = bo_handle;
   req->reg_ghd_to_nodes.res_handle = res_id;
 #endif
+
+  req->reg_ghd_to_nodes.flag = RegisterFlags.Value;
 
   memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
 
@@ -837,9 +1054,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
              GraphicsResourceHandle, GraphicsResourceInfo->MemoryAddress,
              GraphicsResourceInfo->SizeInBytes);
 
-  r = vhsakmt_create_clgl_bo(dev, GraphicsResourceInfo->MemoryAddress,
-                             GraphicsResourceInfo->SizeInBytes, res_id, bo_handle,
-                             VHSA_UINT64_TO_VPTR(GraphicsResourceInfo->Metadata));
+  r = vhsakmt_create_amdgpu_bo(dev, GraphicsResourceInfo->MemoryAddress,
+                               GraphicsResourceInfo->SizeInBytes, res_id, bo_handle,
+                               VHSA_UINT64_TO_VPTR(GraphicsResourceInfo->Metadata));
   if (r) goto free_out;
 
   r = rsp->ret;
@@ -849,4 +1066,316 @@ free_out:
   close(GraphicsResourceHandle);
   free(req);
   return r;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
+    HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  HSA_REGISTER_MEM_FLAGS flags = {0};
+
+  return vhsaKmtRegisterGraphicsHandleToNodesExt(GraphicsResourceHandle, GraphicsResourceInfo,
+                                                 NumberOfNodes, NodeArray, flags);
+}
+
+static int vhsakmt_export_dmabuf(vhsakmt_device_handle dev, uint32_t bo_handle, int* dmabuf_fd) {
+  return drmPrimeHandleToFD(dev->vgdev->fd, bo_handle, DRM_CLOEXEC | DRM_RDWR, dmabuf_fd);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtMapGraphicHandle(HSAuint32 NodeId, HSAuint64 GraphicDeviceHandle,
+                                                HSAuint64 GraphicResourceHandle,
+                                                HSAuint64 GraphicResourceOffset,
+                                                HSAuint64 GraphicResourceSize,
+                                                HSAuint64* FlatMemoryAddress) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapGraphicHandle(HSAuint32 NodeId, HSAuint64 FlatMemoryAddress,
+                                                  HSAuint64 SizeInBytes) {
+  return vhsaKmtUnmapMemoryToGPU(VHSA_UINT64_TO_VPTR(FlatMemoryAddress));
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                  int* DMABufFd, HSAuint64* Offset) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo =  vhsakmt_find_bo_by_addr(dev, MemoryAddress);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  int r;
+
+  r = vhsakmt_export_dmabuf(dev, bo->real.handle, DMABufFd);
+  if (r) {
+    vhsa_err("%s: export dmabuf failed for handle: %d\n",
+              __FUNCTION__, bo->real.handle);
+    return -HSAKMT_STATUS_ERROR;
+  }
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
+      .export_dmabuf_args =
+          {
+              .MemoryAddress = (uint64_t)MemoryAddress,
+              .MemorySizeInBytes = MemorySizeInBytes,
+          },
+      .res_id = bo->real.res_id,
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  *Offset = rsp->export_dmabuf_rsp.offset;
+
+  vhsa_debug("%s: gva: %p, size: %lx, dmabuf_fd: %d, offset: %lx, resid: %x \n", __FUNCTION__,
+             MemoryAddress, MemorySizeInBytes, *DMABufFd, *Offset, bo->real.res_id);
+
+  return r;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtShareMemory(void* MemoryAddress, HSAuint64 SizeInBytes,
+                                           HsaSharedMemoryHandle* SharedMemoryHandle) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_SHARE_MEMORY,
+      .share_memory_args =
+          {
+              .MemoryAddress = (uint64_t)MemoryAddress,
+              .MemorySizeInBytes = SizeInBytes,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);
+  if (!bo) return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  req.res_id = bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(SharedMemoryHandle, &rsp->share_memory_rsp.SharedMemoryHandle,
+         sizeof(HsaSharedMemoryHandle));
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
+    const HsaSharedMemoryHandle* SharedMemoryHandle, void** MemoryAddress, HSAuint64* SizeInBytes,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (NumberOfNodes > VHSAKMT_MEMORY_MAX_NODES) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(
+          MEMORY, sizeof(struct vhsakmt_ccmd_memory_req) + NumberOfNodes * sizeof(NodeArray)),
+      .type = VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
+      .blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id),
+      .register_shared_handle_args = {
+          .NumberOfNodes = NumberOfNodes,
+      }};
+  int r;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  memcpy(req.payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
+  memcpy(&req.register_shared_handle_args.SharedMemoryHandle, SharedMemoryHandle,
+         sizeof(HsaSharedMemoryHandle));
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  if (!rsp->register_shared_handle_rsp.memory_handle || !rsp->register_shared_handle_rsp.size)
+    return -ENOMEM;
+
+  // treat as VHSA_BO_KFD_MEM for shared handle memory
+  r = vhsakmt_init_host_blob(dev, rsp->register_shared_handle_rsp.size, VIRTGPU_BLOB_MEM_HOST3D,
+                             VIRTGPU_BLOB_FLAG_USE_MAPPABLE, req.blob_id, VHSA_BO_KFD_MEM,
+                             (void*)rsp->register_shared_handle_rsp.memory_handle, &bo);
+  if (r) return r;
+
+  r = vhsakmt_bo_cpu_map(bo, &bo->cpu_addr, bo->host_addr);
+  if (r) {
+    free(bo);
+    return -ENOMEM;
+  }
+
+  *MemoryAddress = bo->cpu_addr;
+  *SizeInBytes = rsp->register_shared_handle_rsp.size;
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle* SharedMemoryHandle,
+                                                    void** MemoryAddress, HSAuint64* SizeInBytes) {
+  return vhsaKmtRegisterSharedHandleToNodes(SharedMemoryHandle, MemoryAddress, SizeInBytes, 0,
+                                            NULL);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryPolicy(HSAuint32 Node, HSAuint32 DefaultPolicy,
+                                               HSAuint32 AlternatePolicy,
+                                               void* MemoryAddressAlternate,
+                                               HSAuint64 MemorySizeInBytes) {
+  CHECK_VIRTIO_KFD_OPEN();
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_SET_MEM_POLICY,
+      .set_mem_policy_args = {
+          .Node = Node,
+          .DefaultPolicy = DefaultPolicy,
+          .AlternatePolicy = AlternatePolicy,
+          .MemoryAddressAlternate = (uint64_t)MemoryAddressAlternate,
+          .MemorySizeInBytes = MemorySizeInBytes,
+      }};
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryUserData(const void* Pointer, void* UserData) {
+  CHECK_VIRTIO_KFD_OPEN();
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = vhsakmt_find_bo_by_addr(dev, VHSA_UINT64_TO_VPTR(Pointer));
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+  bo->user_data = UserData;
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (nattr > VHSAKMT_MEMORY_MAX_NATTR) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  vhsakmt_bo_handle bo;
+  size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  size_t rsp_len = sizeof(struct vhsakmt_ccmd_memory_rsp) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
+      .type = VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
+      .svm_attr_args =
+          {
+              .start_addr = (uint64_t)start_addr,
+              .size = size,
+              .nattr = nattr,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, start_addr);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  req.res_id = bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, rsp_len);
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMSetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (nattr > VHSAKMT_MEMORY_MAX_NATTR) return -EINVAL;
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
+      .type = VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
+      .svm_attr_args =
+          {
+              .start_addr = (uint64_t)start_addr,
+              .size = size,
+              .nattr = nattr,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, start_addr);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  req.res_id = bo->real.res_id;
+
+  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReplaceAsanHeaderPage(void* addr) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReturnAsanHeaderPage(void* addr) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                HSAint32 fd, HSAint64 file_offset,
+                                                HsaAisFlags AisFlags, HSAuint64* SizeCopiedInBytes,
+                                                HSAint32* status) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMRead(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                             HSAuint64 LocalMemoryArrayCount,
+                                             HsaMemoryRange* RemoteMemoryArray,
+                                             HSAuint64 RemoteMemoryArrayCount,
+                                             HSAuint64* SizeCopied) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMWrite(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                              HSAuint64 LocalMemoryArrayCount,
+                                              HsaMemoryRange* RemoteMemoryArray,
+                                              HSAuint64 RemoteMemoryArrayCount,
+                                              HSAuint64* SizeCopied) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }

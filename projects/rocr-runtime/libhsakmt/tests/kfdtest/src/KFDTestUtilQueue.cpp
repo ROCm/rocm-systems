@@ -147,7 +147,7 @@ void AsyncMPSQ::Destroy(void) {
         delete m_buf;
 
     if (m_event)
-        hsaKmtDestroyEvent(m_event);
+        HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, m_event);
 }
 
 void AsyncMPSQ::AllocTimeStampBuf(int packetCount) {

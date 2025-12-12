@@ -1,20 +1,7 @@
 /*
- * Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #include <hip_test_checkers.hh>
@@ -62,7 +49,7 @@ template <typename Func, typename T> void threadCall(Func f, hipStream_t stream)
 
   T* ptr{nullptr};
   constexpr size_t size = 1024;
-  constexpr size_t iter = 512;
+  const size_t iter = isQuickLevel() ? 8 : 512;
   HIP_CHECK_THREAD(hipMalloc(&ptr, sizeof(T) * size));
   hipEvent_t event{};
   HIP_CHECK_THREAD(hipEventCreate(&event));
@@ -110,7 +97,8 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
                                                    hipStream_t)>::value) &&  // hipMemsetD8Async
                 "Func f should be hipMemsetAsync or hipMemsetD*Async");
 
-  const size_t num_threads = (std::thread::hardware_concurrency() > 8)
+  const size_t num_threads = isQuickLevel() ? 4
+                            : (std::thread::hardware_concurrency() > 8)
                                  ? (((std::thread::hardware_concurrency() / 4) >= 127)
                                         ? 127
                                         : (std::thread::hardware_concurrency() / 4))
@@ -143,7 +131,7 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   }
 }
 
-TEST_CASE("Unit_hipMemsetAsync_QueueJobsMultithreaded") {
+HIP_TEST_CASE(Unit_hipMemsetAsync_QueueJobsMultithreaded) {
   using hipMemsetAsync_t = hipError_t (*)(void*, int, const size_t, hipStream_t);
   using hipMemsetAsyncD8_t =
       hipError_t (*)(hipDeviceptr_t, unsigned char, const size_t, hipStream_t);

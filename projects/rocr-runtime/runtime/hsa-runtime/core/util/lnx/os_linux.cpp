@@ -62,6 +62,8 @@
 #include <semaphore.h>
 #include "core/inc/runtime.h"
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -259,13 +261,22 @@ class os_thread {
 static_assert(sizeof(LibHandle) == sizeof(void*), "OS abstraction size mismatch");
 static_assert(sizeof(Semaphore) == sizeof(sem_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Mutex) == sizeof(pthread_mutex_t*), "OS abstraction size mismatch");
-static_assert(sizeof(SharedMutex) == sizeof(pthread_rwlock_t*), "OS abstraction size mismatch");
 static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatch");
 
 LibHandle LoadLib(std::string filename) {
-  void* ret = dlopen(filename.c_str(), RTLD_LAZY);
+  // RTLD_NODELETE keeps the library mapped even after dlclose.
+  // This prevents crashes when the library has circular dependencies:
+  // if libA loads libB, and libB links against libA, then dlclose(libB)
+  // could unmap libA while libA's code is still executing.
+  // With RTLD_NODELETE, dlclose decrements the refcount but does not
+  // unmap the code pages or run destructors - those happen at process exit.
+  int dlopen_flags = RTLD_LAZY;
+#ifdef RTLD_NODELETE
+  dlopen_flags |= RTLD_NODELETE;
+#endif
+  void* ret = dlopen(filename.c_str(), dlopen_flags);
   if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
-  return *(LibHandle*)&ret;
+  return ret;
 }
 
 void* GetExportAddress(LibHandle lib, std::string export_name) {
@@ -313,6 +324,13 @@ bool CloseLib(LibHandle lib) { return (dlclose(*(void**)&lib) == 0) ? true : fal
  * shared objects.
  */
 
+// Disable ASAN: dl_iterate_phdr pointers may reside outside ASAN's shadow
+// mapped range as ASLR makes this non-deterministic across nodes/runs
+#if defined(__has_attribute)
+#if __has_attribute(no_sanitize)
+__attribute__((no_sanitize("address")))
+#endif
+#endif
 static int callback(struct dl_phdr_info* info, size_t size, void* data) {
   std::vector<std::string>* loadedToolsLib = (std::vector<std::string>*)data;
   assert(loadedToolsLib != nullptr);
@@ -325,7 +343,7 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    * will have a specific segment or section. Hence its skipped.
    */
 
-  if ((info) && (info->dlpi_name[0] != '\0')) {
+  if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
     if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
 
     /*
@@ -539,7 +557,7 @@ typedef struct EventDescriptor_ {
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
-  
+
   if(!eventDescrp) { return nullptr; }
 
   pthread_mutex_init(&eventDescrp->mutex, NULL);
@@ -706,74 +724,6 @@ uint64_t AccurateClockFrequency() {
   return 1000000000ull / uint64_t(time.tv_nsec);
 }
 
-SharedMutex CreateSharedMutex() {
-  pthread_rwlockattr_t attrib;
-  int err = pthread_rwlockattr_init(&attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock attribute init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-#ifdef HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP
-  err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-  if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
-    return nullptr;
-  }
-#endif
-
-  std::unique_ptr<pthread_rwlock_t> lock(new pthread_rwlock_t);
-  err = pthread_rwlock_init(lock.get(), &attrib);
-  if (err != 0) {
-    fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
-    return nullptr;
-  }
-
-  pthread_rwlockattr_destroy(&attrib);
-  return lock.release();
-}
-
-bool TryAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_trywrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool AcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_wrlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void ReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-bool TrySharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_tryrdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-bool SharedAcquireSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_rdlock(*(pthread_rwlock_t**)&lock);
-  return err == 0;
-}
-
-void SharedReleaseSharedMutex(SharedMutex lock) {
-  int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
-  if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
-    abort();
-  }
-}
-
-void DestroySharedMutex(SharedMutex lock) {
-  pthread_rwlock_destroy(*(pthread_rwlock_t**)&lock);
-  delete *(pthread_rwlock_t**)&lock;
-}
-
 static uint64_t sys_clock_period_ = 0;
 
 uint64_t ReadSystemClock() {
@@ -849,6 +799,39 @@ size_t PageSize() {
   return g_page_size_;
 }
 
+bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
+
+bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  if (fd < 0)  return false;
+
+  void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
+                            MAP_SHARED | MAP_FIXED, fd, cpu_addr);
+  if (mapped_ptr != va)
+      return false;
+  return true;
+}
+
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (*dmabuf < 0) return HSA_STATUS_SUCCESS;
+  if (::close(*dmabuf) != 0) {
+    *dmabuf = -1;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+  }
+  /* Set to -1 even on close failure: the fd is no longer valid regardless of errno. */
+  *dmabuf = -1;
+  return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  if (dmabuf < 0) return -1;
+  int dup_fd = ::dup(dmabuf);
+  if (dup_fd < 0) {
+    return -1;
+  }
+  return dup_fd;
+}
+
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   size = AlignUp(size, PageSize());
   // check for invalid input size
@@ -887,7 +870,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+      fprintf(stderr,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
@@ -920,6 +903,10 @@ bool UncommitMemory(void* addr, size_t size) {
                 0) != MAP_FAILED;
 }
 
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
+}
+
 uint64_t HostTotalPhysicalMemory() {
   static uint64_t totalPhys = 0;
 
@@ -935,7 +922,136 @@ int Ffs(int i) { return ffs(i); }
 
 int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
+int Popcount(uint32_t i) { return __builtin_popcount(i); }
+
 char* DlError() { return dlerror(); }
+
+static inline int IPCSockToFd(IPCSocket sock) {
+  return static_cast<int>(sock);
+}
+
+static inline IPCSocket FdToIPCSock(int fd) {
+  return static_cast<IPCSocket>(fd);
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  if (listen(fd, backlog) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  return FdToIPCSock(fd);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  int fd = accept(IPCSockToFd(server), NULL, NULL);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+  return FdToIPCSock(fd);
+}
+
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
+      return FdToIPCSock(fd);
+    usleep(static_cast<useconds_t>(retryInterval.count()) * 1000);
+  }
+
+  close(fd);
+  return INVALID_SOCKET_VALUE;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
+  struct timeval tv;
+  tv.tv_sec = static_cast<time_t>(timeout.count());
+  tv.tv_usec = 0;
+  setsockopt(IPCSockToFd(sock), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  return static_cast<int>(read(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  return static_cast<int>(write(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
+  int fd = static_cast<int>(handle);
+  char iov_buf[1] = {'y'};
+  struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
+
+  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  memset(cmsg_buf, 0, sizeof(cmsg_buf));
+
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = cmsg_buf;
+  msg.msg_controllen = sizeof(cmsg_buf);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+
+  msg.msg_controllen = CMSG_SPACE(sizeof(int));
+
+  return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
+}
+
+intptr_t IPCRecvHandle(IPCSocket conn) {
+  char m_buffer[1];
+  struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
+
+  char c_buffer[256];
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = c_buffer;
+  msg.msg_controllen = sizeof(c_buffer);
+
+  ssize_t rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+  if (rcv < 0) return -1;
+
+  while (!rcv)
+    rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
+  int fd;
+  memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
+  return fd;
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock != INVALID_SOCKET_VALUE)
+    close(IPCSockToFd(sock));
+}
 
 }   //  namespace os
 }   //  namespace rocr

@@ -31,8 +31,10 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sqlite3.h>
 
+#include <cctype>
 #include <iomanip>
 #include <sstream>
 #include <thread>
@@ -46,11 +48,15 @@ namespace sql
 namespace sdk = ::rocprofiler::sdk;
 
 void
-check(std::string_view function, int status, std::string_view stmt)
+check(std::string_view               function,
+      int                            status,
+      std::string_view               stmt,
+      const std::unordered_set<int>& valid_statuses)
 {
-    if(status != SQLITE_OK)
+    if(valid_statuses.find(status) == valid_statuses.end())
     {
-        ROCP_FATAL << "[" << function << "] " << stmt << " failed with error code " << status;
+        ROCP_FATAL << "[" << function << "] " << stmt << " failed with error code " << status
+                   << ": " << sqlite3_errstr(status);
     }
 }
 
@@ -153,7 +159,7 @@ extract_row_count(sqlite3* conn, std::string_view query)
         return 0;
     }
 
-    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statment: " << query;
+    ROCP_CI_LOG_IF(ERROR, _stmt == nullptr) << "Error preparing statement: " << query;
 
     int64_t nrows = 0;
     if(_stmt && sqlite3_column_count(_stmt) == 1 && sqlite3_step(_stmt) == SQLITE_ROW)

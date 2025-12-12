@@ -41,27 +41,28 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/mem_util_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
-#include <string>
 #include <map>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/mem_util_read.h"
-#include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi_test/test_common.h"
 
 TestMemUtilRead::TestMemUtilRead() : TestBase() {
   set_title("Memory Utilization Read Test");
-  set_description("The Memory Utilization Read tests verifies that "
-           "memory busy percent, size and amount used can be read properly.");
+  set_description(
+      "The Memory Utilization Read tests verifies that "
+      "memory busy percent, size and amount used can be read properly.");
 }
 
-TestMemUtilRead::~TestMemUtilRead(void) {
-}
+TestMemUtilRead::~TestMemUtilRead(void) {}
 
 void TestMemUtilRead::SetUp(void) {
   TestBase::SetUp();
@@ -69,9 +70,7 @@ void TestMemUtilRead::SetUp(void) {
   return;
 }
 
-void TestMemUtilRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestMemUtilRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestMemUtilRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -84,8 +83,7 @@ void TestMemUtilRead::Close() {
   TestBase::Close();
 }
 
-static const std::map<rsmi_memory_type_t, const char *>
-   kDevMemoryTypeNameMap = {
+static const std::map<rsmi_memory_type_t, const char*> kDevMemoryTypeNameMap = {
     {RSMI_MEM_TYPE_VRAM, "VRAM memory"},
     {RSMI_MEM_TYPE_VIS_VRAM, "Visible VRAM memory"},
     {RSMI_MEM_TYPE_GTT, "GTT memory"},
@@ -102,15 +100,11 @@ void TestMemUtilRead::Run(void) {
     return;
   }
 
-  auto err_chk = [&](const char *str) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t** " << str << std::endl;
-    }
+  auto err_chk = [&](const char* str) {
+    IF_VERB(STANDARD) { std::cout << "\t** " << str << std::endl; }
     if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_FILE_ERROR ||
-          err == RSMI_STATUS_NOT_SUPPORTED) {
-        ASSERT_TRUE(err == RSMI_STATUS_NOT_SUPPORTED
-                    || err == RSMI_STATUS_FILE_ERROR);
+      if (err == RSMI_STATUS_FILE_ERROR || err == RSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_TRUE(err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_FILE_ERROR);
       } else {
         CHK_ERR_ASRT(err)
       }
@@ -132,37 +126,31 @@ void TestMemUtilRead::Run(void) {
                                                                       std::endl;
       }
 #endif
-      for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
-                                   mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
-        err = rsmi_dev_memory_total_get(i,
-                             static_cast<rsmi_memory_type_t>(mem_type), &total);
+      for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST; mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
+        err = rsmi_dev_memory_total_get(i, static_cast<rsmi_memory_type_t>(mem_type), &total);
         amd::smi::getRSMIStatusString(err, false);
         std::string mem_type_str =
-          kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
-        std::string input_str =
-          "rsmi_dev_memory_total_get(" + mem_type_str + "): "
-          + amd::smi::getRSMIStatusString(err, false);
+            kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
+        std::string input_str = "rsmi_dev_memory_total_get(" + mem_type_str +
+                                "): " + amd::smi::getRSMIStatusString(err, false);
         err_chk(input_str.c_str());
         if (err != RSMI_STATUS_SUCCESS) {
           continue;
         }
 
-        err = rsmi_dev_memory_usage_get(i,
-                             static_cast<rsmi_memory_type_t>(mem_type), &usage);
-        input_str =
-          "rsmi_dev_memory_usage_get(" + mem_type_str + "): "
-          + amd::smi::getRSMIStatusString(err, false);
+        err = rsmi_dev_memory_usage_get(i, static_cast<rsmi_memory_type_t>(mem_type), &usage);
+        input_str = "rsmi_dev_memory_usage_get(" + mem_type_str +
+                    "): " + amd::smi::getRSMIStatusString(err, false);
         err_chk(input_str.c_str());
         if (err != RSMI_STATUS_SUCCESS) {
           continue;
         }
 
         IF_VERB(STANDARD) {
-          std::cout << "\t**" <<
-           kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type))
-            << " Calculated Utilization: " <<
-              (static_cast<float>(usage)*100)/static_cast<float>(total) << "% (" << usage <<
-                                              "/" << total << ")" << std::endl;
+          std::cout << "\t**" << kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type))
+                    << " Calculated Utilization: "
+                    << (static_cast<float>(usage) * 100) / static_cast<float>(total) << "% ("
+                    << usage << "/" << total << ")" << std::endl;
         }
       }
     }

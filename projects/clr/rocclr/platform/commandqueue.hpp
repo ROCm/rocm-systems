@@ -1,22 +1,8 @@
-/* Copyright (c) 2012 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*! \file commandqueue.hpp
  *  \brief  Declarations CommandQueue object.
@@ -88,6 +74,9 @@ class CommandQueue : public RuntimeObject {
   //! Returns the base class object
   CommandQueue* asCommandQueue() { return this; }
 
+  //! Returns TRUE if this queue requires a dedicated HW queue
+  bool isDedicatedQueue() const { return dedicated_queue_; }
+
   virtual ~CommandQueue() {}
 
   //! Returns TRUE if the object was successfully created
@@ -123,7 +112,8 @@ class CommandQueue : public RuntimeObject {
                cl_command_queue_properties propMask,     //!< Queue properties mask
                uint rtCUs = RealTimeDisabled,            //!< Avaialble real time compute units
                Priority priority = Priority::Normal,     //!< Queue priority
-               const std::vector<uint32_t>& cuMask = {}  //!< CU mask
+               const std::vector<uint32_t>& cuMask = {}, //!< CU mask
+               bool dedicated_queue = false              //!< TRUE if requires dedicated HW queue
                )
       : properties_(propMask, properties),
         rtCUs_(rtCUs),
@@ -132,7 +122,8 @@ class CommandQueue : public RuntimeObject {
         lastCmdLock_(),
         device_(device),
         context_(context),
-        cuMask_(cuMask) {}
+        cuMask_(cuMask),
+        dedicated_queue_(dedicated_queue) {}
 
   Properties properties_;               //!< Queue properties
   uint rtCUs_;                          //!< The number of used RT compute units
@@ -142,6 +133,7 @@ class CommandQueue : public RuntimeObject {
   Device& device_;                      //!< The device
   SharedReference<Context> context_;    //!< The context of this command queue
   const std::vector<uint32_t> cuMask_;  //!< The CU mask
+  bool dedicated_queue_ = false;        //!< TRUE if this queue requires a dedicated HW queue
 
  private:
   //! Disable copy constructor
@@ -184,7 +176,11 @@ class HostQueue : public CommandQueue {
       }
     }
 
-    void Release() const { virtualDevice_->release(); }
+    void Release() const {
+      if (virtualDevice_ != nullptr) {
+        virtualDevice_->release();
+      }
+    }
 
     //! Get virtual device for the current thread
     device::VirtualDevice* vdev() const { return virtualDevice_; }
@@ -213,7 +209,7 @@ class HostQueue : public CommandQueue {
    */
   HostQueue(Context& context, Device& device, cl_command_queue_properties properties,
             uint queueRTCUs = 0, Priority priority = Priority::Normal,
-            const std::vector<uint32_t>& cuMask = {});
+            const std::vector<uint32_t>& cuMask = {}, bool dedicated_queue = false);
 
   //! Returns TRUE if this command queue can accept commands.
   virtual bool create() { return thread_.acceptingCommands_; }
@@ -253,7 +249,7 @@ class HostQueue : public CommandQueue {
 
   //! Get the current batch size
   size_t GetSubmissionBatchSize() const {
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     return size_;
   }
 
@@ -274,26 +270,26 @@ class HostQueue : public CommandQueue {
     // an invalid access
     command->retain();
 
-    // Release the last command in the batch
-    if (lastEnqueueCommand_ != nullptr) {
-      lastEnqueueCommand_->release();
+    // Extra retain for the last command
+    command->retain();
+
+    // Update lastEnqueueCommand_ before releasing the old one to prevent
+    // use-after-free if the release triggers re-entrant access to this queue
+    // (e.g. ~GraphExec calling finish() on graph-internal streams during
+    // cascading destruction from the old command's release).
+    Command* prevLastEnqueue = lastEnqueueCommand_;
+    lastEnqueueCommand_ = command;
+
+    if (prevLastEnqueue != nullptr) {
+      prevLastEnqueue->release();
     } else {
       // The queue becomes active. Add it to the set of activeQueues.
       device_.addToActiveQueues(this);
     }
-
-    // Extra retain for the last command
-    command->retain();
-
-    lastEnqueueCommand_ = command;
   }
 
   //! Flushes submitted commands if the batch size significantly grew
-  void FlushSubmissionBatch(Command* command) {
-    if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
-      command->notifyCmdQueue();
-    }
-  }
+  void FlushSubmissionBatch();
   //! Reset the command batch list
   void ResetSubmissionBatch() {
     head_ = nullptr;
@@ -304,7 +300,7 @@ class HostQueue : public CommandQueue {
   void SetQueueStatus() { isActive_ = true; }
 
   //! Get queue status
-  bool GetQueueStatus() { return isActive_; }
+  bool GetQueueStatus() const { return isActive_; }
 
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }

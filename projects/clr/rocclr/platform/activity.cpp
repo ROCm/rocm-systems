@@ -1,22 +1,8 @@
-/* Copyright (c) 2019 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/activity.hpp"
 #include "platform/command.hpp"
@@ -28,6 +14,17 @@
 namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
+
+// Reserved sentinel pointer value (0x1) used to signal roctracer that CLR commits
+// to delivering an activity record for this operation. roctracer's TracerCallback
+// distinguishes this from an IsEnabled query (nullptr) and a real record (valid ptr).
+// See TracerCallback in roctracer.cpp, ACTIVITY_DOMAIN_HIP_OPS case.
+static void* const kCommitRecordSentinel = reinterpret_cast<void*>(uintptr_t{1});
+
+void CommitRecord(OpId operation_id) {
+  auto function = report_activity.load(std::memory_order_acquire);
+  if (function) function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, kCommitRecordSentinel);
+}
 
 #if defined(__linux__)
 __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec"))) = 0;
@@ -44,7 +41,7 @@ static inline size_t linearSize(const amd::Coord3D& size3d) {
 
 bool IsEnabled(OpId operation_id) {
   if (operation_id < OP_ID_NUMBER)
-    if (auto report = report_activity.load(std::memory_order_relaxed))
+    if (auto report = report_activity.load(std::memory_order_acquire))
       return report(ACTIVITY_DOMAIN_HIP_OPS, operation_id, nullptr) == 0;
   return false;
 }
@@ -53,12 +50,21 @@ void ReportActivity(const amd::Command& command) {
   assert(command.profilingInfo().enabled_ && "Profiling must be enabled for this command");
   activity_op_t operation_id = OperationId(command.type());
   if (operation_id >= OP_ID_NUMBER) {
-    // This command does not translate into a profiler activity (dispatch, memcopy, etc...), there
-    // is nothing to report to the profiler.
-    return;
+    // hipEventRecord enqueues an EventMarker with command type 0 (internal marker) rather than
+    // CL_COMMAND_MARKER, so OperationId() can't classify it. It still dispatches a real barrier
+    // packet carrying a GPU timestamp (marker_ts_), so report it as a barrier to surface
+    // event-record sync points on the GPU timeline. Generic internal markers (batch-flush) have
+    // marker_ts_ == false and stay unreported.
+    if (command.type() == 0 && command.profilingInfo().marker_ts_) {
+      operation_id = OP_ID_BARRIER;
+    } else {
+      // This command does not translate into a profiler activity (dispatch, memcopy, etc...),
+      // there is nothing to report to the profiler.
+      return;
+    }
   }
 
-  auto function = report_activity.load(std::memory_order_relaxed);
+  auto function = report_activity.load(std::memory_order_acquire);
   if (!function) return;
 
   const auto* queue = command.queue();
@@ -97,19 +103,52 @@ void ReportActivity(const amd::Command& command) {
     case CL_COMMAND_FILL_BUFFER:
       record.bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
       break;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER: {
+      const auto& ops = static_cast<const amd::BatchCopyMemoryCommand&>(command).copyOps();
+      size_t total = 0;
+      for (const auto& op : ops) total += op.size;
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER: {
+      const std::vector<amd::BatchWriteMemoryOp>& ops =
+          static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
+      size_t total = 0;
+      for (const amd::BatchWriteMemoryOp& op : ops) {
+        total += op.size;
+      }
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER: {
+      const std::vector<amd::BatchReadMemoryOp>& ops =
+          static_cast<const amd::BatchReadMemoryCommand&>(command).ReadOps();
+      size_t total = 0;
+      for (const amd::BatchReadMemoryOp& op : ops) {
+        total += op.size;
+      }
+      record.bytes = total;
+      break;
+    }
     default:
       break;
   }
 
   if (command.type() == CL_COMMAND_TASK) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    std::vector<std::string> kernel_names =
+    const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
-    for (uint32_t i = 0; i < timestamps.size() && i < kernel_names.size(); i++) {
-      auto it = timestamps[i];
+    // timestamps has one entry per HSA_PACKET_TYPE_KERNEL_DISPATCH packet only.
+    // kernel_names has one entry per AQL packet slot (nullptr for barriers and SDMA/copy nodes
+    // that don't generate timestamps). Walk kernel_names; for each non-null entry consume
+    // the next timestamp.
+    uint32_t ti = 0;
+    for (uint32_t ki = 0; ki < kernel_names.size() && ti < timestamps.size(); ki++) {
+      if (kernel_names[ki] == nullptr) continue;
+      auto it = timestamps[ti++];
       record.begin_ns = it.first;
       record.end_ns = it.second;
-      record.kernel_name = kernel_names[i].c_str();
+      record.kernel_name = kernel_names[ki]->c_str();
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {
@@ -159,6 +198,10 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(CL_COMMAND_SVM_UNMAP, SvmUnmap);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WAIT_VALUE, StreamWait);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:
       break;
   };

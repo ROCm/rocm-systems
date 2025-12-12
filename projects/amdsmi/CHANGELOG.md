@@ -4,9 +4,1129 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.14.0
+
+### Added
+
+- **Added NIC processor discovery and information API surface**.  
+  - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
+  - `amdsmi_get_nic_processor_handles()` enumerates NIC processors by socket; the BDF, firmware, and port/vendor statistics getters are reserved and currently return `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`.
+
+- **Exposed APU metrics through the CLI and Python interface**.  
+  - `amd-smi metric` now surfaces APU-specific data under `--usage`, `--power`, `--clock`, `--temperature`, `--fan`, `--voltage`, and `--throttle` when APU metrics are available.
+  - `amd-smi monitor` provides APU temperature and clock fallbacks when standard dGPU sensors report N/A.
+  - On APU systems the `--pcie`, `--ecc-blocks`, `--voltage-curve`, `--overdrive`, `--xgmi-err`, and `--energy` sections are not applicable and are omitted.
+
+- **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
+  - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources; throttle metrics are already partition-aware.
+  - Reuses the existing temperature/clock/usage section schema and adds partition-only AID/XCP/MID entries within it; socket-only fields with no partition equivalent report `N/A`.
+  - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
+  - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
+  - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
+
+- **Added `--folder` support to `amd-smi ras --afid`**.  
+  - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
+  - Records with no AFIDs show `-`; files that cannot be parsed show `decode failed`.
+
+- **Added IFoE/UALoE fabric telemetry and topology support**.  
+  - New `amd-smi fabric` CLI subcommand with `--topology`/`-t` and `--info`/`-i` flags for querying fabric (UALoE) information.
+  - New C APIs: `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, `amdsmi_free_fabric_telemetry()`, `amdsmi_fabric_telem_id_to_string()`, and `amdsmi_get_gpu_fabric_info()`.
+  - New Python APIs: `amdsmi_get_fabric_telemetry_data()` and `amdsmi_get_gpu_fabric_info()`.
+  - Fabric telemetry category masks and size constants converted from preprocessor `#define`s to enums so they are exposed through the Python wrapper.
+
+- **Wrapped ESMI functions in `amdsmi_go_shim`**.  
+  - Go callers can now access ESMI CPU functionality through the existing `amdsmi_go_shim` interface.
+
+- **Added GPU partitioning conceptual guide and usage examples**.  
+  - New guide at `docs/conceptual/partition.md` covering accelerator partition modes (SPX/DPX/TPX/QPX/CPX), memory partition modes (NPS1/NPS2/NPS4/NPS8), API generations, device enumeration after partition, and BDF encoding.
+  - New C++ example: `example/amd_smi_partition_example.cc`.
+  - New Python example: `example/amd_smi_partition_example.py`.
+
+- **Improved Python test runner behavior**.  
+  - Added `-l`/`--list` flag to list all available tests and exit without running them.
+  - Added shadow detection: if `amdsmi` loads from a path other than the resolved expected path (`AMDSMI_PATH`, `ROCM_HOME`, `ROCM_PATH`, or `/opt/rocm` default), tests exit early with a clear error message and remediation steps.
+  - Non-root invocations now exit with code 1 immediately with a clear message instead of failing mid-test.
+
+- **Added new alias for `amd-smi set -C/--compute-partition` as `amd-smi set --accelerator-partition`**.  
+  - Compute and accelerator partitions are fundamentally the same, so users can now use `--accelerator-partition` to set the compute/accelerator partition.
+
+- **Added input validation for CPU `set` commands**.  
+  - Out-of-range values are now rejected with a clear error showing the valid range:
+    - `--cpu-xgmi-link-width` (0-1)
+    - `--cpu-gmi3-link-width` (0-2)
+    - `--cpu-lclk-dpm-level` (0-3)
+    - `--cpu-disable-apb` (0-3)
+  - `--cpu-pwr-limit` values above the socket maximum are now reduced to the maximum and applied, with a warning.
+
+- **Added compute partition memory allocation mode API**.  
+  - New `amd-smi static --partition` output includes `COMPUTE_PARTITION_MEM_ALLOC_MODE` field.
+  - New `amd-smi set --compute-partition-mem-alloc-mode [CAPPING|ALL]` to control memory allocation mode (requires sudo).
+  - New APIs: `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, `amdsmi_set_gpu_compute_partition_mem_alloc_mode()`.
+  - New enum: `amdsmi_compute_partition_mem_alloc_mode_t` (`AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL`).
+  - Reads/writes sysfs: `/sys/class/drm/cardN/device/compute_partition_mem_alloc_mode`.
+
+- **Added `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` to `amdsmi_link_type_t`**.  
+  - Represent NIC-to-GPU links that cross different PCIe switches on the same CPU (NUMA) or across CPUs (XNUMA).
+
+- **Added PID-grouped process listing across GPUs**.  
+  - `amd-smi process --sort-by-pid` and `amd-smi monitor --sort-by-pid` group output by PID, merging each PID's per-GPU usage into one row.
+  - New C and Python API `amdsmi_get_gpu_process_list_by_pid()`.
+
+### Changed
+
+- **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
+  - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
+  - Human-readable output is unchanged, since it uppercases all keys.
+
+- **Normalized JSON/CSV key casing in the `amd-smi topology` NIC-GPU access table**.  
+  - The per-GPU columns are now lowercase (`gpu_<N>` for the BDF header row, `gpu_<N>_topo` for each NIC's status row) in JSON and CSV output, matching the existing `gpu_<N>` keys in the GPU-to-GPU access matrix; they were previously uppercase (`GPU<N>`, `GPU<N>_Topo`).
+  - Human-readable output is unchanged, since it uppercases all keys.
+
+- **Fixed `amd-smi static --clock` CSV and human-readable formatting to output frequency levels as strings instead of dictionary objects**.  
+
+- **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
+  - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
+
+- **Renamed "AINIC version" to "ionic version" in `amd-smi version` output**.  
+  - The label now correctly reflects that it shows the ionic kernel driver version.
+
+### Removed
+
+- **Removed the non-functional `--decode` flag from `amd-smi ras`**. Out-of-band CPER decoding is available via `amd-smi ras --afid --cper-file <path>` or `--afid --folder <DIR>`.
+
+- **Removed the unused `amdsmi_nic_link_type_t` enum from the public header**. No API or struct referenced it; NIC link types are reported through `amdsmi_link_type_t`, which gains `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` in this release.
+
+### Resolved Issues
+
+- **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
+  - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
+
+- **Corrected invalid AMD SMI status-code names in exception messages and documentation**.  
+  - Some `AmdSmiLibraryException` messages and API documentation entries were misspelled; they now use the correct `AMDSMI_STATUS_*` names.
+
+- **Fixed a crash in `amdsmi_get_gpu_vram_vendor()` and made `amdsmi_get_gpu_vram_info()` resilient to DRM failures**.  
+  - `amdsmi_get_gpu_vram_vendor()` now validates the output buffer and only writes it on success, fixing a null-pointer dereference on the not-supported path.
+  - `amdsmi_get_gpu_vram_info()` now reads the VRAM vendor from sysfs first and treats the DRM ioctl (VRAM type/bit width/bandwidth) as best effort, so the vendor is still returned when the DRM path is unavailable.
+
+- **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
+  - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
+  - Standardized the hardcoded AMD vendor string on the canonical `pci.ids` spelling (with the comma) so `VENDOR_NAME` and `MANUFACTURER_NAME` are consistent with `lspci`.
+
+- **Fixed `amd-smi ras --cper` / `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`)** when `libamd_smi.so` is `LD_PRELOAD`-ed under a host with a different libstdc++ (for example, device-metrics-exporter / `gpuagent`).
+
+- **Fixed `amd-smi ras --cper` failing with `AMDSMI_STATUS_FILE_ERROR` on an empty CPER ring**. An empty ring (no RAS records) now reports no CPER records; `amdsmi_get_gpu_cper_entries()` returns `AMDSMI_STATUS_SUCCESS` with `entry_count == 0`.
+
+- **Fixed `amdsmi_init()` aborting entirely when CPU/ESMI initialization fails**.  
+  - `populate_amd_cpus()` treated an `esmi_init()` failure (non-AMD CPU, missing/unsupported energy or HSMP driver, or a CPU/SMU in a bad state) as fatal, causing all of `amdsmi_init()` to fail so GPU and NIC functionality became unusable. ESMI/CPU discovery is now non-fatal and is skipped on failure, mirroring the NIC discovery paths.
+  - Removed an incorrect `static_cast<amdsmi_status_t>(esmi_init())` that conflated the unrelated `esmi_status_t` and `amdsmi_status_t` enums.
+  - Added checks for the previously ignored return values of `get_nr_cpu_sockets()`, `get_nr_cpu_cores()`, and `get_nr_threads_per_core()`, plus a guard against a divide-by-zero when a misbehaving driver reports zero sockets or threads.
+
+- **Fixed `amd-smi static` hanging indefinitely on gfx1153 and gfx950**.  
+  - Added a 60-second timeout to `amdsmi_init()` in the CLI so the process exits with a clear error message instead of hanging when the GPU driver is unresponsive.
+  - Added `O_NONBLOCK` to DRM device open during initialization so `open()` returns immediately if the device is wedged.
+
+- **Fixed `amd-smi ras --afid --cper-file <file>` not showing AFIDs for correctable errors**.  
+  - `aca_decode_corrected_error` was receiving the count of `uint32_t` elements where `decode_afid` expected the count of `uint64_t` elements, causing `decode_error_info` to return `NULL` for all non-standard section types.
+
+- **Fixed `amd-smi ras --cper --json` producing invalid JSON**.  
+  - Multi-GPU runs emitted a separate JSON array per GPU instead of a single unified array, and `--follow` mode printed an empty `[]` every iteration when no new entries existed. Both are now consolidated into a single JSON document.
+
+- **Exposed `amdsmi_get_afids_from_cper` in the Python package**.  
+  - The CPER AFID API was implemented but missing from `py-interface/__init__.py`, making it unavailable to Python callers using `from amdsmi import ...`.
+
+- **Python unittest scripts now append a GTest-style summary after test output**.  
+  - All `*_test.py` and `unit_tests.py` scripts print a colored `[PASSED]`/`[SKIPPED]`/`[FAILED]` block after the standard unittest output. Colors are automatically suppressed when output is not a TTY (e.g. file redirection, CI log capture).
+
+- **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.  
+  - The struct comment claimed frequencies were in MHz, but `amdsmi_get_clk_freq()` returns them in Hz. The comment now reads "List of frequencies in Hz".
+  - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
+  - Updated the Python API reference to state the unit is Hz.
+
+- **Fixed fabric telemetry APIs returning the wrong status on non-IFoE systems**.  
+  - `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, and `amdsmi_free_fabric_telemetry()` now return `AMDSMI_STATUS_NOT_SUPPORTED` on systems without fabric hardware, consistent with `amdsmi_get_gpu_fabric_info()`.
+
+## amd_smi_lib for ROCm 7.13.0
+
+### Added
+
+- **Added APU metrics support (table versions 2.4 and 3.0)**.  
+  - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).
+  - **v2.4 metrics**:
+    - `temperature_gfx`, `temperature_soc`, `temperature_core[8]`, `temperature_l3[2]`
+    - `average_gfx_activity`, `average_mm_activity`
+    - `average_socket_power`, `average_cpu_power`, `average_soc_power`, `average_gfx_power`, `average_core_power[8]`
+    - Average clocks: `gfxclk`, `socclk`, `uclk`, `fclk`, `vclk`, `dclk`
+    - Current clocks: `gfxclk`, `socclk`, `uclk`, `fclk`, `vclk`, `dclk`, `coreclk[8]`, `l3clk[2]`
+    - `average_temperature_gfx`, `average_temperature_soc`, `average_temperature_core[8]`, `average_temperature_l3[2]`
+    - `average_cpu_voltage`, `average_soc_voltage`, `average_gfx_voltage`, `average_cpu_current`, `average_soc_current`, `average_gfx_current`
+    - `throttle_status`, `indep_throttle_status`
+    - `fan_pwm`
+  - **v3.0 metrics**:
+    - `temperature_core[16]`, `temperature_skin`
+    - `average_vcn_activity`, `average_ipu_activity[8]`, `average_core_c0_activity[16]`
+    - `average_dram_reads`, `average_dram_writes`, `average_ipu_reads`, `average_ipu_writes`
+    - `average_apu_power`, `average_dgpu_power`, `average_all_core_power`, `average_ipu_power`, `average_sys_power`
+    - `stapm_power_limit`, `current_stapm_power_limit`
+    - `average_core_power[16]`, `current_coreclk[16]`
+    - `current_core_maxfreq`, `current_gfx_maxfreq`
+    - `average_vpeclk_frequency`, `average_ipuclk_frequency`, `average_mpipu_frequency`
+    - `throttle_residency_prochot`, `throttle_residency_spl`, `throttle_residency_fppt`, `throttle_residency_sppt`, `throttle_residency_thm_core`, `throttle_residency_thm_gfx`, `throttle_residency_thm_soc`
+    - `time_filter_alphavalue`
+  - Fields not applicable to the current version are set to sentinel values: `0xFFFF` for `uint16_t`, `0xFFFFFFFF` for `uint32_t`, and `UINT64_MAX` for `uint64_t` fields.
+  - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
+
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.  
+  - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
+  - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
+
+- **Added support for GPU metrics v1.9 new fields**.  
+  - Added new temperature fields to `amdsmi_gpu_metrics_t`:
+    - `temperature_hbm_stacks` — per-stack HBM temperatures (°C)
+    - `temperature_mid` — per-MID temperatures (°C)
+    - `temperature_aid` — per-AID temperatures (°C)
+    - `temperature_xcd` — per-XCC compute die temperatures (°C)
+  - Added new per-die clock fields to `amdsmi_gpu_metrics_t`:
+    - `current_uclk_aid` — per-AID uclk (MHz)
+    - `current_socclks_mid` — per-MID SOC clock (MHz)
+  - Added new constants:
+    - `AMDSMI_MAX_NUM_HBM_STACKS` (12)
+    - `AMDSMI_MAX_NUM_AID` (2)
+    - `AMDSMI_MAX_NUM_MID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_AID` (2)
+    - `AMDSMI_MAX_NUM_CLKS_PER_MID` (2)
+
+- **Added VRAM and GTT tuning interface**.  
+  - New `amd-smi static --mem-carveout` to view VRAM carveout options.
+  - New `amd-smi set --mem-carveout` to change the VRAM carveout (APU).
+  - New `amd-smi set --gtt` and `amd-smi reset --gtt` for system-wide GTT size tuning.
+  - New APIs: `amdsmi_get_gpu_uma_carveout_info()`, `amdsmi_set_gpu_uma_carveout()`, `amdsmi_get_ttm_info()`, `amdsmi_set_ttm_pages_limit()`, `amdsmi_reset_ttm_pages_limit()`.
+  - **TTM module auto-detection**: probes `amdttm` (DKMS), `amd_ttm`, and the in-tree
+    `ttm` module in order so the correct `pages_limit` parameter is read/written
+    on every supported configuration. Overridable via the `AMDSMI_TTM_SYSFS_NAME`
+    environment variable. Note: third-party tools that hard-code
+    `/sys/module/ttm/parameters/pages_limit` may report `0` on DKMS hosts
+    because the active module is `amdttm`, not `ttm`; `amd-smi` reads the
+    active one.
+  - **Initramfs rebuild**: `set --gtt` / `reset --gtt` now invoke the
+    distro's initramfs builder so the new `modprobe.d` snippet is picked up
+    at next boot. Supported tools (first available wins): `dracut -f`
+    (RHEL/Fedora/openSUSE), `update-initramfs -u` (Debian/Ubuntu), and
+    `mkinitcpio -P` (Arch). If none is found, a clear message is printed
+    describing the manual command to run.
+  - **Reboot semantics**: these settings take effect only after the next
+    reboot. `amd-smi node --gtt` shows the currently active value and, when
+    a pending value has been written, an additional `PENDING (after reboot)`
+    line so the previous-boot value is not mistaken for the new one.
+
+- **Added UBB power and power_limit fields to `amdsmi_power_info_t` and `amdsmi_npm_info_t`**.  
+  - `amd-smi metric --power` now displays `ubb_power` when available.
+  - `amd-smi node -p` now displays UBB power threshold when available.
+
+- **Added CPU support for family 1A Models 50h-57h**.  
+  - New APIs: `amdsmi_get_cpu_xgmi_pstate_range()`, `amdsmi_get_cpu_core_ccd_power()`, `amdsmi_get_cpu_tdelta()`, `amdsmi_get_cpu_dimm_sb_reg()`, `amdsmi_get_cpu_svi3_vr_controller_temp()`, `amdsmi_get_cpu_pc6_enable()`, `amdsmi_get_cpu_cc6_enable()`, `amdsmi_get_cpu_sdps_limit()`, `amdsmi_get_cpu_core_floor_freq_limit()`, `amdsmi_get_cpu_core_eff_floor_freq_limit()`, and corresponding set APIs.
+  - **Note**: `amdsmi_get_dfc_ctrl()` renamed to `amdsmi_get_cpu_dfc_ctrl()` and `amdsmi_set_dfc_ctrl()` renamed to `amdsmi_set_cpu_dfc_ctrl()` for naming consistency.
+
+- **Updated memory API documentation**  
+    Added note that the sum of per-process memory usage is not expected to equal total usage.
+
+### Changed
+
+- **Renamed `processor_type_t` enum typedef to `amdsmi_processor_type_t`**.  
+  - The unprefixed typedef name did not follow the `amdsmi_*_t` convention used throughout `amdsmi.h` and was easy to collide with identifiers defined by other system-management libraries. New code should use `amdsmi_processor_type_t`. The old name is preserved as a backward-compatibility typedef alias, so existing callers continue to compile unchanged.
+
+- **Package install no longer modifies the system-wide logrotate timer or cron schedule**.  
+  - Previously, installing `amd-smi-lib` overwrote `/lib/systemd/system/logrotate.timer` (or moved `/etc/cron.daily/logrotate` to `/etc/cron.hourly/`) to force hourly rotation, which affected every other package using logrotate.
+  - The package now only ships `/etc/logrotate.d/amd_smi.conf`, which sets its own `hourly` + `size 1M` cadence. AMD-SMI logs still rotate at the same frequency; system-wide settings stay as the distribution configured them.
+
+- **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
+
+- **Removed references to deprecated `amd-smi reset -r`**.  
+  - CLI help text and memory partition change warnings no longer reference `amd-smi reset -r` for driver reloading.
+  - Users are now directed to use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload the driver after partition changes.
+
+- **Changed CPU power APIs to return values in milliwatts (mW) for higher precision**.  
+  - Removed lossy integer rounding (`(mW + 500) / 1000`) from 6 CPU power get APIs. Values are now
+    returned in milliwatts directly from the ESMI library, preserving sub-watt precision.
+  - **C API**: Output parameter type remains `uint32_t*`, but the unit changed from watts to milliwatts (mW).
+    - `amdsmi_get_cpu_socket_power`
+    - `amdsmi_get_cpu_socket_power_cap`
+    - `amdsmi_get_cpu_socket_power_cap_max`
+    - `amdsmi_get_cpu_pwr_efficiency_mode` (ppt_limit field)
+    - `amdsmi_get_cpu_core_ccd_power`
+    - `amdsmi_get_cpu_sdps_limit`
+  - **Python API (breaking)**: These functions now return `int` (milliwatts) instead of `str` (e.g., `"240 Watts"`).
+    Callers that parsed the string output must update to handle the numeric return value.
+  - **CLI output**: Power values now display with milliwatt precision (e.g., `240.500 Watts`).
+  - Added missing null-pointer validation for output parameters in `amdsmi_get_cpu_socket_power_cap`
+    and `amdsmi_get_cpu_socket_power_cap_max`.
+  - Updated header documentation to specify milliwatt units for all affected get and set API parameters.
+
+- **Changed power APIs to have consistent output parameter types**.  
+  - Modified 6 cpu power API's to have consistent output power types. All set and get API's have uint32_t output values.
+  - Modified get and set API's that had double output types to have uint32_t output types in milliwatts (mW).
+    - amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle, uint32_t* ppower);
+    - amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle, uint32_t* pcap);
+    - amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle, uint32_t* pmax);
+    - amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
+                                         uint32_t* power_efficiency_mode,
+                                         uint32_t* utilization, uint32_t* ppt_limit);
+    - amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle, uint32_t* power);
+    - amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle, uint32_t* sdps_limit);
+
+### Optimized
+
+- **Optimized `rsmi_dev_device_identifiers_get()` in the ROCm-SMI device layer**.  
+  - Removed unnecessary iteration by directly indexing the device list.
+  - Added bounds checking for `device_id`, with clearer error handling/logging.
+  - Improves performance for device identifier queries.
+
+### Resolved Issues
+
+- **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
+  - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
+
+- **Fixed `amdsmi_get_gpu_accelerator_partition_profile()` returning incorrect `num_partitions` when `num_partition` is unavailable from GPU metrics**.  
+  - GPU metrics no longer always provides `num_partition`. The function now derives the partition count from the active partition type when `num_partition` is not available:
+    - SPX → 1, DPX → 2, TPX → 3, QPX → 4
+    - CPX → derived from the XCD counter via `amdsmi_get_gpu_xcd_counter()`
+
+- **Fixed `amdsmi_topo_get_p2p_status()` returning a raw `ctypes.c_uint32` object instead of an integer for the `type` field**.  
+  - The `'type'` key in the returned dictionary now correctly returns `type_32.value` (an `int`) rather than the unwrapped ctypes object, consistent with the pattern used in `amdsmi_topo_get_link_type()`.
+
+- **Adjusted KFD process caching to be more responsive**.  
+  - Updated process caching to allow cache duration adjustment via the `AMDSMI_PROCESS_INFO_CACHE_MS` environment variable for workflows with rapid metric polling.
+
+- **Fixed CLI exit codes to use absolute values**.  
+  - Invalid GPU parameters now return positive error codes as documented.
+
+- **Fixed CLI breakage when `amdgpu` driver is not present**.  
+  - Improved init to better catch driver loading issues.
+
+- **Aligned `amdsmi_get_gpu_device_uuid()` with HIP/rocminfo UUID format**.  
+  - Modified `amdsmi_asic_info_t.asic_serial` to report per-socket serial using KFD's `unique_id`.
+
+- **Fixed multiple bugs in NIC/switch code and `amdsmi_init()` NIC handling**.  
+  - Fixed `sizeof` operator precedence, `hw_mon` reset, NUMA=65535 handling, and several CLI function call errors.
+  - Fixed `amdsmi_init()` to succeed when no NIC hardware is present.
+
+- **Fixed shared mutex and self-heal**.  
+  - Improved self-heal logic to correctly identify and recover from corrupted or uninitialized mutex state.
+
+- **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
+  - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
+
+- **Fixed CLI set commands silently succeeding on invalid input values**.  
+  - `amd-smi set --profile <INVALID>` now returns a non-zero exit code and lists available profiles in the error message; invalid profile names are rejected at parse time.
+  - `amd-smi set --clk-level <CLK_TYPE>` (missing performance level indices) now returns a non-zero exit code with a usage hint instead of silently succeeding.
+  - `amd-smi set --power-cap <OUT_OF_RANGE>` now returns a non-zero exit code.
+  - `amd-smi set --fan <INVALID>%` no longer prompts the out-of-spec warning before validating the percentage range; invalid values are rejected immediately.
+
+- **Fixed `amd-smi set --profile` help text omitting `BOOTUP_DEFAULT`**.  
+  - `BOOTUP_DEFAULT` was always accepted at runtime but was missing from the `--help` profile list. Auditing invalid-input handling exposed this gap. `amd-smi reset --profile` can also be used to return to the bootup default power profile.
+
+- **Fixed `amd-smi monitor --brcm_nic` and `--brcm_switch` flags being registered on non-BRCM systems**.  
+  - These flags are now only registered when BRCM hardware is present, preventing spurious failures on AMD GPU-only systems.
+
+- **Fixed `amd-smi` default command alignment**.  
+  - Updated default `amd-smi` output to align values to the left for improved readability.
+    Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
+  - *This change is purely cosmetic and does not affect any functionality.*
+
+- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs (ROCM-21057)**.
+  - `get_frequencies()` in the rsmi backend no longer discards a parsed `pp_dpm_*` DPM table with `STATUS_UNEXPECTED_DATA` when the kernel omits the `*` current-level marker (which happens whenever the SMU power-gates the domain at idle). The supported frequency table is now returned and `current` is reported as `-1` (unknown) until the marker reappears, so `amdsmi_get_clk_freq()` and all callers see the table at idle as well as under load.
+
+## amd_smi_lib for ROCm 7.12.0
+
+### Added
+
+- **Enhanced `amd-smi node` command to display baseboard temperatures**.  
+  - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
+  - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
+  - Default behavior (no flags): Shows both power management and baseboard temperatures.
+
+- **Added UBB (baseboard) power monitoring support**.  
+  - Added `ubb_power` field to `amdsmi_power_info_t` for baseboard power in Watts.
+  - Added `ubb_power_threshold` field to `amdsmi_npm_info_t` for UBB node power threshold.
+  - `amd-smi metric --power` now displays `ubb_power` when available.
+  - `amd-smi node -p` now displays `THRESHOLD` when available.
+  
+- **Added Power Profile set/get/reset to amd-smi CLI**.  
+  - New `amd-smi static --profile` command to display current and available power profiles.
+  - New `amd-smi set --profile <PROFILE>` command to set the power profile.
+  - New `amd-smi reset --profile` command to reset power profile back to default (bootup default).
+  - Available profiles: CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT.
+
+  ```console
+  $ amd-smi static --profile
+  GPU: 0
+      POWER_PROFILE:
+          CURRENT: COMPUTE
+          NUM_PROFILES: 7
+          PROFILES:
+              CUSTOM
+              VIDEO
+              POWER_SAVING
+              COMPUTE
+              VR
+              3D_FULL_SCREEN
+              BOOTUP_DEFAULT
+  ```
+
+  ```console
+  $ sudo amd-smi set --profile VIDEO
+  GPU: 0
+      PROFILE: Successfully set power profile to VIDEO
+  ```
+
+  ```console
+  $ sudo amd-smi reset --profile
+  GPU: 0
+      RESET_PROFILE:
+          POWER_PROFILE: Successfully reset Power Profile to default (bootup default)
+  ```
+
+- **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
+  - Displays the Linux kernel version from `os.uname().release`.
+
+- **Added new error status code `AMDSMI_STATUS_IPC_ERROR` (21)**.  
+  - For IPC communication errors.
+
+### Changed
+
+- **Improved VRAM usage reporting performance and reliability**.  
+  - Optimized memory queries with batching and caching (< 1 μs for cached queries)
+  - Improved error handling and automatic fallback mechanisms
+  - Configurable behavior via environment variables:
+    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
+    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original method if needed (default: 0)
+    - Additional low-level tuning variables available for advanced debugging
+  
+- **Enhanced logging system** with better resource management and error reporting
+
+- **Modified asic_serial to display "N/A" when not available**.  
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
+
+- **Made `libdrm` a required runtime dependency** ([#3349](https://github.com/ROCm/rocm-systems/pull/3349)).  
+  - Debian: `libdrm-dev` moved from `Recommends` to `Depends` on the `amd-smi-lib` package; `libdrm-amdgpu-dev` remains in `Recommends` (not shipped by Debian 10).
+  - RPM: `libdrm-devel` moved from `Suggests` to `Requires`; `libdrm-amdgpu-devel` remains in `Suggests` (not shipped by Azure Linux).
+  - Building from source now requires `libdrm-dev` / `libdrm-devel`; the project `Dockerfile` was updated accordingly.
+  - Removed the "libdrm is optional" note from `docs/install/install.md` — firmware and hardware-IP queries previously gated on libdrm are now always available.
+
+### Removed
+
+- **Removed `amd-smi reset --reload-driver` and `amd-smi reset -r` option from CLI only**.  
+  - The API `amdsmi_gpu_driver_reload()` will remain for backwards compatibility until deprecated in a future release.
+  - Use modprobe to reload driver, e.g.,
+
+  ```console
+  sudo modprobe -r amdgpu
+  sudo modprobe amdgpu
+  ```
+
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
+
+### Optimized
+
+- **Adjusted the KFD Process cache to be more responsive and have and adjustable cache duration**.  
+  - Users may adjust the cache duration by setting the environment variable 'AMDSMI_PROCESS_INFO_CACHE_MS'.
+
+### Resolved Issues
+
+- **Fixed `amdsmi_get_gpu_memory_usage()` blocking driver reloads and partition changes**.  
+  - Memory queries no longer create persistent process entries that interfere with driver operations
+  - Use `AMDSMI_KFD_USE_ORIG_VRAM=1` environment variable to revert to previous behavior if needed
+
+- **Fixed sensor ID formatting bug** that caused terminal output pollution for sensor IDs greater than 9
+
+- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
+  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
+  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
+  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
+  - Affected command: `amd-smi static --xgmi-plpd`
+
+- **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
+  - Updated driver logic to detect when `amdsmi_get_gpu_xgmi_link_status()` should return `AMDSMI_STATUS_NOT_SUPPORTED`. In mVF configurations, links are connected over XGMI and active, but security restrictions prevent the driver from exposing link status. In these cases we now return `AMDSMI_STATUS_NOT_SUPPORTED` instead of reporting the links as down.
+  - Example outputs:
+
+    ```console
+    $ amd-smi xgmi --source-status
+
+    GPU LINK PORT STATUS:
+           bdf           port_num
+    GPU0   0000:05:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU1   0000:15:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU2   0000:65:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU3   0000:75:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU4   0000:85:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU5   0000:95:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU6   0000:e5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU7   0000:f5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    ...  
+    ```
+
+    ```console
+    $ amd-smi xgmi --link-status
+
+    XGMI LINK STATUS:
+           bdf           GPU0          GPU1          GPU2          GPU3          GPU4          GPU5          GPU6          GPU7
+    GPU0   0000:05:00.0  SELF          N/A           N/A           N/A           N/A           N/A           N/A           N/A
+    GPU1   0000:15:00.0  N/A           SELF          N/A           N/A           N/A           N/A           N/A           N/A
+    GPU2   0000:65:00.0  N/A           N/A           SELF          N/A           N/A           N/A           N/A           N/A
+    GPU3   0000:75:00.0  N/A           N/A           N/A           SELF          N/A           N/A           N/A           N/A
+    GPU4   0000:85:00.0  N/A           N/A           N/A           N/A           SELF          N/A           N/A           N/A
+    GPU5   0000:95:00.0  N/A           N/A           N/A           N/A           N/A           SELF          N/A           N/A
+    GPU6   0000:e5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           SELF          N/A
+    GPU7   0000:f5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           N/A           SELF
+    ...
+    ```
+
+- **Fixed `amd-smi xgmi --metric` on devices without XGMI links reporting `bit_rate` and `max_bandwidth` with their maximum values instead of `N/A`**.  
+  - Updated the logic to report `N/A` for `bit_rate` and `max_bandwidth` when no XGMI links are present.
+  - Below shows a before and after of the fix (using 2 Navi ASICs without XGMI links as an example).
+
+    - Before fix:
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+    - After fix:
+
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.11.0
+
+### Updated
+
+- **Updated support for set and get option for the following APIs**.  
+
+  - Users can now set the power efficiency mode using `amd-smi set --cpu-pwr-eff-mode MODE(0-5) UTIL(0-100) PPT_LIMIT(in mW)`
+  - UTIL and PPT_LIMIT are valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards.
+
+  ```console
+  amd-smi  set --cpu-pwr-eff-mode 4 100 3000
+  CPU: 0
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+          RESPONSE: Set power efficiency mode operation successful
+
+  CPU: 1
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+          RESPONSE: Set power efficiency mode operation successful
+  ```
+
+  - Users can now read the power efficiency mode using `amd-smi metric --cpu-pwr-eff-mode`
+
+  ```console
+  amd-smi  metric --cpu-pwr-eff-mode
+  CPU: 0
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+
+  CPU: 1
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+  ```
+
+  - Users can now set the XGMI Pstate range using `amd-smi set --cpu-xgmi-pstate-range MIN_PSTATE(0-1) MAX_PSTATE(0-1)`
+
+  ```console
+  amd-smi set --cpu-xgmi-pstate-range 1 1
+  CPU: 0
+      XGMI_PSTATE_RANGE:
+          RESPONSE: Set, MIN_PSTATE: 1, MAX_PSTATE: 1, successful
+
+  CPU: 1
+      XGMI_PSTATE_RANGE:
+          RESPONSE: Set, MIN_PSTATE: 1, MAX_PSTATE: 1, successful
+  ```
+
+  - Users can now read the XGMI Pstate range using `amd-smi metric --cpu-xgmi-pstate-range`
+
+  ```console
+  amd-smi metric --cpu-xgmi-pstate-range
+  CPU: 0
+      XGMI_PSTATE_RANGE:
+          MIN_PSTATE: 0
+          MAX_PSTATE: 0
+
+  CPU: 1
+      XGMI_PSTATE_RANGE:
+          MIN_PSTATE: 0
+          MAX_PSTATE: 0
+  ```
+
+  - Users can now set cpu rail isolated frequency policy using `amd-smi set --cpu-railisofreq-policy VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-railisofreq-policy 1
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the cpu rail isolated frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+
+  ```console
+  amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+  ```
+
+  - Users can now set the Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-dfcstate-ctrl 1
+  CPU: 0
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+
+  ```console
+  amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          VALUE: 1
+  ```
+
+  - Users can now set the PC6 enabling control status using `amd-smi set --cpu-pc6-enable VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-pc6-enable 1
+  CPU: 0
+      PC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      PC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the PC6 enabling control status using `amd-smi metric --cpu-pc6-enable`.
+
+  ```console
+  amd-smi metric --cpu-pc6-enable
+  CPU: 0
+      PC6_ENABLE:
+          VALUE: 1
+
+  CPU: 1
+      PC6_ENABLE:
+          VALUE: 1
+  ```
+
+  - Users can now set the CC6 enabling control status using `amd-smi set --cpu-cc6-enable VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-cc6-enable 1
+  CPU: 0
+      CC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      CC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the CC6 enabling control status using `amd-smi metric --cpu-cc6-enable`.
+
+  ```console
+  amd-smi metric --cpu-cc6-enable
+  CPU: 0
+      CC6_ENABLE:
+          VALUE: 1
+
+  CPU: 1
+      CC6_ENABLE:
+          VALUE: 1
+  ```
+
+  - Users can now read 4 bytes data at a given register offset on the target DIMM address using `amd-smi metric --cpu-dimm-sb-reg`.
+
+  ```console
+  amd-smi metric --cpu-dimm-sb-reg 0x87 0xA 0 1
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x0000
+          REGSPACE: 1
+          DATA: 0x01121230
+  ```
+
+  - Users can now write 4 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
+
+  ```console
+  amd-smi set --cpu-dimm-sb-reg 0x87 0xA 0x2c0 1 0x11
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x02C0
+          REGSPACE: 1
+          DATA: 0x00000011
+          RESPONSE: Set DIMM sideband register write operation successful
+  ```
+
+  - Users can now read CCD power using `amd-smi metric --core-ccd-power`.
+
+  ```console
+  amd-smi metric --core-ccd-power -O 0 1 2
+  CORE: 0
+      CCD_POWER:
+          VALUE: 3.501 Watts
+
+  CORE: 1
+      CCD_POWER:
+          VALUE: 3.501 Watts
+
+  CORE: 2
+      CCD_POWER:
+          VALUE: 3.501 Watts
+  ```
+
+  - Users can now read Tdelta value using `amd-smi metric --cpu-tdelta`.
+
+  ```console
+  amd-smi metric --cpu-tdelta
+  CPU: 0
+      TDELTA:
+          VALUE: 0
+
+  CPU: 1
+      TDELTA:
+          VALUE: 0
+  ```
+
+  - Users can now read Temperature of SVI3 VR controller using `amd-smi metric --cpu-svi3-vr-controller-temp TYPE(0-1) RAIL_INDEX(0-4)`.
+  - RAIL_INDEX (0-4) is valid only when the TYPE is 1.
+
+  ```console
+  amd-smi metric --cpu-svi3-vr-controller-temp 1 1
+  CPU: 0
+      SVI3_VR_CONTROLLER_TEMP:
+          RAIL_SELECTION: 1
+          RAIL_INDEX: 1
+          TEMPERATURE: 30.0 Degree C
+
+  CPU: 1
+      SVI3_VR_CONTROLLER_TEMP:
+          RAIL_SELECTION: 1
+          RAIL_INDEX: 1
+          TEMPERATURE: 32.0 Degree C
+  ```
+
+  - Users can now read enabled HSMP command bit mask using `amd-smi metric --cpu-enabled-commands`.
+
+  ```console
+  amd-smi metric --cpu-enabled-commands
+  CPU: 0
+      ENABLED_COMMANDS:
+          READ_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+
+  CPU: 1
+      ENABLED_COMMANDS:
+          READ_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+  ```
+
+  - Users can now read core floor frequency limit using `amd-smi metric --core-floor-limit`.
+
+  ```console
+  amd-smi metric --core-floor-limit -O 0 1 2
+  CORE: 0
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 1
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 2
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+  ```
+
+  - Users can now read core effictive floor frequency limit using `amd-smi metric --core-eff-floor-limit`.
+
+  ```console
+  amd-smi metric --core-eff-floor-limit -O 0 1 2
+  CORE: 0
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 1
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 2
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  ```
+
+  - Users can now set core floor frequency limit using `amd-smi set --core-floor-limit FLOOR_LIMIT(in MHz)`.
+  ```console
+  amd-smi set --core-floor-limit 1200 -O 0 1 2
+  CORE: 0
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 1
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 2
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  ```
+
+  - Users can now set cpu floor frequency limit using `amd-smi set --cpu-floor-limit FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --cpu-floor-limit 1200
+  CPU: 0
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CPU: 1
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set core msr floor frequency limit using `amd-smi set --core-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --core-msr-floor-limit 1200 -O 0 1 2
+  CORE: 0
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 1
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 2
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set cpu msr floor frequency limit using `amd-smi set --cpu-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --cpu-msr-floor-limit 1200
+  CPU: 0
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CPU: 1
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set the socket + DIMM combined power (SDPS) limit using `amd-smi set --cpu-sdps-limit SDPS_LIMIT (in mW)`.
+
+  ```console
+  amd-smi set  --cpu-sdps-limit 300000
+  CPU: 0
+      SDPS_LIMIT:
+          RESPONSE: Set, VALUE: 300.000 Watts, successful
+  ```
+
+  - Users can now read set the socket + DIMM combined power (SDPS) limit using `amd-smi metric --cpu-sdps-limit`.
+
+  ```console
+  amd-smi metric --cpu-sdps-limit
+  CPU: 0
+      SDPS_LIMIT:
+          VALUE: 300.000 Watts
+  ```
+
+### Added
+
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+  ```
+
+- **Added flexible argument ordering for `amd-smi set --power-cap`**.  
+  - The `--power-cap` option now accepts arguments in any order, improving usability.
+    - Both syntaxes are now supported:
+      - `amd-smi set --power-cap <power-cap-type> <new-cap>`
+      - `amd-smi set --power-cap <new-cap> <power-cap-type>`
+
+  Example:
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+
+  $ sudo amd-smi set --power-cap 1100 ppt1
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1100W
+    ...
+  ```
+
+- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
+  - Set/get CPU ISO frequency policy:
+    - `amd-smi set --cpu-railisofreq-policy (0-1)`
+    - `amd-smi metric --cpu-railisofreq-policy`
+  - Set/get Data Fabric C-state control:
+    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
+    - `amd-smi metric --cpu-dfcstate-ctrl`
+
+  ```console
+  $ amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $ amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $ amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $ amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+  ```
+
+### Changed
+
+- **Modified output file handling options for `--file` argument**.  
+  - Previously tool always appended to existing files without confirmation
+  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
+  - Interactive prompt when file exists and no flag is specified:
+    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
+  - This issue caused all policy IDs to display as 0.
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.2.1
+
+### Added
+
+- **Added gpu_board and base_board temperatures to monitor**.  
+  - Added GPU board and base board temperature sensors to `amd-smi monitor` command.
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed `amd-smi metric` JSON output under watch mode**.  
+  - Resolved issue where JSON output was not formatted correctly when using watch mode with metrics.
+
+- **Fixed `amd-smi` not redirecting output to file when `--json` option is used**.  
+  - Resolved issue where output was not properly redirected to file when using JSON format.
+
+- **Fixed `amd-smi ras --cper` component not being redirected to output file with `--follow`**.  
+  - Resolved issue where CPER component output was not redirected when using the follow option.
+
+- **Fixed list of AFIDs printing garbage values when given invalid CPER files**.  
+  - Resolved issue where invalid CPER files caused garbage output for AFID lists.
+
+- **Fixed JSON output for `amd-smi reset`**.  
+  - Resolved issue where JSON output was not formatted correctly for reset commands.
+
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
+  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
+  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+
+
+### Known Issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 7.2.0
 
 ### Added
+
+- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
+  - Users can now set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
+  - Users can now read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          VALUE: 1
+ ```
+- **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
+  - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
+  - Added `--base-board-temps` option to `amd-smi monitor` command for base board temperature sensors
+
+- **Added Node Power Management (NPM) support**.  
+  - Added new Node Power Management APIs and CLI for node monitoring
+  - Added C++ API functions:
+    - `amdsmi_get_node_handle()`: Get handle for node devices
+    - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
+  - Added C++ types to support NPM API:
+    - `amdsmi_npm_status_t`: whether NPM is enabled or disabled
+    - `amdsmi_npm_info_t`: a struct containing the status and the Node-level power limit in Watts
+  - Added Python API wrappers for new node device functions
+  - Added `amd-smi node` CLI command for Node Power Management operations
+  - Currently supported for OAM_ID 0 only.
 
 - **Added the following C API's to amdsmi_interface.py**.  
   - amdsmi_get_cpu_handle()
@@ -51,19 +1171,50 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - amdsmi_get_gpu_compute_process_info()
     - amdsmi_get_gpu_compute_process_info_by_pid()
 
-- **Added new VRAM types to  `amdsmi_vram_type_t`**.
+- **Added new VRAM types to  `amdsmi_vram_type_t`**.  
   - `amd-smi static --vram` & `amdsmi_get_gpu_vram_info()` now support the following types:
   - DDR5, LPDDR4, LPDDR5, and HBM3E
 
 - **Added support for PPT1 power limit information**.  
   - Support has been added for querying and setting the PPT (Package Power Tracking) limits
     - There are two PPT limits, PPT0 has lower limit and tracks a filtered version of the input power and PPT1 has higher limit but tracks the raw input power. This is to catch spikes in the raw data.  
-  - New API added:
+  - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
-      - amdsmi_get_power_cap_info() 
+      - amdsmi_get_power_cap_info()
       - amdsmi_set_power_cap()
+  - New C++ type added:
+    - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
+
+- **Added PTL Support to `amd-smi static` and `amd-smi set`**.  
+  - Performance TOPS Limiter (PTL) is a control system that, when in place, constrains the product to never deliver more than a specified TOPS / second.
+  - New C++ API added:
+    - `amdsmi_get_gpu_ptl_state()`: retrieves whether PTL (Peak Tops Limiter) is currently enabled or disabled for the specified processor
+    - `amdsmi_set_gpu_ptl_state()`: enables or disables PTL (Peak Tops Limiter) operation
+    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL formats for the specified processor
+    - `amdsmi_set_gpu_ptl_formats()`: Set PTL with specified preferred data formats
+  - New C++ type added:
+    - `amdsmi_ptl_data_format_t`: Valid PTL data formats: I8, F16, BF16, F32, F64
+  - `amd-smi set` now support --ptl-status 0|1 and --ptl-format FORMAT1,FORMAT2
+  - `amd-smi static -l` shows current state and format of PTL
+
+  ```console
+  $ amd-smi static -l
+  GPU: 0
+      LIMIT:
+        PTL_STATE: Enabled
+        PTL_FORMAT: I8,F64
+  ```
+
+- **Added support to process CPER files even on machines without GPU and CPER is not enabled.**  
+  - New `--cper-file` option:
+  ```console
+  $ sudo amd-smi ras --afid --cper-file cpers/bad_cper/incomplete_aca.cper --decode --folder /tmp/cper_dump
+timestamp            gpu_id  severity             file_name         list of afids
+2070/01/01 00:26:21  -       FATAL                fatal-1.cper      28
+2070/01/01 00:26:21  -       FATAL                fatal-2.cper      28
+  ```
 
 ### Changed
 
@@ -79,8 +1230,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts specification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
 
   ```console
@@ -93,8 +1245,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
+
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
@@ -104,6 +1257,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amd-smi static --limit` now has a PPT1 section when PPT1 is available**.  
   - The static --limit command has been updated to include PPT1 power limit information when available on the device.
+
     ```console
     $ amd-smi static --limit
     GPU: 0
@@ -119,8 +1273,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           SLOWDOWN_EDGE_TEMPERATURE: N/A
           ...
     ```
+
     - JSON and CSV formats are updated to reflect this change as well.  
       Ex.
+
       ```console
       $ amd-smi static --limit --json
       {
@@ -152,7 +1308,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             },
             ...
       ```
-    
+
       ```console
       $ amd-smi static --limit --csv
       gpu,ppt0_max_power_limit,ppt0_min_power_limit,ppt0_socket_power_limit,ppt1_max_power_limit,ppt1_min_power_limit,ppt1_socket_power_limit,slowdown_edge_temperature,slowdown_hotspot_temperature,slowdown_vram_temperature,shutdown_edge_temperature,shutdown_hotspot_temperature,shutdown_vram_temperature
@@ -366,12 +1522,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-- **Optimized the way `amd-smi process` validates which proccesses are running on a GPU**.  
+- **Optimized the way `amd-smi process` validates which processes are running on a GPU**.  
 
 - **Changed sourcing of BDF to from drm to kfd**.  
   - Non sudo privliged users were unable to see the BDF due to logical errors.
 
 ### Resolved Issues
+
+- **Fixed CPER component not being redirected to output file issue when using `amd-smi ras --cper --folder <folder_name> --file <file_name> --follow`**.  
+  - Utilized the AMDSMILogger to redirect to output file when --file option is used
 
 - **Fixed a CPER record count mismatch issue when using the `amd-smi ras --cper --file-limit`**.  
   - Fixed deletion calculation to use files_to_delete = len(folder_files) - file_limit for exact file count management
@@ -685,14 +1844,14 @@ $ amd-smi
     ```
 
 - **Updated `amdsmi_bdf_t` in `amdsmi.h`**.  
-  - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
+  - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatibility
 
 - **Updated `amdsmi_get_temp_metric` and `amdsmi_temperature_type_t` with new values**.  
   - New values have added to `amdsmi_temperature_type_t` representing various baseboard and gpuboard temperature measures.
   - `amdsmi_get_temp_metric` API has also been updated to be able to take in and return the respective values for the new
   temperature types.
 
-- **Modified error responses for `amd-smi set` and `amd-smi reset` to display AMD SMI's error codes**
+- **Modified error responses for `amd-smi set` and `amd-smi reset` to display AMD SMI's error codes**.  
   - Error responses now include the explicit AMDSMI status code in square brackets (e.g., `[AMDSMI_STATUS_NOT_SUPPORTED]`) before the error message for each GPU, providing clear context on the type of failure.
   - This change is intended to help provide more context on the failure and why the failure occurred.
   - **How to interpret error codes:**  
@@ -756,9 +1915,13 @@ $ amd-smi
       ...
       ```
 
+- **Modified the enum `AMDSMI_STATUS_MORE_DATA` in `amdsmi_status_t`**.  
+  - The `AMDSMI_STATUS_MORE_DATA` value changed from 57 to 39.
+  - Change was done to align all drivers on a common value.
+
 ### Removed
 
-- **Removed unnecessary API, `amdsmi_free_name_value_pairs(),` from amdsmi.h**
+- **Removed unnecessary API, `amdsmi_free_name_value_pairs(),` from amdsmi.h**.  
   - This API is only used internally to free up memory from the python interface and does not need to be
   exposed to the User.
 
@@ -807,7 +1970,7 @@ $ amd-smi
         uint32_t max_bandwidth;         //!< max bandwidth of the link in Gb/s
         amdsmi_link_type_t link_type;   //!< type of the link
         uint64_t read;                  //!< total data received for each link in KB
-        uint64_t write;                 //!< total data transfered for each link in KB
+        uint64_t write;                 //!< total data transferred for each link in KB
         uint64_t reserved[2];
     } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
     uint64_t reserved[7];
@@ -931,7 +2094,7 @@ $ amd-smi
 
 - **Removed duplicated GPU IDs when receiving events using the `amd-smi event` command**.  
 
-- **Fixed `amd-smi monitor` decoder utilization (`DEC%`) not showing up on MI3x ASICs**.
+- **Fixed `amd-smi monitor` decoder utilization (`DEC%`) not showing up on MI3x ASICs**.  
 
 - **Removed additional output after valid json for `amd-smi partition --json`**.  
   - Previously, when calling `amd-smi partition --json`, there was additional output after the valid json.
@@ -1062,7 +2225,7 @@ $ amd-smi
     } amdsmi_cper_hdr_t;
     ```
 
-  - Dumping CPER entires is also enabled in the CLI interface via `sudo amd-smi ras --cper`
+  - Dumping CPER entries is also enabled in the CLI interface via `sudo amd-smi ras --cper`
 
     ```console
     $ sudo amd-smi ras --cper
@@ -1415,7 +2578,7 @@ Functions affected by struct change are:
 - **Corrected CLI CPU argument name**.  
   - `--cpu-pwr-svi-telemtry-rails` to `--cpu-pwr-svi-telemetry-rails`
 
-- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.
+- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.  
   - The `amd-smi version` command can now also display the amdgpu driver version using the `-g` flag.
   - The amd_hsmp driver version can also be displayed using the `-c` flag.
   - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
@@ -1722,7 +2885,7 @@ Functions affected by struct change are:
 
 ### Resolved issues
 
-- **Fixed `amd-smi static --partition` for guest systems with MIx ASICs being unable to run**
+- **Fixed `amd-smi static --partition` for guest systems with MIx ASICs being unable to run**  
 
 - **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs**.  
 
@@ -1746,9 +2909,9 @@ Functions affected by struct change are:
 
 ### Upcoming changes
 
-- **Deprication in ROCm 7.0 of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields**.  
+- **Deprecation in ROCm 7.0 of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields**.  
 
-- **Deprication in ROCm 7.0 of the `pasid` field within struct `amdsmi_process_info_t`**  
+- **Deprecation in ROCm 7.0 of the `pasid` field within struct `amdsmi_process_info_t`**  
 
 ### Known issues
 
@@ -1881,7 +3044,7 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 - **Added new violation status outputs and APIs: `amdsmi_status_t amdsmi_get_violation_status()`, `amd-smi metric  --throttle`, and `amd-smi monitor --violation`**.  
   ***Only available for MI300+ ASICs.***  
   Users can now retrieve violation status' through either our Python or C++ APIs. Additionally, we have
-  added capability to view these outputs conviently through `amd-smi metric --throttle` and `amd-smi monitor --violation`.  
+  added capability to view these outputs conveniently through `amd-smi metric --throttle` and `amd-smi monitor --violation`.  
   Example outputs are listed below (below is for reference, output is subject to change):
 
 ```shell
@@ -2156,7 +3319,7 @@ GPU: 1
 - **Added unittest functionality to test amdsmi API calls in Python**.  
 
 - **Changed the `power` parameter in `amdsmi_get_energy_count()` to `energy_accumulator`**.  
-  - Changes propagate forwards into the python interface as well, however we are maintaing backwards compatibility and keeping the `power` field in the python API until ROCm 6.4.
+  - Changes propagate forwards into the python interface as well, however we are maintaining backwards compatibility and keeping the `power` field in the python API until ROCm 6.4.
 
 - **Added GPU memory overdrive percentage to `amd-smi metric -o`**.  
   - Added `amdsmi_get_gpu_mem_overdrive_level()` function to amd-smi C and Python Libraries.
@@ -2191,7 +3354,7 @@ Topology arguments:
   -o, --hops               Displays the number of hops between GPUs
   -t, --link-type          Displays the link type between GPUs
   -b, --numa-bw            Display max and min bandwidth between nodes
-  -c, --coherent           Display cache coherant (or non-coherant) link capability between nodes
+  -c, --coherent           Display cache coherent (or non-coherent) link capability between nodes
   -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
   -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
   -z, --bi-dir             Display P2P bi-directional link capability between nodes
@@ -2206,7 +3369,7 @@ Command Modifiers:
 
 ```shell
 $ amd-smi topology -cndz
-CACHE COHERANCY TABLE:
+CACHE COHERENCY TABLE:
              0000:0c:00.0 0000:22:00.0 0000:38:00.0 0000:5c:00.0 0000:9f:00.0 0000:af:00.0 0000:bf:00.0 0000:df:00.0
 0000:0c:00.0 SELF         C            NC           NC           C            C            C            NC
 0000:22:00.0 C            SELF         NC           C            C            C            NC           C
@@ -2255,7 +3418,7 @@ Legend:
  ENABLED / DISABLED = Link is enabled or disabled
  N/A = Not supported
  T/F = True / False
- C/NC = Coherant / Non-Coherant io links
+ C/NC = Coherent / Non-Coherent io links
  64,32 = 64 bit and 32 bit atomic support
  <BW from>-<BW to>
 ```
@@ -2384,7 +3547,7 @@ GPU: 2
 ...
 ```  
 
-- **Updated `amdsmi_get_gpu_accelerator_partition_profile` to provide driver memory partition capablities**.  
+- **Updated `amdsmi_get_gpu_accelerator_partition_profile` to provide driver memory partition capabilities**.  
 Driver now has the ability to report what the user can set memory partition modes to. User can now see available
 memory partition modes upon an invalid argument return from memory partition mode set (`amdsmi_set_gpu_memory_partition`).
 This change also updates `amd-smi partition`, `amd-smi partition --memory`, and `amd-smi partition --accelerator` (*see note below)   
@@ -2411,10 +3574,10 @@ See below for overview as seen from `rsmi_dev_pci_id_get()` now provides partiti
   - On amd-smi-lib-tests uninstall, the amd_smi tests folder is removed
   - Removed pytest dependency, our python testing now only depends on the unittest framework.
 
-- **Updated Partition APIs and struct information and added and partition_id to `amd-smi static --partition`**.
+- **Updated Partition APIs and struct information and added and partition_id to `amd-smi static --partition`**.  
   - As part of an overhaul to partition information, some partition information will be made available in the `amdsmi_accelerator_partition_profile_t`.
   - This struct will be filled out by a new API, `amdsmi_get_gpu_accelerator_partition_profile()`.
-  - Future data from these APIs wil will eventually get added to `amd-smi partition`.
+  - Future data from these APIs will eventually get added to `amd-smi partition`.
 
 ```C
 #define AMDSMI_MAX_ACCELERATOR_PROFILE    32
@@ -2478,7 +3641,7 @@ GPU: 0
 ### Removed
 
 - **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
-  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
+  - This change is part of the partition redesign.
   - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
 
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
@@ -2499,7 +3662,7 @@ GPU: 0
 
 - **Fixed CPX not showing total number of logical GPUs**.  
   - Updates were made to `amdsmi_init()` and `amdsmi_get_gpu_bdf_id(..)`. In order to display all logical devices, we needed a way to provide order to GPU's enumerated. This was done by adding a partition_id within the BDF optional pci_id bits.
-  - Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `amdsmi_get_gpu_bdf_id(..)`, we provided this fallback to properly retreive partition ID. We
+  - Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `amdsmi_get_gpu_bdf_id(..)`, we provided this fallback to properly retrieve partition ID. We
 plan to eventually remove partition ID from the function portion of the BDF (Bus Device Function). See below for PCI ID description.
 
     - bits [63:32] = domain
@@ -2580,7 +3743,7 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
 ```
 
-- **`amd-smi set --compute-partition` "SPX/DPX/CPX..." will modified to accept profile IDs in ROCm 6.4**. 
+- **`amd-smi set --compute-partition` "SPX/DPX/CPX..." will modified to accept profile IDs in ROCm 6.4**.  
   - This is due to aligning with Host setups and providing more robust partition information through the APIs outlined above. Furthermore, new APIs which will be available on both BM/Host can set by profile ID. (functionality coming soon!)
 
 - **Added preliminary `amd-smi partition` command**.  
@@ -2591,10 +3754,10 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
 
 ### Added
 
-- **Removed `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.
+- **Removed `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.  
 Guest VMs do not support getting current ECC counts from the Host cards.
 
-- **Added `amd-smi static --ras`on Guest VMs**.
+- **Added `amd-smi static --ras`on Guest VMs**.  
 Guest VMs can view enabled/disabled ras features that are on Host cards.
 
 ### Resolved issues
@@ -2603,9 +3766,9 @@ Guest VMs can view enabled/disabled ras features that are on Host cards.
 
 - **Updated CLI error strings to handle empty and invalid GPU/CPU inputs**.  
 
-- **Fixed Guest VM showing passthrough options**.
+- **Fixed Guest VM showing passthrough options**.  
 
-- **Fixed firmware formatting where leading 0s were missing**.
+- **Fixed firmware formatting where leading 0s were missing**.  
 
 ## amd_smi_lib for ROCm 6.2.0
 
@@ -2627,7 +3790,7 @@ GPU                  NAME      PID  GTT_MEM  CPU_MEM  VRAM_MEM  MEM_USAGE     GF
 ```
 
 - **Added Handling to detect VMs with passthrough configurations in CLI Tool**.  
-CLI Tool had only allowed a restricted set of options for Virtual Machines with passthrough GPUs. Now we offer an expanded set of functions availble to passthrough configured GPUs.
+CLI Tool had only allowed a restricted set of options for Virtual Machines with passthrough GPUs. Now we offer an expanded set of functions available to passthrough configured GPUs.
 
 - **Added Process Isolation and Clear SRAM functionality to the CLI Tool for VMs**.  
 VMs now have the ability to set the process isolation and clear the sram from the CLI tool. Using the following commands
@@ -2645,7 +3808,7 @@ Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_not
 
 ### Optimized
 
-- **Updated CLI error strings to specify invalid device type queried**
+- **Updated CLI error strings to specify invalid device type queried**  
 
 ```shell
 $ amd-smi static --asic --gpu 123123
@@ -2743,7 +3906,7 @@ GPU: 0
 ```
 
 - **Updated `amdsmi_get_gpu_board_info()` now has larger structure sizes for `amdsmi_board_info_t`**.  
-Updated sizes that work for retreiving relavant board information across AMD's
+Updated sizes that work for retrieving relevant board information across AMD's
 ASIC products. This requires users to update any ABIs using this structure.
 
 ### Resolved issues
@@ -2858,7 +4021,7 @@ GPU   PCIE_BW
 Previously calls were returning "No bad pages found." if no pages were found, now it only returns the list type and can be empty.
 
 - **Updated `amd-smi metric --ecc-blocks` output**.  
-The ecc blocks argument was outputing blocks without counters available, updated the filtering show blocks that counters are available for:
+The ecc blocks argument was outputting blocks without counters available, updated the filtering show blocks that counters are available for:
 
 ``` shell
 $ amd-smi metric --ecc-block
@@ -3205,11 +4368,11 @@ $ /opt/rocm/bin/amd-smi topology -a -t --json
 ### Resolved issues
 
 - **Fix for GPU reset error on non-amdgpu cards**.  
-Previously our reset could attempting to reset non-amd GPUS- resuting in "Unable to reset non-amd GPU" error. Fix
+Previously our reset could attempting to reset non-amd GPUS- resulting in "Unable to reset non-amd GPU" error. Fix
 updates CLI to target only AMD ASICs.
 
 - **Fix for `amd-smi static --pcie` and `amdsmi_get_pcie_info()` Navi32/31 cards**.  
-Updated API to include `amdsmi_card_form_factor_t.AMDSMI_CARD_FORM_FACTOR_CEM`. Prevously, this would report "UNKNOWN". This fix
+Updated API to include `amdsmi_card_form_factor_t.AMDSMI_CARD_FORM_FACTOR_CEM`. Previously, this would report "UNKNOWN". This fix
 provides the correct board `SLOT_TYPE` associated with these ASICs (and other Navi cards).
 
 - **Fix for `amd-smi process`**.  
@@ -3227,7 +4390,7 @@ Fixed Attribute Error when getting process in csv format
 ### Added
 
 - **Added Monitor Command**.  
-Provides users the ability to customize GPU metrics to capture, collect, and observe. Output is provided in a table view. This aligns closer to ROCm SMI `rocm-smi` (no argument), additionally allows uers to customize what data is helpful for their use-case.
+Provides users the ability to customize GPU metrics to capture, collect, and observe. Output is provided in a table view. This aligns closer to ROCm SMI `rocm-smi` (no argument), additionally allows users to customize what data is helpful for their use-case.
 
 ```shell
 $ amd-smi monitor -h
@@ -3437,7 +4600,7 @@ CPU: 0
 ```
 
 - **Added support for new metrics: VCN, JPEG engines, and PCIe errors**.  
-Using the AMD SMI tool, users can retreive VCN, JPEG engines, and PCIe errors by calling `amd-smi metric -P` or `amd-smi metric --usage`. Depending on device support, `VCN_ACTIVITY` will update for MI3x ASICs (with 4 separate VCN engine activities) for older asics `MM_ACTIVITY` with UVD/VCN engine activity (average of all engines). `JPEG_ACTIVITY` is a new field for MI3x ASICs, where device can support up to 32 JPEG engine activities. See our documentation for more in-depth understanding of these new fields.
+Using the AMD SMI tool, users can retrieve VCN, JPEG engines, and PCIe errors by calling `amd-smi metric -P` or `amd-smi metric --usage`. Depending on device support, `VCN_ACTIVITY` will update for MI3x ASICs (with 4 separate VCN engine activities) for older asics `MM_ACTIVITY` with UVD/VCN engine activity (average of all engines). `JPEG_ACTIVITY` is a new field for MI3x ASICs, where device can support up to 32 JPEG engine activities. See our documentation for more in-depth understanding of these new fields.
 
 ```shell
 $ amd-smi metric -P
@@ -3550,7 +4713,7 @@ amd-smi metric -p --json
 
 ### Changed
 
-- **Topology is now left-aligned with BDF of each device listed individual table's row/coloumns**.  
+- **Topology is now left-aligned with BDF of each device listed individual table's row/columns**.  
 We provided each device's BDF for every table's row/columns, then left aligned data. We want AMD SMI Tool output to be easy to understand and digest for our users. Having users scroll up to find this information made it difficult to follow, especially for devices which have many devices associated with one ASIC.
 
 ```shell
@@ -3628,7 +4791,7 @@ TypeError: dump_all() got an unexpected keyword argument 'sort_keys'
 ```
 
 - **Fix for crash when user is not a member of video/render groups**.  
-AMD SMI now uses same mutex handler for devices as rocm-smi. This helps avoid crashes when DRM/device data is inaccessable to the logged in user.
+AMD SMI now uses same mutex handler for devices as rocm-smi. This helps avoid crashes when DRM/device data is inaccessible to the logged in user.
 
 ## amd_smi_lib for ROCm 6.0.0
 
@@ -3658,4 +4821,4 @@ Now the information is displayed as a table by each GPU's BDF, which closer rese
 ### Resolved issues
 
 - **Fix for driver not initialized**.  
-If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.
+If driver module is not loaded, user retrieve error response indicating amdgpu module is not loaded.

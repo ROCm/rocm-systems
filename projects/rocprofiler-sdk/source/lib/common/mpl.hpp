@@ -96,12 +96,16 @@ template <typename Tp>
 struct is_pair_impl
 {
     static constexpr auto value = false;
+    using first_type            = void;
+    using second_type           = void;
 };
 
 template <typename LhsT, typename RhsT>
 struct is_pair_impl<std::pair<LhsT, RhsT>>
 {
     static constexpr auto value = true;
+    using first_type            = LhsT;
+    using second_type           = RhsT;
 };
 
 template <typename Tp>

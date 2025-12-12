@@ -21,6 +21,9 @@ set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES
     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfxtest.hpp gfx12test.cpp)
 
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX1250_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfxtest.hpp gfx1250test.cpp)
+
 add_executable(pcs_gfx9_test)
 
 target_sources(pcs_gfx9_test
@@ -33,16 +36,14 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET pcs_gfx9_test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES}
-    TEST_LIST pcs_gfx9_test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${pcs_gfx9_test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    LABELS "unittests;pc-sampling;gfx9"
+    TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )
 
 add_executable(pcs_id_test)
 
@@ -55,15 +56,14 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET pcs_id_test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES}
-    TEST_LIST pcs_id_test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${pcs_id_test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-                                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    LABELS "unittests"
+    TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_bench_test)
 
@@ -91,16 +91,14 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET pcs_thread_test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES}
-    TEST_LIST pcs_thread_test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${pcs_thread_test_TESTS}
-    PROPERTIES TIMEOUT 75 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    LABELS "unittests"
+    TIMEOUT 75
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_gfx12_test)
 
@@ -114,13 +112,32 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
+rocprofiler_add_unit_test(
     TARGET pcs_gfx12_test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX12_TEST_SOURCES}
-    TEST_LIST pcs_gfx12_test_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    LABELS "unittests"
+    TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set_tests_properties(
-    ${pcs_gfx12_test_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+add_executable(pcs_gfx1250_test)
+
+target_sources(pcs_gfx1250_test
+               PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX1250_TEST_SOURCES})
+target_include_directories(pcs_gfx1250_test PRIVATE ${PCTEST_INCLUDE_DIR})
+
+target_link_libraries(
+    pcs_gfx1250_test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET pcs_gfx1250_test
+    SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX1250_TEST_SOURCES}
+    LABELS "unittests"
+    TIMEOUT 45
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

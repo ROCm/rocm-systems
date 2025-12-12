@@ -260,7 +260,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
           it++;
         }
       }  // end for
-    }    // end if
+    }  // end if
   }
   if (unsupported_fields > 0) {
     RDC_LOG(RDC_DEBUG, "Skip watch " << unsupported_fields << " fields as they are not supported.");
@@ -473,7 +473,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
   }
 
   // Start to watch the fields and update fields per 1 second.
-  result = rdc_field_watch(group_id, field_group_id, 1000000, 0, 0);
+  result = rdc_field_watch(group_id, field_group_id, 1000000, 1, 1);
   return result;
 }
 

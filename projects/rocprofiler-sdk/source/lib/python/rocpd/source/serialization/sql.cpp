@@ -23,6 +23,9 @@
 #include "lib/python/rocpd/source/serialization/sql.hpp"
 #include "lib/output/sql/common.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 namespace cereal
 {
 SQLite3InputArchive::SQLite3InputArchive(sqlite3*         conn,
@@ -40,7 +43,7 @@ SQLite3InputArchive::SQLite3InputArchive(sqlite3*         conn,
                    sqlite3_prepare_v2(m_conn, m_query.c_str(), -1, &m_stmt, nullptr) != SQLITE_OK)
         << "Error preparing select statement: " << sqlite3_errmsg(m_conn);
 
-    ROCP_CI_LOG_IF(ERROR, m_stmt == nullptr) << "Error preparing statment: " << query;
+    ROCP_CI_LOG_IF(ERROR, m_stmt == nullptr) << "Error preparing statement: " << query;
 
     if(!m_stmt) return;
 

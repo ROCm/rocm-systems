@@ -1,0 +1,19 @@
+# Note: In production, these reference upstream ROCm repos.
+# For CI/testing on MI300X hardware, pins are updated via explicit PRs.
+# Scaffolding: submodules created with stub structure for harness development.
+
+[submodule "benchmarks/tritonbench-rocm"]
+	path = benchmarks/tritonbench-rocm
+	url = https://github.com/ROCm/TritonBench.git
+	# Pinned SHA: known-good on MI300X; update via PR after validation
+	branch = main
+
+[submodule "benchmarks/kernelbench-rocm"]
+	path = benchmarks/kernelbench-rocm
+	url = https://github.com/ROCm/KernelBench.git
+	# Pinned SHA: known-good on MI300X; update via PR after validation
+	branch = main
+[submodule "opencode"]
+	path = opencode
+	url = https://github.com/sst/opencode.git
+	tag = v1.4.11

@@ -22,12 +22,14 @@
 
 #pragma once
 
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -39,11 +41,11 @@ namespace code_object
 {
 namespace hsa
 {
-using context_t               = context::context;
-using user_data_t             = rocprofiler_user_data_t;
-using context_user_data_map_t = std::unordered_map<const context_t*, user_data_t>;
-using context_array_t         = context::context_array_t;
-using context_user_data_map_t = std::unordered_map<const context_t*, user_data_t>;
+using context_t                = context::context;
+using user_data_t              = rocprofiler_user_data_t;
+using context_user_data_map_t  = std::unordered_map<const context_t*, user_data_t>;
+using synchronized_user_data_t = common::Synchronized<context_user_data_map_t>;
+using context_array_t          = context::context_array_t;
 
 struct code_object
 {
@@ -59,15 +61,15 @@ struct code_object
     code_object& operator=(const code_object&) = delete;
     code_object& operator                      =(code_object&&) noexcept;
 
-    bool                     beg_notified    = false;
-    bool                     end_notified    = false;
+    std::atomic<bool>        beg_notified    = false;
+    std::atomic<bool>        end_notified    = false;
     const std::string*       uri             = nullptr;
     hsa_executable_t         hsa_executable  = {};
     hsa_loaded_code_object_t hsa_code_object = {};
     code_object_data_t       rocp_data       = common::init_public_api_struct(code_object_data_t{});
     symbol_array_t           symbols         = {};
     context_array_t          contexts        = {};
-    context_user_data_map_t  user_data       = {};
+    synchronized_user_data_t user_data       = {};
 };
 
 struct code_object_unload

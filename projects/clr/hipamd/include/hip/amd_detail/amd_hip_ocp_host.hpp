@@ -1,26 +1,8 @@
 /*
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-
-SPDX-License-Identifier: MIT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -75,7 +57,7 @@ static const float ieee754_nan = std::numeric_limits<float>::quiet_NaN();
 static const float ieee754_inf = std::numeric_limits<float>::infinity();
 
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t U32(float f) {
-  static_assert(sizeof(uint32_t) == sizeof(float));
+  static_assert(sizeof(uint32_t) == sizeof(float), "");
   union {
     float f32;
     uint32_t ui32;
@@ -84,7 +66,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t U32(float f) {
 }
 
 __OCP_FP_HOST_DEVICE_STATIC__ float F32(uint32_t u32) {
-  static_assert(sizeof(uint32_t) == sizeof(float));
+  static_assert(sizeof(uint32_t) == sizeof(float), "");
   union {
     uint32_t ui32;
     float f32;
@@ -464,7 +446,7 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, uint3
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
 
   const auto& enc = encodings[(size_t)E];
   const auto dstE = []() -> Encoding {
@@ -560,15 +542,15 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
-  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float));
-  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float));
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
+  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
+  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float), "");
   union {
     float f32;
     __amd_fp16_storage_t fp16[2];
     __amd_bf16_storage_t bf16[2];
     uint32_t u32;
-  } u;
+  } u{0};
 
   if constexpr (std::is_same<T, float>())
     u.f32 = f;
@@ -674,15 +656,15 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
-  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float));
-  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float));
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
+  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
+  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float), "");
   union {
     float f32;
     __amd_fp16_storage_t fp16[2];
     __amd_bf16_storage_t bf16[2];
     uint32_t u32;
-  } u;
+  } u{0};
 
   if constexpr (std::is_same<T, float>())
     u.f32 = f;
@@ -787,6 +769,121 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
     return inf<E, sat>(signBit);
 }
 
+// ------------
+template <typename InType, typename OutType, typename float_base_t, Encoding in_encode,
+          Encoding out_encode, bool sr = false>
+__OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, int8_t scale = 0,
+                                                        uint32_t seed = 0) {
+  // This is tightly coupled with the definitions of the amd_ocp_types
+  constexpr bool in_float = std::is_same<InType, __amd_floatx16_storage_t>::value ||
+      std::is_same<InType, __amd_fp16x16_storage_t>::value ||
+      std::is_same<InType, __amd_bf16x16_storage_t>::value;
+  using other_type = std::conditional<in_float, OutType, InType>::type;
+
+  struct fp6x16_packed {
+    uint8_t val1 : 6;
+    uint8_t val2 : 6;
+    uint8_t val3 : 6;
+    uint8_t val4 : 6;
+    uint8_t val5 : 6;
+    uint8_t val6 : 6;
+    uint8_t val7 : 6;
+    uint8_t val8 : 6;
+    uint8_t val9 : 6;
+    uint8_t val10 : 6;
+    uint8_t val11 : 6;
+    uint8_t val12 : 6;
+    uint8_t val13 : 6;
+    uint8_t val14 : 6;
+    uint8_t val15 : 6;
+    uint8_t val16 : 6;
+    unsigned int padded;
+  } __attribute__((packed));
+
+  static_assert(sizeof(other_type) == sizeof(fp6x16_packed));
+  union {
+    other_type o;
+    fp6x16_packed fp6;
+  } u;
+
+  // TODO maybe make it simpler
+  if constexpr (in_float) {
+    if constexpr (sr) {
+      u.fp6.val1 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
+      u.fp6.val2 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
+      u.fp6.val3 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
+      u.fp6.val4 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
+      u.fp6.val5 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
+      u.fp6.val6 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
+      u.fp6.val7 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
+      u.fp6.val8 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
+      u.fp6.val9 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
+      u.fp6.val10 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
+      u.fp6.val11 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
+      u.fp6.val12 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
+      u.fp6.val13 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
+      u.fp6.val14 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
+      u.fp6.val15 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
+      u.fp6.val16 =
+          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
+    } else {
+      u.fp6.val1 = from_float<float_base_t, out_encode, true>(in[0], scale);
+      u.fp6.val2 = from_float<float_base_t, out_encode, true>(in[1], scale);
+      u.fp6.val3 = from_float<float_base_t, out_encode, true>(in[2], scale);
+      u.fp6.val4 = from_float<float_base_t, out_encode, true>(in[3], scale);
+      u.fp6.val5 = from_float<float_base_t, out_encode, true>(in[4], scale);
+      u.fp6.val6 = from_float<float_base_t, out_encode, true>(in[5], scale);
+      u.fp6.val7 = from_float<float_base_t, out_encode, true>(in[6], scale);
+      u.fp6.val8 = from_float<float_base_t, out_encode, true>(in[7], scale);
+      u.fp6.val9 = from_float<float_base_t, out_encode, true>(in[8], scale);
+      u.fp6.val10 = from_float<float_base_t, out_encode, true>(in[9], scale);
+      u.fp6.val11 = from_float<float_base_t, out_encode, true>(in[10], scale);
+      u.fp6.val12 = from_float<float_base_t, out_encode, true>(in[11], scale);
+      u.fp6.val13 = from_float<float_base_t, out_encode, true>(in[12], scale);
+      u.fp6.val14 = from_float<float_base_t, out_encode, true>(in[13], scale);
+      u.fp6.val15 = from_float<float_base_t, out_encode, true>(in[14], scale);
+      u.fp6.val16 = from_float<float_base_t, out_encode, true>(in[15], scale);
+    }
+    return u.o;
+  } else {
+    OutType ret;
+    u.o = in;
+    ret[0] = to_float<float_base_t, in_encode, true>(u.fp6.val1, scale);
+    ret[1] = to_float<float_base_t, in_encode, true>(u.fp6.val2, scale);
+    ret[2] = to_float<float_base_t, in_encode, true>(u.fp6.val3, scale);
+    ret[3] = to_float<float_base_t, in_encode, true>(u.fp6.val4, scale);
+    ret[4] = to_float<float_base_t, in_encode, true>(u.fp6.val5, scale);
+    ret[5] = to_float<float_base_t, in_encode, true>(u.fp6.val6, scale);
+    ret[6] = to_float<float_base_t, in_encode, true>(u.fp6.val7, scale);
+    ret[7] = to_float<float_base_t, in_encode, true>(u.fp6.val8, scale);
+    ret[8] = to_float<float_base_t, in_encode, true>(u.fp6.val9, scale);
+    ret[9] = to_float<float_base_t, in_encode, true>(u.fp6.val10, scale);
+    ret[10] = to_float<float_base_t, in_encode, true>(u.fp6.val11, scale);
+    ret[11] = to_float<float_base_t, in_encode, true>(u.fp6.val12, scale);
+    ret[12] = to_float<float_base_t, in_encode, true>(u.fp6.val13, scale);
+    ret[13] = to_float<float_base_t, in_encode, true>(u.fp6.val14, scale);
+    ret[14] = to_float<float_base_t, in_encode, true>(u.fp6.val15, scale);
+    ret[15] = to_float<float_base_t, in_encode, true>(u.fp6.val16, scale);
+    return ret;
+  }
+}
+// ------------
+
 template <typename InType, typename OutType, typename float_base_t, Encoding in_encode,
           Encoding out_encode, bool sr = false>
 __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale = 0,
@@ -795,9 +892,6 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
   constexpr bool in_float = std::is_same<InType, __amd_floatx32_storage_t>::value ||
                             std::is_same<InType, __amd_fp16x32_storage_t>::value ||
                             std::is_same<InType, __amd_bf16x32_storage_t>::value;
-  constexpr bool out_float = std::is_same<OutType, __amd_floatx32_storage_t>::value ||
-                             std::is_same<OutType, __amd_fp16x32_storage_t>::value ||
-                             std::is_same<OutType, __amd_bf16x32_storage_t>::value;
   using other_type = std::conditional<in_float, OutType, InType>::type;
 
   struct fp6x32_packed {
@@ -836,7 +930,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
     unsigned long long padded;
   } __attribute__((packed));
 
-  static_assert(sizeof(other_type) == sizeof(fp6x32_packed));
+  static_assert(sizeof(other_type) == sizeof(fp6x32_packed), "");
   union {
     other_type o;
     fp6x32_packed fp6;

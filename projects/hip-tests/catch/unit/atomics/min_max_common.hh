@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -285,13 +269,13 @@ void TestCore(const TestParams& p) {
   // Initialize Device Memory
   TestType test_value =
       std::is_floating_point_v<TestType> ? kFloatingPointTestValue : kIntegerTestValue;
+  std::vector<TestType> test_values(p.width * p.pitch / sizeof(TestType), test_value);
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     TestType* const mem_ptr =
-      p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
+        p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
     HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
-    for (int i = 0; i < p.width * p.pitch / sizeof(TestType); ++i) {
-      HIP_CHECK(hipMemcpy(&mem_ptr[i], &test_value, sizeof(TestType), hipMemcpyHostToDevice));
-    }
+    HIP_CHECK(hipMemcpy(mem_ptr, test_values.data(), p.width * p.pitch, hipMemcpyHostToDevice));
   }
 
   // Launch kernel
@@ -310,6 +294,7 @@ void TestCore(const TestParams& p) {
   }
   // Copy Results back to Host
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));
@@ -381,8 +366,7 @@ void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsig
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
-    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
 
   TestParams params;
@@ -409,14 +393,11 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
                                       const unsigned int pitch) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
-      std::string msg = std::to_string(num_devices) + " devices are required";
-      HipTest::HIP_SKIP_TEST(msg.c_str());
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kRequiredDeviceCountNotMet);
     }
   }
   if (!HipTest::checkConcurrentKernels(num_devices)) {
-    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kConcurrentKernelExecutionUnsupported);
   }
   TestParams params;
   params.num_devices = num_devices;

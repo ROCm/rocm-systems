@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -30,7 +11,7 @@
 /// to use this
 ///
 
-#include "defines.hpp"
+#include "common/defines.h"
 
 #include <cstdint>
 #include <ctime>
@@ -51,7 +32,10 @@ struct stages
 
     stages();
 
-    ROCPROFSYS_DEFAULT_COPY_MOVE(stages)
+    stages(const stages&)                = default;
+    stages(stages&&) noexcept            = default;
+    stages& operator=(const stages&)     = default;
+    stages& operator=(stages&&) noexcept = default;
 
     functor_t init    = [](const spec&) { return true; };
     functor_t wait    = [](const spec&) { return true; };
@@ -69,7 +53,10 @@ struct clock_identifier
     clock_identifier();
     clock_identifier(std::string_view, int);
 
-    ROCPROFSYS_DEFAULT_COPY_MOVE(clock_identifier)
+    clock_identifier(const clock_identifier&)                = default;
+    clock_identifier(clock_identifier&&) noexcept            = default;
+    clock_identifier& operator=(const clock_identifier&)     = default;
+    clock_identifier& operator=(clock_identifier&&) noexcept = default;
 
     std::string as_string() const;
 
@@ -86,19 +73,22 @@ struct clock_identifier
 
 struct spec
 {
-    spec(int, double, double, uint64_t = 0, uint64_t = 1);
-    spec(clock_identifier, double, double, uint64_t = 0, uint64_t = 1);
-    spec(const std::string&, double, double, uint64_t = 0, uint64_t = 1);
+    spec(int, double, double, std::uint64_t = 0, std::uint64_t = 1);
+    spec(clock_identifier, double, double, std::uint64_t = 0, std::uint64_t = 1);
+    spec(const std::string&, double, double, std::uint64_t = 0, std::uint64_t = 1);
     spec(const std::string&);
 
-    ROCPROFSYS_DEFAULT_COPY_MOVE(spec)
+    spec(const spec&)                = default;
+    spec(spec&&) noexcept            = default;
+    spec& operator=(const spec&)     = default;
+    spec& operator=(spec&&) noexcept = default;
 
     void operator()(const stages&) const;
 
     double           delay    = 0.0;
     double           duration = 0.0;
-    uint64_t         count    = 0;
-    uint64_t         repeat   = 1;
+    std::uint64_t    count    = 0;
+    std::uint64_t    repeat   = 1;
     clock_identifier clock_id = {};
 };
 

@@ -1,0 +1,455 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *****************************************************************************/
+
+#ifndef LIBRARY_SRC_BACKEND_BC_HPP_
+#define LIBRARY_SRC_BACKEND_BC_HPP_
+
+/**
+ * @file backend_bc.hpp
+ * Defines the Backend base class.
+ *
+ * The backend base class sets up most of the host-side library resources.
+ * It is the top-level interface for these resources.
+ */
+
+#include <cstdint>
+#include <map>
+#include <vector>
+
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "rocshmem/rocshmem.hpp"
+#include "mpi_instance.hpp"
+#include "backend_type.hpp"
+#include "ipc_policy.hpp"
+#include "memory/symmetric_heap.hpp"
+#include "stats.hpp"
+#include "team_tracker.hpp"
+#include "bootstrap/bootstrap.hpp"
+
+namespace rocshmem {
+
+class Team;
+class TeamInfo;
+
+/**
+ * @class Backend backend.hpp
+ * @brief Container class for the persistent state used by the library.
+ *
+ * Backend is populated by host-side initialization and allocation calls.
+ * It uses this state to populate Context objects which the GPU may use to
+ * perform networking operations.
+ *
+ * The rocshmem.cpp implementation file wraps many the Backend public
+ * members to implement the library's public API.
+ */
+class Backend {
+ public:
+  friend Context;
+
+  /**
+   * @brief Constructor.
+   *
+   * @note Implementation may reduce the number of workgroups if the
+   * number exceeds hardware limits.
+   */
+  explicit Backend(MPI_Comm comm);
+
+  explicit Backend(TcpBootstrap* bootstrap);
+  /**
+   * @brief Destructor.
+   */
+  virtual ~Backend();
+
+  __device__ bool create_ctx(int64_t option, rocshmem_ctx_t* ctx);
+  __device__ void destroy_ctx(rocshmem_ctx_t* ctx);
+
+  /**
+   * @brief Create a new team object and initialize it.
+   *
+   * @param[in] parent_team Pointer to the parent team object.
+   * @param[in] team_info_wrt_parent TeamInfo object wrt parent team.
+   * @param[in] team_info_wrt_world TeamInfo object wrt TEAM_WORLD.
+   * @param[in] num_pes Number of PEs in this team.
+   * @param[in] my_pe_in_new_team Index of this PE in the new team.
+   * @param[in] team_comm MPI communicator for this team.
+   *
+   * @param[out] new_team pointer to the new team.
+   */
+  virtual void create_new_team(Team* parent_team,
+                               const TeamInfo& team_info_wrt_parent,
+                               const TeamInfo& team_info_wrt_world,
+                               int num_pes, int my_pe_in_new_team,
+                               MPI_Comm team_comm,
+                               rocshmem_team_t* new_team) = 0;
+
+  /**
+   * @brief Destruct a team
+   *
+   * @param[in] team Handle to the team to destroy.
+   */
+  virtual void team_destroy(rocshmem_team_t team) = 0;
+
+  /**
+   * @brief Reports processing element number id.
+   *
+   * @return Unique numeric identifier for each processing element.
+   */
+  __host__ __device__ int getMyPE() const { return my_pe; }
+
+  /**
+   * @brief Reports number of processing elements.
+   *
+   * @return Number of active processing elements tracked by library.
+   */
+  __host__ __device__ int getNumPEs() const { return num_pes; }
+
+  /**
+   * @brief Allocates and initializes device-side library state.
+   *
+   * Preallocates a single private context for this workgroup (thread-block)
+   * and binds it to the WGState instance.
+   *
+   * The code below carves the allocation out of the "extern __shared__"
+   * partition and then builds the context object in that memory.
+   *
+   * @return void
+   */
+  __device__ void create_wg_state();
+
+  /**
+   * @brief Frees device-side library resources.
+   *
+   * @return void
+   */
+  __device__ void finalize_wg_state();
+
+  /**
+   * @brief Dumps statistics for public API invocations.
+   *
+   * @note Implementation may dump additional statistics from backend
+   * derived classes when calling this function. If so, the method,
+   * dump_backend_stats, will be used as the interface for the
+   * additional statistics.
+   */
+  void dump_stats();
+
+  /**
+   * @brief Resets statistics for public API invocations.
+   *
+   * @note Implementation may reset additional statistics from backend
+   * derived classes when calling this function. If so, the method,
+   * reset_backend_stats, will be used as the interface for the
+   * additional statistics.
+   */
+  void reset_stats();
+
+  /**
+   * @brief Abort the application.
+   *
+   * @param[in] status Exit code.
+   *
+   * @return void.
+   *
+   * @note This routine terminates the entire application.
+   */
+  virtual void global_exit(int status) = 0;
+
+  /**
+   * @brief Creates a new OpenSHMEM context.
+   *
+   * @param[in] options Options for context creation
+   * @param[in] ctx     Address of the pointer to the new context
+   *
+   * @return Zero on success, nonzero otherwise.
+   */
+  virtual void ctx_create(int64_t options, void** ctx) = 0;
+
+  /**
+   * @brief Destroys a context.
+   *
+   * @param[in] ctx Context handle.
+   *
+   * @return void.
+   */
+  virtual void ctx_destroy(Context* ctx) = 0;
+
+  /**
+   * @brief Structure to keep user buffer registrations.
+   */
+  std::map<uintptr_t, size_t> user_buffer_regions;
+
+  /**
+   * @brief Per-symmetric-registration record kept on the host.
+   */
+  struct SymmRegion {
+    size_t length{0};       // registered length in bytes
+    uintptr_t orig_base{0}; // user's original buffer base address
+  };
+
+  /**
+   * @brief Symmetric registrations keyed by the rocSHMEM-managed alias address.
+   *
+   * The alias is the address returned to (and used by) the caller; it is the
+   * key for unregistration and the base that needs unmapping at cleanup. The
+   * stored orig_base ties the alias back to the user's original buffer so its
+   * entry in symm_orig_regions can be removed on unregister.
+   */
+  std::map<uintptr_t, SymmRegion> symm_buffer_regions;
+
+  /**
+   * @brief User original buffer ranges keyed by original base address.
+   *
+   * Used to reject overlapping registrations of the same underlying buffer.
+   * Aliases are freshly reserved virtual addresses and never overlap, so
+   * overlap detection must be performed against the original addresses.
+   */
+  std::map<uintptr_t, size_t> symm_orig_regions;
+
+  /**
+   * @brief Register a user buffer.
+   */
+  virtual int buffer_register(void *addr, size_t length);
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  virtual int buffer_unregister(void *addr);
+
+  /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  virtual void buffer_unregister_all();
+
+  /**
+   * @brief Register a symmetric user buffer (collective).
+   *
+   * The base implementation performs the common host-side work: argument
+   * validation, mapping the user's buffer to a fresh rocSHMEM-owned virtual
+   * address (the "alias"), capacity enforcement (ROCSHMEM_MAX_SYMM_REGIONS),
+   * duplicate detection, and recording the registration (keyed by the alias)
+   * in symm_buffer_regions. The alias is returned via @p registered_addr and
+   * is the address the caller must use for RMA and for unregistration.
+   *
+   * @param[in]  addr            User's VMM allocation to register
+   * @param[in]  length          Length in bytes
+   * @param[out] registered_addr Filled with the rocSHMEM-managed alias address
+   */
+  virtual int buffer_register_symmetric(void *addr, size_t length,
+                                        void **registered_addr);
+
+  /**
+   * @brief Unregister a symmetric user buffer (collective).
+   *
+   * The base implementation removes the registration from
+   * symm_buffer_regions. Backends override to release transport-specific
+   * resources and call Backend::buffer_unregister_symmetric for the common
+   * portion.
+   */
+  virtual int buffer_unregister_symmetric(void *addr);
+
+  /**
+   * @brief High level device stats that do not depend on backend type.
+   */
+  ROCStats globalStats{};
+
+  /**
+   * @brief High level host stats that do not depend on backend type.
+   */
+  ROCHostStats globalHostStats{};
+
+  /**
+   * @brief Number of processing elements running in job.
+   *
+   * @todo Change to size_t.
+   */
+  int num_pes{0};
+
+  /**
+   * @brief Unique numeric identifier ranging from 0 (inclusive) to
+   * num_pes (exclusive) [0 ... num_pes).
+   *
+   * @todo Change to size_t and set invalid entry to max size.
+   */
+  int my_pe{-1};
+
+  /**
+   * @brief indicate when init is done on the CPU. Non-blocking init is only
+   * available with GPU-IB
+   */
+  uint8_t* done_init{nullptr};
+
+  /**
+   * @todo document where this is used and try to coalesce this into another
+   * class
+   */
+  MPI_Comm backend_comm;
+
+  /**
+   * @todo document where this is used
+   */
+  TcpBootstrap *backend_bootstr{nullptr};
+
+  /**
+   * @brief Object contains the interface and internal data structures
+   * needed to allocate/free memory on the symmetric heap.
+   */
+  SymmetricHeap heap;
+
+  /**
+   * @brief Determines which device to launch device kernels onto.
+   *
+   * Multi-device nodes can specify which one they would like to use.
+   */
+  int hip_dev_id{0};
+
+  /**
+   * @brief Add ctx from the list of user-created ctxs
+   */
+  void track_ctx(Context* ctx);
+
+  /**
+   * @brief Remove ctx from the list of user-created ctxs
+   */
+  void untrack_ctx(Context* ctx);
+
+  /**
+   * @brief Remove all ctxs from the list of user-created ctxs
+   */
+  void destroy_remaining_ctxs();
+
+  /**
+   * @brief Compile-time configuration policy for intra-node shared memory
+   * accesses.
+   *
+   * The configuration option "USE_IPC" can be enabled to allow shared
+   * memory accesses to the symmetric heap from processing elements
+   * co-located on the same node.
+   */
+  IpcImpl ipcImpl{};
+
+  /**
+   * @brief Maintains information about teams
+   */
+  TeamTracker team_tracker{};
+
+  BackendType get_type() { return type; }
+
+  /**
+   * Fine grained memory allocator for buffers used in collectives Routines
+   */
+  HIPAllocator *psync_allocator_{nullptr};
+
+ protected:
+  /**
+   * @brief Alignment for regions carved from a backend's work/sync pool.
+   *
+   * The barrier_sync and pSync pools are accessed with 64-bit atomics, which
+   * require 8-byte alignment.
+   */
+  static constexpr size_t wrk_sync_pool_alignment{alignof(int64_t)};
+
+  /* @brief Maximum number of concurrent symmetric buffer registrations.
+   *
+   * Configured via ROCSHMEM_MAX_SYMM_REGIONS (see envvar::max_symm_regions)
+   * and shared by every backend that supports symmetric registration.
+   */
+  size_t max_symm_regions_{0};
+
+  /**
+   * @brief Collective all-gather of fixed-size per-PE blobs.
+   *
+   * @p inout points to a contiguous array of num_pes elements, each
+   * @p bytes_per_pe long. The calling PE's slot (index my_pe) must already be
+   * populated on entry. Works with either the MPI or TCP bootstrap transport.
+   * Shared helper for backends exchanging registration handles.
+   */
+  void symm_allgather(void *inout, size_t bytes_per_pe);
+
+  /**
+   * @brief Required to support static inheritance for device calls.
+   *
+   * The Context DISPATCH implementation requires this member.
+   * The implementation needs to know the derived class type to
+   * issue a static_cast.
+   *
+   * GPU devices do not support virtual functions. Therefore, we cannot
+   * rely on the normal inheritance mechanism to tailor behavior for
+   * derived backend types.
+   */
+  BackendType type;
+
+  /**
+   * @brief Copies per-context device-side stats from the hipMalloc ctx_array
+   *        into globalStats via hipMemcpy, so that dump_stats() can read them
+   *        from the host.  Default implementation is a no-op for backends that
+   *        do not have a device ctx_array.
+   */
+  virtual void accumulate_ctx_device_stats() {}
+
+  /**
+   * @brief Accumulates the default host context's ctxHostStats into
+   *        globalHostStats.  The default host context is not in list_of_ctxs
+   *        (to avoid a double-free with its owning unique_ptr), so it must be
+   *        handled separately.  Default is a no-op.
+   */
+  virtual void accumulate_default_host_ctx_stats() {}
+
+  /**
+   * @brief Dumps derived class statistics. Default is a no-op.
+   */
+  virtual void dump_backend_stats() {}
+
+  /**
+   * @brief Resets derived class statistics. Default is a no-op.
+   */
+  virtual void reset_backend_stats() {}
+
+ private:
+  /**
+   * @brief initialization code used by all constructors
+   */
+  void init (void);
+
+
+  /**
+   * @brief List of ctxs created by the user.
+   */
+  std::vector<Context*> list_of_ctxs{};
+
+  /**
+   * @brief initialize MPI.
+   *
+   * Backend relies on MPI to exchange meta data across PEs.
+   */
+  void init_mpi_once(MPI_Comm comm);
+};
+
+/**
+ * @brief Global handle used by the device to access the backend.
+ */
+extern __constant__ Backend* device_backend_proxy;
+
+}  // namespace rocshmem
+
+#endif  // LIBRARY_SRC_BACKEND_BC_HPP_

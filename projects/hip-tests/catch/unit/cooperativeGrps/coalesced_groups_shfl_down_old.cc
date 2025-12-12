@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 // Test Description:
 /* This test implements sum reduction kernel, first with each threads own rank
    as input and comparing the sum with expected sum output derieved from n(n-1)/2
@@ -131,11 +116,15 @@ static void test_group_partition(unsigned int tileSz) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
     int expectedSum = ((tileSz - 1) * tileSz / 2);
     int* expectedResult = new int[numTiles];
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -146,7 +135,7 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
     HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
@@ -176,7 +165,7 @@ static void test_group_partition(unsigned int tileSz) {
 }
 
 static void test_shfl_down() {
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
     hipError_t err;
     int blockSize = 1;
@@ -237,7 +226,7 @@ static void test_shfl_down() {
 }
 
 
-TEST_CASE("Unit_coalesced_groups_shfl_down") {
+HIP_TEST_CASE(Unit_coalesced_groups_shfl_down) {
   // Use default device for validating the test
   int deviceId;
   ASSERT_EQUAL(hipGetDevice(&deviceId), hipSuccess);

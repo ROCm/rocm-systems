@@ -27,7 +27,7 @@
  */
 
 /**
- ** Miscellanous definitions needed by multiple components.
+ ** Miscellaneous definitions needed by multiple components.
  **/
 
 #ifndef	_ELFTC_H

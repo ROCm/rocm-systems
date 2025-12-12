@@ -27,7 +27,7 @@
 
 class TestMemUtilRead : public TestBase {
  public:
-    TestMemUtilRead();
+  TestMemUtilRead();
 
   // @Brief: Destructor for test case of TestMemUtilRead
   virtual ~TestMemUtilRead();
@@ -38,7 +38,7 @@ class TestMemUtilRead : public TestBase {
   // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrive the resource
+  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
   // @Brief: Display  results

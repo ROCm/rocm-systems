@@ -1,16 +1,13 @@
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-causal-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -20,13 +17,10 @@ if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
 endif()
 
 add_library(causal-interface-library INTERFACE)
-target_compile_options(
-    causal-interface-library
-    INTERFACE -g3 -gdwarf-3 -fno-omit-frame-pointer
-)
+target_compile_options(causal-interface-library INTERFACE -g3 -fno-omit-frame-pointer)
 target_link_libraries(
     causal-interface-library
-    INTERFACE Threads::Threads ${CMAKE_DL_LIBS}
+    INTERFACE Threads::Threads pthread ${CMAKE_DL_LIBS}
 )
 
 rocprofiler_systems_causal_example_executable(

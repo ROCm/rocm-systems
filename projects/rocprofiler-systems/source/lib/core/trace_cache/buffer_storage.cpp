@@ -1,35 +1,16 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "buffer_storage.hpp"
-#include "PTL/Task.hh"
-#include "PTL/TaskGroup.hh"
-#include "PTL/ThreadPool.hh"
-#include "debug.hpp"
-#include "library/runtime.hpp"
-#include <chrono>
+
+#include "logger/debug.hpp"
+
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
+#include <stop_token>
 #include <thread>
 #include <unistd.h>
 
@@ -40,162 +21,110 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-namespace
-{
-constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
-constexpr auto NUM_OF_THREADS           = 1;
-}  // namespace
+flush_worker_t::flush_worker_t(worker_function_t            worker_function,
+                               worker_synchronization_ptr_t worker_synchronization_ptr,
+                               std::string                  filepath)
 
-buffer_storage::buffer_storage()
-{
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_thread_pool = std::make_unique<PTL::ThreadPool>(NUM_OF_THREADS);
-    m_thread_pool->initialize_threadpool(NUM_OF_THREADS);
-
-    m_task_group = std::make_unique<PTL::TaskGroup<void>>(m_thread_pool.get());
-}
+: m_worker_function(std::move(worker_function))
+, m_worker_synchronization(std::move(worker_synchronization_ptr))
+, m_filepath(std::move(filepath))
+{}
 
 void
-buffer_storage::start_flushing_thread(pid_t _pid)
+flush_worker_t::start(const pid_t& current_pid)
 {
-    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_task_group->exec([this, _pid]() {
-        auto filepath = get_buffered_storage_filename(get_root_process_id(), getpid());
-        std::ofstream _ofs(filepath, std::ios::binary | std::ios::out);
-
-        if(!_ofs)
-        {
-            std::stringstream _ss;
-            _ss << "Error opening file for writing: " << filepath;
-            throw std::runtime_error(_ss.str());
-        }
-
-        auto execute_flush = [&](std::ofstream& ofs, bool force = false) {
-            size_t _head, _tail;
-            {
-                std::lock_guard guard{ m_mutex };
-                _head = m_head;
-                _tail = m_tail;
-
-                if(_head == _tail)
-                {
-                    return;
-                }
-
-                auto used_space =
-                    m_head > m_tail ? (m_head - m_tail) : (buffer_size - m_tail + m_head);
-                if(!force && used_space < flush_threshold)
-                {
-                    return;
-                }
-                m_tail = m_head;
-            }
-
-            if(_head > _tail)
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          _head - _tail);
-            }
-            else
-            {
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data() + _tail),
-                          buffer_size - _tail);
-                ofs.write(reinterpret_cast<const char*>(m_buffer->data()), _head);
-            }
-        };
-
-        m_created_process = _pid;
-        std::mutex _shutdown_condition_mutex;
-        while(m_running)
-        {
-            execute_flush(_ofs);
-            std::unique_lock _lock{ _shutdown_condition_mutex };
-            m_shutdown_condition.wait_for(
-                _lock, std::chrono::milliseconds(CACHE_FILE_FLUSH_TIMEOUT),
-                [&]() { return !m_running; });
-        }
-
-        execute_flush(_ofs, true);
-        _ofs.close();
-        m_exit_finished = true;
-        m_exit_condition.notify_one();
-    });
-}
-
-buffer_storage::~buffer_storage()
-{
-    shutdown();
-    if(m_thread_pool && m_thread_pool->is_alive())
+    if(m_worker_synchronization->is_running)
     {
-        m_thread_pool->destroy_threadpool();
+        LOG_WARNING("Flush worker is already running for pid={}", current_pid);
+        throw std::runtime_error("Flush worker is already running");
     }
+
+    LOG_DEBUG("Starting flush worker for pid={}, filepath={}", current_pid, m_filepath);
+
+    m_ofs = std::ofstream{ m_filepath, std::ios::binary | std::ios::out };
+
+    if(!m_ofs.good())
+    {
+        LOG_CRITICAL("Failed to open file for writing: {}", m_filepath);
+        std::stringstream _ss;
+        _ss << "Error opening file for writing: " << m_filepath;
+        throw std::runtime_error(_ss.str());
+    }
+
+    m_worker_synchronization->origin_pid    = current_pid;
+    m_worker_synchronization->exit_finished = false;
+
+    m_flushing_thread = std::jthread{ [this](std::stop_token stoken) {
+        LOG_TRACE("Flush worker thread started for pid={}",
+                  m_worker_synchronization->origin_pid);
+
+        // Local cv/mutex pair: kept off the worker_synchronization struct so
+        // the destructor runs on this thread's stack frame, never during TLS
+        // teardown of a foreign thread (TSan DTLS_Destroy deadlock).
+        std::condition_variable_any cv;
+        std::mutex                  mu;
+
+        while(!stoken.stop_requested())
+        {
+            m_worker_function(m_ofs, false);
+            std::unique_lock _lock{ mu };
+            cv.wait_for(_lock, stoken, CACHE_FILE_FLUSH_TIMEOUT,
+                        [&]() { return stoken.stop_requested(); });
+        }
+
+        LOG_TRACE("Flush worker thread performing final flush");
+        m_worker_function(m_ofs, true);
+        m_ofs.close();
+        m_worker_synchronization->is_running = false;
+        m_worker_synchronization->exit_finished = true;
+        LOG_TRACE("Flush worker thread exiting");
+    } };
+
+    m_worker_synchronization->is_running = true;
+
+    LOG_DEBUG("Flush worker started successfully for pid={}", current_pid);
 }
 
 void
-buffer_storage::shutdown()
+flush_worker_t::stop(const pid_t& current_pid)
 {
-    if(!m_running)
+    LOG_DEBUG("Stopping flush worker for pid={}", current_pid);
+
+    const bool flushing_thread_exist = m_flushing_thread.joinable();
+    const bool worker_is_running =
+        m_worker_synchronization != nullptr && m_worker_synchronization->is_running;
+
+    if(!flushing_thread_exist || !worker_is_running)
     {
+        LOG_TRACE("Flush worker not running or thread doesn't exist, nothing to stop");
         return;
     }
 
-    ROCPROFSYS_DEBUG("Buffer storage shutting down..");
-    m_running = false;
-    m_shutdown_condition.notify_all();
+    const bool thread_is_created_in_this_process =
+        current_pid == m_worker_synchronization->origin_pid;
 
-    if(m_created_process != getpid())
+    if(!thread_is_created_in_this_process)
     {
-        ROCPROFSYS_DEBUG(
-            "Buffer storage is not created in same process as shutting down..");
+        // Child process after fork(): the flush thread does not exist in this
+        // address space. Calling detach() or join() would invoke
+        // pthread_detach / pthread_join on a thread id that is invalid in the
+        // child (UB, and ThreadSanitizer CHECK-fails inside its thread
+        // registry). Re-construct the jthread in place to drop the inherited
+        // handle without running ~jthread, so no pthread call is made and the
+        // member is left non-joinable.
+        LOG_DEBUG("Flush worker was created in different process, skipping join");
+        m_worker_synchronization->is_running.store(false, std::memory_order_release);
+        std::construct_at(&m_flushing_thread);
         return;
     }
 
-    std::mutex       _exit_mutex;
-    std::unique_lock _exit_lock{ _exit_mutex };
-    m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
+    LOG_TRACE("Signaling flush worker to stop");
+    m_flushing_thread.request_stop();
 
-    if(m_thread_pool && m_thread_pool->is_alive())
-    {
-        m_thread_pool->destroy_threadpool();
-    }
-}
+    LOG_TRACE("Waiting for flush worker thread to finish");
+    m_flushing_thread.join();
 
-void
-buffer_storage::fragment_memory()
-{
-    auto* _data = m_buffer->data();
-    memset(_data + m_head, 0xFFFF, buffer_size - m_head);
-    *reinterpret_cast<entry_type*>(_data + m_head) = entry_type::fragmented_space;
-
-    size_t remaining_bytes = buffer_size - m_head - minimal_fragmented_memory_size;
-    *reinterpret_cast<size_t*>(_data + m_head + sizeof(entry_type)) = remaining_bytes;
-    m_head                                                          = 0;
-}
-
-uint8_t*
-buffer_storage::reserve_memory_space(size_t len)
-{
-    size_t _size;
-    {
-        std::lock_guard scope{ m_mutex };
-
-        if((m_head + len + minimal_fragmented_memory_size) > buffer_size)
-        {
-            fragment_memory();
-        }
-        _size  = m_head;
-        m_head = m_head + len;
-    }
-
-    auto* _result = m_buffer->data() + _size;
-    memset(_result, 0, len);
-    return _result;
-}
-
-bool
-buffer_storage::is_running() const
-{
-    return m_running;
+    LOG_DEBUG("Flush worker stopped for pid={}", current_pid);
 }
 
 }  // namespace trace_cache

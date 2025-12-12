@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     Unit_hipEvent_Negative.cc
@@ -10,6 +14,7 @@ set(TEST_SRC
     hipEventCreateWithFlags.cc
     hipEventSynchronize.cc
     Unit_hipEventMGpuMThreads.cc
+    hipEventCoalescing.cc
 )
 
 # The test used wait mechanism and doesnt play well with all arch of nvidia
@@ -28,3 +33,4 @@ endif()
 hip_add_exe_to_target(NAME EventTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+

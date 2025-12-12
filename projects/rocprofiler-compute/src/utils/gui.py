@@ -1,54 +1,22 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from typing import Any
 
-import colorlover  # type: ignore
 import pandas as pd
 import plotly.express as px  # type: ignore
-from dash import dash_table, html  # type: ignore
+from dash import dash_table  # type: ignore
 
-from utils import schema
 from utils.logger import console_error
 
 pd.set_option(
     "mode.chained_assignment", None
 )  # ignore SettingWithCopyWarning pandas warning
 
-IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 
-
-##################
-# HELPER FUNCTIONS
-##################
-def filter_df(column: str, df: pd.DataFrame, filt: list[str]) -> pd.DataFrame:
-    if not filt:
-        return df
-    return df.loc[df[schema.PMC_PERF_FILE_PREFIX][column].astype(str).isin(filt)]
-
-
+####################
+# GRAPHICAL ELEMENTS
+####################
 def multi_bar_chart(
     table_id: int, display_df: pd.DataFrame
 ) -> dict[str, dict[str, Any]]:
@@ -69,71 +37,9 @@ def multi_bar_chart(
     return nested_bar
 
 
-def discrete_background_color_bins(
-    df: pd.DataFrame, n_bins: int = 5, columns: str | list[str] = "all"
-) -> tuple[list[dict[str, Any]], html.Div]:
-    bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
-
-    if columns == "all":
-        df_numeric_columns = (
-            df.select_dtypes("number").drop(["id"], axis=1)
-            if "id" in df.columns
-            else df.select_dtypes("number")
-        )
-    else:
-        df_numeric_columns = df[columns]
-
-    df_max = df_numeric_columns.max().max()
-    df_min = df_numeric_columns.min().min()
-    ranges = [((df_max - df_min) * i) + df_min for i in bounds]
-
-    styles: list[dict[str, Any]] = []
-    legend: list[html.Div] = []
-
-    for i in range(1, len(bounds)):
-        min_bound = ranges[i - 1]
-        max_bound = ranges[i]
-        background_color = colorlover.scales[str(n_bins)]["seq"]["Blues"][i - 1]
-        color = "white" if i > len(bounds) / 2.0 else "inherit"
-
-        for column in df_numeric_columns.columns:
-            filter_query = f"{{{column}}} >= {min_bound}" + (
-                f" && {{{column}}} < {max_bound}" if i < len(bounds) - 1 else ""
-            )
-            styles.append({
-                "if": {
-                    "filter_query": filter_query,
-                    "column_id": column,
-                },
-                "backgroundColor": background_color,
-                "color": color,
-            })
-
-        legend.append(
-            html.Div(
-                style={"display": "inline-block", "width": "60px"},
-                children=[
-                    html.Div(
-                        style={
-                            "backgroundColor": background_color,
-                            "borderLeft": "1px rgb(50, 50, 50) solid",
-                            "height": "10px",
-                        }
-                    ),
-                    html.Small(round(min_bound, 2), style={"paddingLeft": "2px"}),
-                ],
-            )
-        )
-
-    return styles, html.Div(legend, style={"padding": "5px 0 5px 0"})
-
-
-####################
-# GRAPHICAL ELEMENTS
-####################
 def create_instruction_mix_bar_chart(display_df: pd.DataFrame, df_unit: str) -> px.bar:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     return px.bar(
         display_df,
@@ -150,7 +56,7 @@ def create_multi_bar_charts(
     display_df: pd.DataFrame, table_id: int, df_unit: str
 ) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     nested_bar = multi_bar_chart(table_id, display_df)
     charts = []
@@ -175,13 +81,15 @@ def create_multi_bar_charts(
 
 def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: float(x) if x != "" else 0.0)
+    display_df["Avg"] = display_df["Avg"].apply(
+        lambda x: float(x) if x != "N/A" else 0.0
+    )
 
     charts = []
 
     if table_id == 1701:
         # Special layout for L2 Cache SOL
-        pct_data = display_df[display_df["Unit"] == "Pct"]
+        pct_data = display_df[display_df["Unit"] == "Percent"]
         charts.append(
             px.bar(
                 pct_data,
@@ -199,7 +107,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
         hbm_row = display_df[display_df["Metric"] == "HBM Bandwidth"]
         if not hbm_row.empty:
             hbm_bw = float(hbm_row["Avg"].iloc[0])
-            gb_data = display_df[display_df["Unit"] == "Gb/s"]
+            gb_data = display_df[display_df["Unit"] == "GB/s"]
             charts.append(
                 px.bar(
                     gb_data,
@@ -214,16 +122,15 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
             )
 
     elif table_id == 1101:
-        # Special formatting reference 'Pct of Peak' value
-        display_df["Pct of Peak"] = display_df["Pct of Peak"].apply(
-            lambda x: float(x) if x != "" else 0.0
+        display_df["Percent of Peak"] = display_df["Percent of Peak"].apply(
+            lambda x: float(x) if x != "N/A" else 0.0
         )
         charts.append(
             px.bar(
                 display_df,
-                x="Pct of Peak",
+                x="Percent of Peak",
                 y="Metric",
-                color="Pct of Peak",
+                color="Percent of Peak",
                 range_color=[0, 100],
                 labels={"Avg": "%"},
                 height=400,
@@ -294,9 +201,6 @@ def build_bar_chart(
 def get_dark_mode_styles() -> tuple[
     dict[str, Any], dict[str, Any], list[dict[str, Any]]
 ]:
-    if not IS_DARK:
-        return {}, {}, []
-
     style_header = {
         "backgroundColor": "rgb(30, 30, 30)",
         "color": "white",
@@ -334,7 +238,7 @@ def build_table_chart(
     formatted_columns = []
     for col in display_df.columns:
         col_lower = str(col).lower()
-        if col_lower in {"pct", "pop", "percentage"}:
+        if col_lower in {"pct", "percent", "percent of peak"}:
             formatted_columns.append({
                 "id": col,
                 "name": col,

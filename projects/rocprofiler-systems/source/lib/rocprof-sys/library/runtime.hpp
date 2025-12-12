@@ -1,40 +1,23 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "api.hpp"
+#include "common/defines.h"
 #include "core/common.hpp"
-#include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
+#include "library/components/kill_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/thread_data.hpp"
+#include <cstdint>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
@@ -49,7 +32,7 @@ namespace rocprofsys
 {
 // started during preinit phase
 using preinit_bundle_t =
-    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
+    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t, kill_gotcha_t>;
 
 // started during init phase
 using init_bundle_t = tim::lightweight_tuple<causal::component::causal_gotcha,
@@ -78,27 +61,29 @@ get_init_bundle();
 std::unique_ptr<preinit_bundle_t>&
 get_preinit_bundle();
 
-std::atomic<uint64_t>&
+std::atomic<std::uint64_t>&
 get_cpu_cid() TIMEMORY_HOT;
 
-unique_ptr_t<std::vector<uint64_t>>&
-get_cpu_cid_stack(int64_t _tid = threading::get_id(), int64_t _parent = 0) TIMEMORY_HOT;
+unique_ptr_t<std::vector<std::uint64_t>>&
+get_cpu_cid_stack(std::int64_t _tid    = threading::get_id(),
+                  std::int64_t _parent = 0) TIMEMORY_HOT;
 
-using cpu_cid_data_t       = std::tuple<uint64_t, uint64_t, uint32_t>;
-using cpu_cid_pair_t       = std::tuple<uint64_t, uint32_t>;
-using cpu_cid_parent_map_t = std::unordered_map<uint64_t, cpu_cid_pair_t>;
+using cpu_cid_data_t       = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>;
+using cpu_cid_pair_t       = std::tuple<std::uint64_t, std::uint32_t>;
+using cpu_cid_parent_map_t = std::unordered_map<std::uint64_t, cpu_cid_pair_t>;
 
 unique_ptr_t<cpu_cid_parent_map_t>&
-get_cpu_cid_parents(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_parents(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 cpu_cid_data_t
-create_cpu_cid_entry(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+create_cpu_cid_entry(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 cpu_cid_pair_t
-get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_entry(std::uint64_t _cid,
+                  std::int64_t  _tid = threading::get_id()) TIMEMORY_HOT;
 
 tim::mutex_t&
-get_cpu_cid_stack_lock(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_stack_lock(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 // query current value
 bool

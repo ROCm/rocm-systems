@@ -51,6 +51,8 @@
 #include <vector>
 #include <memory>
 #include <sys/socket.h>
+#include <chrono>
+#include <thread>
 
 #include "suites/functional/svm_memory.h"
 #include "common/base_rocr_utils.h"
@@ -288,7 +290,7 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   }
 
   if (kernArgs) {
-    hsa_memory_free(kernArgs);
+    hsa_amd_memory_pool_free(kernArgs);
   }
 
   if (signal.handle) {
@@ -365,10 +367,83 @@ void SvmMemoryTestBasic::TestSVMPrefetch(void) {
   }
 }
 
+void SvmMemoryTestBasic::TestSVMBatchDiscard(void) {
+  // Check if SVM is supported by the ROCr runtime
+  bool svm_supported = false;
+  hsa_status_t err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+  
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping SVMBatchDiscard test ***" << std::endl;
+    return;
+  }
+
+  // Check if XNACK is enabled
+  bool xnack_enabled = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled);
+  if (err != HSA_STATUS_SUCCESS || !xnack_enabled) {
+    std::cout << "  *** XNACK not enabled - skipping SVMBatchDiscard test ***" << std::endl;
+    return;
+  }
+
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("SVMBatchDiscard Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      TestSVMBatchDiscard(a->agent, p);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardNegative() {
+  // Check if SVM is supported by the runtime
+  bool svm_supported = false;
+  hsa_status_t err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+  
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping TestSVMDiscardNegative test ***" << std::endl;
+    return;
+  }
+
+  // Check if XNACK is enabled
+  bool xnack_enabled = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &xnack_enabled);
+  if (err != HSA_STATUS_SUCCESS || !xnack_enabled) {
+    std::cout << "  *** XNACK not enabled - skipping TestSVMDiscardNegative test ***" << std::endl;
+    return;
+  }
+
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("TestSVMDiscardNegative Test");
+  }
+
+  ASSERT_SUCCESS(rocrtst::GetAgentPools(&agent_pools));
+  for (auto a : agent_pools) {
+    TestSVMDiscardNegative(a->agent);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void SvmMemoryTestBasic::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
@@ -503,4 +578,438 @@ void SvmMemoryTestBasic::TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_
     hsa_queue_destroy(queue);
   }
 
+}
+
+void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
+  hsa_device_type_t ag_type;
+  hsa_agent_t cpu_agent;
+  rocrtst::pool_info_t pool_i;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if(!pool_i.alloc_allowed) return;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NEAREST_CPU, &cpu_agent));
+
+  static const int kNumRegions = 4;
+  static const size_t kRegionSize = 1024;
+
+  struct Region {
+    void* ptr;
+    size_t size;
+  };
+  std::vector<Region> regions;
+  std::vector<void*> ptrs(kNumRegions);
+  std::vector<size_t> sizes(kNumRegions);
+
+  // reserve memory for all regions
+  for (int i = 0; i < kNumRegions; i++) {
+    void* addr = nullptr;
+    ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr, kRegionSize, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+    ASSERT_NE(addr, nullptr);
+
+    regions.push_back({addr, kRegionSize});
+    ptrs[i] = addr;
+    sizes[i] = kRegionSize;
+
+    if (verbosity() > 0) {
+      std::cout << "Reserved SVM region " << i << " at " << addr << std::endl;
+    }
+
+    std::vector<hsa_amd_svm_attribute_pair_t> dev_attrs;
+    dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, agent.handle});
+    dev_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, agent.handle});
+
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_set(ptrs[i], sizes[i], dev_attrs.data(), dev_attrs.size()));
+  }
+
+  /* Launch a kernel to write to the 4 svm memory regions which 
+  would trigger migration from host memory to device memory */
+  hsa_queue_t* queue = nullptr;  // command queue
+  uint32_t queue_size = 0;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  ASSERT_SUCCESS(hsa_queue_create(agent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue));
+
+  // Find kernarg pool
+  hsa_amd_memory_pool_t kernarg_pool;
+  ASSERT_SUCCESS(hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetKernArgMemoryPool, &kernarg_pool));
+
+  // Load kernel for writing
+  set_kernel_file_name("gpuReadWrite_kernels.hsaco");
+  set_kernel_name("gpuReadWrite");
+  ASSERT_SUCCESS(rocrtst::LoadKernelFromObjFile(this, &agent));
+
+  // completion signal for kernel dispatch
+  hsa_signal_t completion = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &completion));
+
+  typedef struct __attribute__((aligned(16))) args_t {
+    int* a;
+    int* b;
+    int* c;
+  } args;
+
+  for (int i = 0; i < kNumRegions; i++) {
+    // allocate kernel arguments
+    args* kernArgs = nullptr;
+    ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args), 0,
+                                                reinterpret_cast<void**>(&kernArgs)));
+    ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &agent, NULL, kernArgs));
+
+    // setup kernel args to write to this region
+    int* pRegion = static_cast<int*>(regions[i].ptr);
+    // store the same region pointer in all of these
+    kernArgs->a = pRegion; 
+    kernArgs->b = pRegion; 
+    kernArgs->c = pRegion;
+    
+    // Create and initialize AQL packet
+    hsa_kernel_dispatch_packet_t aql;
+    memset(&aql, 0, sizeof(aql));
+
+    aql.workgroup_size_x = 256;
+    aql.workgroup_size_y = 1;
+    aql.workgroup_size_z = 1;
+    aql.grid_size_x = kRegionSize / sizeof(int); // number of elements in the region
+    aql.grid_size_y = 1;
+    aql.grid_size_z = 1;
+    aql.private_segment_size = 0;
+    aql.group_segment_size = 0;
+    aql.kernel_object = kernel_object();
+    aql.kernarg_address = kernArgs;
+    aql.completion_signal = completion;
+    
+    const uint32_t queue_mask = queue->size - 1;
+
+    // write to command queue
+    uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+    hsa_queue_store_write_index_relaxed(queue, index + 1);
+    rocrtst::WriteAQLToQueueLoc(queue, index, &aql);
+
+    hsa_kernel_dispatch_packet_t* q_base_addr =
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address);
+    rocrtst::AtomicSetPacketHeader(
+        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+            (1 << HSA_PACKET_HEADER_BARRIER) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
+        (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&q_base_addr[index & queue_mask]));
+
+    // Ring doorbell
+    hsa_signal_store_relaxed(queue->doorbell_signal, index);
+
+    // wait for kernel execution to finish
+    while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {}
+
+    // reset completion signal for next iteration
+    hsa_signal_store_relaxed(completion, 1);
+
+    if (verbosity() > 0) {
+      std::cout << "Kernel executed for SVM region " << i << ", memory allocation completed." << std::endl;
+    }
+
+    // free kernel args
+    hsa_amd_memory_pool_free(kernArgs);
+  }
+
+  // Create multiple dependency signals
+  static const int kNumDepSignals = 3;
+  hsa_signal_t dep_signals[kNumDepSignals];
+  for (int i = 0; i < kNumDepSignals; i++) {
+    ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &dep_signals[i]));
+  }
+
+  // Check if this memory is on gpu
+  for (int i = 0; i < kNumRegions; ++i) {    
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
+    attr.value = 0;
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(regions[i].ptr, kRegionSize, &attr, 1));
+    ASSERT_EQ(attr.value, agent.handle);
+  }
+
+  // reset completion signal for discard
+  hsa_signal_store_relaxed(completion, 1);
+  
+  // Discard all of the above 4 regions
+  ASSERT_SUCCESS(hsa_amd_svm_discard_batch_async(ptrs.data(), sizes.data(), ptrs.size(), kNumDepSignals, dep_signals, completion));
+
+  /* Confirm that memory is still on GPU until discard completes, which is 
+  supposed to only execute once all dependency signals are 0. */
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  for (int i = 0; i < kNumRegions; ++i) {    
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION;
+    attr.value = 0;
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(regions[i].ptr, kRegionSize, &attr, 1));
+    ASSERT_EQ(attr.value, agent.handle);
+  }
+
+  // Resolve all dependency signals with 1ms delay
+  for (int i = 0; i < kNumDepSignals; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    hsa_signal_store_screlease(dep_signals[i], 0);
+  }
+
+  while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                 HSA_WAIT_STATE_ACTIVE)) {}
+
+  for (int i = 0; i < kNumRegions; ++i) {    
+    // After discard, memory should have been prefetched to CPU agent
+    hsa_amd_svm_attribute_pair_t attr;
+    attr.attribute = HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION;
+    attr.value = 0;
+    ASSERT_SUCCESS(hsa_amd_svm_attributes_get(regions[i].ptr, kRegionSize, &attr, 1));
+    ASSERT_EQ(attr.value, cpu_agent.handle);
+
+    // Verify pointer is valid after discard operation 
+    hsa_amd_pointer_info_t ptrInfo = {};
+    ptrInfo.size = sizeof(ptrInfo);
+    ASSERT_SUCCESS(hsa_amd_pointer_info(regions[i].ptr, &ptrInfo, nullptr, nullptr, nullptr));
+    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+  }
+
+  // Cleanup
+  if (completion.handle) {
+    hsa_signal_destroy(completion);
+  }
+  
+  for (int i = 0; i < kNumDepSignals; i++) {
+    hsa_signal_destroy(dep_signals[i]);
+  }
+
+  // Free reserved SVM regions
+  for (int i = 0; i < kNumRegions; i++) {
+    hsa_amd_vmem_address_free(regions[i].ptr, regions[i].size);
+  }
+
+  if (queue) {
+    hsa_queue_destroy(queue);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Batch discard test completed successfully" << std::endl;
+  }
+}
+
+void SvmMemoryTestBasic::TestSVMDiscardNegative(hsa_agent_t agent) {
+  hsa_device_type_t ag_type;
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type));
+  if (ag_type != HSA_DEVICE_TYPE_GPU) return;
+
+  hsa_status_t err;
+
+  // Stack memory pointers passed to svm discard api should return error
+  {
+    char buf[4096];
+    void* ptrs[1] = {buf};
+    size_t sizes[1] = {sizeof(buf)};
+    hsa_signal_t null_signal = {0};
+
+    err = hsa_amd_svm_discard_batch_async(ptrs, sizes, 1, 0, nullptr, null_signal);
+    ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ARGUMENT);
+
+    if (verbosity() > 0) {
+      std::cout << "    Stack memory discard rejected as expected" << std::endl;
+    }
+  }
+}
+
+// Test to verify that HSA_AMD_SVM_ATTRIB_ACCESS_QUERY correctly returns access
+// status for all devices including the CPU agent.
+// This test mirrors the HIP test Unit_hipMemAdvise_AccessedBy_All_Devices
+// which validates that hipMemAdvise(hipMemAdviseSetAccessedBy, device) works
+// correctly for all devices (including hipCpuDeviceId) and can be queried back.
+void SvmMemoryTestBasic::TestAccessedByAllDevices(void) {
+  hsa_status_t err;
+
+  // Check if SVM is supported by the ROCr runtime
+  bool svm_supported = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping AccessedByAllDevices test ***" << std::endl;
+    return;
+  }
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("AccessedByAllDevices Test");
+  }
+
+  // Collect all agents (CPU and GPU)
+  std::vector<hsa_agent_t> all_agents;
+  hsa_agent_t cpu_agent = {0};
+
+  auto get_agents_callback = [](hsa_agent_t agent, void* data) -> hsa_status_t {
+    auto* agents = static_cast<std::vector<hsa_agent_t>*>(data);
+    agents->push_back(agent);
+    return HSA_STATUS_SUCCESS;
+  };
+
+  ASSERT_SUCCESS(hsa_iterate_agents(get_agents_callback, &all_agents));
+
+  if (all_agents.empty()) {
+    std::cout << "  *** No agents found - skipping test ***" << std::endl;
+    return;
+  }
+
+  // Find the CPU agent and separate GPU agents
+  // Note: Use first CPU agent found (handles multi-NUMA systems)
+  std::vector<hsa_agent_t> gpu_agents;
+  for (const auto& agent : all_agents) {
+    hsa_device_type_t device_type;
+    ASSERT_SUCCESS(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type));
+    if (device_type == HSA_DEVICE_TYPE_CPU) {
+      if (cpu_agent.handle == 0) {
+        cpu_agent = agent;
+      }
+    } else if (device_type == HSA_DEVICE_TYPE_GPU) {
+      gpu_agents.push_back(agent);
+    }
+  }
+
+  if (cpu_agent.handle == 0) {
+    std::cout << "  *** No CPU agent found - skipping test ***" << std::endl;
+    return;
+  }
+
+  if (gpu_agents.empty()) {
+    std::cout << "  *** No GPU agents found - skipping test ***" << std::endl;
+    return;
+  }
+
+  // Reserve SVM-managed virtual address range for attribute testing
+  static const size_t kPageSize = 4096;
+  void* svm_ptr = nullptr;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_address_reserve(&svm_ptr, kPageSize, 0, HSA_AMD_VMEM_ADDRESS_NO_REGISTER));
+  ASSERT_NE(svm_ptr, nullptr);
+
+  // Ensure cleanup on test exit (normal or via ASSERT failure)
+  auto cleanup_svm = [&]() {
+    if (svm_ptr) {
+      hsa_amd_vmem_address_free(svm_ptr, kPageSize);
+      svm_ptr = nullptr;
+    }
+  };
+  // Use a simple destructor-based guard for cleanup (avoids std::function overhead)
+  struct ScopeGuard {
+    decltype(cleanup_svm)& func;
+    ~ScopeGuard() { func(); }
+  } guard{cleanup_svm};
+
+  if (verbosity() > 0) {
+    std::cout << "    Reserved SVM address range at " << svm_ptr << std::endl;
+    std::cout << "    Testing with " << gpu_agents.size() << " GPU(s) and 1 CPU" << std::endl;
+  }
+
+  // Set AccessedBy for all agents (CPU + all GPUs)
+  // First set for CPU agent
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> cpu_attrs;
+    cpu_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, cpu_attrs.data(), cpu_attrs.size()));
+    if (verbosity() > 0) {
+      std::cout << "    Set AGENT_ACCESSIBLE for CPU agent" << std::endl;
+    }
+  }
+
+  // Set for all GPU agents
+  for (const auto& gpu : gpu_agents) {
+    std::vector<hsa_amd_svm_attribute_pair_t> gpu_attrs;
+    gpu_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, gpu.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, gpu_attrs.data(), gpu_attrs.size()));
+    if (verbosity() > 0) {
+      std::cout << "    Set AGENT_ACCESSIBLE for GPU agent handle=" << gpu.handle << std::endl;
+    }
+  }
+
+  // Query and verify AccessedBy for all agents
+  // First verify CPU agent access
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    // The attribute field should be changed to indicate the access type
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "CPU agent access query did not return AGENT_ACCESSIBLE (got attribute="
+        << query_attrs[0].attribute << ")";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent has AGENT_ACCESSIBLE set" << std::endl;
+    }
+  }
+
+  // Verify all GPU agents
+  for (const auto& gpu : gpu_agents) {
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, gpu.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "GPU agent (handle=" << gpu.handle << ") access query did not return AGENT_ACCESSIBLE";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified GPU agent handle=" << gpu.handle << " has AGENT_ACCESSIBLE set"
+                << std::endl;
+    }
+  }
+
+  // Test clearing CPU access and verify it returns NO_ACCESS
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> clear_attrs;
+    clear_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, clear_attrs.data(), clear_attrs.size()));
+
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS)
+        << "CPU agent access query after NO_ACCESS should return AGENT_NO_ACCESS";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent correctly returns NO_ACCESS after clearing" << std::endl;
+    }
+  }
+
+  // Re-enable CPU access for completeness
+  {
+    std::vector<hsa_amd_svm_attribute_pair_t> set_attrs;
+    set_attrs.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_set(svm_ptr, kPageSize, set_attrs.data(), set_attrs.size()));
+
+    std::vector<hsa_amd_svm_attribute_pair_t> query_attrs;
+    query_attrs.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agent.handle});
+    ASSERT_SUCCESS(
+        hsa_amd_svm_attributes_get(svm_ptr, kPageSize, query_attrs.data(), query_attrs.size()));
+
+    ASSERT_EQ(query_attrs[0].attribute, HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE)
+        << "CPU agent access query after re-enabling should return AGENT_ACCESSIBLE";
+
+    if (verbosity() > 0) {
+      std::cout << "    Verified CPU agent correctly returns ACCESSIBLE after re-enabling"
+                << std::endl;
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished successfully" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+
+  // Note: cleanup_svm() is automatically called by ScopeGuard destructor
 }

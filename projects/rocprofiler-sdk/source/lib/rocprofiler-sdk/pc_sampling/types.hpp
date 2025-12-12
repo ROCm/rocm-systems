@@ -64,6 +64,10 @@ struct PCSAgentSession
     std::unique_ptr<PCSamplingParserContext> parser = {};
     // Manager responsible for retiring CIDs
     std::unique_ptr<PCSCIDManager> cid_manager = {};
+    // Context that owns this session
+    rocprofiler_context_id_t context_id = {.handle = 0};
+    // Client index from the context (tool's id)
+    uint32_t client_idx = 0;
 };
 
 // TODO static assertions

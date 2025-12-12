@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -33,25 +14,26 @@ namespace gpu
 struct gpu_metrics_t
 {
     // VCN metrics
-    std::vector<uint16_t>              vcn_activity;  // Device-level VCN (when supported)
-    std::vector<std::vector<uint16_t>> vcn_busy;  // XCP-level VCN (per-XCP organization)
+    std::vector<std::uint16_t> vcn_activity;  // Device-level VCN (when supported)
+    std::vector<std::vector<std::uint16_t>>
+        vcn_busy;  // XCP-level VCN (per-XCP organization)
 
     // JPEG metrics
-    std::vector<uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
-    std::vector<std::vector<uint16_t>>
+    std::vector<std::uint16_t> jpeg_activity;  // Device-level JPEG (when supported)
+    std::vector<std::vector<std::uint16_t>>
         jpeg_busy;  // XCP-level JPEG (per-XCP organization)
 
     // XGMI metrics
-    uint16_t              xgmi_link_width = 0;
-    uint16_t              xgmi_link_speed = 0;
-    std::vector<uint64_t> xgmi_read_data_acc;
-    std::vector<uint64_t> xgmi_write_data_acc;
+    std::uint16_t              xgmi_link_width = 0;
+    std::uint16_t              xgmi_link_speed = 0;
+    std::vector<std::uint64_t> xgmi_read_data_acc;
+    std::vector<std::uint64_t> xgmi_write_data_acc;
 
     // PCIe metrics
-    uint16_t pcie_link_width     = 0;
-    uint16_t pcie_link_speed     = 0;
-    uint64_t pcie_bandwidth_acc  = 0;
-    uint64_t pcie_bandwidth_inst = 0;
+    std::uint16_t pcie_link_width     = 0;
+    std::uint16_t pcie_link_speed     = 0;
+    std::uint64_t pcie_bandwidth_acc  = 0;
+    std::uint64_t pcie_bandwidth_inst = 0;
 };
 
 /// Settings structure for controlling which metrics are serialized
@@ -66,15 +48,18 @@ struct gpu_metrics_settings_t
 /// GPU metrics capabilities structure with bitfield flags
 struct gpu_metrics_capabilities_t
 {
+    struct flags_t
+    {
+        std::uint8_t vcn_is_device_level_only : 1;  ///< VCN is device-level (vs per-XCP)
+        std::uint8_t
+            jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
+        std::uint8_t reserved         : 6;  ///< Reserved for future use
+    };
+
     union
     {
-        struct
-        {
-            uint8_t vcn_is_device_level_only  : 1;  ///< VCN is device-level (vs per-XCP)
-            uint8_t jpeg_is_device_level_only : 1;  ///< JPEG is device-level (vs per-XCP)
-            uint8_t reserved                  : 6;  ///< Reserved for future use
-        } flags;
-        uint8_t value;  ///< Raw byte value for easy serialization
+        flags_t      flags;
+        std::uint8_t value;  ///< Raw byte value for easy serialization
     };
 
     /// Default constructor - initializes all flags to zero
@@ -117,7 +102,7 @@ struct gpu_metrics_capabilities_t
  * @param settings Controls which metrics to include in serialization
  * @return Binary serialized data
  */
-std::vector<uint8_t>
+std::vector<std::uint8_t>
 serialize_gpu_metrics(const gpu_metrics_t&              metrics,
                       const gpu_metrics_capabilities_t& capabilities,
                       const gpu_metrics_settings_t&     settings);
@@ -135,7 +120,7 @@ serialize_gpu_metrics(const gpu_metrics_t&              metrics,
  * @throws std::runtime_error if serialized data is invalid
  */
 void
-deserialize_gpu_metrics(const std::vector<uint8_t>& serialized_data,
+deserialize_gpu_metrics(const std::vector<std::uint8_t>& serialized_data,
                         gpu_metrics_t& result, bool is_vcn_enabled, bool is_jpeg_enabled,
                         bool is_xgmi_enabled, bool is_pcie_enabled,
                         gpu_metrics_capabilities_t& capabilities);

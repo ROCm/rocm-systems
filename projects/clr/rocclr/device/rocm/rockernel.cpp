@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "rockernel.hpp"
 
@@ -47,7 +33,8 @@ bool Kernel::postLoad() {
   hsaStatus = Hsa::executable_get_symbol_by_name(program()->hsaExecutable(), symbolName().c_str(),
                                                 &agent, &symbol);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
-    DevLogPrintfError("Cannot Get Symbol : %s, failed with hsa_status: %d \n", symbolName().c_str(),
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Cannot Get Symbol : %s, failed with hsa_status: %d \n", symbolName().c_str(),
                       hsaStatus);
     return false;
   }
@@ -55,15 +42,30 @@ bool Kernel::postLoad() {
   hsaStatus = Hsa::executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                              &kernelCodeHandle_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
-    DevLogPrintfError(" Cannot Get Symbol Info: %s, failed with hsa_status: %d \n ",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             " Cannot Get Symbol Info: %s, failed with hsa_status: %d \n ",
                       symbolName().c_str(), hsaStatus);
     return false;
+  }
+
+  // Resolve the metadata kernel descriptor for prefetching at load time,
+  // so dispatch doesn't need to call loaderQueryHostAddress per packet.
+  const void* host_address = nullptr;
+  Device::loaderQueryHostAddress(reinterpret_cast<void*>(kernelCodeHandle_), &host_address);
+  if (host_address != nullptr) {
+    constexpr size_t KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET = 16;
+    auto* descriptor = reinterpret_cast<const hsa_amd_metadata_kernel_descriptor_t*>(
+        reinterpret_cast<const uint8_t*>(host_address) + KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET);
+    metadataKernelDescriptor_ = descriptor;
+    metadata_preload_length_ = descriptor->kernarg_preload.length;
+    metadata_preload_offset_ = descriptor->kernarg_preload.offset;
   }
 
   hsaStatus = Hsa::executable_symbol_get_info(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK, &kernelHasDynamicCallStack_);
   if (hsaStatus != HSA_STATUS_SUCCESS) {
-    DevLogPrintfError(" Cannot Get Dynamic callstack info, failed with hsa_status: %d \n ",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             " Cannot Get Dynamic callstack info, failed with hsa_status: %d \n ",
                       hsaStatus);
     return false;
   }
@@ -81,7 +83,8 @@ bool Kernel::postLoad() {
     hsaStatus = Hsa::executable_get_symbol_by_name(program()->hsaExecutable(),
                                                   RuntimeHandle().c_str(), &agent, &kernelSymbol);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      DevLogPrintfError("Cannot get Kernel Symbol by name: %s, failed with hsa_status: %d \n",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+               "Cannot get Kernel Symbol by name: %s, failed with hsa_status: %d \n",
                         RuntimeHandle().c_str(), hsaStatus);
       return false;
     }
@@ -89,7 +92,7 @@ bool Kernel::postLoad() {
     hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &variable_size);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      DevLogPrintfError(
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
           "[ROC][Kernel] Cannot get Kernel Symbol Info, failed with hsa_status: %d \n", hsaStatus);
       return false;
     }
@@ -97,7 +100,8 @@ bool Kernel::postLoad() {
     hsaStatus = Hsa::executable_symbol_get_info(
         kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &variable_address);
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      DevLogPrintfError("[ROC][Kernel] Cannot get Kernel Address, failed with hsa_status: %d \n",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+               "[ROC][Kernel] Cannot get Kernel Address, failed with hsa_status: %d \n",
                         hsaStatus);
       return false;
     }
@@ -108,7 +112,8 @@ bool Kernel::postLoad() {
         Hsa::memory_copy(reinterpret_cast<void*>(variable_address), &runtime_handle, variable_size);
 
     if (hsaStatus != HSA_STATUS_SUCCESS) {
-      DevLogPrintfError("[ROC][Kernel] HSA Memory copy failed, failed with hsa_status: %d \n",
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+               "[ROC][Kernel] HSA Memory copy failed, failed with hsa_status: %d \n",
                         hsaStatus);
       return false;
     }
@@ -121,7 +126,8 @@ bool Kernel::postLoad() {
   if (wavefront_size == 0 &&
       Hsa::agent_get_info(program()->rocDevice().getBackendDevice(), HSA_AGENT_INFO_WAVEFRONT_SIZE,
                           &wavefront_size) != HSA_STATUS_SUCCESS) {
-    DevLogPrintfError("[ROC][Kernel] Cannot get Wavefront Size, failed with hsa_status: %d \n",
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "[ROC][Kernel] Cannot get Wavefront Size, failed with hsa_status: %d \n",
                       hsaStatus);
     return false;
   }

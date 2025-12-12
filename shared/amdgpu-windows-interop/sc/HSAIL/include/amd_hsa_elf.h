@@ -51,7 +51,7 @@
 // AMD GPU Specific ELF Header Enumeration Values.
 //
 // Values are copied from LLVM BinaryFormat/ELF.h . This file also contains
-// code object V1 defintions which are not part of the LLVM header. Code object
+// code object V1 definitions which are not part of the LLVM header. Code object
 // V1 was only supported by the Finalizer which is now deprecated and removed.
 //
 // TODO: Deprecate and remove V1 support and replace this header with using the
@@ -161,13 +161,16 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_GFX1150       = 0x043,
   EF_AMDGPU_MACH_AMDGCN_GFX1151       = 0x04a,
   EF_AMDGPU_MACH_AMDGCN_GFX1152       = 0x055,
+  EF_AMDGPU_MACH_AMDGCN_GFX1153       = 0x058,
   EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC = 0x054,
 #endif // GFX11_BUILD
 #if defined(GFX12_BUILD)
   EF_AMDGPU_MACH_AMDGCN_GFX1200       = 0x048,
   EF_AMDGPU_MACH_AMDGCN_GFX1201       = 0x04e,
+  EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC = 0x059,
 #endif // GFX12_BUILD
   EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC      = 0x051,
+  EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC    = 0x05f,
   EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC   = 0x052,
   EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC   = 0x053,
   // Reserved for AMDGCN-based processors.

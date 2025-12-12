@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include <hip/texture_types.h>
@@ -61,6 +47,13 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
                             const size_t imageArraySize, const size_t imageRowPitch,
                             const size_t imageSlicePitch, const uint32_t numMipLevels,
                             const size_t offset, amd::Memory* buffer, hipError_t& status);
+
+static bool ValidateDevicePointer(const void* ptr) {
+  amd::Device* curDev = hip::getCurrentDevice()->devices()[0];
+  // host pointers can be GPU accessible on APUs but should be denied for texture APIs as they
+  // aren't valid device pointers
+  return amd::MemObjMap::FindMemObj(ptr, nullptr, curDev) != nullptr;
+}
 
 hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                    const hipTextureDesc* pTexDesc,
@@ -310,8 +303,9 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       const amd::Image::Format imageFormat({channelOrder, channelType});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
       const size_t imageSizeInBytes = pResDesc->res.linear.sizeInBytes;
-      amd::Memory* buffer =
-          getMemoryObjectWithOffset(pResDesc->res.linear.devPtr, imageSizeInBytes);
+      amd::Memory* buffer = getMemoryObjectWithOffset(hip::getCurrentDevice(),
+                                                       pResDesc->res.linear.devPtr,
+                                                       imageSizeInBytes);
       hipError_t status = hipSuccess;
       image = ihipImageCreate(channelOrder, channelType, imageType,
                               imageSizeInBytes / imageFormat.getElementSize(), /* imageWidth */
@@ -339,11 +333,18 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
       const amd::Image::Format imageFormat({channelOrder, channelType});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
-      const size_t imageSizeInBytes =
-          pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
-          pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1);
-      amd::Memory* buffer =
-          getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);
+      // Guard against unsigned underflow when height is 0
+      const size_t imageSizeInBytes = (pResDesc->res.pitch2D.height > 0)
+          ? pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
+            pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1)
+          : pResDesc->res.pitch2D.width * imageFormat.getElementSize();
+      if (!ValidateDevicePointer(pResDesc->res.pitch2D.devPtr)) {
+        return hipErrorInvalidValue;
+      }
+      amd::Memory* buffer = getMemoryObjectWithOffset(hip::getCurrentDevice(),
+                                                       pResDesc->res.pitch2D.devPtr,
+                                                       imageSizeInBytes);
+
       hipError_t status = hipSuccess;
       image = ihipImageCreate(channelOrder, channelType, imageType,
                               pResDesc->res.pitch2D.width,        /* imageWidth */
@@ -620,7 +621,8 @@ hipError_t hipBindTexture2D(size_t* offset, const textureReference* texref, cons
   size_t refDevSize = 0;
 
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture2D(offset, texref, devPtr, desc, width, height, pitch);
@@ -659,13 +661,14 @@ hipError_t hipBindTextureToArray(const textureReference* texref, hipArray_const_
   HIP_INIT_API(hipBindTextureToArray, texref, array, desc);
 
   if ((texref == nullptr) || (array == nullptr) || (desc == nullptr)) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToArray(texref, array, desc);
@@ -713,7 +716,8 @@ hipError_t hipBindTextureToMipmappedArray(const textureReference* texref,
   size_t refDevSize = 0;
 
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
 
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTextureToMipmappedArray(texref, mipmappedArray, desc);
@@ -738,7 +742,8 @@ hipError_t hipBindTexture(size_t* offset, const textureReference* texref, const 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
   HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(texref, ihipGetDevice(), &refDevPtr, &refDevSize));
+      PlatformState::Instance().StatCO().GetGlobalVar(
+          texref, ihipGetDevice(), &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
   hipError_t err = ihipBindTexture(offset, texref, devPtr, desc, size);
   if (err != hipSuccess) {
@@ -982,7 +987,7 @@ hipError_t hipTexRefSetArray(textureReference* texRef, hipArray_const_t array, u
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
 
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1062,7 +1067,7 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hip
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1105,7 +1110,7 @@ hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCR
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1453,7 +1458,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef, hipMipmappedArra
 
   hipDeviceptr_t refDevPtr = nullptr;
   size_t refDevSize = 0;
-  HIP_RETURN_ONFAIL(PlatformState::instance().getDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().GetDynTexGlobalVar(texRef, &refDevPtr, &refDevSize));
   assert(refDevSize == sizeof(textureReference));
 
   // Any previous address or HIP array state associated with the texture reference is superseded by
@@ -1468,7 +1473,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef, hipMipmappedArra
   resDesc.res.mipmap.mipmap = mipmappedArray;
 
   hipTextureDesc texDesc = hip::getTextureDesc(texRef);
-
+  texDesc.normalizedCoords = texRef->normalized;
   hipResourceViewFormat format =
       hip::getResourceViewFormat(hip::getChannelFormatDesc(texRef->numChannels, texRef->format));
   hipResourceViewDesc resViewDesc = hip::getResourceViewDesc(mipmappedArray, format);

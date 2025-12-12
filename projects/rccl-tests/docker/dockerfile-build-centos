@@ -1,0 +1,41 @@
+# Copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+# This Dockerfile provides a starting point for a ROCm installation of rccl
+
+# Parameters related to building rccl
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="rccl-maintainer@amd.com"
+
+USER root
+ARG user_uid
+
+# Install dependent packages
+RUN yum install -y --nogpgcheck \
+    sudo \
+    chrpath \
+    rock-dkms \
+    rocm-cmake \
+    centos-release-scl \
+    devtoolset-7 \
+    ca-certificates \
+    git \
+    cmake3 \
+    make \
+    libgomp \
+    clang \
+    clang-devel \
+    gcc-c++ \
+    pkgconfig \
+    numactl-libs 
+
+RUN echo '#!/bin/bash' | tee /etc/profile.d/devtoolset7.sh && echo \
+    'source scl_source enable devtoolset-7' >>/etc/profile.d/devtoolset7.sh
+
+# docker pipeline runs containers with particular uid
+# create a jenkins user with this specific uid so it can use sudo priviledges
+# Grant any member of sudo group password-less sudo privileges
+RUN useradd --create-home -u ${user_uid} -o -G video --shell /bin/bash jenkins && \
+    echo '%video ALL=(ALL) NOPASSWD:ALL' | tee /etc/sudoers.d/sudo-nopasswd && \
+    chmod 400 /etc/sudoers.d/sudo-nopasswd
+

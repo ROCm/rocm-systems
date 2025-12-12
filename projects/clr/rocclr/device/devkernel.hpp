@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -167,7 +153,8 @@ enum class KernelField : uint8_t {
   Kind = 15,
   WgpMode = 16,
   UniformWrokGroupSize = 17,
-  MaxSize = 18
+  ClusterDims = 18,
+  MaxSize = 19
 };
 
 namespace amd {
@@ -194,7 +181,7 @@ struct PrintfInfo {
 };
 
 //! \class DeviceKernel, which will contain the common fields for any device
-class Kernel : public amd::HeapObject {
+class Kernel {
  public:
   typedef std::vector<amd::KernelParameterDescriptor> parameters_t;
 
@@ -202,6 +189,7 @@ class Kernel : public amd::HeapObject {
   struct WorkGroupInfo : public amd::EmbeddedObject {
     size_t size_;                   //!< kernel workgroup size
     size_t compileSize_[3];         //!< kernel compiled workgroup size
+    size_t clusterSize_[3];         //!< cluster dims size
     uint64_t localMemSize_;         //!< amount of used local memory
     size_t preferredSizeMultiple_;  //!< preferred multiple for launch
     uint64_t privateMemSize_;       //!< amount of used private memory
@@ -224,9 +212,11 @@ class Kernel : public amd::HeapObject {
     size_t maxDynamicSharedSizeBytes_;
     std::string compileVecTypeHint_;  //!< kernel compiled vector type hint
 
-    int maxOccupancyPerCu_;      //!< Max occupancy per compute unit in threads
-    bool isWGPMode_;             //!< kernel compiled in WGP/cumode
-    bool uniformWorkGroupSize_;  //!< uniform work group size option
+    int maxOccupancyPerCu_;           //!< Max occupancy per compute unit in threads
+    bool isWGPMode_;                  //!< kernel compiled in WGP/cumode
+    bool uniformWorkGroupSize_;       //!< uniform work group size option
+    bool hasClusterAttr_;             //!< cluster metadata present in code object
+    uint8_t groupMemCarveout_;        //!< LDS carveout
   };
 
   //! Default constructor
@@ -269,14 +259,23 @@ class Kernel : public amd::HeapObject {
 
   size_t getWorkGroupSizeHint(int dim) const { return workGroupInfo_.compileSizeHint_[dim]; }
 
+  void setClusterSize(size_t x, size_t y, size_t z) {
+    workGroupInfo_.hasClusterAttr_ = true;
+    workGroupInfo_.clusterSize_[0] = x;
+    workGroupInfo_.clusterSize_[1] = y;
+    workGroupInfo_.clusterSize_[2] = z;
+  }
+
+  size_t getClusterSize(int dim) const { return workGroupInfo_.clusterSize_[dim]; }
+
+  //! Returns whether cluster_dims was specified in the object metadata. If false,
+  //! it was not specified, and getClusterSize() would return the default implicit value
+  bool hasClusterAttr() const { return workGroupInfo_.hasClusterAttr_; }
+
   //! Returns GPU device object, associated with this kernel
   const amd::Device& device() const { return dev_; }
 
   void setVecTypeHint(const std::string& hint) { workGroupInfo_.compileVecTypeHint_ = hint; }
-
-  void setLocalMemSize(size_t size) { workGroupInfo_.localMemSize_ = size; }
-
-  void setPreferredSizeMultiple(size_t size) { workGroupInfo_.preferredSizeMultiple_ = size; }
 
   const std::string& RuntimeHandle() const { return runtimeHandle_; }
   void setRuntimeHandle(const std::string& handle) { runtimeHandle_ = handle; }

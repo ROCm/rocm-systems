@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -57,7 +43,7 @@ class Program : public device::Program {
   }
 
   virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
-                                  const char* global_name) const;
+                                  const char* global_name) const override;
 
  protected:
   //! Disable default copy constructor
@@ -65,7 +51,7 @@ class Program : public device::Program {
   //! Disable operator=
   Program& operator=(const Program&) = delete;
 
-  virtual bool defineGlobalVar(const char* name, void* dptr);
+  virtual bool defineGlobalVar(const char* name, void* dptr) override;
 
   bool createBinary(amd::option::Options* options) override final;
 

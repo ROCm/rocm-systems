@@ -92,8 +92,8 @@ void RdciXgmiLinkStatusSubSystem::process() {
           }
           std::cout << "\n";
         }
-          std::cout << "\n";
-          std::cout << "* U:Up D:Down X:Disabled\n";
+        std::cout << "\n";
+        std::cout << "* U:Up D:Down X:Disabled\n";
       }
       break;
     }

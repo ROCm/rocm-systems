@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hipP2pLinkTypeAndHopFunc.h"
 #include <hip_test_kernels.hh>
@@ -28,6 +15,7 @@ THE SOFTWARE.
 #include <dlfcn.h>
 #endif
 #include <vector>
+#include <string>
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0
 
@@ -63,7 +51,7 @@ void getDeviceCount(int* pdevCnt) {
     write(fd[1], &devCnt, sizeof(devCnt));
     // close the write descriptor:
     close(fd[1]);
-    exit(0);
+    _exit(0);
   } else {  // failure
     *pdevCnt = 1;
     return;
@@ -96,7 +84,7 @@ bool testMaskedDevice(int actualNumGPUs) {
     close(fd[0]);
     write(fd[1], &testResult, sizeof(testResult));
     close(fd[1]);
-    exit(0);
+    _exit(0);
 
   } else if (cPid > 0) {  // parent
     close(fd[1]);
@@ -203,12 +191,22 @@ bool validateLinkType(uint32_t linktype_Hip, RSMI_IO_LINK_TYPE linktype_RocmSmi)
 bool testhipLinkTypeHopcountDevice(int numDevices) {
   bool TestPassed = true;
   // Opening and initializing rocm-smi library
-  void* lib_rocm_smi_hdl;
+  void* lib_rocm_smi_hdl = nullptr;
   rsmi_status_t (*fntopo_get_link_type)(uint32_t, uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*);
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("librocm_smi64.so", RTLD_LAZY);
+  if (lib_rocm_smi_hdl == nullptr) {
+    // Try to find in the user defined rocm path
+    if (const char *rocm_path = std::getenv("ROCM_PATH")) {
+      std::string rocm_smi_path =
+          std::string(rocm_path) + "/lib/librocm_smi64.so";
+      lib_rocm_smi_hdl = dlopen(rocm_smi_path.c_str(), RTLD_LAZY);
+    } else {
+      lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
+    }
+  }
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
@@ -297,13 +295,12 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
+HIP_TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   int numDevices = 0;
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
   SECTION("Test running for testhipInvalidDevice") {
     TestPassed = testhipInvalidDevice(numDevices);
@@ -312,7 +309,7 @@ TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
 #ifdef __linux__
   getDeviceCount(&numDevices);
   if (numDevices < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    WARN("Skipping Linux-only P2P sections: " << HipTest::SkipReason::kFewerThanTwoGpus);
     return;
   }
   SECTION("Test running for testMaskedDevice") {
@@ -340,7 +337,7 @@ TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
     REQUIRE(TestPassed == true);
   }
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  WARN("Skipping Linux-only P2P link scenarios: " << HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 

@@ -22,19 +22,21 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 ```
 
 ```{note}
-The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
-control the internal GPU metrics cache duration (ms). 
-Default 1, set to 0 to disable.
-```
+The following environment variables can be set to control internal cache
+durations:
 
-```{note}
-The environment variable ``AMDSMI_ASIC_INFO_CACHE_MS`` may be set to
-control the internal GPU asic info cache duration (ms). 
-Default 10000 ms, set to 0 to disable.
+| Variable | Description | Default |
+|---|---|---|
+| ``AMDSMI_GPU_METRICS_CACHE_MS`` | GPU metrics cache duration (ms) | 1 ms (set to 0 to disable) |
+| ``AMDSMI_ASIC_INFO_CACHE_MS`` | GPU ASIC info cache duration (ms) | 10000 ms (set to 0 to disable) |
+
+These can be set in the shell before running your application:
+
+    export AMDSMI_GPU_METRICS_CACHE_MS=200
 ```
 
 ```{seealso}
-Refer to the [C++ library API reference](../reference/amdsmi-cpp-api.md).
+Refer to the [C/C++ library API reference](../reference/amdsmi-cpp-api/index.md).
 ```
 
 (device_socket_handle)=
@@ -44,7 +46,9 @@ Many functions in the library take a _socket handle_ or _device handle_. A
 _socket_ refers to a physical hardware socket, abstracted by the library to
 represent the hardware more effectively to the user. While there is always one
 unique GPU per socket, an APU may house both a GPU and CPU on the same socket.
-For MI200 GPUs, multiple GCDs may reside within a single socket
+For MI200 GPUs, multiple GCDs may reside within a single socket, so a single socket can
+own several processor handles. GPU socket IDs are derived from the device's BDF, whereas
+CPU socket IDs correspond to the physical CPU package.
 
 To identify the sockets in a system, use the `amdsmi_get_socket_handles()`
 function, which returns a list of socket handles. These handles can then be used
@@ -133,7 +137,7 @@ driver and make sure that any resources held by AMD SMI are released.
        for (uint32_t j=0; j < device_count; j++) {
          // Get device type. Since the amdsmi is initialized with
          // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
-         processor_type_t processor_type;
+         amdsmi_processor_type_t processor_type;
          ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
          if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
            std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
@@ -200,7 +204,7 @@ driver and make sure that any resources held by AMD SMI are released.
            uint32_t cpu_count = 0;
 
            // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU
-           processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
+           amdsmi_processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
            ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, nullptr, &cpu_count);
 
            // Allocate the memory for the cpus
@@ -231,3 +235,53 @@ driver and make sure that any resources held by AMD SMI are released.
        return 0;
    }
    ```
+
+(multiple_init_perf_opt)=
+## Multiple initialization performance optimization
+
+To optimize performance when initializing multiple amd-smi instances, AMD SMI implements a static metrics cache stored
+in a Singleton object. This design allows metrics data to persist across multiple instances of amd-smi, whether the
+tool is invoked repeatedly or used within a multithreaded C/C++ application. 
+
+Upon creation of the first amd-smi
+instance, a Singleton object that contains the metrics cache is instantiated. Any amd-smi instances created thereafter
+will inherit the Singleton object metrics cache data. Each amd-smi creation increases the usage counter in the
+Singleton object. And each amd-smi destruction decreases the usage counter. When the Singleton counter reaches zero,
+the metrics cache is destroyed along with the Singleton object. This principle follows the Singleton Design Principal
+of sharing cached data across multiple objects.
+
+```mermaid
+graph LR
+    subgraph "Singleton Object"
+    data_cache["Metrics data cache<br>instances 3"]
+    end
+    subgraph "amd-smi 1"
+    data1[data] ----> data_cache
+    end
+    subgraph "amd-smi 2"
+    data2[data] ----> data_cache
+    end
+    subgraph "amd-smi 3"
+    data3[data] ----> data_cache
+    end
+```
+
+The data caching can be controlled through two environment variables:
+```
+AMD_GPU_METRICS_CACHE_MS = 1 ms
+AMD_ASIC_INFO_CACHE_MS = 10000 ms
+```
+These environment variables control how long information is stored in the data cache before it is refreshed.
+Therefore calls for the system information will not trigger a system retrieval until the cache goes invalid
+and needs refreshing.
+
+(best_practice)=
+### Best practice
+You should tune the cache refresh interval based on how frequently your application accesses data. If a multi-threaded
+application or multiple amd-smi instances are only going to need information every 5 seconds, then set
+the `AMD_GPU_METRICS_CACHE_MS` environment variable to something slightly less than 5 seconds.
+```
+AMD_GPU_METRICS_CACHE_MS = 4900 ms
+```
+In that way, the system is not constantly updating the cache from requests by each of the instances in the threads.
+

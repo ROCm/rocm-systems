@@ -1,0 +1,88 @@
+#pragma once
+
+#include <cstdint>
+#include <sstream>
+#include "rocprof_trace_decoder/trace_decoder_types.h"
+
+inline uint64_t get_sa_wgp(uint64_t sa, uint64_t wgp)
+{
+    return (sa << ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT) + (wgp & ROCPROFILER_TRACE_DECODER_CU_WGP_MASK);
+}
+
+enum RdnaType
+{
+    // Rare-token cluster (positions 0..4). The mi400 fast scanner pushes any
+    // token whose type id is < 5 into a side vector with full contents — this
+    // is by far the simplest predicate (single unsigned compare) and saves a
+    // sub on every hot-loop iteration.
+    //
+    // UNKNOWN sits in the cluster on purpose: it should never appear in a real
+    // trace, but if it ever does we'd rather capture it than silently drop it.
+    //
+    // EVENT / EVENT_SYNC / REG / REG_INIT are the four token types whose 64-bit
+    // contents downstream consumers want preserved alongside the type tag.
+    UNKNOWN,
+    EVENT,
+    EVENT_SYNC,
+    REG,
+    REG_INIT,
+
+    VALU_INST,
+    IMM_ONE,
+    IMMEDIATE,
+    WAVE_READY,
+    NEW_PC_GFX10,
+    WAVE_END,
+    WAVE_START,
+    WAVE_START_EXT,
+    WAVE_ALLOC,
+    SHADER_DATA,
+    SHADER_DATA_SHORT,
+    UTIL_COUNTER_GFX10,
+    TIME,
+    NOP,
+    MISC_GFX10,
+    TIMESTAMP,
+    HEADER,
+    INST,
+    LAST_GFX10_TYPE = INST,
+    UTIL_COUNTER_GFX11,
+    LAST_GFX11_TYPE = UTIL_COUNTER_GFX11,
+    // New GFX12
+    EXEC_POPCOUNT1,
+    EXEC_POPCOUNT3,
+    NEW_PC_GFX12,
+    LAST_GFX12_TYPE = NEW_PC_GFX12,
+    // New MI400
+    LDS_CONFIG,
+    MEDIUM_TIME,
+    LAST_MI400_TYPE = MEDIUM_TIME,
+    NAVI_TYPE_LAST
+};
+
+struct wstart_type_common
+{
+    uint64_t tm      : 2;
+    uint64_t sa      : 1;
+    uint64_t simd    : 2;
+    uint64_t wgp     : 4;
+    uint64_t wid     : 5;
+    uint64_t pipe    : 2;
+    uint64_t me      : 1;
+    uint64_t count   : 10;
+    uint64_t isExt   : 1;
+    uint64_t wgid    : 5;
+    uint64_t last    : 1;
+    uint64_t dynvgpr : 1;
+
+    uint64_t SACU() const { return get_sa_wgp(sa, wgp); }
+    uint64_t getGPULocation() const { return (SACU() << 7) | (simd << 5) | wid; };
+
+    std::stringstream print() const
+    {
+        std::stringstream ss;
+        ss << "wgp:" << wgp << " simd:" << simd << " wid:" << wid << " sa:" << sa << " me:" << me << " pipe:" << pipe;
+        return ss;
+    }
+    const char* typestr() const { return "WAVE_START"; };
+};

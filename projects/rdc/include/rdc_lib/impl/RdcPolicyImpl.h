@@ -23,25 +23,26 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCPOLICYIMPL_H_
 
 #include <atomic>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>  // NOLINT
 #include <string>
 #include <utility>
 #include <vector>
-#include <future>
 
 #include "amd_smi/amdsmi.h"
-#include "rdc_lib/RdcPolicy.h"
-#include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcGroupSettings.h"
+#include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcPolicy.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcPolicyImpl : public RdcPolicy {
  public:
-  RdcPolicyImpl(const RdcGroupSettingsPtr& group_settings, const RdcMetricFetcherPtr& metric_fetcher);
+  RdcPolicyImpl(const RdcGroupSettingsPtr& group_settings,
+                const RdcMetricFetcherPtr& metric_fetcher);
   ~RdcPolicyImpl();
 
   rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) override;
@@ -52,7 +53,8 @@ class RdcPolicyImpl : public RdcPolicy {
   rdc_status_t rdc_policy_delete(rdc_gpu_group_t group_id,
                                  rdc_policy_condition_type_t condition_type) override;
 
-  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id,rdc_policy_register_callback callback) override;
+  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id,
+                                   rdc_policy_register_callback callback) override;
 
   rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) override;
 

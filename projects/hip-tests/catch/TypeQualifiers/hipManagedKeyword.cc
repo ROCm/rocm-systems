@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /*
@@ -25,57 +12,90 @@
 #include <hip_test_checkers.hh>
 
 #define N 1048576
-__managed__ float A[N];  // Accessible by ALL CPU and GPU functions !!!
-__managed__ float B[N];
-__managed__ int x = 0;
+__managed__ float m_A[N];  // Accessible by ALL CPU and GPU functions !!!
+__managed__ float m_B[N];
+__managed__ int m_X = 0;
+__managed__ int m_pa_before = 0;
+__managed__ int m_pa_after = 0;
 
-__global__ void add(const float* A, float* B) {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < N; i += stride) B[i] = A[i] + B[i];
+static __global__ void managed_add(size_t size) {
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < size) {
+    m_B[i] += m_A[i];
+  }
 }
 
-__global__ void GPU_func() { x++; }
+static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
-TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
-  for (int i = 0; i < N; i++) {
-    A[i] = 1.0f;
-    B[i] = 2.0f;
+static __global__ void managed_touch(int* p) { (void)*p; }
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  for (int i = 0; i < numDevices; i++) {
+    CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
+  }
+
+  for (size_t i = 0; i < N; i++) {
+    m_A[i] = 1.0f;
+    m_B[i] = 2.0f;
   }
 
   int blockSize = 256;
-  int numBlocks = (N + blockSize - 1) / blockSize;
-  dim3 dimGrid(numBlocks, 1, 1);
-  dim3 dimBlock(blockSize, 1, 1);
-  hipLaunchKernelGGL(add, dimGrid, dimBlock, 0, 0, static_cast<const float*>(A),
-                     static_cast<float*>(B));
+  int numBlocks = N / blockSize;
 
-  HIP_CHECK(hipGetLastError());
+  managed_add<<<numBlocks, blockSize>>>(N);
   HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
 
-  float maxError = 0.0f;
-  for (int i = 0; i < N; i++) maxError = fmax(maxError, fabs(B[i] - 3.0f));
-
-  REQUIRE(maxError == 0.0f);
+  for (size_t i = 0; i < N; i++) {
+    INFO("Reading output from managed variable: Index: " << i << " output: " << m_B[i]);
+    REQUIRE(3.0f == m_B[i]);
+  }
 }
 
-TEST_CASE("Unit_hipManagedKeyword_MultiGpu") {
+HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   for (int i = 0; i < numDevices; i++) {
-    int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
-      HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
-      return;
-    }
+    CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(i)
   }
 
   for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    GPU_func<<<1, 1>>>();
+    managed_inc<<<1, 1>>>();
     HIP_CHECK(hipDeviceSynchronize());
   }
-  REQUIRE(x == numDevices);
+
+  INFO("Inc counter should match the device count: " << m_X << " Device count: " << numDevices);
+  REQUIRE(m_X == numDevices);
+}
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  hipPointerAttribute_t attrs{};
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_before));
+  REQUIRE(attrs.type == hipMemoryTypeManaged);
+  REQUIRE(attrs.isManaged == true);
+  REQUIRE(attrs.hostPointer != nullptr);
+  REQUIRE(attrs.devicePointer != nullptr);
+  REQUIRE(attrs.hostPointer == attrs.devicePointer);
+}
+
+HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  managed_touch<<<1, 1>>>(&m_pa_after);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  hipPointerAttribute_t attrs{};
+  HIP_CHECK(hipPointerGetAttributes(&attrs, &m_pa_after));
+  REQUIRE(attrs.type == hipMemoryTypeManaged);
+  REQUIRE(attrs.isManaged == true);
+  REQUIRE(attrs.hostPointer != nullptr);
+  REQUIRE(attrs.devicePointer != nullptr);
+  REQUIRE(attrs.hostPointer == attrs.devicePointer);
 }

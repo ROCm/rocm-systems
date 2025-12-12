@@ -26,26 +26,23 @@
 #include <sstream>
 #include <string>
 
-#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
 
-
-static const char *kPowerMonPMName = "amdgpu_pm_info";
+static const char* kPowerMonPMName = "amdgpu_pm_info";
 
 // Using this map in case we add other files from dri directory to parse.
-static const std::map<PowerMonTypes, const char *> kMonitorNameMap = {
+static const std::map<PowerMonTypes, const char*> kMonitorNameMap = {
     {kPowerMaxGPUPower, kPowerMonPMName},
 };
 
-PowerMon::PowerMon(std::string path, RocmSMI_env_vars const *e) :
-                                                        path_(path), env_(e) {
-}
+PowerMon::PowerMon(std::string path, RocmSMI_env_vars const* e) : path_(path), env_(e) {}
 PowerMon::~PowerMon(void) = default;
 
-static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
+static int parse_power_str(std::string s, PowerMonTypes type, uint64_t* val) {
   std::stringstream ss(s);
   std::string ln;
   std::string search_str;
@@ -88,13 +85,11 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
       l_ss >> sz;
       assert(sz == "W");  // We only expect Watts at this time
       if (sz != "W") {
-        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA,
-                                                                __FUNCTION__);
+        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
       }
 
-      if (num_units > static_cast<long double>(0xFFFFFFFFFFFFFFFF)/1000) {
-        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA,
-                                                                __FUNCTION__);
+      if (num_units > static_cast<long double>(0xFFFFFFFFFFFFFFFF) / 1000) {
+        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
       }
       *val = static_cast<uint64_t>(num_units * 1000);  // Convert W to mW
       break;
@@ -107,7 +102,7 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
   return 0;
 }
 
-int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
+int PowerMon::readPowerValue(PowerMonTypes type, uint64_t* power) {
   auto tempPath = path_;
   std::string fstr;
 
@@ -116,7 +111,7 @@ int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
   tempPath += "/";
   tempPath += kMonitorNameMap.at(type);
 
-  DBG_FILE_ERROR(tempPath, (std::string *)nullptr)
+  DBG_FILE_ERROR(tempPath, (std::string*)nullptr)
   int ret = ReadSysfsStr(tempPath, &fstr);
 
   if (ret) {
@@ -126,4 +121,4 @@ int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
   return parse_power_str(fstr, type, power);
 }
 
-} // namespace amd::smi
+}  // namespace amd::smi

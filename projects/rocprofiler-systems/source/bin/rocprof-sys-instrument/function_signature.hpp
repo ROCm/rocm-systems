@@ -1,28 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "fwd.hpp"
+#include <cstdint>
 
 #include <tuple>
 
@@ -30,7 +12,11 @@ struct function_signature
 {
     using location_t = std::pair<unsigned long, unsigned long>;
 
-    TIMEMORY_DEFAULT_OBJECT(function_signature)
+    function_signature()                                         = default;
+    function_signature(const function_signature&)                = default;
+    function_signature(function_signature&&) noexcept            = default;
+    function_signature& operator=(const function_signature&)     = default;
+    function_signature& operator=(function_signature&&) noexcept = default;
 
     function_signature(std::string_view _ret, std::string_view _name,
                        std::string_view _file, location_t _row = { 0, 0 },
@@ -43,7 +29,7 @@ struct function_signature
                        bool _loop = false, bool _info_beg = false,
                        bool _info_end = false);
 
-    function_signature& set_loop_number(uint32_t _n)
+    function_signature& set_loop_number(std::uint32_t _n)
     {
         m_loop_num = _n;
         return *this;
@@ -56,7 +42,7 @@ struct function_signature
     bool                m_loop      = false;
     bool                m_info_beg  = false;
     bool                m_info_end  = false;
-    uint32_t            m_loop_num  = std::numeric_limits<uint32_t>::max();
+    std::uint32_t       m_loop_num  = std::numeric_limits<std::uint32_t>::max();
     location_t          m_row       = { 0, 0 };
     location_t          m_col       = { 0, 0 };
     std::string         m_return    = {};
@@ -72,7 +58,7 @@ struct function_signature
 
     friend bool operator<(const function_signature& lhs, const function_signature& rhs)
     {
-        const auto loop_max = std::numeric_limits<uint32_t>::max();
+        const auto loop_max = std::numeric_limits<std::uint32_t>::max();
         if(lhs.m_loop && !rhs.m_loop) return false;
         if(!lhs.m_loop && rhs.m_loop) return true;
         if(lhs.m_loop_num < loop_max && rhs.m_loop_num == loop_max) return false;

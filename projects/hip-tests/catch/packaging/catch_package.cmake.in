@@ -1,0 +1,27 @@
+# cmake variables are replaced since cpack cannot find them
+# but cpack can understand cpack variables
+# this file gets executed by each CPACK_GENERATOR.
+# During standalone install step
+if(NOT DEFINED CPACK_GENERATOR)
+  get_filename_component(ABS_INSTALL_PATH "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
+  get_filename_component(ABS_CPACK_INSTALL "@CPACK_INSTALL_PREFIX@" ABSOLUTE)
+  if("${ABS_INSTALL_PATH}" STREQUAL "${ABS_CPACK_INSTALL}")
+    return()
+  endif()
+  set(CPACK_PKG_DIRS ${CMAKE_INSTALL_PREFIX}/@INSTALL_DIR@)
+else()
+  set(CPACK_PKG_DIRS
+      @PROJECT_BINARY_DIR@/_CPack_Packages/${CPACK_SYSTEM_NAME}/${CPACK_GENERATOR}/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_SYSTEM_NAME}/${CPACK_INSTALL_PREFIX}/@INSTALL_DIR@)
+endif()
+
+execute_process(COMMAND @Python_EXECUTABLE@
+                        @CMAKE_SOURCE_DIR@/cmake/relative_paths.py @CATCH_BUILD_DIR@ ${CPACK_PKG_DIRS}
+                        OUTPUT_VARIABLE workaround_out
+                        RESULT_VARIABLE workaround_res)
+if(NOT ${workaround_res} EQUAL 0)
+  message(FATAL_ERROR
+    "Error performing workaround using relative_paths.py :\n"
+    "  Result: ${workaround_res}\n"
+    "  Output: ${workaround_out}\n"
+  )
+endif()

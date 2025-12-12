@@ -32,6 +32,7 @@ project(
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 set(PACKAGE_NAME ${PROJECT_NAME})
+string(REPLACE "-" "_" PACKAGE_NAME_UNDERSCORED ${PACKAGE_NAME})
 
 if(NOT PROJECT_IS_TOP_LEVEL)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
@@ -107,6 +108,11 @@ include(rocprofiler_formatting) # formatting
 include(rocprofiler_linting) # clang-tidy
 include(rocprofiler_config_interfaces) # configure interface libraries
 
+if(ROCPROFILER_BUILD_TESTS)
+    # Source-level unit tests are configured before tests/common sets test GPU targets.
+    include("${PROJECT_SOURCE_DIR}/tests/cmake/rocprofiler_test_gpu_targets.cmake")
+endif()
+
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")
@@ -120,8 +126,20 @@ add_subdirectory(source)
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
 include(rocprofiler_config_install_rocpd)
+# rocattach is only supported on x86_64 for now
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    include(rocprofiler_config_install_rocattach)
+endif()
+include(rocprofiler_config_install_tests)
 
-if(ROCPROFILER_BUILD_TESTS)
+# ROCPROFILER_BUILD_INTEGRATION_TESTS is not a standard option. If not defined, set it as
+# a local (non-cached) variable equal to ROCPROFILER_BUILD_TESTS. If one only wants to
+# build and install unit tests, they can use -DROCPROFILER_BUILD_INTEGRATION_TESTS=OFF.
+if(NOT DEFINED ROCPROFILER_BUILD_INTEGRATION_TESTS)
+    set(ROCPROFILER_BUILD_INTEGRATION_TESTS ${ROCPROFILER_BUILD_TESTS})
+endif()
+
+if(ROCPROFILER_BUILD_TESTS AND ROCPROFILER_BUILD_INTEGRATION_TESTS)
     add_subdirectory(tests)
 endif()
 

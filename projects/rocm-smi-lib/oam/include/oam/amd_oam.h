@@ -53,15 +53,13 @@ typedef enum {
 int amdoam_init(void);
 int amdoam_free(void);
 // int amdoam_get_mapi_version(oam_mapi_version_t *version);
-int amdoam_discover_devices(uint32_t *device_count);
-int amdoam_get_dev_properties(uint32_t dev_inx,
-                              oam_dev_properties_t *prop);
-int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info);
-int amdoam_get_sensors_count(uint32_t device_id,
-                             oam_sensor_count_t *sensor_count);
-int amdoam_get_error_description(int code, const char **description);
-int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
-                uint32_t num_sensors, oam_sensor_info_t sensor_info[]);
+int amdoam_discover_devices(uint32_t* device_count);
+int amdoam_get_dev_properties(uint32_t dev_inx, oam_dev_properties_t* prop);
+int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t* pci_info);
+int amdoam_get_sensors_count(uint32_t device_id, oam_sensor_count_t* sensor_count);
+int amdoam_get_error_description(int code, const char** description);
+int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type, uint32_t num_sensors,
+                            oam_sensor_info_t sensor_info[]);
 
 #ifdef __cplusplus
 }

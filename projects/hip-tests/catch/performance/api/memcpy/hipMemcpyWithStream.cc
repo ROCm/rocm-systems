@@ -1,0 +1,182 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "memcpy_performance_common.hh"
+
+/**
+ * @addtogroup memcpy memcpy
+ * @{
+ * @ingroup PerformanceTestMemory
+ */
+
+class MemcpyWithStreamBenchmark : public Benchmark<MemcpyWithStreamBenchmark> {
+ public:
+  void operator()(void* dst, const void* src, size_t size, hipMemcpyKind kind, hipStream_t stream) {
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyWithStream(dst, src, size, kind, stream)); }
+  }
+};
+
+static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allocation_type,
+                         size_t size, hipMemcpyKind kind, bool enable_peer_access = false) {
+  MemcpyWithStreamBenchmark benchmark;
+  benchmark.AddSectionName(std::to_string(size));
+  benchmark.AddSectionName(GetAllocationSectionName(src_allocation_type));
+  benchmark.AddSectionName(GetAllocationSectionName(dst_allocation_type));
+
+  const StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+
+  if (kind != hipMemcpyDeviceToDevice) {
+    LinearAllocGuard<int> src_allocation(src_allocation_type, size);
+    LinearAllocGuard<int> dst_allocation(dst_allocation_type, size);
+    benchmark.Run(dst_allocation.ptr(), src_allocation.ptr(), size, kind, stream);
+  } else {
+    int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
+    int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
+
+    LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
+    HIP_CHECK(hipSetDevice(dst_device));
+    LinearAllocGuard<int> dst_allocation(LinearAllocs::hipMalloc, size);
+    HIP_CHECK(hipSetDevice(src_device));
+    benchmark.Run(dst_allocation.ptr(), src_allocation.ptr(), size, kind, stream);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyWithStream` from Device to Host:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - Source: device malloc
+ *      - Destination: host pinned and pageable
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyWithStream.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto src_allocation_type = LinearAllocs::hipMalloc;
+  const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToHost);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyWithStream` from Host to Device:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - Source: host pinned and pageable
+ *      - Destination: device malloc
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyWithStream.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const auto dst_allocation_type = LinearAllocs::hipMalloc;
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyHostToDevice);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyWithStream` from Host to Host:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - Source: host pinned and pageable
+ *      - Destination: host pinned and pageable
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyWithStream.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyHostToHost);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpy` from Device to Device with peer access disabled:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - Source: device malloc
+ *      - Destination: device malloc
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyWithStream.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) {
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto src_allocation_type = LinearAllocs::hipMalloc;
+  const auto dst_allocation_type = LinearAllocs::hipMalloc;
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToDevice);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemcpyWithStream` from Device to Device with peer access enabled:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - Source: device malloc
+ *      - Destination: device malloc
+ * Test source
+ * ------------------------
+ * - performance/api/memcpy/hipMemcpyWithStream.cc
+ * Test requirements
+ * ------------------------
+ *  - Multi-device
+ *  - Device supports Peer-to-Peer access
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto src_allocation_type = LinearAllocs::hipMalloc;
+  const auto dst_allocation_type = LinearAllocs::hipMalloc;
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToDevice,
+               true);
+}
+
+/**
+ * End doxygen group memcpy.
+ * @}
+ */

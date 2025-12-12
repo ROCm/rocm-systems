@@ -10,40 +10,34 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.json)
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # pmc2
-add_test(
-    NAME rocprofv3-test-minimum-bytes-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-minimum-bytes
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json --output-format csv json pftrace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-kernel-trace -o out --
-        $<TARGET_FILE:simple-transpose>)
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-minimum-bytes)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
-set(cc-env-pmc2 "${PRELOAD_ENV}")
-
-set_tests_properties(
-    rocprofv3-test-minimum-bytes-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc2}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-minimum-bytes-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --trace-input-csv
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out*.csv
-        --trace-input-json
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.json
-        --trace-input-pftrace
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.pftrace)
-
-set_tests_properties(
-    rocprofv3-test-minimum-bytes-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-minimum-bytes-execute" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-minimum-bytes
+    TEST_PATHS validate.py
+    COPY conftest.py input.json
+    CONFIG pytest.ini
+    ARGS --trace-input-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out*.csv
+         --trace-input-json
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.json
+         --trace-input-pftrace
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-kernel-trace/out_results.pftrace
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-minimum-bytes)

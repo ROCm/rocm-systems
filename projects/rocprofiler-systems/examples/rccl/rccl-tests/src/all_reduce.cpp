@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 AllReduceGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -41,6 +42,16 @@ AllReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, 
     return testSuccess;
 }
 
+testResult_t
+AllReduceGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type,
+                              int* algo, int* proto, int* nchannels)
+{
+    if(rcclTestsGetAlgoInfo == NULL) return testInternalError;
+    NCCLCHECK(rcclTestsGetAlgoInfo(comm, ncclFuncAllReduce, count, type, 0, 0, 1, algo,
+                                   proto, nchannels));
+    return testSuccess;
+}
+
 void
 AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw,
                int nranks)
@@ -54,14 +65,17 @@ AllReduceGetBw(size_t count, int typesize, double sec, double* algBw, double* bu
 
 testResult_t
 AllReduceRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                 void* bias = nullptr)
 {
+    (void) bias;
     NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, count, type, op, comm, stream));
     return testSuccess;
 }
 
-struct testColl allReduceTest = { "AllReduce", AllReduceGetCollByteCount,
-                                  AllReduceInitData, AllReduceGetBw, AllReduceRunColl };
+struct testColl allReduceTest = { "AllReduce",       AllReduceGetCollByteCount,
+                                  AllReduceInitData, AllReduceGetBw,
+                                  AllReduceRunColl,  AllReduceGetAlgoProtoChannels };
 
 void
 AllReduceGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

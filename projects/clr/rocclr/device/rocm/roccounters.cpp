@@ -1,22 +1,8 @@
-/* Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/rocm/roccounters.hpp"
 #include "device/rocm/rocvirtual.hpp"
@@ -579,7 +565,7 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStartPacket() {
 
   // set up the profile aql packets for capturing performance counter
   if (api_.hsa_ven_amd_aqlprofile_start(&profile_, &prePacket_) != HSA_STATUS_SUCCESS) {
-    DevLogError("Cannot Start AQL Profile \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Cannot Start AQL Profile \n");
     return nullptr;
   }
 
@@ -593,7 +579,7 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStopPacket() {
   // set up the profile aql packets for post-capturing performance counter
   // and create the completion signal
   if (api_.hsa_ven_amd_aqlprofile_stop(&profile_, &postPacket_) != HSA_STATUS_SUCCESS) {
-    DevLogError("Cannot Stop AQL Profile \n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL, "Cannot Stop AQL Profile \n");
     return nullptr;
   }
 

@@ -43,24 +43,25 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/overdrive_read_write.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/overdrive_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
 TestOverdriveReadWrite::TestOverdriveReadWrite() : TestBase() {
   set_title("RSMI Overdrive Read/Write Test");
-  set_description("The Fan Read tests verifies that the overdrive settings "
-                                      "can be read and controlled properly.");
+  set_description(
+      "The Fan Read tests verifies that the overdrive settings "
+      "can be read and controlled properly.");
 }
 
-TestOverdriveReadWrite::~TestOverdriveReadWrite(void) {
-}
+TestOverdriveReadWrite::~TestOverdriveReadWrite(void) {}
 
 void TestOverdriveReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -68,9 +69,7 @@ void TestOverdriveReadWrite::SetUp(void) {
   return;
 }
 
-void TestOverdriveReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestOverdriveReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestOverdriveReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -82,7 +81,6 @@ void TestOverdriveReadWrite::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestOverdriveReadWrite::Run(void) {
   GTEST_SKIP_("Temporarily disabled due to kernel issue");
@@ -98,21 +96,16 @@ void TestOverdriveReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
-    IF_VERB(STANDARD) {
-      std::cout << "Set Overdrive level to 0%..." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 0%..." << std::endl; }
     ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout <<
-          "\t**Overdrive Level set is not supported on this machine" << std::endl;
+        std::cout << "\t**Overdrive Level set is not supported on this machine" << std::endl;
       }
       continue;
     }
     CHK_ERR_ASRT(ret)
-    IF_VERB(STANDARD) {
-      std::cout << "Set Overdrive level to 10%..." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 10%..." << std::endl; }
     ret = rsmi_dev_overdrive_level_set(dv_ind, 10);
     CHK_ERR_ASRT(ret)
     // this won't be reachable if set doesn't work
@@ -127,8 +120,6 @@ void TestOverdriveReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
     ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
     CHK_ERR_ASRT(ret)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**New OverDrive Level:" << val << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**New OverDrive Level:" << val << std::endl; }
   }
 }

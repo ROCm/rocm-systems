@@ -6,104 +6,92 @@
 Install HIP
 *******************************************
 
-HIP can be installed on AMD (ROCm with HIP-Clang) and NVIDIA (CUDA with NVCC) platforms.
-
-.. note::
-
-  The version definition for the HIP runtime is different from CUDA. On AMD
-  platforms, the :cpp:func:`hipRuntimeGetVersion` function returns the HIP
-  runtime version. On NVIDIA platforms, this function returns the CUDA runtime
-  version.
+HIP can be installed on AMD platforms using ROCm with HIP-Clang.
 
 .. _install_prerequisites:
 
 Prerequisites
 =======================================
 
-.. tab-set::
+Before you begin, verify that your system is supported. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-  .. tab-item:: AMD
-     :sync: amd
+For advanced workflows, source builds, or custom configurations, see
+:doc:`./build`.
 
-     Refer to the Prerequisites section in the ROCm install guides:
-
-     * `System requirements (Linux) <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_
-     * `System requirements (Windows) <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/reference/system-requirements.html>`_
-
-  .. tab-item:: NVIDIA
-     :sync: nvidia
-
-     With NVIDIA GPUs, HIP requires unified memory. All CUDA-enabled NVIDIA
-     GPUs with compute capability 5.0 or later should be supported. For more
-     information, see `NVIDIA's list of CUDA enabled GPUs <https://developer.nvidia.com/cuda-gpus>`_.
-
-Installation
+Install the ROCm Core SDK
 =======================================
 
-.. tab-set::
+The HIP runtime is included with the ROCm Core SDK on Linux and Windows. For
+the most complete installation, we recommend that developers use the
+``amdrocm-core-sdk`` meta package.
 
-  .. tab-item:: AMD
-     :sync: amd
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
+selector panel on that page to view instructions appropriate for your system
+environment.
 
-     HIP is automatically installed during the ROCm installation. If you haven't
-     yet installed ROCm, you can find installation instructions here:
+.. note::
 
-     * `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/index.html>`_
-     * `HIP SDK installation for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/index.html>`_
+   By default, when installing using your Linux distribution's package manager,
+   HIP is installed into ``/opt/rocm``.
 
-     By default, HIP is installed into ``/opt/rocm``.
+   There is no autodetection for the HIP installation. If you choose to
+   install it somewhere other than the default location, you must set the
+   ``HIP_PATH`` environment variable as explained in
+   :doc:`Build HIP from source <./build>`.
 
-     .. note::
-     
-        There is no autodetection for the HIP installation. If you choose to 
-        install it somewhere other than the default location, you must set the
-        ``HIP_PATH`` environment variable as explained in
-        `Build HIP from source <./build.html>`_.
+Install the ROCm runtime on Linux
+=================================
 
-  .. tab-item:: NVIDIA
-     :sync: nvidia
+Alternatively, if you want to install the ROCm runtime package without
+additional ROCm libraries and tools, install the ``amdrocm-runtime`` package.
+This includes the HIP, base ROCm packages, and the compiler ecosystem.
 
-     #. Install the NVIDIA toolkit.
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-        The latest release can be found here:
-        `CUDA Toolkit <https://developer.nvidia.com/cuda-downloads>`_.
+2. Install the ROCm runtime package that matches your desired ROCm version.
+   Package names use the following format:
 
-     #. Setup the radeon repo.
+   .. code-block:: shell-session
 
-        .. code-block::shell
+      amdrocm-runtime<rocm_version>
 
-          # Replace url with appropriate link in the table below
-          wget https://repo.radeon.com/amdgpu-install/6.2/distro/version_name/amdgpu-install_6.2.60200-1_all.deb
-          sudo apt install ./amdgpu-install_6.2.60200-1_all.deb
-          sudo apt update
+   Where ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
+   suffix to install the latest available version.
 
-        .. list-table:: amdgpu-install links
-           :widths: 25 100
-           :header-rows: 1
+   For example, to install the latest ROCm runtime package release for
+   supported GPU architectures:
 
-           * - Ubuntu version
-             - URL
-           * - 24.04
-             - https://repo.radeon.com/amdgpu-install/6.2.4/ubuntu/noble/amdgpu-install_6.2.60204-1_all.deb
-           * - 22.04
-             - https://repo.radeon.com/amdgpu-install/6.2.4/ubuntu/jammy/amdgpu-install_6.2.60204-1_all.deb
+   .. tab-set::
 
-     #. Install the ``hip-runtime-nvidia`` and ``hip-dev`` packages. This installs the CUDA SDK and HIP
-        porting layer.
+      .. tab-item:: Debian-based distros
 
-        .. code-block:: shell
+         .. code-block:: bash
 
-          apt-get install hip-runtime-nvidia hip-dev
+            sudo apt install amdrocm-runtime
 
-        The default paths are:
-          * CUDA SDK: ``/usr/local/cuda``
-          * HIP: ``/opt/rocm``
+      .. tab-item:: RHEL-based distros
 
-     #. Set the HIP_PLATFORM to nvidia.
+         .. code-block:: bash
 
-        .. code-block:: shell
+            sudo dnf install amdrocm-runtime
 
-          export HIP_PLATFORM="nvidia"
+      .. tab-item:: SLES
+
+         .. code-block:: bash
+
+            sudo zypper install amdrocm-runtime
+
+.. _install-nightly:
+
+Install a nightly build
+=======================
+
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for the ROCm Core SDK and its components, including the HIP
+runtime. See `Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
 Verify your installation
 ==========================================================

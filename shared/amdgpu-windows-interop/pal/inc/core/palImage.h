@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,10 @@ enum class TilingOptMode : uint32
     Balanced     = 0x0,  ///< Balance memory foorprint and rendering performance.
     OptForSpace  = 0x1,  ///< Optimize tiling mode for saving memory footprint
     OptForSpeed  = 0x2,  ///< Optimize tiling mode for rendering performance.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 986
+    BlockBased   = 0x3,  ///< Use a block based heuristic which provides more predictable image sizes, which is
+                         ///< required by VK_KHR_maintenance4.
+#endif
     Count
 };
 
@@ -96,7 +100,7 @@ enum class MetadataMode : uint16
 {
     Default = 0,  ///< Default behavior. PAL chooses if metadata should be present or not.
     ForceEnabled, ///< Optimization Hint: The client would prefer Metadata if possible. Useful for scenarios where
-                  ///  metadata isn't an obvious win and clients can enable based on some hueristic or app-detect.
+                  ///  metadata isn't an obvious win and clients can enable based on some heuristic or app-detect.
     Disabled,     ///< The Image will not contain any compression metadata.
     FmaskOnly,    ///< The color msaa Image will only contain Cmask/Fmask metadata; this mode is only valid for color
                   ///  msaa Image. On GPUs with GFX12-style distributed compression (see supportDistributedCompression
@@ -125,7 +129,7 @@ enum class MetadataSharingLevel : uint32
 /// Specifies the type of PRT map image being created.
 enum class PrtMapType : uint32
 {
-    None            = 0, ///< This is not an auxillary image used for PRT plus functionality.
+    None            = 0, ///< This is not an auxiliary image used for PRT plus functionality.
     Residency       = 1, ///< Image data is really a low-resolution map containing the finest populated LOD
                          ///  for a particular UV space region.
     SamplingStatus  = 2, ///< Indicates the validity of a given tile on a per-mip level basis.
@@ -186,8 +190,12 @@ union ImageCreateFlags
                                              ///  "Uninitialized" state at any time.  Otherwise, both planes must be
                                              ///  transitioned in the same barrier call.  Only meaningful if
                                              /// "perSubresInit" is set.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 957
         uint32 repetitiveResolve       :  1; ///< Optimization: Is this image resolved multiple times to an image which
                                              ///  is mostly similar to this image?
+#else
+        uint32 reservedRepResolve      :  1; ///< Reserved for future use.
+#endif
         uint32 preferSwizzleEqs        :  1; ///< Image prefers valid swizzle equations, but an invalid swizzle
                                              ///  equation is also acceptable.
         uint32 fixedTileSwizzle        :  1; ///< Fix this image's tile swizzle to ImageCreateInfo::tileSwizzle. This
@@ -197,13 +205,21 @@ union ImageCreateFlags
         uint32 optimalShareable        :  1; ///< Indicates metadata information is to be added into private data on
                                              ///  creation time and honored on open time.
         uint32 sampleLocsAlwaysKnown   :  1; ///< Sample pattern is always known in client driver for MSAA depth image.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 963
         uint32 fullResolveDstOnly      :  1; ///< Indicates any ICmdBuffer::CmdResolveImage using this image as a
-                                             ///  desination will overwrite the entire image (width and height of
+                                             ///  designation will overwrite the entire image (width and height of
                                              ///  resolve region is same as width and height of resolve dst).
+#else
+        uint32 reserved963             :  1;
+#endif
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 960
         uint32 fullCopyDstOnly         :  1; ///< Indicates any copy to this image will overwrite the entire image.
                                              ///  A perf optimization of using post-copy metadata fixup to replace heavy
                                              ///  expand at barrier to LayoutCopyDst. Unsafe to enable it if there is
                                              ///  potential partial copy to the image.
+#else
+        uint32 reserved956             :  1;
+#endif
         uint32 pipSwapChain            :  1; ///< Indicates this image is PIP swap-chain. It is only supported on
                                              ///  Windows platforms.
         uint32 view3dAs2dArray         :  1; ///< If set client can view 3D image as 2D with its depth as array slices.
@@ -266,7 +282,8 @@ union ImageUsageFlags
                                             ///< for this image.
         uint32 vrsRateImage           :  1; ///< This image is potentially used with CmdBindSampleRateImage
         uint32 videoDecoder           :  1; ///< Indicating this Image is video decoder target
-        uint32 reserved               : 12; ///< Reserved for future use.
+        uint32 videoEncoder           :  1; ///< Indicating this Image is video encoder input.
+        uint32 reserved               : 11; ///< Reserved for future use.
     };
     uint32 u32All;                          ///< Flags packed as 32-bit uint.
 };
@@ -292,9 +309,12 @@ struct ImageCreateInfo
     Extent3d           extent;           ///< Dimensions in pixels WxHxD.
     uint32             mipLevels;        ///< Number of mipmap levels.  Cannot be 0.
     uint32             arraySize;        ///< Number of slices.  Set to 1 for non-array images.
-    uint32             samples;          ///< Number of coverage samples.  Set to 1 for single sample images.  Must be
-                                         ///  greater than or equal to the number of fragments.
+    uint32             samples;          ///< Number of coverage samples.  Set to 1 for single sample images.
+                                         ///< Must be a power of two no larger than @ref MaxMsaaSurfaceSamples.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
+                                         ///< Must be greater than or equal to the number of fragments.
     uint32             fragments;        ///< Number of color/depth fragments.  Set to 1 for single sample images.
+#endif
     ImageTiling        tiling;           ///< Controls layout of pixels in the image.
     ImageTilingPattern tilingPreference; ///< Controls preferred tile swizzle organization for this image.
     TilingOptMode      tilingOptMode;    ///< Hints to pal to select the appropriate tiling mode.
@@ -315,15 +335,11 @@ struct ImageCreateInfo
     /// by client with @ref GpuMemoryCreateInfo::compression.
     CompressionMode compressionMode;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 876
     /// Client compression is part of distributed compression (aka physical compression); it can only be enabled if
     /// physical compression is enabled.
     ///
     /// On Gfx12, controls (legacy FMask based) color fragment compression and Z plane compression.
     ClientCompressionMode clientCompressionMode; ///< Controls client compression behavior for this resource.
-#else
-    TriState              clientCompressionMode; ///< Controls client compression behavior for this resource.
-#endif
 
     uint32 maxBaseAlign;      ///< Maximum address alignment for this image or zero for an unbounded alignment.
     float  imageMemoryBudget; ///< The memoryBudget value used in SW addrlib to determine the minSizeBlk for textures.
@@ -345,7 +361,7 @@ struct ImageCreateInfo
     } prtPlus;
 
     /// The following "pitch" members must be zeroed unless the client is creating a @ref ImageTiling::Linear image and
-    /// wishes to directly specify the image's row and depth pitches.  In that case, they must be integer multiples of
+    /// wishes to directly specify the image's row and/or depth pitches.  In that case, they must be integer multiples of
     /// the alignments given by @ref IDevice::GetLinearImageAlignments, called with an appropriate maxElementSize.
     uint32   rowPitch;    ///< The image must have this row pitch for the first mip level (in bytes).
     uint32   depthPitch;  ///< The image must have this depth pitch for the first mip level (in bytes).
@@ -383,7 +399,9 @@ inline constexpr bool operator==(const ImageCreateInfo& lhs, const ImageCreateIn
                 (lhs.mipLevels               == rhs.mipLevels)               &&
                 (lhs.arraySize               == rhs.arraySize)               &&
                 (lhs.samples                 == rhs.samples)                 &&
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
                 (lhs.fragments               == rhs.fragments)               &&
+#endif
                 (lhs.tiling                  == rhs.tiling)                  &&
                 (lhs.tilingPreference        == rhs.tilingPreference)        &&
                 (lhs.tilingOptMode           == rhs.tilingOptMode)           &&
@@ -590,6 +608,10 @@ struct ImageMemoryLayout
 
 /// Collection of bitmasks specifying which operations are currently allowed on an image, and which queues are allowed
 /// to perform those operations.  Based on this information, PAL can determine the best compression state of the image.
+///
+/// Note that for valid image layout,
+///   - LayoutUninitializedTarget doesn't require engine flags.
+///   - All other layouts require both usages and engines are set.
 struct ImageLayout
 {
     uint32 usages  : 24;  ///< Bitmask of @ref ImageLayoutUsageFlags values.
@@ -599,7 +621,7 @@ struct ImageLayout
 /**
 ****************************************************************************************************
 * @brief
-*   Enumerates swizzle modes useable on any supported GPU.
+*   Enumerates swizzle modes usable on any supported GPU.
 * @note
 * For details please check _AddrSwizzleMode
 *
@@ -670,16 +692,6 @@ struct SubresLayout
     Extent3d extentElements; ///< Unpadded extent of the subresource in elements.
     Extent3d paddedExtent;   ///< Extent of the subresource in elements, including all internal padding for this subresource.
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 912
-    /// Reports supported engines and usages for this subresource while it can remain in its optimal compression state.
-    /// Clients using CmdRelease()/CmdAcquire() without complete knowledge of the application's next usage during
-    /// CmdRelease() or its previous usage at CmdAcquire() can treat this layout as a performant target for an
-    /// intermediate state that will avoid unnecessary decompressions.
-    ///
-    /// This value is only valid if supportSplitReleaseAcquire is set in @ref DeviceProperties.
-    ImageLayout defaultGfxLayout;
-#endif
-
     SwizzledFormat planeFormat; ///< Swizzled format for plane. Planar resource like D32-S8
                                 /// will have different swizzled format per plane.
     SwizzleMode swizzleMode;    ///< Swizzle mode for plane, based on AddrSwizzleMode
@@ -696,7 +708,6 @@ struct SubresLayout
 ///         is always plane 0. If the format is @ref ChNumFormat::YV12 it has three planes where plane 1 is the
 ///         red-difference chrominance plane and plane 2 is the blue-difference chrominance plane. Otherwise, plane 1
 ///         interleaves blue-difference and red-difference chrominance values.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 886
 struct SubresId
 {
     uint8  plane;      ///< Selects a data plane.
@@ -712,25 +723,6 @@ struct SubresRange
     uint8    numMips;      ///< Number of mip levels in the range.
     uint16   numSlices;    ///< Number of slices in the range.
 };
-
-#else
-struct SubresId
-{
-    uint32 plane;      ///< Selects a data plane.
-    uint32 mipLevel;   ///< Selects a mip level.
-    uint32 arraySlice; ///< Selects an array slice.
-};
-
-/// Defines a range of subresources.
-struct SubresRange
-{
-    SubresId startSubres;  ///< First subresource in the range.
-    uint32   numPlanes;    ///< Number of planes in the range.
-    uint32   numMips;      ///< Number of mip levels in the range.
-    uint32   numSlices;    ///< Number of slices in the range.
-};
-
-#endif
 
 /// A variant struct of MemoryImageCopyRegion
 /// Specifies parameters for a copy from CPU memory to Image.
@@ -817,13 +809,29 @@ public:
 
     /// Reports information on the full range of the image's subresources.
     ///
+    /// @returns Reports info on the full range of the image's subresources such as number of mips and planes.
+    virtual SubresRange GetFullSubresourceRange() const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 953
+    /// Reports information on the full range of the image's subresources.
+    ///
     /// @param [out] pRange  Reports info on the full range of the image's subresources such as number of mips and
     ///                      planes.
     ///
     /// @returns Success if the layout was successfully reported.  Otherwise, one of the following error codes may be
     ///          returned:
     ///          + ErrorInvalidPointer if pRange is null.
-    virtual Result GetFullSubresourceRange(SubresRange* pRange) const = 0;
+    Result GetFullSubresourceRange(SubresRange* pRange) const
+    {
+        Result result = Result::ErrorInvalidPointer;
+        if (pRange != nullptr)
+        {
+            *pRange = GetFullSubresourceRange();
+            result = Result::Success;
+        }
+        return result;
+    }
+#endif
 
     /// Reports information on the layout of the specified subresource in memory.
     ///
@@ -958,6 +966,27 @@ public:
         IImage*                pDstImage,
         const ImageCopyRegion* pImgRegions,
         const uint32           regionCount) const = 0;
+
+    /// Check if the provided layout transition is compatible (no layout transition blt necessary) or not (requires
+    /// layout transition blt).
+    ///
+    /// @param [in]  subresRange  Image subresource range.
+    /// @param [in]  oldLayout    Specifies the current image layout based on bitmasks of allowed operations and
+    ///                           engines up to this point.  These masks imply the previous compression state. No
+    ///                           usage flags should ever be set in oldLayout.usages that correspond to usages
+    ///                           that are not supported by the engine that is performing the transition. The engine
+    ///                           type performing the transition must be set in oldLayout.engines.
+    /// @param [in]  newLayout    Specifies the upcoming image layout based on bitmasks of allowed operations and
+    ///                           engines after this point.  These masks imply the upcoming compression state.
+    ///                           A difference between oldLayoutUsageMask and newLayoutUsageMask may result in layout
+    ///                           transition blt (e.g. decompression) and returns compatible = false.
+    ///
+    /// @returns True if the layout transition is compatible which indicates no need layout transition blt.
+    ///          False otherwise if layout transition is incompatible and requires layout transition blt.
+    virtual bool IsLayoutTransitionCompatible(
+        const SubresRange subresRange,
+        const ImageLayout oldLayout,
+        const ImageLayout newLayout) const = 0;
 
 protected:
     /// @internal Constructor.

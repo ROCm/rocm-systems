@@ -1,73 +1,56 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "library/tracing.hpp"
+#include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/emitter.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
 
-namespace rocprofsys
-{
-namespace tracing
+#include <unistd.h>
+
+#include "logger/debug.hpp"
+
+namespace rocprofsys::tracing
 {
 namespace
 {
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid = threading::get_id());
+get_timemory_hash_ids(std::int64_t _tid = threading::get_id());
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+get_timemory_hash_aliases(std::int64_t _tid = threading::get_id());
 
 tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid)
+get_timemory_hash_ids(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_map_ptr_t>>::instance(
         construct_on_thread{ _tid });
 }
 
 tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid)
+get_timemory_hash_aliases(std::int64_t _tid)
 {
     return thread_data<identity<tim::hash_alias_ptr_t>>::instance(
         construct_on_thread{ _tid });
 }
 }  // namespace
 
-bool debug_push = tim::get_env("ROCPROFSYS_DEBUG_PUSH", false) || get_debug_env();
-bool debug_pop  = tim::get_env("ROCPROFSYS_DEBUG_POP", false) || get_debug_env();
-bool debug_mark = tim::get_env("ROCPROFSYS_DEBUG_MARK", false) || get_debug_env();
-bool debug_user = tim::get_env("ROCPROFSYS_DEBUG_USER_REGIONS", false) || get_debug_env();
-
-std::unordered_map<hash_value_t, std::string>&
-get_perfetto_track_uuids()
-{
-    static thread_local auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
-}
+bool debug_push = rocprofsys::get_env(env_vars::DEBUG_PUSH, false) || get_debug_env();
+bool debug_pop  = rocprofsys::get_env(env_vars::DEBUG_POP, false) || get_debug_env();
+bool debug_mark = rocprofsys::get_env(env_vars::DEBUG_MARK, false) || get_debug_env();
+bool debug_user =
+    rocprofsys::get_env(env_vars::DEBUG_USER_REGIONS, false) || get_debug_env();
 
 void
 copy_timemory_hash_ids()
@@ -81,24 +64,53 @@ copy_timemory_hash_ids()
     // copy these over so that all hashes are known
     auto& _hmain = tim::hash::get_main_hash_ids();
     auto& _amain = tim::hash::get_main_hash_aliases();
-    ROCPROFSYS_REQUIRE(_hmain != nullptr) << "no main timemory hash ids";
-    ROCPROFSYS_REQUIRE(_amain != nullptr) << "no main timemory hash aliases";
-
-    // combine all the hash and alias info into one container
-    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    if(_hmain == nullptr)
     {
-        auto& _hitr = get_timemory_hash_ids(i);
-        auto& _aitr = get_timemory_hash_aliases(i);
+        LOG_CRITICAL("no main timemory hash ids");
+        std::exit(1);
+    }
+    if(_amain == nullptr)
+    {
+        LOG_CRITICAL("no main timemory hash aliases");
+        std::exit(1);
+    }
 
-        if(_hitr)
+    // Access underlying storage directly to avoid construct_on_thread which
+    // throws when peak_num_threads grew beyond the thread_data capacity
+    // (e.g., during re-attach where grow functors weren't registered yet)
+    using hash_thread_data_t  = thread_data<identity<tim::hash_map_ptr_t>>;
+    using alias_thread_data_t = thread_data<identity<tim::hash_alias_ptr_t>>;
+
+    const auto& hash_storage  = hash_thread_data_t::instance();
+    const auto& alias_storage = alias_thread_data_t::instance();
+
+    const auto peak_threads = thread_info::get_peak_num_threads();
+
+    if(hash_storage)
+    {
+        const auto num_entries = std::min(peak_threads, hash_storage->size());
+        for(size_t i = 0; i < num_entries; ++i)
         {
-            for(const auto& itr : *_hitr)
-                _hmain->emplace(itr.first, itr.second);
+            const auto& _hitr = (*hash_storage)[i];
+            if(_hitr)
+            {
+                for(const auto& itr : *_hitr)
+                    _hmain->emplace(itr.first, itr.second);
+            }
         }
-        if(_aitr)
+    }
+
+    if(alias_storage)
+    {
+        const auto num_entries = std::min(peak_threads, alias_storage->size());
+        for(size_t i = 0; i < num_entries; ++i)
         {
-            for(auto itr : *_aitr)
-                _amain->emplace(itr.first, itr.second);
+            const auto& _aitr = (*alias_storage)[i];
+            if(_aitr)
+            {
+                for(const auto& itr : *_aitr)
+                    _amain->emplace(itr.first, itr.second);
+            }
         }
     }
 
@@ -106,13 +118,24 @@ copy_timemory_hash_ids()
     // container before finalizing
     if(get_state() == State::Finalized)
     {
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+        if(hash_storage)
         {
-            auto& _hitr = get_timemory_hash_ids(i);
-            auto& _aitr = get_timemory_hash_aliases(i);
+            const auto num_entries = std::min(peak_threads, hash_storage->size());
+            for(size_t i = 0; i < num_entries; ++i)
+            {
+                auto& _hitr = (*hash_storage)[i];
+                if(_hitr) *_hitr = *_hmain;
+            }
+        }
 
-            if(_hitr) *_hitr = *_hmain;
-            if(_aitr) *_aitr = *_amain;
+        if(alias_storage)
+        {
+            const auto num_entries = std::min(peak_threads, alias_storage->size());
+            for(size_t i = 0; i < num_entries; ++i)
+            {
+                auto& _aitr = (*alias_storage)[i];
+                if(_aitr) *_aitr = *_amain;
+            }
         }
     }
 }
@@ -159,24 +182,34 @@ thread_init()
         auto _tidx = (_tinfo && _tinfo->index_data) ? _tinfo->index_data->sequent_value
                                                     : threading::get_id();
 
-        ROCPROFSYS_REQUIRE(_tidx >= 0)
-            << "thread setup failed. thread info not initialized: " << [&_tinfo]() {
-                   if(_tinfo) return JOIN("", *_tinfo);
-                   return std::string{ "no thread_info" };
-               }();
+        if(_tidx < 0)
+        {
+            LOG_CRITICAL("thread setup failed. thread info not initialized: {}",
+                         [&_tinfo]() {
+                             if(_tinfo) return _tinfo->as_string();
+                             return std::string{ "no thread_info" };
+                         }());
+            std::exit(1);
+        }
 
-        if(_tidx > 0) threading::set_thread_name(JOIN(" ", "Thread", _tidx).c_str());
+        if(_tidx > 0) threading::set_thread_name(fmt::format("Thread {}", _tidx).c_str());
         thread_data<thread_bundle_t>::construct(
-            JOIN('/', "rocprofsys/process", process::get_id(), "thread", _tidx),
+            fmt::format("rocprofsys/process/{}/thread/{}", process::get_id(), _tidx),
             quirk::config<quirk::auto_start>{});
         // save the hash maps
         get_timemory_hash_ids(_tidx)     = tim::get_hash_ids();
         get_timemory_hash_aliases(_tidx) = tim::get_hash_aliases();
 
-        ROCPROFSYS_REQUIRE(get_timemory_hash_ids(_tidx) != nullptr)
-            << "no timemory hash ids pointer for thread " << _tidx;
-        ROCPROFSYS_REQUIRE(get_timemory_hash_aliases(_tidx) != nullptr)
-            << "no timemory hash aliases pointer for thread " << _tidx;
+        if(get_timemory_hash_ids(_tidx) == nullptr)
+        {
+            LOG_CRITICAL("no timemory hash ids pointer for thread {}", _tidx);
+            std::exit(1);
+        }
+        if(get_timemory_hash_aliases(_tidx) == nullptr)
+        {
+            LOG_CRITICAL("no timemory hash aliases pointer for thread {}", _tidx);
+            std::exit(1);
+        }
 
         record_thread_start_time();
         return true;
@@ -208,5 +241,4 @@ thread_init()
     (void) _thread_setup;
     (void) _sample_setup;
 }
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <resource_guards.hh>
 
@@ -45,11 +29,13 @@ __global__ void test_kernel() { return; }
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_Basic) {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
-
   StreamGuard stream_guard{Streams::created};
-  REQUIRE(hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream()) != nullptr);
+
+  const char* kernel_name{hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream())};
+  REQUIRE(kernel_name != nullptr);
+  REQUIRE(std::strlen(kernel_name) > 0);
 }
 
 /**
@@ -65,11 +51,13 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_StreamNullptr") {
+HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_StreamNullptr) {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
   StreamGuard stream_guard{Streams::nullstream};
 
-  REQUIRE(hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream()) != nullptr);
+  const char* kernel_name{hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream())};
+  REQUIRE(kernel_name != nullptr);
+  REQUIRE(std::strlen(kernel_name) > 0);
 }
 
 /**
@@ -88,7 +76,7 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_StreamNullptr") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_KernelNullptr") {
+HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Negative_KernelNullptr) {
   const void* kernel_ptr{nullptr};
 
   SECTION("stream is nullptr") {

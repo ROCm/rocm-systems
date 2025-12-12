@@ -30,7 +30,7 @@ be the same size.
 
 .. note::
 
-   Direct Perfetto output (using ``--trace`` or ``ROCPROFSYS_USE_TRACE=ON``) has limited support for Artificial Intelligence (AI) and Machine Learning (ML) workloads.
+   Direct Perfetto output (using ``--trace`` or ``ROCPROFSYS_TRACE=ON``) has limited support for Artificial Intelligence (AI) and Machine Learning (ML) workloads.
    Data from child threads is not captured. Instead, use ROCPD (``ROCPROFSYS_USE_ROCPD=ON``) as the output type.
    For more information, see the :ref:`rocprof_sys_rocpd_output` section.
 
@@ -56,7 +56,7 @@ environment variable.
    .. code-block:: shell
 
       export LD_LIBRARY_PATH=:/opt/venv/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
-   
+
 Running ROCm Systems Profiler on a Python script
 ================================================
 

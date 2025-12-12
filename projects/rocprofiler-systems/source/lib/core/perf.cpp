@@ -1,64 +1,17 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-#include "debug.hpp"
+#include "common/units.hpp"
 
-#include <timemory/units.hpp>
+#include "logger/debug.hpp"
+
+#include <cstdint>
 
 namespace rocprofsys
 {
 namespace perf
 {
-namespace units = ::tim::units;
-
-std::vector<std::string>
-get_config_choices()
-{
-    namespace regex_const = ::std::regex_constants;
-
-    auto       _data        = std::vector<std::string>{};
-    auto       _papi_events = tim::papi::available_events_info();
-    const auto _prefix      = std::string_view{ "perf::" };
-    auto       _regex =
-        std::regex{ "^(perf::|)PERF_COUNT_(HW|SW|HW_CACHE)_([A-Z_]+)(|:[A-Z]+)$",
-                    regex_const::optimize };
-
-    for(const auto& itr : _papi_events)
-    {
-        if(std::regex_match(itr.symbol(), _regex))
-        {
-            auto _symbol = itr.symbol();
-            auto _pos    = _symbol.find(_prefix);
-            if(_pos == 0) _symbol = _symbol.substr(_prefix.length());
-            _data.emplace_back(_symbol);
-        }
-    }
-
-    std::sort(_data.begin(), _data.end());
-    _data.erase(std::unique(_data.begin(), _data.end()), _data.end());
-
-    return _data;
-}
 
 event_type
 get_event_type(std::string_view _v)
@@ -101,7 +54,8 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hardware config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hardware config: {}", _v.data()));
     }
 
 #undef HW_CONFIG_REGEX
@@ -134,7 +88,8 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        ROCPROFSYS_THROW("Unknown perf hw cache config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf hw cache config: {}", _v.data()));
     }
 
 #undef SW_CONFIG_REGEX
@@ -165,7 +120,8 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        ROCPROFSYS_THROW("Unknown perf software config: %s", _v.data());
+        throw std::runtime_error(
+            fmt::format("Unknown perf software config: {}", _v.data()));
 
 #undef HW_CACHE_CONFIG_REGEX
 #define HW_CACHE_OP_REGEX(KEY)                                                           \
@@ -226,18 +182,18 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            ROCPROFSYS_THROW("unsupported perf type");
+            throw std::runtime_error("Unsupported perf type");
         }
     };
 
     if(_pe.type == PERF_TYPE_SOFTWARE &&
        (_pe.config == PERF_COUNT_SW_CPU_CLOCK || _pe.config == PERF_COUNT_SW_TASK_CLOCK))
     {
-        _pe.sample_period = static_cast<uint64_t>(_period);
+        _pe.sample_period = static_cast<std::uint64_t>(_period);
     }
     else
     {
-        _pe.sample_period = static_cast<uint64_t>(_freq);
+        _pe.sample_period = static_cast<std::uint64_t>(_freq);
     }
 }
 }  // namespace perf

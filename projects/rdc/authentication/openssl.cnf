@@ -87,4 +87,3 @@ subjectAltName = @alt_names
 # < ** MODIFY BELOW TO YOUR NEEDS. WILDCARDS ARE ACCEPTED. **>
 DNS.1   = localhost
 DNS.2   = *.amd.com
-

@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -48,9 +34,11 @@ class Settings : public device::Settings {
       uint system_scope_signal_ : 1;   //!< HSA signal is visibile to the entire system
       uint fgs_kernel_arg_ : 1;        //!< Use fine grain kernel arg segment
       uint barrier_value_packet_ : 1;  //!< Barrier value packet functionality
-      uint dynamic_queues_ : 1;        //!< Dynamic queues management
+      uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
-      uint reserved_ : 21;
+      uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
+      uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
+      uint reserved_ : 18;
     };
     uint value_;
   };
@@ -74,6 +62,7 @@ class Settings : public device::Settings {
 
   uint32_t hmmFlags_;       //!< HMM functionality control flags
   uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
+  uint32_t max_hw_queues_;  //!< Effective maximum HW queues (accounts for null stream reservation)
 
   //! Default constructor
   Settings();

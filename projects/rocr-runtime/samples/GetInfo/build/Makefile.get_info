@@ -16,7 +16,7 @@ ifdef ATI_BITS_64
     LIB_SUFFIX=64
     BITS=64
     CMPILERBITS=64
-else 
+else
     LIB_SUFFIX=
     BITS=
     ifdef ATI_OS_WINDOWS
@@ -41,7 +41,7 @@ endif
 
 LCXXDEFS += -DAMD_INTERNAL_BUILD
 
-vpath %.cpp $(COMPONENT_DEPTH) 
+vpath %.cpp $(COMPONENT_DEPTH)
 CPPFILES := $(notdir $(wildcard $(COMPONENT_DEPTH)/*.cpp))
 
 TOOLS_TEST_COMMON=$(COMPONENT_DEPTH)/../common
@@ -52,7 +52,7 @@ CPPFILES += $(notdir $(wildcard $(TOOLS_TEST_COMMON)/*.cpp))
 ifdef ATI_OS_LINUX
     GCXXOPTS := $(filter-out -fno-rtti,$(GCXXOPTS))
     GCXXOPTS := $(filter-out -fno-exceptions,$(GCXXOPTS))
-    LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt -lstdc++ 
+    LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt -lstdc++
     #LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt
 endif
 

@@ -1464,6 +1464,126 @@ typedef union rocprofiler_hsa_api_args_t
         int32_t*                  status;
     } hsa_amd_ais_file_read;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+    struct
+    {
+        hsa_agent_t              agent;
+        hsa_queue_type_t         type;
+        hsa_amd_queue_priority_t priority;
+        void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data);
+        void*         data;
+        uint64_t      flags;
+        hsa_queue_t** queue;
+    } hsa_amd_counted_queue_acquire;
+    struct
+    {
+        hsa_queue_t* queue;
+    } hsa_amd_counted_queue_release;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    struct
+    {
+        const hsa_amd_memory_copy_op_t* copy_ops;
+        uint32_t                        num_copy_ops;
+        uint32_t                        num_dep_signals;
+        const hsa_signal_t*             dep_signals;
+    } hsa_amd_memory_async_batch_copy;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0B
+    struct
+    {
+        hsa_agent_t agent;
+        uint64_t    flags;
+    } hsa_amd_agent_preload;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0C
+    struct
+    {
+        void**              ptrs;
+        size_t*             sizes;
+        uint32_t            count;
+        uint32_t            num_dep_signals;
+        const hsa_signal_t* dep_signals;
+        hsa_signal_t        completion_signal;
+    } hsa_amd_svm_discard_batch_async;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    struct
+    {
+        hsa_signal_t signal;
+        uint32_t*    event_id;
+    } hsa_amd_signal_get_event_id;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+    struct
+    {
+        hsa_agent_t                                           agent;
+        const hsa_amd_external_semaphore_handle_descriptor_t* desc;
+        hsa_amd_external_semaphore_t*                         out_sem;
+    } hsa_amd_external_semaphore_handle_open;
+    struct
+    {
+        hsa_amd_external_semaphore_t sem;
+    } hsa_amd_external_semaphore_handle_close;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+    struct
+    {
+        hsa_fabric_handle_t*        fabric_handle;
+        hsa_amd_vmem_alloc_handle_t handle;
+        uint64_t                    flags;
+    } hsa_amd_vmem_export_fabric_handle;
+    struct
+    {
+        hsa_fabric_handle_t          fabric_handle;
+        hsa_amd_vmem_alloc_handle_t* handle;
+    } hsa_amd_vmem_import_fabric_handle;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    struct
+    {
+        hsa_agent_t                  agent;
+        hsa_amd_queue_create_desc_t* descs;
+        uint32_t                     num_descs;
+    } hsa_amd_queue_create;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_signal_external_semaphore;
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_wait_external_semaphore;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+    struct
+    {
+        hsa_agent_t                          agent;
+        const hsa_ext_image_descriptor_v2_t* image_descriptor;
+        const hsa_amd_image_descriptor_t*    image_layout;
+        const void*                          image_data;
+        hsa_access_permission_t              access_permission;
+        hsa_ext_image_t*                     image;
+    } hsa_amd_image_create_v2;
+    struct
+    {
+        uint32_t     num_agents;
+        hsa_agent_t* agents;
+        hsa_handle_t interop_handle;
+        uint32_t     flags;
+        size_t       size_hint;
+        size_t*      size;
+        void**       ptr;
+        size_t*      metadata_size;
+        const void** metadata;
+    } hsa_amd_interop_map_buffer_with_size;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

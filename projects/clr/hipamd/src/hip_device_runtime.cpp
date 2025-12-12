@@ -1,22 +1,8 @@
-/* Copyright (c) 2018 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 
@@ -457,6 +443,22 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
       break;
+    case hipDeviceAttributeDmaBufSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+      *pi = static_cast<int>(
+          g_devices[device]->devices()[0]->info().gpuDirectRdmaWithHipVmmSupported_);
+      break;
+    case hipDeviceAttributeHandleTypeFabricSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().fabric_handle_);
+      break;
+    case hipDeviceAttributeExpertSchedMode:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
+      break;
+    case hipDeviceAttributeMaxDynDataPrefetchRegions:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().maxDynDataPrefetchRegions_);
+      break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
   }
@@ -604,6 +606,8 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
+      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
   HIP_RETURN(hipSuccess);
 }
 
@@ -730,7 +734,7 @@ hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr,
     return hipErrorInvalidValue;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -777,12 +781,14 @@ hipError_t hipSetDevice(int device) {
 
   hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
-  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
+  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device
+      && hip::tls.device_->GetActiveStatus() == true) {
     HIP_RETURN(hipSuccess);
   }
 
   if (static_cast<unsigned int>(device) < g_devices.size()) {
     hip::setCurrentDevice(device);
+    hip::getCurrentDevice()->SetActiveStatus();
 
     HIP_RETURN(hipSuccess);
   } else if (g_devices.empty()) {

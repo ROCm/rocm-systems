@@ -1,25 +1,5 @@
-/*
- * Copyright (C) 2014-2018 Advanced Micro Devices, Inc. All Rights Reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- * OTHER DEALINGS IN THE SOFTWARE.
- *
- */
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 #include <sys/time.h>
 #include <sys/mman.h>
@@ -36,6 +16,9 @@
 #include <algorithm>
 
 #include "Dispatch.hpp"
+
+const unsigned int FILL_VALUE = 0x01010101;
+const unsigned int INIT_VALUE = 0x5A5A5A5A;
 
 extern unsigned int g_TestGPUsNum;
 
@@ -54,11 +37,7 @@ void KFDQMTest::TearDown() {
 
     ROUTINE_END
 }
-
-static void CreateDestroyCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::CreateDestroyCpQueue(int gpuNode) {
 
     PM4Queue queue;
 
@@ -70,16 +49,14 @@ static void CreateDestroyCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, CreateDestroyCpQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-   ASSERT_SUCCESS(KFDTest_Launch(CreateDestroyCpQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateDestroyCpQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SubmitNopCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-
+void KFDQMTest::SubmitNopCpQueue(int gpuNode) {
     PM4Queue queue;
     HsaEvent *event;
     ASSERT_SUCCESS_GPU(CreateQueueTypeEvent(false, false, gpuNode, &event), gpuNode);
@@ -90,7 +67,7 @@ static void SubmitNopCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
 
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -98,16 +75,15 @@ static void SubmitNopCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SubmitNopCpQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SubmitNopCpQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SubmitNopCpQueue(gpuNode);
+    }));
+
 
     TEST_END
 }
 
-static void SubmitPacketCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-
+void KFDQMTest::SubmitPacketCpQueue(int gpuNode) {
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
     destBuf.Fill(0xFF);
@@ -123,30 +99,29 @@ static void SubmitPacketCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
 
     EXPECT_TRUE_GPU(WaitOnValue(destBuf.As<unsigned int*>(), 0), gpuNode);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
 TEST_F(KFDQMTest, SubmitPacketCpQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SubmitPacketCpQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SubmitPacketCpQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void AllCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    int gpuIndex = pKFDQMTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+void KFDQMTest::AllCpQueues(int gpuNode) {
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
     destBuf.Fill(0xFF);
 
-    unsigned int  m_numCpQueues = pKFDQMTest->Get_NumCpQueues(gpuIndex);
+    unsigned int  m_numCpQueues = Get_NumCpQueues(gpuIndex);
     std::vector<PM4Queue> queues(m_numCpQueues);
 
     for (unsigned int qidx = 0; qidx < m_numCpQueues; ++qidx)
@@ -167,15 +142,14 @@ static void AllCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, AllCpQueues) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AllCpQueues));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AllCpQueues(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CreateDestroySdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-
+void KFDQMTest::CreateDestroySdmaQueue(int gpuNode) {
     SDMAQueue queue;
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
@@ -187,14 +161,14 @@ static void CreateDestroySdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, CreateDestroySdmaQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateDestroySdmaQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateDestroySdmaQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SubmitNopSdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
+void KFDQMTest::SubmitNopSdmaQueue(int gpuNode) {
 
     SDMAQueue queue;
 
@@ -211,14 +185,14 @@ static void SubmitNopSdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SubmitNopSdmaQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SubmitNopSdmaQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SubmitNopSdmaQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SubmitPacketSdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
+void KFDQMTest::SubmitPacketSdmaQueue(int gpuNode) {
 
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
@@ -240,19 +214,18 @@ static void SubmitPacketSdmaQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SubmitPacketSdmaQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SubmitPacketSdmaQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SubmitPacketSdmaQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void AllSdmaQueues(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::AllSdmaQueues(int gpuNode) {
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    int gpuIndex = pKFDQMTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-
-    unsigned int m_numSdmaEngines = pKFDQMTest->Get_NumSdmaEngines(gpuIndex);
-    unsigned int m_numSdmaQueuesPerEngine = pKFDQMTest->Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
+    unsigned int m_numSdmaEngines = Get_NumSdmaEngines(gpuIndex);
+    unsigned int m_numSdmaQueuesPerEngine = Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
 
     int bufSize = PAGE_SIZE;
     const unsigned int numSdmaQueues = m_numSdmaEngines * m_numSdmaQueuesPerEngine;
@@ -293,18 +266,17 @@ static void AllSdmaQueues(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, AllSdmaQueues) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AllSdmaQueues));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AllSdmaQueues(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void AllXgmiSdmaQueues(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    int gpuIndex = pKFDQMTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    unsigned int m_numSdmaXgmiEngines = pKFDQMTest->Get_NumSdmaSdmaXgmiEngines(gpuIndex);
-    unsigned int m_numSdmaQueuesPerEngine = pKFDQMTest->Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
+void KFDQMTest::AllXgmiSdmaQueues(int gpuNode) {
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    unsigned int m_numSdmaXgmiEngines = Get_NumSdmaSdmaXgmiEngines(gpuIndex);
+    unsigned int m_numSdmaQueuesPerEngine = Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
 
     int bufSize = PAGE_SIZE;
     int j;
@@ -350,23 +322,22 @@ static void AllXgmiSdmaQueues(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, AllXgmiSdmaQueues) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AllXgmiSdmaQueues));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AllXgmiSdmaQueues(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void AllQueues(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::AllQueues(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
-    int gpuIndex = pKFDQMTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
-
-    unsigned int m_numSdmaXgmiEngines = pKFDQMTest->Get_NumSdmaSdmaXgmiEngines(gpuIndex);
-    unsigned int m_numSdmaQueuesPerEngine = pKFDQMTest->Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
-    unsigned int m_numSdmaEngines = pKFDQMTest->Get_NumSdmaEngines(gpuIndex);
-    unsigned int m_numCpQueues = pKFDQMTest->Get_NumCpQueues(gpuIndex);
+    unsigned int m_numSdmaXgmiEngines = Get_NumSdmaSdmaXgmiEngines(gpuIndex);
+    unsigned int m_numSdmaQueuesPerEngine = Get_NumSdmaSdmaQueuesPerEngine(gpuIndex);
+    unsigned int m_numSdmaEngines = Get_NumSdmaEngines(gpuIndex);
+    unsigned int m_numCpQueues = Get_NumCpQueues(gpuIndex);
 
     int bufSize = PAGE_SIZE;
     unsigned int i, j;
@@ -455,7 +426,9 @@ static void AllQueues(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, AllQueues) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(AllQueues));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->AllQueues(gpuNode);
+    }));
 
     TEST_END
 }
@@ -466,13 +439,9 @@ TEST_F(KFDQMTest, AllQueues) {
  * seems to be PCIe speed switching. The problem can be worked around
  * by disabling the lowest DPM level on Fiji.
  */
-static void SdmaConcurrentCopies(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-
-    int gpuIndex = pKFDQMTest->Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+void KFDQMTest::SdmaConcurrentCopies(int gpuNode) {
+    int gpuIndex = Get_NodeInfo()->HsaGPUindexFromGpuNode(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
 #define BUFFER_SIZE (64*1024)
 #define NPACKETS 1
@@ -496,9 +465,9 @@ static void SdmaConcurrentCopies(KFDTEST_PARAMETERS* pTestParamters) {
         }
 
         for (unsigned j = 0; j < NPACKETS; j++)
-            queue.PlacePacket(
+            ASSERT_NO_FATAL_FAILURE(queue.PlacePacket(
                 SDMACopyDataPacket(queue.GetFamilyId(), dstBuf.As<char *>()+COPY_SIZE*j,
-                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE));
+                                   srcBuf.As<char *>()+COPY_SIZE*j, COPY_SIZE)));
         queue.SubmitPacket();
 
         /* Waste a variable amount of time. Submission timing
@@ -512,12 +481,12 @@ static void SdmaConcurrentCopies(KFDTEST_PARAMETERS* pTestParamters) {
          * run concurrently for a bit without getting too far ahead
          */
         if ((i & 0x7) == 0)
-            queue.Wait4PacketConsumption();
+            ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     }
     log << "Done." << std::endl;
 
-    queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202));
-    queue.Wait4PacketConsumption();
+    ASSERT_NO_FATAL_FAILURE(queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), srcBuf.As<unsigned *>(), 0x02020202)));
+    ASSERT_NO_FATAL_FAILURE(queue.Wait4PacketConsumption());
     EXPECT_TRUE_GPU(WaitOnValue(srcBuf.As<unsigned int*>(), 0x02020202), gpuNode);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
@@ -526,15 +495,14 @@ static void SdmaConcurrentCopies(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SdmaConcurrentCopies) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SdmaConcurrentCopies));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SdmaConcurrentCopies(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void DisableCpQueueByUpdateWithNullAddress(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::DisableCpQueueByUpdateWithNullAddress(int gpuNode) {
 
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
@@ -571,7 +539,7 @@ static void DisableCpQueueByUpdateWithNullAddress(KFDTEST_PARAMETERS* pTestParam
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -579,15 +547,14 @@ static void DisableCpQueueByUpdateWithNullAddress(KFDTEST_PARAMETERS* pTestParam
 TEST_F(KFDQMTest, DisableCpQueueByUpdateWithNullAddress) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(DisableCpQueueByUpdateWithNullAddress));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->DisableCpQueueByUpdateWithNullAddress(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void DisableSdmaQueueByUpdateWithNullAddress(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-
+void KFDQMTest::DisableSdmaQueueByUpdateWithNullAddress(int gpuNode) {
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
     destBuf.Fill(0xFFFFFFFF);
@@ -625,15 +592,14 @@ static void DisableSdmaQueueByUpdateWithNullAddress(KFDTEST_PARAMETERS* pTestPar
 TEST_F(KFDQMTest, DisableSdmaQueueByUpdateWithNullAddress) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(DisableSdmaQueueByUpdateWithNullAddress));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->DisableSdmaQueueByUpdateWithNullAddress(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void DisableCpQueueByUpdateWithZeroPercentage(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-
+void KFDQMTest::DisableCpQueueByUpdateWithZeroPercentage(int gpuNode) {
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
 
     destBuf.Fill(0xFFFFFFFF);
@@ -672,7 +638,7 @@ static void DisableCpQueueByUpdateWithZeroPercentage(KFDTEST_PARAMETERS* pTestPa
     queue.Wait4PacketConsumption(event);
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
@@ -681,14 +647,14 @@ static void DisableCpQueueByUpdateWithZeroPercentage(KFDTEST_PARAMETERS* pTestPa
 TEST_F(KFDQMTest, DisableCpQueueByUpdateWithZeroPercentage) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(DisableCpQueueByUpdateWithZeroPercentage));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->DisableCpQueueByUpdateWithZeroPercentage(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CreateQueueStressSingleThreaded(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
+void KFDQMTest::CreateQueueStressSingleThreaded(int gpuNode) {
 
     static const HSAuint64 TEST_TIME_SEC = 15;
 
@@ -727,16 +693,16 @@ static void CreateQueueStressSingleThreaded(KFDTEST_PARAMETERS* pTestParamters) 
 TEST_F(KFDQMTest, CreateQueueStressSingleThreaded) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateQueueStressSingleThreaded));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateQueueStressSingleThreaded(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void OverSubscribeCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId == FAMILY_CI || m_FamilyId == FAMILY_KV) {
         LOG() << "Skipping test: CI doesn't have HW scheduling." << std::endl;
@@ -773,8 +739,14 @@ static void OverSubscribeCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         queues[qidx].SubmitPacket();
 
-    // Delaying for 5 seconds in order to get all the results
-    Delay(5000);
+    // Delaying in order to get all the results
+    if(g_IsEmuMode) {
+        LOG() << "Emulation mode detected, delaying for 1 min to allow all packets to be processed." << std::endl;
+        Delay(60000);
+    } else {
+        LOG() << "Delaying for 5 seconds to allow all packets to be processed." << std::endl;
+        Delay(5000);
+    }
 
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         EXPECT_TRUE_GPU(queues[qidx].AllPacketsSubmitted(), gpuNode)<< "QueueId=" << qidx;;
@@ -787,7 +759,9 @@ static void OverSubscribeCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, OverSubscribeCpQueues) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(OverSubscribeCpQueues));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->OverSubscribeCpQueues(gpuNode);
+    }));
 
     TEST_END
 }
@@ -850,14 +824,11 @@ HSAint64 KFDQMTest::GetAverageTimeConsumedwithCUMask(int node, uint32_t* mask, u
  * Apply CU masking in a linear fashion, adding 1 CU per iteration
  * until all Shader Engines are full
  */
-void BasicCuMaskingLinear(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+void KFDQMTest::BasicCuMaskingLinear(int gpuNode) {
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId >= FAMILY_VI) {
-        const HsaNodeProperties *pNodeProperties = pKFDQMTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+        const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
         uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
         uint32_t numSEs = pNodeProperties->NumShaderBanks;
         LOG() << std::dec << "# Compute cores: " << pNodeProperties->NumFComputeCores << std::endl;
@@ -875,23 +846,23 @@ void BasicCuMaskingLinear(KFDTEST_PARAMETERS* pTestParamters) {
             mask[i] = 0x0;
 
         /* Execute once to get any HW optimizations out of the way */
-        pKFDQMTest->TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+        TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
 
         LOG() << "Getting baseline performance numbers (CU Mask: 0x1)" << std::endl;
-        TimewithCU1 = pKFDQMTest->GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
+        TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
         for (int nCUs = 2; nCUs <= ActiveCU; nCUs++) {
             int maskIndex = (nCUs - 1) / 32;
             mask[maskIndex] |= 1 << ((nCUs - 1) % 32);
 
-            TimewithCU = pKFDQMTest->TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+            TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
             ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
 
             LOG() << "Expected performance of " << nCUs << " CUs vs 1 CU:" << std::endl;
-            LOG() << std::setprecision(2) << pKFDQMTest->CuNegVariance << " <= " << std::fixed << std::setprecision(8)
-                  << ratio << " <= " << std::setprecision(2) << pKFDQMTest->CuPosVariance << std::endl;
+            LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
+                  << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
-            EXPECT_TRUE((ratio >= pKFDQMTest->CuNegVariance) && (ratio <= pKFDQMTest->CuPosVariance));
+            EXPECT_TRUE((ratio >= CuNegVariance) && (ratio <= CuPosVariance));
 
             RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
         }
@@ -903,7 +874,9 @@ void BasicCuMaskingLinear(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, BasicCuMaskingLinear) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicCuMaskingLinear));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicCuMaskingLinear(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1249,18 +1222,16 @@ static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, H
  * 3) Changes to validation code.
  *
  */
-static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
+void KFDQMTest::extendedCuMasking(int gpuNode) {
 
-    int gpuNode = pTestParameters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParameters->pTestObject;
-    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId >= FAMILY_GFX12) {  // Supporting GFX12 and up for now
 
         // Lock to prevent interleave of logging on multigpu (multithreaded) testing
         static std::mutex logMutex;
 
-        const HsaNodeProperties *pProps = pKFDQMTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+        const HsaNodeProperties *pProps = Get_NodeInfo()->GetNodeProperties(gpuNode);
         const uint32_t activeCU = (pProps->NumFComputeCores / pProps->NumSIMDPerCU);
         const uint32_t numSEs = pProps->NumShaderBanks;
         const uint32_t numSAperSE = pProps->NumArrays;
@@ -1335,7 +1306,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         out_data_t *pOutput = outputBuffer.As<out_data_t *>();
 
         // Assemble shader
-        Assembler *pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+        Assembler *pAsm = GetAssemblerFromNodeId(gpuNode);
         ASSERT_NOTNULL_GPU(pAsm, gpuNode);
         ASSERT_SUCCESS_GPU(pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()), gpuNode);
 
@@ -1363,7 +1334,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
             }
 
             // Check if what we detected is consistent with info from KFD
-            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+            EXPECT_TRUE_GPU(g_IsEmuMode || (activeCU + inactiveCount) == maxCU, gpuNode);
 
             maskConfig.pInactiveMask = inactiveMask;
 
@@ -1505,7 +1476,9 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
 TEST_F(KFDQMTest, ExtendedCuMasking) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(extendedCuMasking));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->extendedCuMasking(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1524,14 +1497,12 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
  * will not yield viable results when an uneven distribution of CUs is used over multiple
  * shader engines (e.g. 0x1000100030003), until the HW changes how it schedules work.
  */
-void BasicCuMaskingEven(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::BasicCuMaskingEven(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId >= FAMILY_VI) {
-        const HsaNodeProperties *pNodeProperties = pKFDQMTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+        const HsaNodeProperties *pNodeProperties = Get_NodeInfo()->GetNodeProperties(gpuNode);
         uint32_t ActiveCU = (pNodeProperties->NumFComputeCores / pNodeProperties->NumSIMDPerCU);
         uint32_t numShaderEngines = pNodeProperties->NumShaderBanks;
         if (numShaderEngines == 1) {
@@ -1565,10 +1536,10 @@ void BasicCuMaskingEven(KFDTEST_PARAMETERS* pTestParamters) {
         }
 
         /* Execute once to get any HW optimizations out of the way */
-        pKFDQMTest->TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+        TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
 
         LOG() << "Getting baseline performance numbers (1 CU per SE)" << std::endl;
-        TimewithCU1 = pKFDQMTest->GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
+        TimewithCU1 = GetAverageTimeConsumedwithCUMask(gpuNode, mask, maskNumBits, 3);
 
         /* Each loop will add 1 more CU per SE. We use the mod and divide to handle
          * when SEs aren't distributed in multiples of 32 (e.g. Tonga)
@@ -1582,14 +1553,14 @@ void BasicCuMaskingEven(KFDTEST_PARAMETERS* pTestParamters) {
             }
             int nCUs = x + 1;
 
-            TimewithCU = pKFDQMTest->TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
+            TimewithCU = TimeConsumedwithCUMask(gpuNode, mask, maskNumBits);
             ratio = (double)(TimewithCU1) / ((double)(TimewithCU) * nCUs);
 
             LOG() << "Expected performance of " << nCUs << " CU(s)/SE vs 1 CU/SE:" << std::endl;
-            LOG() << std::setprecision(2) << pKFDQMTest->CuNegVariance << " <= " << std::fixed << std::setprecision(8)
-                  << ratio << " <= " << std::setprecision(2) << pKFDQMTest->CuPosVariance << std::endl;
+            LOG() << std::setprecision(2) << CuNegVariance << " <= " << std::fixed << std::setprecision(8)
+                  << ratio << " <= " << std::setprecision(2) << CuPosVariance << std::endl;
 
-            EXPECT_TRUE_GPU((ratio >= pKFDQMTest->CuNegVariance) && (ratio <= pKFDQMTest->CuPosVariance), gpuNode);
+            EXPECT_TRUE_GPU((ratio >= CuNegVariance) && (ratio <= CuPosVariance), gpuNode);
 
             RECORD(ratio) << "Ratio-" << nCUs << "-CUs";
         }
@@ -1601,19 +1572,19 @@ void BasicCuMaskingEven(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, BasicCuMaskingEven) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicCuMaskingEven));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicCuMaskingEven(gpuNode);
+    }));
 
     TEST_END
 }
 
-void testQueuePriority(KFDTEST_PARAMETERS* pTestParamters, bool isSamePipe)
+void KFDQMTest::testQueuePriority(int gpuNode, bool isSamePipe)
 {
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     if (m_FamilyId < FAMILY_VI) {
@@ -1679,7 +1650,7 @@ void testQueuePriority(KFDTEST_PARAMETERS* pTestParamters, bool isSamePipe)
         dispatch[i].Submit(queue[i]);
 
     while (activeTaskBitmap > 0) {
-        hsaKmtWaitOnMultipleEvents(pHsaEvent, numEvent, false, g_TestTimeOut);
+        HSAKMT_CALL(hsaKmtWaitOnMultipleEvents, m_hsakmt_current_ctx, pHsaEvent, numEvent, false, g_TestTimeOut);
         for (i = 0; i < 2; i++) {
             if ((activeTaskBitmap & (1 << i)) && (syncBuffer[i] == pHsaEvent[i]->EventId)) {
                 endTime[i] = GetSystemTickCountInMicroSec();
@@ -1699,33 +1670,37 @@ void testQueuePriority(KFDTEST_PARAMETERS* pTestParamters, bool isSamePipe)
     }
 }
 
-static void QueuePriorityOnDifferentPipe(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::QueuePriorityOnDifferentPipe(int gpuNode) {
 
-	testQueuePriority(pTestParamters, false);
+	testQueuePriority(gpuNode, false);
 }
 
 TEST_F(KFDQMTest, QueuePriorityOnDifferentPipe) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(QueuePriorityOnDifferentPipe));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->QueuePriorityOnDifferentPipe(gpuNode);
+    }));
 
     TEST_END
 }
 
-void QueuePriorityOnSamePipe(KFDTEST_PARAMETERS* pTestParamters) {
+void  KFDQMTest::QueuePriorityOnSamePipe(int gpuNode) {
 
-    testQueuePriority(pTestParamters, true);
+    testQueuePriority(gpuNode, true);
 }
 
 TEST_F(KFDQMTest, QueuePriorityOnSamePipe) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(QueuePriorityOnSamePipe));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->QueuePriorityOnSamePipe(gpuNode);
+    }));
 
     TEST_END
 }
 
-void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, void* pDstBuf, int node) {
+void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* arg0, void* arg1, int node) {
     PM4Queue queue;
 
     if (node == -1)
@@ -1734,7 +1709,7 @@ void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, vo
     ASSERT_GE_GPU(node, 0, node) << "failed to get GPU Node";
 
     Dispatch dispatch(isaBuffer);
-    dispatch.SetArgs(pSrcBuf, pDstBuf);
+    dispatch.SetArgs(arg0, arg1);
     dispatch.SetDim(1, 1, 1);
 
     ASSERT_SUCCESS_GPU(queue.Create(node), node);
@@ -1745,69 +1720,121 @@ void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, vo
     EXPECT_SUCCESS_GPU(queue.Destroy(), node);
 }
 
-void EmptyDispatch(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::EmptyDispatch(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
 
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(NoopIsa, isaBuffer.As<char*>()), gpuNode);
 
-    pKFDQMTest->SyncDispatch(isaBuffer, NULL, NULL, gpuNode);
+    SyncDispatch(isaBuffer, NULL, NULL, gpuNode);
 
 }
 
 TEST_F(KFDQMTest, EmptyDispatch) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(EmptyDispatch));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->EmptyDispatch(gpuNode);
+    }));
 
     TEST_END
 }
 
-void SimpleWriteDispatch(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::SimpleWriteDispatch(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
     HsaMemoryBuffer srcBuffer(PAGE_SIZE, gpuNode, false);
     HsaMemoryBuffer destBuffer(PAGE_SIZE, gpuNode);
 
-    srcBuffer.Fill(0x01010101);
+    srcBuffer.Fill(FILL_VALUE);
 
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()),gpuNode);
 
-    pKFDQMTest->SyncDispatch(isaBuffer, srcBuffer.As<void*>(), destBuffer.As<void*>(), gpuNode);
+    SyncDispatch(isaBuffer, srcBuffer.As<void*>(), destBuffer.As<void*>(), gpuNode);
 
-    EXPECT_EQ(destBuffer.As<unsigned int*>()[0], 0x01010101);
+    EXPECT_EQ(destBuffer.As<unsigned int*>()[0], FILL_VALUE);
 
 }
 
 TEST_F(KFDQMTest, SimpleWriteDispatch) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SimpleWriteDispatch));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SimpleWriteDispatch(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MultipleCpQueuesStressDispatch(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::GpuMemCopyTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AR) {
+        LOG() << "Skipping test: MultipleWordsDispatch test not yet available for this family id." << std::endl;
+        return;
+    }
+
+    const size_t bufSize = PAGE_SIZE;
+    HsaMemoryBuffer srcBuffer(bufSize, gpuNode, false);
+    HsaMemoryBuffer dstBuffer(bufSize, gpuNode, false);
+    HsaMemoryBuffer dstLocalBuffer(bufSize, gpuNode, false, true);
+    HsaMemoryBuffer verifyBuffer(bufSize, gpuNode, false);
+
+    srcBuffer.Fill(FILL_VALUE, 0, bufSize);
+
+    // SDMA copy
+    dstBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, true));
+
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(dstBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // Blit kernel copy
+    dstBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, false));
+
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(dstBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // SDMA copy to local memory
+    verifyBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstLocalBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, true));
+    ASSERT_TRUE(GPUMemCopy(verifyBuffer.As<void*>(), dstLocalBuffer.As<void*>(), bufSize, gpuNode, true));
+    
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(verifyBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // Blit kernel copy to local memory
+    verifyBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstLocalBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, false));
+    ASSERT_TRUE(GPUMemCopy(verifyBuffer.As<void*>(), dstLocalBuffer.As<void*>(), bufSize, gpuNode, false));
+    
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(verifyBuffer.As<unsigned int*>()[i], FILL_VALUE);
+}
+
+TEST_F(KFDQMTest, GpuMemCopyTest) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GpuMemCopyTest(gpuNode);
+    }));
+
+    TEST_END;
+}
+
+void KFDQMTest::MultipleCpQueuesStressDispatch(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     static const unsigned int MAX_CP_QUEUES = 16;
@@ -1867,15 +1894,14 @@ static void MultipleCpQueuesStressDispatch(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, MultipleCpQueuesStressDispatch) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(MultipleCpQueuesStressDispatch));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MultipleCpQueuesStressDispatch(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CpuWriteCoherence(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::CpuWriteCoherence(int gpuNode) {
 
     PM4Queue queue;
 
@@ -1909,25 +1935,24 @@ static void CpuWriteCoherence(KFDTEST_PARAMETERS* pTestParamters) {
 
     WaitOnValue(destBuf.As<unsigned int*>(), 0x42);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 }
 
 TEST_F(KFDQMTest, CpuWriteCoherence) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CpuWriteCoherence));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CpuWriteCoherence(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CreateAqlCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::CreateAqlCpQueue(int gpuNode) {
 
     AqlQueue queue;
 
-    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */g_baseTest->NeedNonPagedWptr(gpuNode));
+    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */NeedNonPagedWptr(gpuNode));
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode, PAGE_SIZE, pointers.As<HSAuint64 *>()), gpuNode);
 
@@ -1937,16 +1962,16 @@ static void CreateAqlCpQueue(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, CreateAqlCpQueue) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(CreateAqlCpQueue));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CreateAqlCpQueue(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void QueueLatency(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::QueueLatency(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     PM4Queue queue;
     const int queueSize = PAGE_SIZE * 2;
@@ -2032,7 +2057,7 @@ static void QueueLatency(KFDTEST_PARAMETERS* pTestParamters) {
     queue.SubmitPacket();
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     /* qts[i] records the timestamp of the end of packet[i] which is
      * approximate that of the beginging of packet[i+1].
      * The workload total is [0, skip], [skip+1, slots-1].
@@ -2077,15 +2102,14 @@ static void QueueLatency(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, QueueLatency) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(QueueLatency));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->QueueLatency(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void CpQueueWraparound(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::CpQueueWraparound(int gpuNode) {
 
     PM4Queue queue;
 
@@ -2108,7 +2132,7 @@ static void CpQueueWraparound(KFDTEST_PARAMETERS* pTestParamters) {
         WaitOnValue(destBuf.As<unsigned int*>(), pktIdx);
     }
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -2116,15 +2140,14 @@ static void CpQueueWraparound(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, CpQueueWraparound) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(CpQueueWraparound));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->CpQueueWraparound(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SdmaQueueWraparound(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::SdmaQueueWraparound(int gpuNode) {
 
     int bufSize = PAGE_SIZE;
 
@@ -2162,7 +2185,9 @@ static void SdmaQueueWraparound(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SdmaQueueWraparound) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(SdmaQueueWraparound));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SdmaQueueWraparound(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2186,13 +2211,10 @@ unsigned int AtomicIncThread(void* pCtx) {
     return 0;
 }
 
-static void Atomics(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::Atomics(int gpuNode) {
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     if (!hasPciAtomicsSupport(gpuNode)) {
@@ -2211,7 +2233,7 @@ static void Atomics(KFDTEST_PARAMETERS* pTestParamters) {
     dispatch.SetArgs(destBuf.As<void*>(), NULL);
     dispatch.SetDim(1024, 1, 1);
 
-    hsaKmtSetMemoryPolicy(gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
+    HSAKMT_CALL(hsaKmtSetMemoryPolicy, m_hsakmt_current_ctx, gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
 
@@ -2249,44 +2271,9 @@ static void Atomics(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, Atomics) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(Atomics));
-
-    TEST_END
-}
-
-TEST_F(KFDQMTest, mGPUShareBO) {
-    TEST_START(TESTPROFILE_RUNALL);
-
-    unsigned int src_node = 2;
-    unsigned int dst_node = 1;
-
-    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
-        src_node = g_TestNodeId;
-        dst_node = g_TestDstNodeId;
-    }
-
-    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false, false, false);
-
-    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node);
-    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node);
-
-    /* Handle ISA to write to local memory BO */
-    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true/*zero*/, false/*local*/, true/*exec*/);
-    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true/*zero*/, false/*local*/, true/*exec*/);
-
-    srcNodeMem.Fill(0x05050505);
-
-    ASSERT_SUCCESS(m_pAsm->RunAssemble(CopyDwordIsa));
-
-    m_pAsm->CopyInstrStream(isaBufferSrc.As<char*>());
-    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void *>(), src_node);
-
-    m_pAsm->CopyInstrStream(isaBufferDst.As<char*>());
-    SyncDispatch(isaBufferDst, shared_addr.As<void *>(), dstNodeMem.As<void*>(), dst_node);
-
-    EXPECT_EQ(dstNodeMem.As<unsigned int*>()[0], 0x05050505);
-
-    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(&dst_node, 1));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->Atomics(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2300,7 +2287,7 @@ sdma_copy(HSAuint32 node, void *src, void *const dst[], int n, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(), dst, src, n, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
 }
 
 static void
@@ -2312,7 +2299,70 @@ sdma_fill(HSAint32 node, void *dst, unsigned int data, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMAFillDataPacket(sdmaQueue.GetFamilyId(), dst, data, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
+}
+
+TEST_F(KFDQMTest, mGPUShareBO) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    if (gpuNodes.size() < 2) {
+        LOG() << "Skipping test: Test requires at least two GPUs." << std::endl;
+        return;
+    }
+
+    unsigned int src_node = gpuNodes[0];
+    unsigned int dst_node = gpuNodes[1];
+
+    if (g_TestDstNodeId != -1 && g_TestNodeId != -1) {
+        src_node = g_TestNodeId;
+        dst_node = g_TestDstNodeId;
+    }
+
+    LOG() << "Testing VRAM → System BO → VRAM transfer" << std::endl;
+
+    // Shared System BO (intermediary) - GTT
+    HsaMemoryBuffer shared_addr(PAGE_SIZE, dst_node, true, false/*GTT*/, false, false);
+    unsigned int nodes[2] = {src_node, dst_node};
+    ASSERT_SUCCESS(shared_addr.MapMemToNodes(nodes, 2));
+
+    // Source and destination in VRAM
+    HsaMemoryBuffer srcNodeMem(PAGE_SIZE, src_node, false/*no zero*/, true/*VRAM*/);
+    HsaMemoryBuffer dstNodeMem(PAGE_SIZE, dst_node, false/*no zero*/, true/*VRAM*/);
+
+    // ISA buffers for shaders
+    HsaMemoryBuffer isaBufferSrc(PAGE_SIZE, src_node, true, false, true);
+    HsaMemoryBuffer isaBufferDst(PAGE_SIZE, dst_node, true, false, true);
+
+    // Step 1: Fill srcNodeMem VRAM with test pattern using SDMA
+    sdma_fill(src_node, srcNodeMem.As<void*>(), 0x05050505, PAGE_SIZE);
+
+    // Step 2 & 3: GPU shader transfers
+    Assembler* pAsmSrc = GetAssemblerFromNodeId(src_node);
+    Assembler* pAsmDst = GetAssemblerFromNodeId(dst_node);
+    ASSERT_NOTNULL(pAsmSrc);
+    ASSERT_NOTNULL(pAsmDst);
+
+    // GPU1: srcNodeMem (VRAM) → shared_addr (System BO)
+    ASSERT_SUCCESS(pAsmSrc->RunAssemble(CopyDwordIsa));
+    pAsmSrc->CopyInstrStream(isaBufferSrc.As<char*>());
+    SyncDispatch(isaBufferSrc, srcNodeMem.As<void*>(), shared_addr.As<void*>(), src_node);
+
+    // GPU2: shared_addr (System BO) → dstNodeMem (VRAM)
+    ASSERT_SUCCESS(pAsmDst->RunAssemble(CopyDwordIsa));
+    pAsmDst->CopyInstrStream(isaBufferDst.As<char*>());
+    SyncDispatch(isaBufferDst, shared_addr.As<void*>(), dstNodeMem.As<void*>(), dst_node);
+
+    // Step 4: Verify dstNodeMem VRAM - copy to GTT and read
+    HsaMemoryBuffer verifyBuffer(PAGE_SIZE, dst_node, true, false/*GTT*/);
+    void* dst_array[1] = {verifyBuffer.As<void*>()};
+    sdma_copy(dst_node, dstNodeMem.As<void*>(), dst_array, 1, PAGE_SIZE);
+
+    EXPECT_EQ(verifyBuffer.As<unsigned int*>()[0], 0x05050505);
+
+    EXPECT_SUCCESS(shared_addr.UnmapMemToNodes(nodes, 2));
+
+    TEST_END
 }
 
 TEST_F(KFDQMTest, P2PTest) {
@@ -2377,17 +2427,17 @@ TEST_F(KFDQMTest, P2PTest) {
     unsigned int end = size / sizeof(HSAuint32) - 1;
 
     /* 1. Allocate a system buffer and allow the access to GPUs */
-    EXPECT_SUCCESS(hsaKmtAllocMemory(0, size, m_MemoryFlags,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0, size, m_MemoryFlags,
                                      reinterpret_cast<void **>(&sysBuf)));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(sysBuf, size, NULL,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, sysBuf, size, NULL,
                                              mapFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
 #define MAGIC_NUM 0xdeadbeaf
 
     /* First GPU fills mem with MAGIC_NUM */
     void *src, *dst;
     HSAuint32 cur = nodes[0], next;
-    ASSERT_SUCCESS(hsaKmtAllocMemory(cur, size, memFlags, reinterpret_cast<void**>(&src)));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(src, size, NULL));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, cur, size, memFlags, reinterpret_cast<void**>(&src)));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src, size, NULL));
     sdma_fill(cur, src, MAGIC_NUM, size);
 
     for (unsigned i = 1; i <= nodes.size(); i++) {
@@ -2407,8 +2457,8 @@ TEST_F(KFDQMTest, P2PTest) {
             if (!m_NodeInfo.IsPeerAccessibleByNode(next, cur))
                 continue;
 
-            ASSERT_SUCCESS(hsaKmtAllocMemory(next, size, memFlags, reinterpret_cast<void**>(&dst)));
-            ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(dst, size, NULL));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, next, size, memFlags, reinterpret_cast<void**>(&dst)));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, dst, size, NULL));
         }
 
         LOG() << "Test " << cur << " -> " << next << std::endl;
@@ -2422,24 +2472,22 @@ TEST_F(KFDQMTest, P2PTest) {
 
         LOG() << "PASS " << cur << " -> " << next << std::endl;
 
-        EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(src));
-        EXPECT_SUCCESS(hsaKmtFreeMemory(src, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, src, size));
 
         cur = next;
         src = dst;
     }
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(sysBuf));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(sysBuf, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, sysBuf));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, sysBuf, size));
 
     TEST_END
 }
 
-static void PM4EventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::PM4EventInterrupt(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     const HSAuint64 bufSize = PAGE_SIZE;
     const int packetCount = bufSize / sizeof(unsigned int);
@@ -2483,7 +2531,7 @@ static void PM4EventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
             queue[i].SubmitPacket();
 
         for (int i = 0; i < numPM4Queue; i++) {
-            EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(event[i], g_TestTimeOut), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut), gpuNode);
             EXPECT_EQ_GPU(buf[i][0], 0xdeadbeaf, gpuNode);
             EXPECT_EQ_GPU(buf[i][packetCount - 1], 0xdeadbeaf, gpuNode);
             memset(buf[i], 0, bufSize);
@@ -2491,7 +2539,7 @@ static void PM4EventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 
         for (int i = 0; i < numPM4Queue; i++) {
             EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-            EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
         }
     }
 
@@ -2502,16 +2550,15 @@ static void PM4EventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, PM4EventInterrupt) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(PM4EventInterrupt));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PM4EventInterrupt(gpuNode);
+    }));
 
     TEST_END
 }
 
 #include "KFDTestUtilQueue.hpp"
-static void SdmaEventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
-
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
+void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
     const HSAuint64 bufSize = 4 << 20;
     HsaMemoryBuffer srcBuf(bufSize, 0); // System memory.
@@ -2568,7 +2615,7 @@ static void SdmaEventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 TimeStamp *ts = tsbuf + i * 32;
-                HSAKMT_STATUS ret = hsaKmtWaitOnEvent(event[i], g_TestTimeOut);
+                HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut);
 
                 if (dst[i][0] != src[0])
                     WARN() << "SDMACopyData FAIL! " << std::dec
@@ -2585,7 +2632,7 @@ static void SdmaEventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 
                     queue[i].SubmitPacket();
 
-                    if (hsaKmtWaitOnEvent(event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
+                    if (HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
                         WARN() << "The timeout event is signaled!" << std::endl;
                     else
                         WARN() << "The timeout event is lost after resubmit!" << std::endl;
@@ -2601,7 +2648,7 @@ static void SdmaEventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-                EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
             }
         }
 
@@ -2613,17 +2660,17 @@ static void SdmaEventInterrupt(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, SdmaEventInterrupt) {
     TEST_START(TESTPROFILE_RUNALL)
 
-     ASSERT_SUCCESS(KFDTest_Launch(SdmaEventInterrupt));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SdmaEventInterrupt(gpuNode);
+    }));
 
     TEST_END
 }
 
 #define DOORBELL_WRITE_USE_SDMA
-static void GPUDoorbellWrite(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDQMTest::GPUDoorbellWrite(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParamters->pTestObject;
-    HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     HsaMemoryBuffer destBuf(PAGE_SIZE, 0, true);
     PM4Queue pm4Queue;
@@ -2708,7 +2755,9 @@ static void GPUDoorbellWrite(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDQMTest, GPUDoorbellWrite) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(GPUDoorbellWrite));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GPUDoorbellWrite(gpuNode);
+    }));
 
     TEST_END
 }
@@ -2728,7 +2777,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
     // System memory mapping on GPU
     QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
 
-    EXPECT_SUCCESS(hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2736,10 +2786,11 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                PAGE_SIZE,
                                NULL,
                                &QueueResources));
-    EXPECT_SUCCESS(hsaKmtDestroyQueue(QueueResources.QueueId));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId));
 
     // CP Queue creation should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2749,7 +2800,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2759,7 +2811,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // CP queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2769,7 +2822,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2778,8 +2832,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                NULL,
                                &QueueResources));
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>()));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>()));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE));
 
     //
     // This following negative test will evict user queues, must execute in child process,
@@ -2798,7 +2852,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
         memset(&QueueResources, 0, sizeof(QueueResources));
 
-        status = hsaKmtCreateQueue(defaultGPUNode,
+        status = HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2812,7 +2867,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         // Update queue percentage 0 to set queue inactive in order to get queue info CWSR area
-        status = hsaKmtUpdateQueue(QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
+        status = HSAKMT_CALL(hsaKmtUpdateQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
                                      QueueBuf->As<unsigned int*>(), PAGE_SIZE, NULL);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "update queue failed." << std::endl;
@@ -2820,7 +2875,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         HsaQueueInfo QueueInfo;
-        status = hsaKmtGetQueueInfo(QueueResources.QueueId, &QueueInfo);
+        status = HSAKMT_CALL(hsaKmtGetQueueInfo, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, &QueueInfo);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "get queue info failed." << std::endl;
             goto err_exit;
@@ -2831,13 +2886,13 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         munmap(cwsr_addr, PAGE_SIZE);
 
         // unmap and free queue ring buffer should fail before the queue is destroyed
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf should fail." << std::endl;
             goto err_exit;
         }
 
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf should fail." << std::endl;
             goto err_exit;
@@ -2846,19 +2901,19 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         exit_code = 0;
 
 err_exit:
-        status = hsaKmtDestroyQueue(QueueResources.QueueId);
+        status = HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "destroy queue failed." << std::endl;
             exit_code = 1;
         }
 free_exit:
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf failed." << std::endl;
             exit_code = 1;
         }
 
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf failed." << std::endl;
             exit_code = 1;

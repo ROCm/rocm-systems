@@ -76,19 +76,16 @@ static inline uint32_t checkCWSREnabled() {
  * 3: 1024 work-items (multi-wave), CWSR threshold of 1000
  */
 
-static void BasicTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDCWSRTest::BasicTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
-
-    const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
-    int num_witems = std::get<0>(pKFDCWSRTest->GetParam());
-    int cwsr_thresh = std::get<1>(pKFDCWSRTest->GetParam());
+    int num_witems = std::get<0>(GetParam());
+    int cwsr_thresh = std::get<1>(GetParam());
     // Increase delay on emulator by this factor.
     const int delayMult = (g_IsEmuMode ? 20 : 1);
 
@@ -160,7 +157,9 @@ static void BasicTest(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_P(KFDCWSRTest, BasicTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -194,15 +193,12 @@ INSTANTIATE_TEST_CASE_P(
  * Preempt runlist. One or both queues must interrupt context restore to preempt.
  */
 
-static void InterruptRestore(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDCWSRTest::InterruptRestore(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDCWSRTest* pKFDCWSRTest = (KFDCWSRTest*)pTestParamters->pTestObject;
-
-    const HSAuint32 m_FamilyId = pKFDCWSRTest->GetFamilyIdFromNodeId(gpuNode);
+    const HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDCWSRTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
    if ((m_FamilyId >= FAMILY_VI) && (checkCWSREnabled())) {
@@ -248,7 +244,9 @@ static void InterruptRestore(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_F(KFDCWSRTest, InterruptRestore) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(InterruptRestore));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->InterruptRestore(gpuNode);
+    }));
 
     TEST_END
 }

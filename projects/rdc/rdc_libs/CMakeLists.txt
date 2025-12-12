@@ -58,7 +58,7 @@ find_program(GIT NAMES git)
 
 # Debian package specific variables
 # Set a default value for the package version
-get_version_from_tag("1.2.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.3.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 
 # VERSION_* variables should be set by get_version_from_tag
 set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
@@ -84,7 +84,7 @@ add_subdirectory(rdc_modules/rdc_rocr)
 add_subdirectory(rdc_modules/rdc_rocp)
 
 # add librdc_rvs.so to RDC_LIB_MODULES
-add_subdirectory(rdc_modules/rdc_rvs)
+#add_subdirectory(rdc_modules/rdc_rvs)
 
 # Create cmake target
 # Add all targets to the build-tree export set
@@ -115,7 +115,12 @@ if(RDC_LIB_MODULES)
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC} COMPONENT ${CLIENT_COMPONENT}
     )
-    set_target_properties(${RDC_LIB_MODULES} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+    set_target_properties(
+        ${RDC_LIB_MODULES}
+        PROPERTIES
+            INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+            THEROCK_INSTALL_RPATH_ORIGIN "${CMAKE_INSTALL_LIBDIR}/${RDC}"
+    )
 endif()
 
 install(

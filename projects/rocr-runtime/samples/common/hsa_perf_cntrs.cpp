@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -89,32 +89,32 @@ hsa_status_t RocrPerfCntrApp::Init(hsa_agent_t agent) {
   // Add SQ counter for number of waves
   CntrInfo* info = NULL;
   cntrList_.reserve(23);
-  
+
   char *cntrChoice = getenv("IOMMU");
   if (cntrChoice == NULL) {
     // Event for number of Waves
     info = new CntrInfo(0x4, "SQ_SQ_PERF_SEL_WAVES", NULL,
                                   0x0E, NULL, 0x00, 0xFFFFFFFF, CntrValCnf_Exact);
     cntrList_.push_back(info);
-    
+
     // Event for number of Threads
     info = new CntrInfo(0xE, "SQ_SQ_PERF_SEL_ITEMS", NULL,
                                   0x0E, NULL, 0x00, 0xFFFFFFFF, CntrValCnf_Exact);
     cntrList_.push_back(info);
-  
+
   } else {
 
     // Program to collect event number 4
     info = new CntrInfo(0x4, "Iommu_Cntr_4", NULL,
                         0x63, NULL, 0x00, 0xFFFFFFFF, CntrValCnf_None);
     cntrList_.push_back(info);
-  
+
     // Program to collect event number 6
     info = new CntrInfo(0x6, "Iommu_Cntr_6", NULL,
                         0x63, NULL, 0x00, 0xFFFFFFFF, CntrValCnf_None);
     cntrList_.push_back(info);
   }
-  
+
 
   // Create an instance of Perf Mgr
   hsa_status_t status;
@@ -127,7 +127,7 @@ hsa_status_t RocrPerfCntrApp::Init(hsa_agent_t agent) {
   uint32_t size = GetNumPerfCntrs();
   for (uint32_t idx = 0; idx < size; idx++) {
     info = GetPerfCntr(idx);
-    
+
     // Obtain the handle of perf block
     if (info->blkHndl == NULL) {
       status = hsa_ext_tools_get_counter_block_by_id(perfMgr_, info->blkId, &info->blkHndl);
@@ -154,7 +154,7 @@ hsa_status_t RocrPerfCntrApp::Init(hsa_agent_t agent) {
 
 // Register Pre and Post dispatch callbacks
 void RocrPerfCntrApp::RegisterCallbacks(hsa_queue_t *queue){
-  
+
   hsa_status_t status;
   status = hsa_ext_tools_set_callback_functions(queue, PreDispatchCallback, PostDispatchCallback);
   assert((status == HSA_STATUS_SUCCESS) && "Error in registering Pre & Post Dispatch Callbacks");

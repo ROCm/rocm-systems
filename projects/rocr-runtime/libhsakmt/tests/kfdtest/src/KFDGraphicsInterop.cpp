@@ -26,12 +26,9 @@
 #include "Dispatch.hpp"
 #include "PM4Queue.hpp"
 
-static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDGraphicsInterop::RegisterGraphicsHandle(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDGraphicsInterop* pKFDGraphicsInterop = (KFDGraphicsInterop*)pTestParamters->pTestObject;
-
-    HsaNodeInfo* m_NodeInfo = pKFDGraphicsInterop->Get_NodeInfo();
+    HsaNodeInfo* m_NodeInfo = Get_NodeInfo();
     const HsaNodeProperties *pNodeProps = m_NodeInfo->GetNodeProperties(gpuNode);
     const HSAuint32 familyID = FamilyIdFromNode(pNodeProps);
 
@@ -44,7 +41,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
 
     const char metadata[] = "This data is really meta.";
     unsigned metadata_size = strlen(metadata)+1;
-    int rn = pKFDGraphicsInterop->FindDRMRenderNode(gpuNode);
+    int rn = FindDRMRenderNode(gpuNode);
 
     if (rn < 0) {
         LOG() << "Skipping test: Could not find render node for default GPU node." << std::endl;
@@ -61,7 +58,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     alloc.phys_alignment = PAGE_SIZE;
     alloc.preferred_heap = AMDGPU_GEM_DOMAIN_VRAM;
     alloc.flags = AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
-    ASSERT_EQ_GPU(0, amdgpu_bo_alloc(pKFDGraphicsInterop->m_RenderNodes[rn].device_handle, &alloc, &handle), gpuNode);
+    ASSERT_EQ_GPU(0, amdgpu_bo_alloc(m_RenderNodes[rn].device_handle, &alloc, &handle), gpuNode);
 
     void *pCpuMap;
     ASSERT_EQ_GPU(0, amdgpu_bo_cpu_map(handle, &pCpuMap), gpuNode);
@@ -80,7 +77,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
 
     // Register it with HSA
     HsaGraphicsResourceInfo info;
-    ASSERT_SUCCESS_GPU(hsaKmtRegisterGraphicsHandleToNodes(dmabufFd, &info,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes, m_hsakmt_current_ctx, dmabufFd, &info,
                                                        1, nodes), gpuNode);
 
     /* DMA buffer handle and GEM handle are no longer needed, KFD
@@ -95,7 +92,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_EQ_GPU(0, strcmp(metadata, (const char *)info.Metadata), gpuNode);
 
     // Map the buffer
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPU(info.MemoryAddress,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, info.MemoryAddress,
                                         info.SizeInBytes,
                                         NULL), gpuNode);
 
@@ -103,7 +100,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDGraphicsInterop->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
@@ -124,7 +121,7 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
 
     // Test QueryMem before the cleanup
     HsaPointerInfo ptrInfo;
-    EXPECT_SUCCESS_GPU(hsaKmtQueryPointerInfo((const void *)info.MemoryAddress, &ptrInfo), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, (const void *)info.MemoryAddress, &ptrInfo), gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_REGISTERED_GRAPHICS, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.Node, (HSAuint32)gpuNode, gpuNode);
     EXPECT_EQ_GPU(ptrInfo.GPUAddress, (HSAuint64)info.MemoryAddress, gpuNode);
@@ -132,14 +129,17 @@ static void RegisterGraphicsHandle(KFDTEST_PARAMETERS* pTestParamters) {
     EXPECT_EQ_GPU(ptrInfo.MemFlags.ui32.CoarseGrain, 1, gpuNode);
 
     // Cleanup
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(info.MemoryAddress), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtDeregisterMemory(info.MemoryAddress), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, info.MemoryAddress), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, info.MemoryAddress), gpuNode);
 
 }
+
 TEST_F(KFDGraphicsInterop, RegisterGraphicsHandle) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(RegisterGraphicsHandle));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterGraphicsHandle(gpuNode);
+    }));
 
     TEST_END
 }

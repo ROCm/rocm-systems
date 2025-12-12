@@ -260,13 +260,21 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // Reject requests exceeding the fixed-size stack array to prevent overflow.
+  const int request_count = request->field_ids_size();
+  if (request_count < 0 || request_count > RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+                          "field_ids count exceeds RDC_MAX_FIELD_IDS_PER_FIELD_GROUP");
+  }
+
   rdc_field_grp_t field_group_id;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
-  for (int i = 0; i < request->field_ids_size(); i++) {
+  for (int i = 0; i < request_count; i++) {
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
   rdc_status_t result =
-      rdc_group_field_create(rdc_handle_, request->field_ids_size(), &field_ids[0],
+      rdc_group_field_create(rdc_handle_, request_count, &field_ids[0],
                              request->field_group_name().c_str(), &field_group_id);
   reply->set_status(result);
   if (result != RDC_ST_OK) {
@@ -274,6 +282,21 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   }
 
   reply->set_field_group_id(field_group_id);
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::AddFieldToFieldGroup(
+    ::grpc::ServerContext* context, const ::rdc::AddFieldToFieldGroupRequest* request,
+    ::rdc::AddFieldToFieldGroupResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
+                                                  static_cast<rdc_field_t>(request->field_id()));
+  reply->set_status(result);
 
   return ::grpc::Status::OK;
 }
@@ -461,17 +484,22 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status::OK;
   }
 
-  reply->set_num_gpus(job_info.num_gpus);
+  uint32_t num_gpus =
+      (job_info.num_gpus > RDC_MAX_NUM_GPUS_PER_JOB) ? RDC_MAX_NUM_GPUS_PER_JOB : job_info.num_gpus;
+  uint32_t num_processes = (job_info.num_processes > RDC_MAX_NUM_PROCESSES_STATUS)
+                               ? RDC_MAX_NUM_PROCESSES_STATUS
+                               : job_info.num_processes;
+  reply->set_num_gpus(num_gpus);
   ::rdc::GpuUsageInfo* sinfo = reply->mutable_summary();
   copy_gpu_usage_info(job_info.summary, sinfo);
 
-  for (uint32_t i = 0; i < job_info.num_gpus; i++) {
+  for (uint32_t i = 0; i < num_gpus; i++) {
     ::rdc::GpuUsageInfo* ginfo = reply->add_gpus();
     copy_gpu_usage_info(job_info.gpus[i], ginfo);
   }
 
-  reply->set_num_processes(job_info.num_processes);
-  for (uint32_t i = 0; i < job_info.num_processes; i++) {
+  reply->set_num_processes(num_processes);
+  for (uint32_t i = 0; i < num_processes; i++) {
     ::rdc::RdcProcessStatsInfo* pinfo = reply->add_processes();
     pinfo->set_pid(job_info.processes[i].pid);
     pinfo->set_process_name(job_info.processes[i].process_name);
@@ -643,6 +671,11 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   ::rdc::DiagnosticResponse* to_response = reply.mutable_response();
+  if (diag_response.results_count > MAX_TEST_CASES) {
+    reply.set_status(RDC_ST_BAD_PARAMETER);
+    writer->Write(reply);
+    return ::grpc::Status::OK;
+  }
   to_response->set_results_count(diag_response.results_count);
 
   for (uint32_t i = 0; i < diag_response.results_count; i++) {
@@ -661,7 +694,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     to_diag_info->set_per_gpu_result_count(test_result.per_gpu_result_count);
 
     // gpu_results
-    for (uint32_t j = 0; j < test_result.per_gpu_result_count; j++) {
+    uint32_t gpu_result_count = (test_result.per_gpu_result_count > RDC_MAX_NUM_DEVICES)
+                                    ? RDC_MAX_NUM_DEVICES
+                                    : test_result.per_gpu_result_count;
+    for (uint32_t j = 0; j < gpu_result_count; j++) {
       auto to_result = to_diag_info->add_gpu_results();
       const rdc_diag_per_gpu_result_t& cur_result = test_result.gpu_results[j];
       to_result->set_gpu_index(cur_result.gpu_index);
@@ -739,7 +775,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   to_diag_info->set_per_gpu_result_count(test_result.per_gpu_result_count);
 
   // gpu_results
-  for (uint32_t j = 0; j < test_result.per_gpu_result_count; j++) {
+  uint32_t gpu_result_count = (test_result.per_gpu_result_count > RDC_MAX_NUM_DEVICES)
+                                  ? RDC_MAX_NUM_DEVICES
+                                  : test_result.per_gpu_result_count;
+  for (uint32_t j = 0; j < gpu_result_count; j++) {
     auto to_result = to_diag_info->add_gpu_results();
     const rdc_diag_per_gpu_result_t& cur_result = test_result.gpu_results[j];
     to_result->set_gpu_index(cur_result.gpu_index);
@@ -796,7 +835,7 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   rdc_policy_t policy;
-  // constructure the policy
+  // construct the policy
   ::rdc::Policy p = request->policy();
 
   ::rdc::PolicyCondition cond = p.condition();
@@ -931,7 +970,8 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
             ::rdc::PolicyCondition* cond = reply.mutable_condition();
             cond->set_type(static_cast<::rdc::PolicyCondition_Type>(ctx->response.condition.type));
             cond->set_value(ctx->response.condition.value);
-
+            reply.set_gpu_index(ctx->response.gpu_index);
+            reply.set_reset_triggered(ctx->response.reset_triggered != 0);
             writer->Write(reply);
           }
 

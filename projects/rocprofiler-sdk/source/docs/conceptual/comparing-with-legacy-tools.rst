@@ -4,11 +4,13 @@
 
 .. _comparing-with-legacy-tools:
 
-========================================================
-Comparing ROCprofiler-SDK to other ROCm profiling tools
-========================================================
+=========================================================
+Comparing ROCprofiler-SDK to legacy ROCm profiling tools
+=========================================================
 
-ROCprofiler-SDK is an improved version of ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding problems that plague the former implementations of ROCProfiler and ROCTracer.
+This topic highlights the differences between the ROCprofiler-SDK and the legacy ROCm profiling tools: `ROCProfiler <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_ and `ROCTracer <https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html>`_. The comparison also includes differences between the ROCprofiler-SDK command-line (CLI) tool: ``rocprofv3`` and legacy ROCProfiler CLI tools: ``rocprof`` and ``rocprofv2``.
+
+ROCprofiler-SDK is an improved version of the ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding the problems that hindered the legacy ROCm profiling tools.
 Here are the distinct ROCprofiler-SDK features, which also highlight the improvements over ROCProfiler and ROCTracer:
 
 - Improved tool initialization
@@ -18,29 +20,28 @@ Here are the distinct ROCprofiler-SDK features, which also highlight the improve
 - Backward ABI compatibility
 - PC sampling (beta implementation)
 
-The former implementations allow a tool to access any of the services provided by ROCProfiler or ROCTracer, such as API tracing and kernel tracing, by calling ``roctracer_init()`` when an ROCm runtime is initially loaded.
-As the calling tool is not required to specify during initialization, the services it needs to use, the libraries must be effectively prepared for any service to be available anytime.
-This behavior introduces unnecessary overhead and makes thread-safe data management difficult, as tools generally don't use all the available services.
-For example, ROCTracer always installs wrappers around every runtime API and adds indirection overhead through the ROCTracer library to check for the current service configuration in a thread-safe manner.
+The legacy ROCm profiling tools allowed a tool to access any of the services provided by ROCProfiler or ROCTracer, such as API tracing and kernel tracing, by calling ``roctracer_init()`` when an ROCm runtime is initially loaded.
+Since the services to be used by the calling tool are not required to be specified during initialization, the libraries must be effectively prepared for any service to be available at any time.
+This behavior introduced unnecessary overhead and made thread-safe data management difficult, as tools generally don't use all the available services.
+For example, ROCTracer always installed wrappers around every runtime API and added indirection overhead through the ROCTracer library to check for the current service configuration in a thread-safe manner.
 
-ROCprofiler-SDK introduces `context` to solve the preceding issues. Contexts are effectively bundles of service configurations. ROCprofiler-SDK provides a single opportunity for a tool to create as many contexts as required.
-A tool can group all services into one context, create one context per service, or choose a mix.
+ROCprofiler-SDK introduces ``context`` to solve the preceding issues. Contexts are effectively bundles of service configurations. ROCprofiler-SDK provides a single opportunity for a tool to create as many contexts as required.
+A tool can group all services into a single context, create a separate context for each service, or use a mix.
 This change in the design allows ROCprofiler-SDK to be aware of the services that might be requested by a tool at any given time.
 The design change empowers ROCprofiler-SDK to:
 
 - Avoid unnecessary preparation for services that are never used. If no registered contexts request HSA API tracing, no wrappers need to be generated.
-- Perform more extensive checks during service specification and inform a tool about potential issues early.
+- Perform more extensive checks during service specification and inform the tool about potential issues early.
 - Allow multiple tools to use certain services simultaneously.
 - Improve thread safety without introducing parallel bottlenecks.
 - Manage internal data and allocations more efficiently.
 
-===================================================================================================
-Comparing command-line tool options: ROCprofiler(rocprof, rocprofv2) and ROCprofiler-SDK(rocprofv3)
-===================================================================================================
+Command-line tool options: rocprofv3 versus rocprof and rocprofv2
+==================================================================
 
-ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more efficient and flexible version of the ROCprofiler tool.
+The following table provides a comparison between the CLI tool options of ``rocprofv3``, ``rocprof``, and ``rocprofv2``. The comparison indicates that ``rocprofv3`` is more efficient and flexible than ``rocprof`` and ``rocprofv2``.
 
-.. list-table:: Comparison of ROCprofiler Command-Line Tool's options
+.. list-table:: Comparing CLI tool options
    :header-rows: 1
 
    * - Category
@@ -51,398 +52,395 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Improvements
      - Notes
    * - Basic tracing options
-     - HIP Trace
-     - `--hip-trace`
-     - `--hip-api`, `--hip-trace`
-     - `--hip-trace`
+     - HIP trace
+     - ``--hip-trace``
+     - ``--hip-api``, ``--hip-trace``
+     - ``--hip-trace``
      - No change
-     - | rocprof and rocprofv2 `--hip-trace` options include kernel dispatches and memory copy activities,
-       | which is not the case in rocprofv3
+     - | rocprof and rocprofv2 ``--hip-trace`` options include kernel dispatches and memory copy activities,
+       | unlike ``rocprofv3``.
    * - Basic tracing options
-     - HSA Trace
-     - `--hsa-trace`
-     - `--hsa-trace`
-     - `--hsa-trace`
+     - HSA trace
+     - ``--hsa-trace``
+     - ``--hsa-trace``
+     - ``--hsa-trace``
      - No change
-     - | rocprof and rocprofv2 `--hsa-trace` options include kernel dispatches and memory copy activities,
-       | which is not the case in rocprofv3
+     - | rocprof and rocprofv2 ``--hsa-trace`` options include kernel dispatches and memory copy activities,
+       | unlike ``rocprofv3``.
    * - Basic tracing options
-     - Scratch Memory Trace
-     - *Not Available*
-     - *Not Available*
-     - `--scratch-memory-trace`
-     - New option to trace scratch memory operations
+     - Scratch memory trace
+     - *Not available*
+     - *Not available*
+     - ``--scratch-memory-trace``
+     - New option to trace scratch memory operations.
      -
    * - Basic tracing options
-     - Marker Trace (ROCTx)
-     - `--roctx-trace`
-     - `--roctx-trace`
-     - `--marker-trace`
-     - Improved ROCTx library with more features
+     - Marker trace (ROCTx)
+     - ``--roctx-trace``
+     - ``--roctx-trace``
+     - ``--marker-trace``
+     - Improved ROCTx library with more features.
      -
    * - Basic tracing options
-     - Memory Copy Trace
-     - Part of HIP and HSA Traces
-     - Part of HIP and HSA Traces
-     - `--memory-copy-trace`
-     - Provides granularity for memory move operations
+     - Memory copy trace
+     - Part of HIP and HSA traces
+     - Part of HIP and HSA traces
+     - ``--memory-copy-trace``
+     - Provides granularity for memory move operations.
      -
    * - Basic tracing options
-     - Memory allocation Trace
-     - *Not Available*
-     - *Not Available*
-     - `--memory-allocation-trace`
-     - New option for collecting Memory Allocation Traces. Displays starting address, allocation size, and agent where allocation occurred.
+     - Memory allocation trace
+     - *Not available*
+     - *Not available*
+     - ``--memory-allocation-trace``
+     - New option for collecting memory allocation traces. Displays starting address, allocation size, and agent where allocation occurred.
      -
    * - Basic tracing options
-     - Kernel Trace
-     - `--kernel-trace`
-     - `--kernel-trace`
-     - `--kernel-trace`
+     - Kernel trace
+     - ``--kernel-trace``
+     - ``--kernel-trace``
+     - ``--kernel-trace``
      - Performance improvement.
      -
    * - Granular tracing options
      - HIP runtime trace
-     - Part of `--hip-trace` option
-     - Part of `--hip-trace` option
-     - `--hip-runtime-trace`
-     - For collecting HIP Runtime API Traces, e.g. public HIP API functions starting with 'hip' (i.e. hipSetDevice).
+     - Part of ``--hip-trace`` option
+     - Part of ``--hip-trace`` option
+     - ``--hip-runtime-trace``
+     - For collecting HIP runtime API traces. For example, public HIP API functions starting with "hip" such as ``hipSetDevice``.
      -
    * - Granular tracing options
      - HIP compiler trace
-     - *Not Available*
-     - *Not Available*
-     - `--hip-compiler-trace`
-     - For collecting HIP Compiler generated code Traces, e.g. HIP API functions starting with '__hip' (i.e. __hipRegisterFatBinary).
+     - *Not available*
+     - *Not available*
+     - ``--hip-compiler-trace``
+     - For collecting HIP compiler-generated code traces. For example, HIP API functions starting with "__hip" such as ``__hipRegisterFatBinary``.
      -
    * - Granular tracing options
      - HSA core API trace
-     - Part of `--hsa-trace` option
-     - Part of `--hsa-trace` option
-     - `--hsa-core-trace`
-     - New option for collecting only HSA API Traces (core API), e.g. HSA functions prefixed with only `hsa_` (i.e. hsa_init)
+     - Part of ``--hsa-trace`` option
+     - Part of ``--hsa-trace`` option
+     - ``--hsa-core-trace``
+     - New option for collecting only HSA API traces (core API). For example, HSA functions prefixed only with "hsa_" such as ``hsa_init``.
      -
    * - Granular tracing options
      - HSA AMD trace
-     - Part of `--hsa-trace` option
-     - Part of `--hsa-trace` option
-     - `--hsa-amd-trace`
-     - For collecting HSA API Traces (AMD-extension API), e.g. HSA function prefixed with `hsa_amd_` (i.e. hsa_amd_coherency_get_type)
+     - Part of ``--hsa-trace`` option
+     - Part of ``--hsa-trace`` option
+     - ``--hsa-amd-trace``
+     - For collecting HSA API traces (AMD-extension API). For example, HSA functions prefixed with "hsa_amd_" such as ``hsa_amd_coherency_get_type``.
      -
    * - Granular tracing options
-     - HSA Image Extension trace
-     - Part of `--hsa-trace` option
-     - Part of `--hsa-trace` option
-     - `--hsa-image-trace`
-     - New option for collecting HSA API Traces (Image-extension API), e.g. HSA functions prefixed with only `hsa_ext_image_` (i.e. hsa_ext_image_get_capability).
+     - HSA image extension trace
+     - Part of ``--hsa-trace`` option
+     - Part of ``--hsa-trace`` option
+     - ``--hsa-image-trace``
+     - New option for collecting HSA API traces (Image-extension API). For example, HSA functions prefixed only with ``hsa_ext_image_`` such as ``hsa_ext_image_get_capability``.
      -
    * - Granular tracing options
-     - HSA Finalizer trace
-     - Part of `--hsa-trace` option
-     - Part of `--hsa-trace` option
-     - `--hsa-finalizer-trace`
-     - New option for collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only `hsa_ext_program_` (i.e. hsa_ext_program_create)
+     - HSA finalizer trace
+     - Part of ``--hsa-trace`` option
+     - Part of ``--hsa-trace`` option
+     - ``--hsa-finalizer-trace``
+     - New option for collecting HSA API traces (Finalizer-extension API). For example, HSA functions prefixed only with "hsa_ext_program_" such as ``hsa_ext_program_create``.
      -
    * - Advanced tracing options
      - Kokkos trace
-     - *Not Available*
-     - *Not Available*
-     - `--kokkos-trace`
-     - New option to enable built-in Kokkos Tools support (implies --marker-trace and --kernel-rename)
+     - *Not available*
+     - *Not available*
+     - ``--kokkos-trace``
+     - New option to enable built-in Kokkos tools support (implies ``--marker-trace`` and ``--kernel-rename``).
      -
    * - Advanced tracing options
      - RCCL trace
-     - *Not Available*
-     - *Not Available*
-     - `--rccl-trace`
-     - For collecting RCCL (ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces
+     - *Not available*
+     - *Not available*
+     - ``--rccl-trace``
+     - For collecting ROCm Communication Collectives Library (RCCL, also pronounced as "Rickle") traces.
      -
    * - Advanced tracing options
      - Scratch memory trace
-     - *Not Available*
-     - *Not Available*
-     - `--scratch-memory-trace`
-     - Collecting scratch memory event traces.
+     - *Not available*
+     - *Not available*
+     - ``--scratch-memory-trace``
+     - For collecting scratch memory event traces.
      -
    * - Advanced tracing options
      - rocDecode trace
-     - *Not Available*
-     - *Not Available*
-     - `--rocdecode-trace`
-     - Tracing rocDecode library.
+     - *Not available*
+     - *Not available*
+     - ``--rocdecode-trace``
+     - Tracing ``rocDecode`` library.
      -
    * - Advanced tracing options
      - rocJPEG trace
-     - *Not Available*
-     - *Not Available*
-     - `--rocjpeg-trace`
+     - *Not available*
+     - *Not available*
+     - ``--rocjpeg-trace``
      - Tracing rocJPEG library.
      -
    * - Aggregate tracing options
-     - Sys Trace
-     - `--sys-trace` [hip-trace|hsa-trace|roctx-trace|kernel-trace]
-     - `--sys-trace` [hip-trace|hsa-trace|roctx-trace|kernel-trace]
-     - ` -s, --sys-trace` [hip-trace|hsa-trace|scratch-trace|memory-copy-trace|roctx-trace|kernel-trace]
-     - Extends the sys trace options with more features
+     - Sys trace
+     - ``--sys-trace`` [``hip-trace``| ``hsa-trace``| ``roctx-trace``| ``kernel-trace``].
+     - ``--sys-trace`` [``hip-trace``| ``hsa-trace``| ``roctx-trace``| ``kernel-trace``].
+     - ``-s``, ``--sys-trace`` [``hip-trace``| ``hsa-trace``| ``scratch-trace``| ``memory-copy-trace``| ``roctx-trace``| ``kernel-trace``].
+     - Extends the ``sys-trace`` options with more features.
      -
    * - Aggregate tracing options
-     - Runtime Trace
+     - Runtime trace
      - *Not available*
      - *Not available*
-     - ` -r, --runtime-trace` [hip-runtime-trace|scratch-trace|memory-copy-trace|roctx-trace|kernel-trace]
-     - New option to aggregate trace operations
+     - ``-r``, ``--runtime-trace`` [``hip-runtime-trace``| ``scratch-trace``| ``memory-copy-trace``| ``roctx-trace``| ``kernel-trace``].
+     - New option to aggregate trace operations.
      -
    * - Kernel naming options
-     - Kernel Name Mangling
-     - *Not Available*
-     - *Not Available*
-     - `-M`, `--mangled-kernels`
-     - New option for mangled  kernel names
-     -
-   * - Kernel naming options
-     - Kernel Name Truncation
-     - `--basenames  <on|off>`
-     - `--basenames`
-     - `-T`, `--truncate-kernels`
-     - New option for truncating the demangled  kernel names
-     -
-   * - Kernel naming options
-     - Kernel Rename
-     - `--roctx-rename`
+     - Kernel name mangling
      - *Not available*
-     - `--kernel-rename`
-     - New option to use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels
+     - *Not available*
+     - ``-M``, ``--mangled-kernels``
+     - New option for mangled kernel names.
+     -
+   * - Kernel naming options
+     - Kernel name truncation
+     - ``--basenames <on|off>``
+     - ``--basenames``
+     - ``-T``, ``--truncate-kernels``
+     - New option for truncating the demangled kernel names.
+     -
+   * - Kernel naming options
+     - Kernel rename
+     - ``--roctx-rename``
+     - *Not available*
+     - ``--kernel-rename``
+     - New option to use region names defined by ``roctxRangePush``/ ``roctxRangePop`` regions for renaming the kernels.
      -
    * - Post-processing tracing options
      - Statistics
-     - --stats
-     - *Not Available*
-     - --stats
-     - Statistics for the collected traces
+     - ``--stats``
+     - *Not available*
+     - ``--stats``
+     - Statistics for the collected traces.
      -
    * - Post-processing tracing options
      - Summary
      - *Not available*
      - *Not available*
-     - `-S, --summary`
-     - New option to output a single summary of tracing data after the profiling session
-     - `rocprof` generated the post-processing step's summary, stats, JSON, and database files with much less information.
+     - ``-S``, ``--summary``
+     - New option to output a single summary of tracing data after the profiling session.
+     - ``rocprof`` generated the post-processing step's summary, stats, JSON, and database files with lesser information.
    * - Post-processing tracing options
-     - Summary Per Domain
+     - Summary per domain
      - *Not available*
      - *Not available*
-     - `-D, --summary-per-domain`
-     - New option to output summary for each tracing domain after the profiling session
-     - `rocprof --stats` option had less number of domains in the summary reports than `rocprofv3`
+     - ``-D``, ``--summary-per-domain``
+     - New option to output a summary for each tracing domain after the profiling session.
+     - Compared to ``rocprofv3``, ``rocprof --stats`` option captured lesser number of domains in the summary reports.
    * - Post-processing tracing options
-     - Summary Groups
+     - Summary groups
      - *Not available*
      - *Not available*
-     - `--summary-groups REGULAR_EXPRESSION`
-     - New option to output a summary for each set of domains matching the regular expression, e.g. 'KERNEL_DISPATCH|MEMORY_COPY' will generate a summary from all the tracing data in the KERNEL_DISPATCH and MEMORY_COPY domains
+     - ``--summary-groups REGULAR_EXPRESSION``
+     - New option to output a summary for each set of domains matching the regular expression. For example, ``KERNEL_DISPATCH``| ``MEMORY_COPY`` generate a summary from all the tracing data in the ``KERNEL_DISPATCH`` and ``MEMORY_COPY`` domains.
      -
    * - Summary options
-     - Summary Output File
+     - Summary output file
      - *Not available*
      - *Not available*
-     - `--summary-output-file SUMMARY_OUTPUT_FILE`
-     - New option to output summary to a file, stdout, or stderr (default: stderr)
+     - ``--summary-output-file SUMMARY_OUTPUT_FILE``
+     - New option to output summary to a file, stdout, or stderr (default: stderr).
      -
    * - Summary options
-     - Summary Units
+     - Summary units
      - *Not available*
      - *Not available*
-     - `-u , --summary-units`
-     - New option to output summary in desired time units {sec,msec,usec,nsec}
+     - ``-u`` , ``--summary-units``
+     - New option to output summary in desired time units {sec,msec,usec,nsec}.
      -
    * - Display options
      - List available basic and derived metrics and PC sampling configurations
-     - `--list-basic`, `--list-derived`
-     - `--list-counters`
-     - `-L`, `--list-avail`
-     - A valid YAML is supported for this option now
+     - ``--list-basic``, ``--list-derived``
+     - ``--list-counters``
+     - ``-L``, ``--list-avail``
+     - A valid YAML is supported for this option now.
      -
    * - Perfetto-specific options
      - Perfetto data collection backend
      - *Not available*
      - *Not available*
-     - `--perfetto-backend` {in-process,system}
-     - New option for perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons
-     - `rocprofv2` used only in-process collection for perfetto plugin, However, `rocprofv3` gives the user the option.
+     - ``--perfetto-backend`` {in-process,system}
+     - New option for Perfetto data collection backend. "system" mode requires starting traces and Perfetto daemons.
+     - ``rocprofv2`` used only in-process collection for Perfetto plugin while ``rocprofv3`` gives options to the user.
    * - Perfetto-specific options
-     - Perfetto Buffer Size
+     - Perfetto buffer size
      - *Not available*
-     - Setting env variable `rocprofiler_PERFETTO_MAX_BUFFER_SIZE_KIB` to the desired buffer size
-     - `--perfetto-buffer-size` {KB}
-     - New option to define size of buffer for perfetto output in KB. default: 1 GB
+     - Setting environment variable ``rocprofiler_PERFETTO_MAX_BUFFER_SIZE_KIB`` to the desired buffer size.
+     - ``--perfetto-buffer-size`` {KB}
+     - New option to define the buffer size for Perfetto output in KB. default: 1 GB.
      -
    * - Perfetto-specific options
-     - Perfetto Buffer fill Policy
+     - Perfetto buffer fill policy
      - *Not available*
      - *Not available*
-     - `--perfetto-buffer-fill-policy` {discard,ring_buffer}
-     - New option or handling new records when perfetto has reached the buffer limit
-     - `rocprofv2` always used `TraceConfig_BufferConfig_FillPolicy_RING_BUFFER` fill policy.
+     - ``--perfetto-buffer-fill-policy {discard,ring_buffer}``
+     - New option for handling new records when Perfetto has reached the buffer limit.
+     - ``rocprofv2`` always used ``TraceConfig_BufferConfig_FillPolicy_RING_BUFFER`` fill policy.
    * - Perfetto-specific options
      - Perfetto shared memory size
      - *Not available*
      - *Not available*
-     - `--perfetto-shmem-size-hint` KB
-     - New option to define perfetto shared memory size hint in KB. default: 64 KB
+     - ``--perfetto-shmem-size-hint`` KB
+     - New option to define Perfetto shared memory size hint in KB. default: 64 KB.
      -
    * - Filtering options
-     - Kernel Filtration options for Counter Collection
-     - Supported in input.xml file (supports range, gpu and kernel filtration)
-     - kernel: <kernel_name> (can only be provided in input.txt file)
-     - `--kernel-include-regex`, `--kernel-exclude-regex`, `--kernel-iteration-range`
-     - Extensive control over output options using regular expressions
+     - Kernel filtration options for counter collection
+     - Supported in input.xml file (supports range, gpu and kernel filtration).
+     - kernel: <kernel_name> (can only be provided in input.txt file).
+     - ``--kernel-include-regex``, ``--kernel-exclude-regex``, ``--kernel-iteration-range``
+     - Extensive control over output options using regular expressions.
      -
    * - I/O options
-     - Output Directory
-     - `-d` <data directory>
-     - `-d`   | `--output-directory`
-     - `-d` OUTPUT_DIRECTORY, `--output-directory` OUTPUT_DIRECTORY
-     - rocprofv3 supports special keys for runtime values, e.g. %pid% gets replaced by the process ID
+     - Output directory
+     - ``-d`` <data directory>
+     - ``-d`` | ``--output-directory``
+     - ``-d OUTPUT_DIRECTORY``, ``--output-directory OUTPUT_DIRECTORY``
+     - ``rocprofv3`` supports special keys for runtime values. For example, "%pid%" gets replaced with the process ID.
      -
    * - I/O options
-     - Output File
-     - `-o` <output file>
-     - `-o`   | `--output-file-name`
-     - `-o` OUTPUT_FILE, `--output-file` OUTPUT_FILE
-     - rocprofv3 supports special keys for runtime values, e.g. %pid% gets replaced by the process ID
+     - Output file
+     - ``-o`` <output file>
+     - ``-o`` | ``--output-file-name``
+     - ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE``
+     - ``rocprofv3`` supports special keys for runtime values. For example, "%pid%" gets replaced with the process ID.
      -
    * - I/O options
      - Logging
-     - Minimal logging via environment variable
-     - Minimal logging via environment variable
-     - --log-level {fatal,error,warning,info,trace,env}
+     - Minimal logging using environment variable.
+     - Minimal logging using environment variable.
+     - ``--log-level {fatal,error,warning,info,trace,env}``
      - Extensive logging options
      -
    * - I/O options
      - Plugins
-     - *Not Available*
-     - plugin support for different output formats
-     - Replaced by `--output-format` option
-     - Not needed as rocprofv3 supports multiple output formats
+     - *Not available*
+     - plugin support for different output formats.
+     - Replaced with ``--output-format`` option.
+     - Not needed as ``rocprofv3`` supports multiple output formats.
      -
    * - I/O options
-     - Output Formats
+     - Output formats
      - CSV, JSON (Chrome-Tracing format)
      - CSV, JSON (Chrome-Tracing format), Perfetto, CTF
      - CSV, JSON (custom schema), Perfetto, OTF2
-     - | # Multiple output formats can be supported in single run.
-       | # OTF2 can visualize larger trace files compared to perfetto.
-     - The Perfetto UI does not accept the JSON output format produced by rocprofv3. Perfetto is dropping support for the JSON Chrome tracing format in favor of the binary Perfetto protobuf format (``.pftrace`` extension), which is supported by rocprofv3.
+     - | Multiple output formats can be supported in a single run.
+       | OTF2 can visualize larger trace files compared to Perfetto.
+     - The Perfetto UI doesn't accept the JSON output format generated by ``rocprofv3``. With JSON Chrome tracing format being treated as legacy, Perfetto encourages the ``rocprofv3``-supported binary Perfetto protobuf format (``.pftrace`` extension).
    * - I/O options
-     - Counter Collection
-     - Supports input text and XML format
-     - Only supports input text format
-     - Input support for text, YAML and JSON formats
-     - | # It's not possible to check for valid text file. Hence rocprofv3 supports strongly typed input formats.
-       | # YAML and JSON formats are more readable and easy to maintain.
-       | # Allows flexibility to add more features for the tool input
+     - Counter collection
+     - Supports input text and XML format.
+     - Only supports input text format.
+     - Input support for text, YAML and JSON formats.
+     - | It's not possible to check for valid text file. Hence ``rocprofv3`` supports strongly typed input formats.
+       | YAML and JSON formats are more readable and easier to maintain.
+       | Allows flexibility to add more features for the tool input.
      -
    * - I/O options
-     - Command-line Counter Collection
-     - *Not Available*
-     - *Not Available*
-     - `--pmc`
-     - New option to collect performance counters from command line. Counters should be comma OR space separated in case of more than 1 counters
+     - Command-line counter collection
+     - *Not available*
+     - *Not available*
+     - ``--pmc``
+     - New option to collect performance counters from command line. When specifying multiple counters, they must be comma or space-separated.
      -
    * - I/O options
-     - Providing Custom metrics file
-     - `-m`  <metric file>
-     - `-m`  <metric file>
-     - `-E`  <metric file> --pmc <counter>
-     - In rocprofv3, this option has changed to provide a file with custom metrics and collect performance counters from the command line using --pmc option
+     - Providing custom metrics file
+     - ``-m <metric file>``
+     - ``-m` <metric file>``
+     - ``-E <metric file> --pmc <counter>``
+     - This option has been modified in ``rocprofv3`` to collect performance counters from the command line by using ``--pmc`` option and specifying a file with custom metrics.
      -
    * - Advanced options
      - Preload
-     - *Not Available*
-     - *Not Available*
-     - --preload
-     - Libraries to prepend to LD_PRELOAD (usually for sanitizers)
+     - *Not available*
+     - *Not available*
+     - ``--preload``
+     - Libraries to prepend to ``LD_PRELOAD`` (usually for sanitizers).
      -
-   * - Trace Control options
-     - Trace Period
-     - `--trace-period`
-     - `-tp | --trace-period`
-     - `-P  |--collection-period`,`--collection-period-unit`
-     - Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`, with the ability to change the unit of time in the given configurations.
+   * - Trace control options
+     - Trace period
+     - ``--trace-period``
+     - ``-tp`` | ``--trace-period``
+     - ``-P`` | ``--collection-period``, ``--collection-period-unit``
+     - Users can specify multiple configurations, each defined by a triplet in the format "start_delay:collection_time:repeat", with the ability to change the unit of time in the given configurations.
      -
-   * - Trace Control options
+   * - Trace control options
      - Trace start
-     -  `--trace-start <on|off>`
+     - ``--trace-start <on|off>``
      - *Not available*
      - *Not available*
-     - Not yet in rocprofv3
+     - Not available in ``rocprofv3``
      -
-   * - Trace Control options
-     - Flush Interval
-     - `--flush-rate`
-     - `--flush-interval`
+   * - Trace control options
+     - Flush interval
+     - ``--flush-rate``
+     - ``--flush-interval``
      - *Not available*
-     - Not applicable for rocprofv3
+     - Not applicable for ``rocprofv3``
      -
-   * - Trace Control options
-     - Merge Traces
-     - `--merge-traces`
+   * - Trace control options
+     - Merge traces
+     - ``--merge-traces``
      - *Not available*
      - *Not available*
-     - Not yet in rocprofv3
+     - Not available in ``rocprofv3``
      -
-   * - PC Sampling options
-     - PC Sampling`
+   * - PC sampling options
+     - PC sampling
      - *Not available*
      - *Not available*
-     - `--pc-sampling-beta-enabled`
-     - Enable pc sampling support; beta version.
+     - ``--pc-sampling-beta-enabled``
+     - Enables PC sampling support; beta version.
      -
    * - Legacy options
      - Timestamp On/Off
-     - `--timestamp <on|off>`
+     - ``--timestamp <on|off>``
      - *Not available*
      - *Not available*
-     - Not applicable for rocprofv3
+     - Not applicable for ``rocprofv3``.
      -
    * - Legacy options
      - Context wait
-     - `--ctx-wait`
+     - ``--ctx-wait``
      - *Not available*
      - *Not available*
-     - Not applicable for rocprofv3
+     - Not applicable for ``rocprofv3``.
      -
    * - Legacy options
-     - Context Limit
-     - `--ctx-limit <max number>`
+     - Context limit
+     - ``--ctx-limit <max number>``
      - *Not available*
      - *Not available*
-     - Not applicable for rocprofv3
+     - Not applicable for ``rocprofv3``.
      -
    * - Legacy options
-     - Code Object Tracking
-     - `--obj-tracking <on|off>`
-     - Always ``ON`` in rocprofv2
-     - Always ``ON`` in rocprofv3
+     - Code object tracking
+     - ``--obj-tracking <on|off>``
+     - Always ``ON`` in ``rocprofv2``.
+     - Always ``ON`` in ``rocprofv3``.
      -
      -
    * - Legacy options
      - Heartbeat
-     - `--heartbeat <rate sec>`
+     - ``--heartbeat <rate sec>``
      - *Not available*
      - *Not available*
-     - Not applicable for rocprofv3
+     - Not applicable for ``rocprofv3``
      -
 
+Timing information: rocprofv3 versus rocprof and rocprofv2
+===========================================================
 
-========================================================
-Timing Difference Between rocprofv3 and rocprofv1/v2
-========================================================
+``rocprofv3`` provides more accurate timing information by reducing the tool overhead required to collect data and the interference with the timing of the kernel being measured. This results in a reduced kernel time variance received for the same kernel execution and more accurate timing overall. These changes are not available in ``rocprof`` and ``rocprofv2``, so there can be substantial differences (up to 20 percent) in execution times reported by ``rocprof`` and ``rocprofv2`` for a single kernel execution in comparison with ``rocprofv3``. Across a large number of samples of the same kernel, the difference in the average execution time is limited to a single digit, with a much tighter variance of results on ``rocprofv3``.
 
-``rocprofv3`` has improved the accuracy of timing information by reducing the tool overhead required to collect data and reducing the interference to the timing of the kernel being measured. The result of this work is a reduction in variance of kernel times received for the same kernel execution and more accurate timing in general. These changes have not been backported (and will not be backported) to rocprofv1/v2, so there can be substantial (20%) differences in execution time reported by v1/v2 vs v3 for a single kernel execution. Over a large number of samples of the same kernel, the difference in average execution time is in the low single digit percentage time with a much tighter variance of results on rocprofv3. We have included testing in the test suite to verify the timing information outputted by rocprofv3 to ensure that the values we are returning are accurate.
+Default behavior: rocprofv3 versus rocprof and rocprofv2
+=========================================================
 
-========================================================
-Default run of rocprofv3 and rocprofv1/v2
-========================================================
-
-``rocprofv3`` has a different default behavior than rocprofv1/v2 when being run without any option. The default behavior of rocprofv3 is to collect all available agents on the system and to output it in ``csv`` format. The default behavior of rocprofv1/v2 was to output the `kernel traces` in CSV format. In rocprofv3, kernel traces can be obtained by using ``--kernel-trace`` option.
+When run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output them in ``CSV`` format, while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``CSV`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.

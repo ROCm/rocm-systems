@@ -1,22 +1,8 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "os/os.hpp"
 #include "utils/flags.hpp"
@@ -47,6 +33,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_queue_destroy)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_relaxed)
+  GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_add_write_index_screlease)
   GET_ROCR_SYMBOL(hsa_memory_register)
@@ -89,17 +76,22 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_memory_pool_free)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy_on_engine)
+  GET_ROCR_SYMBOL(hsa_amd_memory_async_batch_copy)
   GET_ROCR_SYMBOL(hsa_amd_memory_copy_engine_status)
   GET_ROCR_SYMBOL(hsa_amd_agent_memory_pool_get_info)
   GET_ROCR_SYMBOL(hsa_amd_agents_allow_access)
   GET_ROCR_SYMBOL(hsa_amd_memory_unlock)
   GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer)
+  GET_ROCR_SYMBOL(hsa_amd_interop_map_buffer_with_size)
   GET_ROCR_SYMBOL(hsa_amd_interop_unmap_buffer)
   GET_ROCR_SYMBOL(hsa_amd_image_create)
+  GET_ROCR_SYMBOL(hsa_amd_image_create_v2)
   GET_ROCR_SYMBOL(hsa_amd_pointer_info)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_create)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_attach)
   GET_ROCR_SYMBOL(hsa_amd_ipc_memory_detach)
+  GET_ROCR_SYMBOL(hsa_amd_ipc_signal_create)
+  GET_ROCR_SYMBOL(hsa_amd_ipc_signal_attach)
   GET_ROCR_SYMBOL(hsa_amd_signal_create)
   GET_ROCR_SYMBOL(hsa_amd_register_system_event_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_set_priority)
@@ -109,6 +101,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_set)
   GET_ROCR_SYMBOL(hsa_amd_svm_attributes_get)
   GET_ROCR_SYMBOL(hsa_amd_svm_prefetch_async)
+  GET_ROCR_SYMBOL(hsa_amd_svm_discard_batch_async)
   GET_ROCR_SYMBOL(hsa_amd_portable_export_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_portable_close_dmabuf)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
@@ -121,6 +114,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_get_access)
   GET_ROCR_SYMBOL(hsa_amd_vmem_export_shareable_handle)
   GET_ROCR_SYMBOL(hsa_amd_vmem_import_shareable_handle)
+  GET_ROCR_SYMBOL(hsa_amd_vmem_export_fabric_handle)
+  GET_ROCR_SYMBOL(hsa_amd_vmem_import_fabric_handle)
   GET_ROCR_SYMBOL(hsa_amd_vmem_retain_alloc_handle)
   GET_ROCR_SYMBOL(hsa_amd_agent_set_async_scratch_limit)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve_align)
@@ -130,14 +125,16 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_ais_file_write)
 
   // Image extensions
-  GET_ROCR_SYMBOL(hsa_ext_image_data_get_info)
-  GET_ROCR_SYMBOL(hsa_ext_image_create)
+  GET_ROCR_SYMBOL(hsa_ext_image_data_get_info_v2)
+  GET_ROCR_SYMBOL(hsa_ext_image_create_v2)
   GET_ROCR_SYMBOL(hsa_ext_image_import)
   GET_ROCR_SYMBOL(hsa_ext_image_export)
-  GET_ROCR_SYMBOL(hsa_ext_image_destroy)
+  GET_ROCR_SYMBOL(hsa_ext_image_destroy_v2)
   GET_ROCR_SYMBOL(hsa_ext_sampler_create_v2)
   GET_ROCR_SYMBOL(hsa_ext_sampler_destroy)
   GET_ROCR_SYMBOL(hsa_ext_image_create_with_layout)
+  GET_ROCR_SYMBOL(hsa_ext_image_mipmap_array_get_level)
+
   is_ready_ = true;
   return true;
 }

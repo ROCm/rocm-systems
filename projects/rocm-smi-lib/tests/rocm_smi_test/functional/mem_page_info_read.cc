@@ -41,25 +41,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/mem_page_info_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/mem_page_info_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestMemPageInfoRead::TestMemPageInfoRead() : TestBase() {
   set_title("RSMI Memory Page Info Test");
-  set_description("The Memory Page Info. test verifies that we can read "
+  set_description(
+      "The Memory Page Info. test verifies that we can read "
       "memory page information, and then displays the information read");
 }
 
-TestMemPageInfoRead::~TestMemPageInfoRead(void) {
-}
+TestMemPageInfoRead::~TestMemPageInfoRead(void) {}
 
 void TestMemPageInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -67,9 +68,7 @@ void TestMemPageInfoRead::SetUp(void) {
   return;
 }
 
-void TestMemPageInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestMemPageInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestMemPageInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -84,7 +83,7 @@ void TestMemPageInfoRead::Close() {
 
 void TestMemPageInfoRead::Run(void) {
   rsmi_status_t err;
-  rsmi_retired_page_record_t *records;
+  rsmi_retired_page_record_t* records;
   uint32_t num_pages;
 
   TestBase::Run();
@@ -99,9 +98,7 @@ void TestMemPageInfoRead::Run(void) {
     err = rsmi_dev_memory_reserved_pages_get(i, &num_pages, nullptr);
 
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
-          "\t**Memory page information is not supported for this device"
-                                                                 << std::endl;
+      std::cout << "\t**Memory page information is not supported for this device" << std::endl;
 
       // Verify api support checking functionality is working
       err = rsmi_dev_memory_reserved_pages_get(i, nullptr, nullptr);
@@ -111,8 +108,7 @@ void TestMemPageInfoRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\tNumber of memory page records: " << num_pages <<
-                                                                    std::endl;
+        std::cout << "\tNumber of memory page records: " << num_pages << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_memory_reserved_pages_get(i, nullptr, nullptr);
@@ -127,10 +123,11 @@ void TestMemPageInfoRead::Run(void) {
       err = rsmi_dev_memory_reserved_pages_get(i, &num_pages, records);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Getting Memory Page Retirement Status not "
-                                     "supported for this device" << std::endl;
+                     "supported for this device"
+                  << std::endl;
         continue;
       } else {
-          CHK_ERR_ASRT(err)
+        CHK_ERR_ASRT(err)
       }
 
       IF_VERB(STANDARD) {
@@ -161,7 +158,7 @@ void TestMemPageInfoRead::Run(void) {
         }
         std::cout.setf(std::ios::dec, std::ios::basefield);
       }
-      delete []records;
+      delete[] records;
     } else {
       continue;
     }

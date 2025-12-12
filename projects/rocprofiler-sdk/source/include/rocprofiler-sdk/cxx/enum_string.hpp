@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <type_traits>
@@ -46,7 +47,7 @@
         static constexpr size_t value     = VALUE;                                                 \
     };
 
-#define ROCPROFILER_ENUM_INFO(ENUM_T, BEG_VALUE, END_VALUE, IS_BITSET)                             \
+#define ROCPROFILER_ENUM_INFO(ENUM_T, BEG_VALUE, END_VALUE, IS_BITSET, IS_OPERATION)               \
     template <>                                                                                    \
     struct rocprofiler_enum_info<ENUM_T>                                                           \
     {                                                                                              \
@@ -63,6 +64,9 @@
             else                                                                                   \
                 return Idx;                                                                        \
         }                                                                                          \
+        static_assert(!IS_OPERATION ||                                                             \
+                          (end <= ::rocprofiler::sdk::details::context_domain_ops_padding),        \
+                      "operation enum range exceeds domain last value");                           \
     };
 
 namespace rocprofiler
@@ -71,6 +75,13 @@ namespace sdk
 {
 namespace details
 {
+// Number of bits to reserve all op codes. This is set here so we can apply static_asserts to ensure
+// that any operation enumeration does not exceed this value. This value is used in
+// "lib/rocprofiler-sdk/context/domain.hpp" to create a bitset for the enabled operations.
+constexpr size_t context_domain_ops_padding = 1024;
+constexpr auto   is_operation               = true;
+constexpr auto   not_operation              = false;
+
 template <typename EnumT, size_t Value>
 struct rocprofiler_enum_label
 {
@@ -119,19 +130,44 @@ get_enum_label(EnumT val, std::index_sequence<Idx, IdxTail...>)
 }
 
 // Table ID
-ROCPROFILER_ENUM_INFO(rocprofiler_hsa_table_id_t, 0, ROCPROFILER_HSA_TABLE_ID_LAST, false)
-ROCPROFILER_ENUM_INFO(rocprofiler_hip_table_id_t, 0, ROCPROFILER_HIP_TABLE_ID_LAST, false)
-ROCPROFILER_ENUM_INFO(rocprofiler_marker_table_id_t, 0, ROCPROFILER_MARKER_TABLE_ID_LAST, false)
-ROCPROFILER_ENUM_INFO(rocprofiler_rccl_table_id_t, 0, ROCPROFILER_RCCL_TABLE_ID_LAST, false)
+ROCPROFILER_ENUM_INFO(rocprofiler_hsa_table_id_t,
+                      0,
+                      ROCPROFILER_HSA_TABLE_ID_LAST,
+                      false,
+                      not_operation)
+ROCPROFILER_ENUM_INFO(rocprofiler_hip_table_id_t,
+                      0,
+                      ROCPROFILER_HIP_TABLE_ID_LAST,
+                      false,
+                      not_operation)
+ROCPROFILER_ENUM_INFO(rocprofiler_marker_table_id_t,
+                      0,
+                      ROCPROFILER_MARKER_TABLE_ID_LAST,
+                      false,
+                      not_operation)
+ROCPROFILER_ENUM_INFO(rocprofiler_rccl_table_id_t,
+                      0,
+                      ROCPROFILER_RCCL_TABLE_ID_LAST,
+                      false,
+                      not_operation)
 ROCPROFILER_ENUM_INFO(rocprofiler_rocdecode_table_id_t,
                       0,
                       ROCPROFILER_ROCDECODE_TABLE_ID_LAST,
-                      false)
-ROCPROFILER_ENUM_INFO(rocprofiler_rocjpeg_table_id_t, 0, ROCPROFILER_ROCJPEG_TABLE_ID_LAST, false)
+                      false,
+                      not_operation)
+ROCPROFILER_ENUM_INFO(rocprofiler_rocjpeg_table_id_t,
+                      0,
+                      ROCPROFILER_ROCJPEG_TABLE_ID_LAST,
+                      false,
+                      not_operation)
 
 // table enums
 // rocprofiler_hsa_core_api_id_t
-ROCPROFILER_ENUM_INFO(rocprofiler_hsa_core_api_id_t, 0, ROCPROFILER_HSA_CORE_API_ID_LAST, false)
+ROCPROFILER_ENUM_INFO(rocprofiler_hsa_core_api_id_t,
+                      0,
+                      ROCPROFILER_HSA_CORE_API_ID_LAST,
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_CORE_API_ID_hsa_init);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_info);
@@ -263,7 +299,8 @@ static_assert(ROCPROFILER_HSA_CORE_API_ID_LAST == 125);
 ROCPROFILER_ENUM_INFO(rocprofiler_hsa_amd_ext_api_id_t,
                       0,
                       ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_coherency_get_type);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_coherency_set_type);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_set_profiler_enabled);
@@ -360,6 +397,41 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_portable_export_dm
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_write);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_read);
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_acquire);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_release);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_batch_copy);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0B
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_preload);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0C
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_discard_batch_async);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_get_event_id);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_open);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_close);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_fabric_handle);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_fabric_handle);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_create);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_signal_external_semaphore);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_wait_external_semaphore);
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_image_create_v2);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_map_buffer_with_size);
+#    endif
 #endif
 
 #if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION == 0x01
@@ -383,6 +455,26 @@ static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 73);
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 74);
 #    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x08
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 76);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x09
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 78);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0A
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 79);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0B
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 80);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0C
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 81);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0D
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 82);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0E
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 84);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0F
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 86);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x10
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 87);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x11
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 89);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x12
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 91);
 #    else
 #        if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                       \
             (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
@@ -400,7 +492,8 @@ static_assert(false, "Support for HSA_AMD_EXT_API_TABLE_MAJOR_VERSION is require
 ROCPROFILER_ENUM_INFO(rocprofiler_hsa_image_ext_api_id_t,
                       0,
                       ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_get_capability);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_data_get_info);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_create);
@@ -420,7 +513,8 @@ static_assert(ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST == 13);
 ROCPROFILER_ENUM_INFO(rocprofiler_hsa_finalize_ext_api_id_t,
                       0,
                       ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_create);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_destroy);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_add_module);
@@ -433,7 +527,8 @@ static_assert(ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST == 6);
 ROCPROFILER_ENUM_INFO(rocprofiler_hip_compiler_api_id_t,
                       0,
                       ROCPROFILER_HIP_COMPILER_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_COMPILER_API_ID___hipPopCallConfiguration);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_COMPILER_API_ID___hipPushCallConfiguration);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_COMPILER_API_ID___hipRegisterFatBinary);
@@ -449,7 +544,8 @@ static_assert(ROCPROFILER_HIP_COMPILER_API_ID_LAST == 9);
 ROCPROFILER_ENUM_INFO(rocprofiler_hip_runtime_api_id_t,
                       0,
                       ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipApiName);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipArray3DCreate);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipArray3DGetDescriptor);
@@ -1004,6 +1100,59 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipGetProcAddress_spt)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo)
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExtDisableLogging)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExtEnableLogging)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExtSetLoggingParams)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemSetMemPool)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetMemPool)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemPrefetchBatchAsync)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxPotentialClusterSize)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyMaxActiveClusters)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipGreenCtxCreate)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxDestroy)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxStreamCreate)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetDevResource)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDevSmResourceSplitByCount)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDevSmResourceSplit)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDevResourceGenerateDesc)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetExecutionCtx)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetDevResource)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetDevice)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxGetId)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetDevResource)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxRecordEvent)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxSynchronize)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipExecutionCtxWaitEvent)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetGlobal)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetManaged)
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardBatchAsync)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardBatchAsync)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipMemDiscardAndPrefetchBatchAsync)
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync)
+#endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 442);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -1046,6 +1195,26 @@ static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 506);
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 507);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 20
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 508);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 21
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 511);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 22
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 513);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 514);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 515);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 517);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 518);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 520);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 535);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 537);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 541);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
@@ -1057,7 +1226,8 @@ static_assert(false, "Support for new HIP_RUNTIME_API_TABLE_STEP_VERSION enumera
 ROCPROFILER_ENUM_INFO(rocprofiler_marker_core_api_id_t,
                       0,
                       ROCPROFILER_MARKER_CORE_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop);
@@ -1070,7 +1240,8 @@ static_assert(ROCPROFILER_MARKER_CORE_API_ID_LAST == 6);
 ROCPROFILER_ENUM_INFO(rocprofiler_marker_control_api_id_t,
                       0,
                       ROCPROFILER_MARKER_CONTROL_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume);
 static_assert(ROCPROFILER_MARKER_CONTROL_API_ID_LAST == 2);
@@ -1079,7 +1250,8 @@ static_assert(ROCPROFILER_MARKER_CONTROL_API_ID_LAST == 2);
 ROCPROFILER_ENUM_INFO(rocprofiler_marker_name_api_id_t,
                       0,
                       ROCPROFILER_MARKER_NAME_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_NAME_API_ID_roctxNameOsThread);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_NAME_API_ID_roctxNameHsaAgent);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_NAME_API_ID_roctxNameHipDevice);
@@ -1089,7 +1261,8 @@ static_assert(ROCPROFILER_MARKER_NAME_API_ID_LAST == 4);
 ROCPROFILER_ENUM_INFO(rocprofiler_marker_core_range_api_id_t,
                       0,
                       ROCPROFILER_MARKER_CORE_RANGE_API_ID_LAST,
-                      false)
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxProcessRangeA);
@@ -1097,7 +1270,11 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId);
 static_assert(ROCPROFILER_MARKER_CORE_RANGE_API_ID_LAST == 4);
 
 // rocprofiler_ompt_operation_t
-ROCPROFILER_ENUM_INFO(rocprofiler_ompt_operation_t, 0, ROCPROFILER_OMPT_ID_LAST, false);
+ROCPROFILER_ENUM_INFO(rocprofiler_ompt_operation_t,
+                      0,
+                      ROCPROFILER_OMPT_ID_LAST,
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_OMPT_ID_thread_begin);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_OMPT_ID_thread_end);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_OMPT_ID_parallel_begin);
@@ -1132,7 +1309,11 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_OMPT_ID_callback_functions);
 static_assert(ROCPROFILER_OMPT_ID_LAST == 31);
 
 // rocprofiler_rccl_api_id_t
-ROCPROFILER_ENUM_INFO(rocprofiler_rccl_api_id_t, 0, ROCPROFILER_RCCL_API_ID_LAST, false)
+ROCPROFILER_ENUM_INFO(rocprofiler_rccl_api_id_t,
+                      0,
+                      ROCPROFILER_RCCL_API_ID_LAST,
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAllGather);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAllReduce);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAllToAll);
@@ -1178,6 +1359,27 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommShrink);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommWindowRegister);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommWindowDeregister);
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 3
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAlltoAll);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclAlltoAllv);
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommRevoke);
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 5
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommSuspend);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommResume);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommMemStats);
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 6
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclPutSignal);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclSignal);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclWaitSignal);
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 7
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommGetUniqueId);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_API_ID_ncclCommGrow);
+#endif
 
 #if RCCL_API_TRACE_VERSION_PATCH == 0
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 37);
@@ -1185,6 +1387,16 @@ static_assert(ROCPROFILER_RCCL_API_ID_LAST == 37);
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 38);
 #elif RCCL_API_TRACE_VERSION_PATCH == 2
 static_assert(ROCPROFILER_RCCL_API_ID_LAST == 41);
+#elif RCCL_API_TRACE_VERSION_PATCH == 3
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 43);
+#elif RCCL_API_TRACE_VERSION_PATCH == 4
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 44);
+#elif RCCL_API_TRACE_VERSION_PATCH == 5
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 47);
+#elif RCCL_API_TRACE_VERSION_PATCH == 6
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 50);
+#elif RCCL_API_TRACE_VERSION_PATCH == 7
+static_assert(ROCPROFILER_RCCL_API_ID_LAST == 52);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
@@ -1193,7 +1405,11 @@ static_assert(false, "Support for new RCCL_API_TRACE_VERSION_PATCH enumerations 
 #endif
 
 // rocprofiler_rocdecode_api_id_t
-ROCPROFILER_ENUM_INFO(rocprofiler_rocdecode_api_id_t, 0, ROCPROFILER_ROCDECODE_API_ID_LAST, false)
+ROCPROFILER_ENUM_INFO(rocprofiler_rocdecode_api_id_t,
+                      0,
+                      ROCPROFILER_ROCDECODE_API_ID_LAST,
+                      false,
+                      is_operation)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCDECODE_API_ID_rocDecCreateVideoParser);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCDECODE_API_ID_rocDecParseVideoData);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCDECODE_API_ID_rocDecDestroyVideoParser);
@@ -1226,7 +1442,11 @@ static_assert(false,
 #endif
 
 // rocprofiler_rocjpeg_api_id_t
-ROCPROFILER_ENUM_INFO(rocprofiler_rocjpeg_api_id_t, 0, ROCPROFILER_ROCJPEG_API_ID_LAST, false);
+ROCPROFILER_ENUM_INFO(rocprofiler_rocjpeg_api_id_t,
+                      0,
+                      ROCPROFILER_ROCJPEG_API_ID_LAST,
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCJPEG_API_ID_rocJpegStreamCreate);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCJPEG_API_ID_rocJpegStreamParse);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCJPEG_API_ID_rocJpegStreamDestroy);
@@ -1242,147 +1462,184 @@ static_assert(ROCPROFILER_ROCJPEG_API_ID_LAST == 9);
 ROCPROFILER_ENUM_INFO(rocprofiler_status_t,
                       ROCPROFILER_STATUS_SUCCESS,
                       ROCPROFILER_STATUS_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_buffer_category_t,
                       ROCPROFILER_BUFFER_CATEGORY_NONE,
                       ROCPROFILER_BUFFER_CATEGORY_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_agent_type_t,
                       ROCPROFILER_AGENT_TYPE_NONE,
                       ROCPROFILER_AGENT_TYPE_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_callback_phase_t,
                       ROCPROFILER_CALLBACK_PHASE_NONE,
                       ROCPROFILER_CALLBACK_PHASE_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_callback_tracing_kind_t,
                       ROCPROFILER_CALLBACK_TRACING_NONE,
                       ROCPROFILER_CALLBACK_TRACING_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_buffer_tracing_kind_t,
                       ROCPROFILER_BUFFER_TRACING_NONE,
                       ROCPROFILER_BUFFER_TRACING_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_code_object_operation_t,
                       ROCPROFILER_CODE_OBJECT_NONE,
                       ROCPROFILER_CODE_OBJECT_LAST,
-                      false);
+                      false,
+                      is_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_hip_stream_operation_t,
+                      ROCPROFILER_HIP_STREAM_NONE,
+                      ROCPROFILER_HIP_STREAM_LAST,
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_copy_operation_t,
                       ROCPROFILER_MEMORY_COPY_NONE,
                       ROCPROFILER_MEMORY_COPY_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_memory_allocation_operation_t,
                       ROCPROFILER_MEMORY_ALLOCATION_NONE,
                       ROCPROFILER_MEMORY_ALLOCATION_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kernel_dispatch_operation_t,
                       ROCPROFILER_KERNEL_DISPATCH_NONE,
                       ROCPROFILER_KERNEL_DISPATCH_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_pc_sampling_method_t,
                       ROCPROFILER_PC_SAMPLING_METHOD_NONE,
                       ROCPROFILER_PC_SAMPLING_METHOD_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_pc_sampling_unit_t,
                       ROCPROFILER_PC_SAMPLING_UNIT_NONE,
                       ROCPROFILER_PC_SAMPLING_UNIT_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_buffer_policy_t,
                       ROCPROFILER_BUFFER_POLICY_NONE,
                       ROCPROFILER_BUFFER_POLICY_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_scratch_memory_operation_t,
                       ROCPROFILER_SCRATCH_MEMORY_NONE,
                       ROCPROFILER_SCRATCH_MEMORY_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_scratch_alloc_flag_t,
                       ROCPROFILER_SCRATCH_ALLOC_FLAG_NONE,
                       HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT + 1,
-                      true);
+                      true,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_runtime_initialization_operation_t,
                       ROCPROFILER_RUNTIME_INITIALIZATION_NONE,
                       ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_counter_info_version_id_t,
                       ROCPROFILER_COUNTER_INFO_VERSION_NONE,
                       ROCPROFILER_COUNTER_INFO_VERSION_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_counter_record_kind_t,
                       ROCPROFILER_COUNTER_RECORD_NONE,
                       ROCPROFILER_COUNTER_RECORD_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_counter_flag_t,
                       ROCPROFILER_COUNTER_FLAG_NONE,
                       ROCPROFILER_COUNTER_FLAG_LAST,
-                      false);
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_code_object_storage_type_t,
                       ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE,
                       ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_LAST,
-                      false);
-
+                      false,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_runtime_library_t,
                       ROCPROFILER_LIBRARY,
                       details::compute_bitset_sequence_range<ROCPROFILER_LIBRARY_LAST>(),
-                      true);
+                      true,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_intercept_table_t,
                       ROCPROFILER_HSA_TABLE,
                       details::compute_bitset_sequence_range<ROCPROFILER_TABLE_LAST>(),
-                      true);
-
+                      true,
+                      not_operation);
 // callback_tracing.h
 ROCPROFILER_ENUM_INFO(rocprofiler_pc_sampling_record_kind_t,
                       ROCPROFILER_PC_SAMPLING_RECORD_NONE,
                       ROCPROFILER_PC_SAMPLING_RECORD_LAST,
-                      false);
+                      false,
+                      not_operation);
 
 // kfd/kfd_id.h
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_event_page_migrate_operation_t,
                       ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_NONE,
                       ROCPROFILER_KFD_EVENT_PAGE_MIGRATE_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_event_page_fault_operation_t,
                       ROCPROFILER_KFD_EVENT_PAGE_FAULT_NONE,
                       ROCPROFILER_KFD_EVENT_PAGE_FAULT_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_event_queue_operation_t,
                       ROCPROFILER_KFD_EVENT_QUEUE_NONE,
                       ROCPROFILER_KFD_EVENT_QUEUE_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_event_unmap_from_gpu_operation_t,
                       ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_NONE,
                       ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_event_dropped_events_operation_t,
                       ROCPROFILER_KFD_EVENT_DROPPED_EVENTS_NONE,
                       ROCPROFILER_KFD_EVENT_DROPPED_EVENTS_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_page_migrate_operation_t,
                       ROCPROFILER_KFD_PAGE_MIGRATE_NONE,
                       ROCPROFILER_KFD_PAGE_MIGRATE_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_page_fault_operation_t,
                       ROCPROFILER_KFD_PAGE_FAULT_NONE,
                       ROCPROFILER_KFD_PAGE_FAULT_LAST,
-                      false);
+                      false,
+                      is_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_kfd_queue_operation_t,
                       ROCPROFILER_KFD_QUEUE_NONE,
                       ROCPROFILER_KFD_QUEUE_LAST,
-                      false);
+                      false,
+                      is_operation);
 
 ROCPROFILER_ENUM_INFO(rocprofiler_external_correlation_id_request_kind_t,
                       ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE,
                       ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST,
-                      false);
+                      false,
+                      is_operation);
 
 ROCPROFILER_ENUM_INFO(rocprofiler_thread_trace_parameter_type_t,
                       ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU,
                       ROCPROFILER_THREAD_TRACE_PARAMETER_LAST,
-                      false);
+                      false,
+                      not_operation);
 
 ROCPROFILER_ENUM_INFO(rocprofiler_agent_version_t,
                       ROCPROFILER_AGENT_INFO_VERSION_NONE,
                       ROCPROFILER_AGENT_INFO_VERSION_LAST,
-                      false);
+                      false,
+                      not_operation);
 
 // begin fwd.h
 // rocprofiler_hsa_table_id_t
@@ -1449,7 +1706,7 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES);
-ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_INTERNAL_NO_AGENT_CONTEXT);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_SAMPLE_RATE_EXCEEDED);
@@ -1460,7 +1717,8 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED);
-static_assert(ROCPROFILER_STATUS_LAST == 41);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION);
+static_assert(ROCPROFILER_STATUS_LAST == 42);
 
 // rocprofiler_buffer_category_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_BUFFER_CATEGORY_NONE);
@@ -1549,6 +1807,13 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER);
 static_assert(ROCPROFILER_CODE_OBJECT_LAST == 4);
 
+// rocprofiler_hip_stream_operation_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_NONE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_CREATE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_DESTROY);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_STREAM_SET);
+static_assert(ROCPROFILER_HIP_STREAM_LAST == 4);
+
 // rocprofiler_memory_copy_operation_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MEMORY_COPY_NONE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_MEMORY_COPY_HOST_TO_HOST);
@@ -1608,7 +1873,8 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_MARKER_LIBRARY)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RCCL_LIBRARY)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCDECODE_LIBRARY)
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_ROCJPEG_LIBRARY)
-static_assert(ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_OMPT_LIBRARY)
+static_assert(ROCPROFILER_LIBRARY_LAST == ROCPROFILER_OMPT_LIBRARY);
 
 // rocprofiler_intercept_table_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_TABLE)
@@ -1630,7 +1896,8 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_RUNTIME_INITIALIZATION_MARKER);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RUNTIME_INITIALIZATION_RCCL);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG);
-static_assert(ROCPROFILER_RUNTIME_INITIALIZATION_LAST == 7);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_RUNTIME_INITIALIZATION_OMPT);
+static_assert(ROCPROFILER_RUNTIME_INITIALIZATION_LAST == 8);
 
 // rocprofiler_counter_info_version_id_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_COUNTER_INFO_VERSION_NONE);
@@ -1749,10 +2016,16 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL);
-static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 9);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE);
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 10);
 
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_CONTROL_NONE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP);
+
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_NONE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_SINGLE_BUFFER);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_TRIPLE_BUFFER);
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFERING_MODE_LAST == 3);
 
 // rocprofiler_agent_version_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_AGENT_INFO_VERSION_NONE);

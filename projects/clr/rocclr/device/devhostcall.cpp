@@ -1,22 +1,8 @@
-/* Copyright (c) 2019 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "utils/debug.hpp"
 #include "top.hpp"
@@ -275,6 +261,8 @@ class HostcallListener {
 
 HostcallListener* hostcallListener = nullptr;
 extern amd::Monitor listenerLock;
+
+static bool listenerTerminating = false;
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
 static struct Init {
@@ -413,6 +401,11 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   buffer->setDevice(&dev);
 
   amd::ScopedLock lock(listenerLock);
+  
+  // Don't start a new listener until any previous one is fully terminated.
+  while (listenerTerminating) {
+    listenerLock.wait();
+  }
   if (!hostcallListener) {
     hostcallListener = new HostcallListener();
     if (!hostcallListener->initSignal(dev)) {
@@ -442,20 +435,28 @@ bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
 }
 
 void disableHostcalls(void* bfr) {
+  HostcallListener* listenerToTerminate = nullptr;
   {
     amd::ScopedLock lock(listenerLock);
-    if (!hostcallListener) {
-      return;
-    }
+    if (!hostcallListener) return;
     assert(bfr && "expected a hostcall buffer");
     auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
     hostcallListener->removeBuffer(buffer);
+    if (hostcallListener->idle()) {
+      listenerToTerminate = hostcallListener;
+      hostcallListener = nullptr;
+      listenerTerminating = true;
+    }
   }
-  if (hostcallListener->idle()) {
-    hostcallListener->terminate();
-    delete hostcallListener;
-    hostcallListener = nullptr;
+  if (listenerToTerminate) {
+    listenerToTerminate->terminate();
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
+    delete listenerToTerminate;
+    {
+      amd::ScopedLock lock(listenerLock);
+      listenerTerminating = false;
+      listenerLock.notifyAll();
+    }
   }
 }
 }  // namespace amd

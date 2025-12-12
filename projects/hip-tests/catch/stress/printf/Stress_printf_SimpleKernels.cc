@@ -1,28 +1,11 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define BLOCK_SIZE 512
@@ -592,7 +575,8 @@ bool test_synchronized_printf(uint32_t num_blocks, uint32_t threads_per_block,
 #endif
 }  // namespace hipPrintfStressTest
 
-TEST_CASE("Stress_printf_ConstStr") {
+HIP_TEST_CASE(Stress_printf_ConstStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_ConstStr\n");
   bool TestPassed = true;
@@ -604,11 +588,12 @@ TEST_CASE("Stress_printf_ConstStr") {
       hipPrintfStressTest::test_printf_conststr(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_IfElseConditionalStr") {
+HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_IfElseConditionalStr\n");
   bool TestPassed = true;
@@ -620,11 +605,12 @@ TEST_CASE("Stress_printf_IfElseConditionalStr") {
                                                                    print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_IfConditionalStr") {
+HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_IfConditionalStr\n");
   bool TestPassed = true;
@@ -636,11 +622,12 @@ TEST_CASE("Stress_printf_IfConditionalStr") {
                                                                       print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_VariableStr") {
+HIP_TEST_CASE(Stress_printf_VariableStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_VariableStr\n");
   bool TestPassed = true;
@@ -651,11 +638,12 @@ TEST_CASE("Stress_printf_VariableStr") {
       hipPrintfStressTest::EmpiricalValues1);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_DependentCalc") {
+HIP_TEST_CASE(Stress_printf_DependentCalc) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_DependentCalc\n");
   bool TestPassed = true;
@@ -666,11 +654,12 @@ TEST_CASE("Stress_printf_DependentCalc") {
                                                       hipPrintfStressTest::EmpiricalValues2);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_DecimalStr") {
+HIP_TEST_CASE(Stress_printf_DecimalStr) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_DecimalStr\n");
   bool TestPassed = true;
@@ -681,11 +670,12 @@ TEST_CASE("Stress_printf_DecimalStr") {
   TestPassed = hipPrintfStressTest::test_decimal_str(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_SharedMem") {
+HIP_TEST_CASE(Stress_printf_SharedMem) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_SharedMem\n");
   bool TestPassed = true;
@@ -696,11 +686,12 @@ TEST_CASE("Stress_printf_SharedMem") {
   TestPassed = hipPrintfStressTest::test_shared_mem(num_blocks, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_SynchronizedPrintf") {
+HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_SynchronizedPrintf\n");
   bool TestPassed = true;
@@ -710,11 +701,12 @@ TEST_CASE("Stress_printf_SynchronizedPrintf") {
   TestPassed = hipPrintfStressTest::test_synchronized_printf(1, threads_per_block, print_limit);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }
 
-TEST_CASE("Stress_printf_AtomicCalc") {
+HIP_TEST_CASE(Stress_printf_AtomicCalc) {
+  SKIP_IF_GPU_COMPOSITOR_ACTIVE();
 #ifdef __linux__
   printf("Test: Stress_printf_AtomicCalc\n");
   bool TestPassed = true;
@@ -725,6 +717,6 @@ TEST_CASE("Stress_printf_AtomicCalc") {
       hipPrintfStressTest::EmpiricalValues2);
   REQUIRE(TestPassed);
 #else
-  printf("This test is skipped due to non linux environment.\n");
+  HIP_SKIP_TEST(HipTest::SkipReason::kRequiresLinux);
 #endif
 }

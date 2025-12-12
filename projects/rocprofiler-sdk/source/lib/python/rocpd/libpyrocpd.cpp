@@ -25,7 +25,6 @@
 #include "lib/python/rocpd/source/common.hpp"
 #include "lib/python/rocpd/source/functions.hpp"
 #include "lib/python/rocpd/source/interop.hpp"
-#include "lib/python/rocpd/source/otf2.hpp"
 #include "lib/python/rocpd/source/perfetto.hpp"
 #include "lib/python/rocpd/source/serialization/sql.hpp"
 #include "lib/python/rocpd/source/sql_generator.hpp"
@@ -53,8 +52,10 @@
 
 #include <rocprofiler-sdk-rocpd/rocpd.h>
 #include <rocprofiler-sdk-rocpd/sql.h>
+#include <rocprofiler-sdk-rocpd/types.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <gotcha/gotcha.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pybind11.h>
@@ -64,7 +65,9 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace py = ::pybind11;
 
@@ -212,7 +215,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS)
         .value("data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS)
         .value("summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS)
-        .value("marker_views", ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS);
+        .value("rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA);
 
     py::enum_<rocpd_sql_options_t>(pyrocpd, "sql_option", "Load schema options")
         .value("none", ROCPD_SQL_OPTIONS_NONE)
@@ -284,6 +287,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("kernel_rename", &tool::output_config::kernel_rename)
         .def_readwrite("agent_index_value", &tool::output_config::agent_index_value)
         .def_readwrite("group_by_queue", &tool::output_config::group_by_queue)
+        .def_readwrite("annotate_args", &tool::output_config::annotate_args)
+        .def_readwrite("annotate_kfd", &tool::output_config::annotate_kfd)
+        .def_readwrite("annotate_pmc", &tool::output_config::annotate_pmc)
         .def_readwrite("perfetto_shmem_size_hint", &tool::output_config::perfetto_shmem_size_hint)
         .def_readwrite("perfetto_buffer_size", &tool::output_config::perfetto_buffer_size)
         .def_readwrite("perfetto_backend", &tool::output_config::perfetto_backend)
@@ -321,6 +327,37 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("uuid", &rocpd::jinja_variables::uuid)
         .def_readwrite("guid", &rocpd::jinja_variables::guid);
 
+    py::class_<rocpd_version_triplet_t>(pyrocpd, "schema_version", "Schema version triplet")
+        .def(py::init<>([]() {
+            return rocpd_version_triplet_t{0, 0, 0};
+        }))
+        .def(py::init<>([](uint32_t major, uint32_t minor, uint32_t patch) {
+            return rocpd_version_triplet_t{major, minor, patch};
+        }))
+        .def(py::init<>([](const std::string& verstr) {
+            auto parts = std::vector<std::string>{};
+            parts.reserve(3);
+            for(const auto& part : rocprofiler::sdk::parse::tokenize(verstr, "."))
+                parts.emplace_back(part);
+
+            auto version = rocpd_version_triplet_t{0, 0, 0};
+            if(!parts.empty()) version.major = static_cast<uint32_t>(std::stoul(parts.at(0)));
+            if(parts.size() > 1) version.minor = static_cast<uint32_t>(std::stoul(parts.at(1)));
+            if(parts.size() > 2) version.patch = static_cast<uint32_t>(std::stoul(parts.at(2)));
+
+            return version;
+        }))
+        .def_readwrite("major", &rocpd_version_triplet_t::major)
+        .def_readwrite("minor", &rocpd_version_triplet_t::minor)
+        .def_readwrite("patch", &rocpd_version_triplet_t::patch)
+        .def("__str__",
+             [](const rocpd_version_triplet_t& v) {
+                 return fmt::format("{}.{}.{}", v.major, v.minor, v.patch);
+             })
+        .def("__repr__", [](const rocpd_version_triplet_t& v) {
+            return fmt::format("schema_version({}, {}, {})", v.major, v.minor, v.patch);
+        });
+
     py::class_<rocpd::RocpdImportData>(pyrocpd, "RocpdImportData", "RocPD database(s) instances")
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
@@ -332,16 +369,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 [](rocpd_sql_engine_t            engine,
                    rocpd_sql_schema_kind_t       kind,
                    rocpd_sql_options_t           options,
+                   rocpd_version_triplet_t       schema_version,
                    const rocpd::jinja_variables& variables) {
                     auto _callback = [](rocpd_sql_engine_t                        _engine,
                                         rocpd_sql_schema_kind_t                   _kind,
                                         rocpd_sql_options_t                       _options,
+                                        rocpd_version_triplet_t                   _schema_version,
                                         const rocpd_sql_schema_jinja_variables_t* _variables,
                                         const char*                               _schema_path,
                                         const char*                               _schema_content,
                                         void* _user_data) -> void {
                         rocprofiler::common::consume_args(
-                            _engine, _kind, _options, _variables, _schema_path);
+                            _engine, _kind, _options, _schema_version, _variables, _schema_path);
                         auto* _data = static_cast<std::string*>(_user_data);
                         if(_data && _schema_content) *_data = std::string{_schema_content};
                     };
@@ -367,6 +406,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     ROCPD_CHECK(rocpd_sql_load_schema(engine,
                                                       kind,
                                                       options,
+                                                      schema_version,
                                                       &_rocpd_variables,
                                                       _callback,
                                                       _hints.data(),
@@ -374,6 +414,42 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       &_contents));
                     return _contents;
                 });
+
+    pyrocpd.def(
+        "query_supported_schema_versions",
+        [](rocpd_sql_engine_t engine, const py::sequence& hints_opt) -> py::list {
+            std::vector<std::string> storage;
+            std::vector<const char*> hints;
+            if(!hints_opt.is_none())
+            {
+                const auto n = hints_opt.size();
+                for(size_t i = 0; i < n; ++i)
+                {
+                    storage.push_back(py::cast<std::string>(hints_opt[i]));
+                    hints.push_back(storage.back().c_str());
+                }
+            }
+
+            py::list out{};
+            auto     _callback = [](rocpd_sql_engine_t /*engine*/,
+                                const rocpd_version_triplet_t* versions,
+                                uint64_t                       num_versions,
+                                void*                          user_data) -> rocpd_status_t {
+                auto* _out = static_cast<py::list*>(user_data);
+                for(uint64_t i = 0; i < num_versions; ++i)
+                {
+                    _out->append(py::cast(versions[i]));
+                }
+                return ROCPD_STATUS_SUCCESS;
+            };
+            ROCPD_CHECK(rocpd_query_supported_schema_versions(
+                engine, hints.empty() ? nullptr : hints.data(), hints.size(), _callback, &out));
+            return out;
+        },
+        py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
+        py::arg("schema_path_hints") = py::list{},
+        "Return supported rocpd SQL schema versions (from versions.yml) as a list of "
+        "schema_version objects. Call str() on each entry to get a \"major.minor.patch\" string.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 
@@ -414,13 +490,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             constexpr auto region_order_by = "start ASC, end DESC";
             constexpr auto sample_order_by = "timestamp ASC";
 
-            auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
-            auto sqlgen_perf      = common::simple_timer{
+            auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
+            auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
+            auto  sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {
@@ -507,147 +583,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             return true;
         },
         "Write pftrace output file from rocpd SQLite3 database");
-
-    pyrocpd.def(
-        "write_otf2",
-        [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) {
-            auto _create_agent_index =
-                [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
-                auto ret_index = tool::create_agent_index(
-                    output_cfg.agent_index_value,
-                    _agent.node_id,                                      // absolute index
-                    static_cast<uint32_t>(_agent.logical_node_id),       // relative index
-                    static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
-                return ret_index;
-            };
-
-            constexpr auto kernels_order_by =
-                "agent_abs_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
-
-            // to initialise the OTF@ session properly we need to know:
-            // (1) the process with the earliest start time
-            // (2) find the process with the longest duration
-            uint64_t min_start_time = std::numeric_limits<uint64_t>::max();
-            uint64_t max_fini_time  = std::numeric_limits<uint64_t>::min();
-            for(auto obj : {data.connection})
-            {
-                auto* conn = rocpd::interop::get_connection(std::move(obj));
-
-                // min start
-                sqlite3_stmt* _stmt_min_start_max_fini = nullptr;
-                uint64_t      _min_start_time          = std::numeric_limits<uint64_t>::max();
-                uint64_t      _max_fini_time           = std::numeric_limits<uint64_t>::min();
-
-                sqlite3_prepare_v2(conn,
-                                   "SELECT MIN(start), MAX(fini) FROM processes;",
-                                   -1,
-                                   &_stmt_min_start_max_fini,
-                                   nullptr);
-                if(sqlite3_step(_stmt_min_start_max_fini) == SQLITE_ROW)
-                {
-                    _min_start_time =
-                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 0));
-                    _max_fini_time =
-                        static_cast<uint64_t>(sqlite3_column_int64(_stmt_min_start_max_fini, 1));
-                }
-
-                sqlite3_finalize(_stmt_min_start_max_fini);
-                min_start_time = std::min(min_start_time, _min_start_time);
-                max_fini_time  = std::max(max_fini_time, _max_fini_time);
-            }
-
-            auto otf2_session =
-                rocpd::output::OTF2Session(output_cfg, min_start_time, max_fini_time);
-
-            auto sqlgen_otf2 = common::simple_timer{
-                fmt::format("OTF2 generation from {} SQL database(s)", data.size())};
-
-            uint16_t _process_counter = 0;
-            for(auto obj : {data.connection})
-            {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
-                for(const auto& nitr : nodes)
-                {
-                    auto agents = rocpd::read<rocpd::types::agent>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-                    auto processes = rocpd::read<rocpd::types::process>(
-                        conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
-
-                    // absolute_index |-> (agent, agent_index)
-                    auto agents_map = std::unordered_map<uint64_t, rocpd::output::extended_agent>{};
-
-                    for(const auto& itr : agents)
-                    {
-                        const rocprofiler::tool::agent_index new_index = _create_agent_index(itr);
-                        const std::string labeled_name = fmt::format("{}", itr.name);
-                        agents_map.emplace(
-                            itr.absolute_index,
-                            rocpd::output::extended_agent{itr, new_index, labeled_name});
-                    }
-
-                    for(const auto& pitr : processes)
-                    {
-                        ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
-                            << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
-
-                        auto select_guid_nid_pid =
-                            [&nitr, &pitr](std::string_view tbl,
-                                           std::string_view where_extra_condition = "") {
-                                return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND "
-                                                   "nid = {} AND pid = {} {}",
-                                                   tbl,
-                                                   pitr.guid,
-                                                   nitr.id,
-                                                   pitr.pid,
-                                                   where_extra_condition);
-                            };
-
-                        constexpr auto region_order_by = "start ASC, end DESC";
-
-                        auto _sqlgen_otf2 = common::simple_timer{fmt::format(
-                            "OTF2 generation from SQL for process {} (total)", pitr.pid)};
-
-                        auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
-
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations"), region_order_by};
-
-                        auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies"), region_order_by};
-
-                        auto regions = rocpd::sql_generator<rocpd::types::region>{
-                            conn, select_guid_nid_pid("regions"), region_order_by};
-
-                        auto threads = rocpd::sql_generator<rocpd::types::thread>{
-                            conn, select_guid_nid_pid("threads")};
-
-                        ROCP_TRACE << "Starting OTF2 generation from SQL for process " << pitr.pid;
-                        auto _sqlgen_perfw = common::simple_timer{fmt::format(
-                            "OTF2 generation from SQL for process {} (write)", pitr.pid)};
-                        rocpd::output::write_otf2(otf2_session,
-                                                  pitr,
-                                                  _process_counter,
-                                                  agents_map,
-                                                  threads,
-                                                  regions,
-                                                  kernels,
-                                                  memory_copies,
-                                                  memory_allocations);
-                        _process_counter++;
-                    }
-                }
-            }
-        },
-        "Write OTF2 output file from rocpd SQLite3 database");
 
     // NOLINTEND(performance-unnecessary-value-param)
 

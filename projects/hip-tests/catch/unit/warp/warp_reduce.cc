@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
@@ -58,24 +46,26 @@ __global__ void multipleMasksKernel(T* output, const T* input, const unsigned lo
 template <class T, class Op, class MaskType>
 __global__ void reduceOp(T* output, const T* input, const MaskType* masks, int numReduces, Op) {
   int tid = threadIdx.x;
+  int laneId = tid % warpSize;
 
   for (int i = 0; i < numReduces; i++) {
-    if (masks[i] & (1ul << tid)) {
+    if (masks[i] & (1ul << laneId)) {
+      int idx = warpSize * i + laneId;
       // call the operator only if the lane is mentioned in the mask
-      T& result = output[warpSize * i + tid];
+      T& result = output[idx];
 
       if constexpr (std::is_same<Op, std::plus<T>>::value)
-        result = __reduce_add_sync(masks[i], input[tid]);
+        result = __reduce_add_sync(masks[i], input[idx]);
       else if constexpr (std::is_same<Op, MinOp<T>>::value)
-        result = __reduce_min_sync(masks[i], input[tid]);
+        result = __reduce_min_sync(masks[i], input[idx]);
       else if constexpr (std::is_same<Op, MaxOp<T>>::value)
-        result = __reduce_max_sync(masks[i], input[tid]);
-      else if constexpr (std::is_same<Op, std::logical_and<T>>::value)
-        result = __reduce_and_sync(masks[i], input[tid]);
-      else if (std::is_same<Op, std::logical_or<T>>::value)
-        result = __reduce_or_sync(masks[i], input[tid]);
+        result = __reduce_max_sync(masks[i], input[idx]);
+      else if constexpr (std::is_same<Op, AndOp<T>>::value)
+        result = __reduce_and_sync(masks[i], input[idx]);
+      else if (std::is_same<Op, OrOp<T>>::value)
+        result = __reduce_or_sync(masks[i], input[idx]);
       else if (std::is_same<Op, XorOp<T>>::value)
-        result = __reduce_xor_sync(masks[i], input[tid]);
+        result = __reduce_xor_sync(masks[i], input[idx]);
       else
         assert(false && "Unsupported operator");
     }
@@ -93,11 +83,14 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T));
   std::plus<T> op;
   std::mt19937_64 gen(123);
-  T a = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::lowest() : -1023;
-  T b = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::max() : 1023;
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                         1023;
   distribution distInput(a, b);
   dim3 blkDim{wavefrontSize};
   dim3 grdDim{1u};
+  T expectedByLane[64];
 
   HIP_CHECK(hipMemcpy(d_masks.ptr(), &masks[0], d_masks.size_bytes(), hipMemcpyHostToDevice));
   genRandomBuffers(d_input, input, distInput, gen, wavefrontSize);
@@ -107,7 +100,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
 
   for (int numMask = 0; numMask < numMasks; numMask++) {
     unsigned long long mask = masks[numMask];
-    T expected = calculateExpected<T>(input.ptr(), op, mask);
+    T expected = calculateExpected<T>(expectedByLane, input.ptr(), op, mask, AggregationType::Reduce);
     int lane = 0;
 
     while (lane < wavefrontSize) {
@@ -117,11 +110,12 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
         if constexpr (std::is_integral<T>::value) {
           // for integral types the result should match exactly
           if (result != expected) {
-            printMismatch(result, expected, input.ptr(), mask);
+            printMismatch(result, expected, input.ptr(), mask, lane);
             REQUIRE(result == expected);
           }
-        } else
-          compareFloatingPoint(result, expected, mask, input.ptr());
+        } else {
+          compareFloatingPoint<std::plus<T>>(result, expected, mask, input.ptr(), lane);
+        }
       }
 
       lane++;
@@ -129,7 +123,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_hipReduceSingleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   unsigned long long fullMask = getWarpSize() == 64 ? ~0ul : 0xFFFFFFFF;
   unsigned long long oneBitMasks[] = {0b1 & fullMask};
@@ -143,7 +137,7 @@ TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long
   runTestMultipleMasks<TestType>(everyFifthButNinethMasks, NELEMS(everyFifthButNinethMasks));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceMultipleMasks", "", int, unsigned int, long long,
+HIP_TEMPLATE_TEST_CASE(Unit_hipReduceMultipleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   if (getWarpSize() == 64) {
     unsigned long long masks[] = {0b0110011, 0x0F0F0F0F00000000, 0xF0F0F0F000000000,
@@ -181,7 +175,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   bool customNumIterations = cmd_options.reduce_iterations != 1;
 
   if (customNumIterations)
-    std::cout << "\n" << opToString<T, Op>() << " - " << typeToString<T>() << "\n";
+    std::cout << "\n" << opToString<T, Op<T>>() << " - " << typeToString<T>() << "\n";
 
   while (iteration < cmd_options.reduce_iterations) {
     runTestReduce<T, decltype(reduceFunc), Op>(iteration, reduceFunc);
@@ -196,7 +190,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   runTestReduceForTypes<Op>(remainingTypes);
 }
 
-TEST_CASE("Unit_hipReduceRandom") {
+HIP_TEST_CASE(Unit_hipReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 
@@ -206,9 +200,9 @@ TEST_CASE("Unit_hipReduceRandom") {
 
   SECTION("max") { runTestReduceForTypes<MaxOp>(allTypes); }
 
-  SECTION("and") { runTestReduceForTypes<std::logical_and>(integralTypes); }
+  SECTION("and") { runTestReduceForTypes<AndOp>(integralTypes); }
 
-  SECTION("or") { runTestReduceForTypes<std::logical_or>(integralTypes); }
+  SECTION("or") { runTestReduceForTypes<OrOp>(integralTypes); }
 
   SECTION("xor") { runTestReduceForTypes<XorOp>(integralTypes); }
 }

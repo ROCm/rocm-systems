@@ -93,8 +93,36 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find AMD CUID library.
+set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
+find_library(AMDCUID_LIB
+  NAMES amdcuid_shared
+  PATHS ${AMDCUID_ROOT}/lib
+  NO_DEFAULT_PATH
+)
+find_path(AMDCUID_INCLUDE_DIR
+  NAMES amd_cuid.h
+  PATHS ${AMDCUID_ROOT}/include
+  NO_DEFAULT_PATH
+)
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+  message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
+  message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
+  set(AMDCUID_FOUND TRUE)
+else()
+  message(WARNING "AMDCUID Library not found")
+  set(AMDCUID_FOUND FALSE)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
+
+## Enable parallel compilation on MSVC.
+if(MSVC)
+  if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+    target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE /MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  endif()
+endif()
 
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
@@ -111,14 +139,14 @@ set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_
 if (UNIX)
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
   ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
-  
+
   ## Check for memfd_create syscall
   include(CheckSymbolExists)
   CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
   if ( HAVE_MEMFD_CREATE )
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
   endif()
-  
+
   ## Check for _GNU_SOURCE pthread extensions
   set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
   CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
@@ -170,13 +198,19 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## UndefinedBehaviorSanitizer flags
+if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=undefined" )
+  message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
-  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags")
+  set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags ${HSA_SHARED_LINK_FLAGS}")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
-  set(HSA_SHARED_LINK_FLAGS "")
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
@@ -196,6 +230,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
            core/runtime/amd_aql_queue.cpp
+           core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp
            core/runtime/hsa_ven_amd_loader.cpp
            core/runtime/amd_memory_region.cpp
@@ -203,6 +238,8 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_topology.cpp
            core/runtime/default_signal.cpp
            core/runtime/host_queue.cpp
+           core/runtime/hotswap.cpp
+           core/runtime/hotswap_gfx_query.cpp
            core/runtime/hsa.cpp
            core/runtime/hsa_api_trace.cpp
            core/runtime/hsa_ext_amd.cpp
@@ -217,6 +254,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
@@ -236,7 +274,7 @@ else()
   set(SRC_OS core/util/win/os_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
-         
+
 if ( BUILD_THUNK_VIRTIO )
   list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
   target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
@@ -260,6 +298,16 @@ if (${PC_SAMPLING_SUPPORT})
   set( PCS_SRCS pcs/hsa_ven_amd_pc_sampling.cpp pcs/pcs_runtime.cpp )
 
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
+endif()
+
+if (${AMDCUID_FOUND})
+  find_package(OpenSSL REQUIRED) # Required by CUID library
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
+              BUILD_RPATH "${AMDCUID_ROOT}/lib"
+              INSTALL_RPATH "${AMDCUID_ROOT}/lib")
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
 endif()
 
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
@@ -388,8 +436,13 @@ if( NOT ${BUILD_SHARED_LIBS} )
 
   ## Bind to source build target interface but not its link requirements.
   target_include_directories( ${CORE_RUNTIME_NAME} INTERFACE $<TARGET_PROPERTY:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET},INTERFACE_INCLUDE_DIRECTORIES> )
-  target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
-    -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  if (UNIX)
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
+      -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  else()
+    # Windows: Link the static library directly without linker script
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE ${CORE_RUNTIME_TARGET})
+  endif()
   add_dependencies( ${CORE_RUNTIME_NAME} ${CORE_RUNTIME_TARGET} )
 
   ## Add external link requirements.
@@ -397,35 +450,42 @@ if( NOT ${BUILD_SHARED_LIBS} )
   if (UNIX)
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
   else()
-    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE rt )
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE Ws2_32 )
   endif()
   install ( TARGETS ${CORE_RUNTIME_NAME} EXPORT ${CORE_RUNTIME_NAME}Targets )
 endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
-install ( TARGETS ${CORE_RUNTIME_TARGET}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+if (NOT WIN32)
+  install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
+
+  install ( TARGETS ${CORE_RUNTIME_TARGET}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+endif()
 
 # Install license
 if(ENABLE_ASAN_PACKAGING)
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+if (NOT WIN32)
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+endif()
 
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsa COMPONENT dev )
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.
-install ( EXPORT ${CORE_RUNTIME_NAME}Targets
-  FILE ${CORE_RUNTIME_NAME}Targets.cmake
-  NAMESPACE ${CORE_RUNTIME_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install ( EXPORT ${CORE_RUNTIME_NAME}Targets
+    FILE ${CORE_RUNTIME_NAME}Targets.cmake
+    NAMESPACE ${CORE_RUNTIME_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Adds the target alias hsa-runtime64::hsa-runtime64 to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
@@ -445,9 +505,11 @@ configure_package_config_file(${CORE_RUNTIME_NAME}-config.cmake.in
 write_basic_package_version_file(${CORE_RUNTIME_NAME}-config-version.cmake
   VERSION ${SO_VERSION_STRING} COMPATIBILITY AnyNewerVersion )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (NOT WIN32)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Install build files needed only when using a static build.
 if( NOT ${BUILD_SHARED_LIBS} )
@@ -456,9 +518,9 @@ if( NOT ${BUILD_SHARED_LIBS} )
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
       COMPONENT dev)
+    # Linker script (defines function aliases)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
   endif()
-  # Linker script (defines function aliases)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
 endif()

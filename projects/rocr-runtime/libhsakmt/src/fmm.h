@@ -151,9 +151,18 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 		aperture_type_e aperture_type, HSAuint32 gpu_id,
 		HSAuint64 *aperture_base, HSAuint64 *aperture_limit);
 
+HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
+		HSAuint32 node_id, int *drm_render_fd,
+		uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point);
+
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor);
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,
 			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd);
 
 extern int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
+extern int (*hsakmt_fn_amdgpu_device_initialize2)(int fd,
+							 bool deduplicate_device,
+							 uint32_t *major_version,
+							 uint32_t *minor_version,
+							 HsaAMDGPUDeviceHandle *device_handle);
 #endif /* FMM_H_ */

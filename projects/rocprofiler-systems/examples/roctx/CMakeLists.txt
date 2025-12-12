@@ -1,51 +1,25 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(rocprofiler-systems-roctx-example LANGUAGES CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+find_package(Threads REQUIRED)
 
 find_program(
     HIPCC_EXECUTABLE
     NAMES hipcc
     HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES bin
     ENV ROCM_PATH
-    /opt/rocm
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
     NO_CACHE
 )
 mark_as_advanced(HIPCC_EXECUTABLE)
@@ -75,44 +49,75 @@ if(
     return()
 endif()
 
-add_executable(roctx roctx.cpp)
-target_link_libraries(roctx PRIVATE Threads::Threads)
-
-if(
-    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-    AND NOT HIPCC_EXECUTABLE
-)
-    target_link_libraries(
-        roctx
-        PRIVATE
-            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-            $<TARGET_NAME_IF_EXISTS:hip::host>
-            $<TARGET_NAME_IF_EXISTS:hip::device>
-    )
-else()
-    target_compile_options(roctx PRIVATE -W -Wall)
-endif()
-
-# Find the library
+# Find the roctx library
 find_library(
     ROCTX_LIBRARY
     NAMES rocprofiler-sdk-roctx
-    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib
     REQUIRED
 )
-# Link it to target
-target_link_libraries(roctx PRIVATE ${ROCTX_LIBRARY})
 
-if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-    target_compile_options(roctx PRIVATE -g1)
-endif()
+set(ROCTX_EXAMPLE_TARGETS
+    roctx
+    pause-resume
+    selective-region
+    selective-region-pause-1
+    selective-region-pause-2
+    selective-region-pause-3
+)
 
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    # defined in MacroUtilities.cmake
-    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
-endif()
+set(ROCTX_KERNEL_HEADER_TARGETS
+    pause-resume
+    selective-region
+    selective-region-pause-1
+    selective-region-pause-2
+    selective-region-pause-3
+)
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(TARGETS roctx DESTINATION bin COMPONENT rocprofiler-systems-examples)
-endif()
+foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
+    set(_sources ${_target}.cpp)
+    if(${_target} IN_LIST ROCTX_KERNEL_HEADER_TARGETS)
+        list(APPEND _sources roctx-example-kernels.hpp)
+    endif()
+    add_executable(${_target} ${_sources})
+    target_link_libraries(${_target} PRIVATE Threads::Threads)
+
+    if(
+        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+        AND NOT HIPCC_EXECUTABLE
+    )
+        target_link_libraries(
+            ${_target}
+            PRIVATE
+                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+                $<TARGET_NAME_IF_EXISTS:hip::host>
+                $<TARGET_NAME_IF_EXISTS:hip::device>
+        )
+    else()
+        target_compile_options(${_target} PRIVATE -W -Wall)
+    endif()
+
+    target_link_libraries(${_target} PRIVATE ${ROCTX_LIBRARY})
+
+    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+        target_compile_options(${_target} PRIVATE -g1)
+    endif()
+
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(${_target} PRIVATE --offload-arch=${arch})
+        target_link_options(${_target} PUBLIC --offload-arch=${arch})
+    endforeach()
+
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${_target})
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${_target})
+        install(
+            TARGETS ${_target}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
+endforeach()

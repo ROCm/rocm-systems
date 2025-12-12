@@ -42,7 +42,7 @@
    * - Kernel time
 
      - The number of seconds the accelerator was executing a kernel, from the
-       :doc:`command processor <command-processor>`'s (CP) start-of-kernel
+       :doc:`command processor <cdna/command-processor>`'s (CP) start-of-kernel
        timestamp (a number of cycles after the CP beings processing the packet)
        to the CP's end-of-kernel timestamp (a number of cycles before the CP
        stops processing the packet).
@@ -52,7 +52,7 @@
    * - Kernel cycles
 
      - The number of cycles the accelerator was active doing *any* work, as
-       measured by the :doc:`command processor <command-processor>` (CP).
+       measured by the :doc:`command processor <cdna/command-processor>` (CP).
 
      - Cycles
 
@@ -60,7 +60,7 @@
 
      - The number of cycles the accelerator was active doing *any* work
        (that is, kernel cycles), multiplied by the number of
-       :doc:`compute units <compute-unit>` on the accelerator. A
+       :doc:`compute units <cdna/compute-unit>` on the accelerator. A
        measure of the total possible active cycles the compute units could be
        doing work, useful for the normalization of metrics inside the CU.
 
@@ -69,7 +69,7 @@
    * - Total active CU cycles
 
      - The number of cycles a CU on the accelerator was active doing *any*
-       work, summed over all :doc:`compute units <compute-unit>` on the
+       work, summed over all :doc:`compute units <cdna/compute-unit>` on the
        accelerator.
 
      - Cycles
@@ -78,7 +78,7 @@
 
      - The number of cycles the accelerator was active doing *any* work (that
        is, kernel cycles), multiplied by the number of
-       :doc:`SIMDs <compute-unit>` on the accelerator. A measure of the
+       :doc:`SIMDs <cdna/compute-unit>` on the accelerator. A measure of the
        total possible active cycles the SIMDs could be doing work, useful for
        the normalization of metrics inside the CU.
 
@@ -87,7 +87,7 @@
    * - Total L2 cycles
 
      - The number of cycles the accelerator was active doing *any* work (that
-       is, kernel cycles), multiplied by the number of :doc:`L2 <l2-cache>`
+       is, kernel cycles), multiplied by the number of :doc:`L2 <cdna/l2-cache>`
        channels on the accelerator. A measure of the total possible active
        cycles the L2 channels could be doing work, useful for the normalization
        of metrics inside the L2.
@@ -97,7 +97,7 @@
    * - Total active L2 cycles
 
      - The number of cycles a channel of the L2 cache was active doing *any*
-       work, summed over all :doc:`L2 <l2-cache>` channels on the accelerator.
+       work, summed over all :doc:`L2 <cdna/l2-cache>` channels on the accelerator.
 
      - Cycles
 
@@ -125,18 +125,18 @@
 
      - The number of cycles the accelerator was active doing *any* work (that
        is, kernel cycles), multiplied by the number of
-       :doc:`scheduler pipes <command-processor>` on the accelerator. A measure
+       :doc:`scheduler pipes <cdna/command-processor>` on the accelerator. A measure
        of the total possible active cycles the scheduler-pipes could be doing
        work, useful for the normalization of metrics inside the
        :ref:`workgroup manager <desc-spi>` and
-       :doc:`command processor <command-processor>`.
+       :doc:`command processor <cdna/command-processor>`.
 
      - Cycles
 
    * - Total shader-engine cycles
 
      - The total number of cycles the accelerator was active doing *any* work,
-       multiplied by the number of :doc:`shader engines <shader-engine>` on the
+       multiplied by the number of :doc:`shader engines <cdna/shader-engine>` on the
        accelerator. A measure of the total possible active cycles the shader
        engines could be doing work, useful for the normalization of
        metrics inside the :ref:`workgroup manager <desc-spi>`.
@@ -162,7 +162,7 @@
    * - Wavefront
 
      - A group of work-items, or threads, that execute in lockstep on the
-       :doc:`compute unit <compute-unit>`. On AMD Instinct accelerators, the
+       :doc:`compute unit <cdna/compute-unit>`. On AMD Instinct accelerators, the
        wavefront size is always 64 work-items.
 
      - N/A
@@ -170,9 +170,9 @@
    * - Workgroup
 
      - A group of wavefronts that execute on the same
-       :doc:`compute unit <compute-unit>`, and can cooperatively execute and
+       :doc:`compute unit <cdna/compute-unit>`, and can cooperatively execute and
        share data via the use of synchronization primitives,
-       :doc:`LDS <local-data-share>`, atomics, and others.
+       :doc:`LDS <cdna/local-data-share>`, atomics, and others.
 
      - N/A
 

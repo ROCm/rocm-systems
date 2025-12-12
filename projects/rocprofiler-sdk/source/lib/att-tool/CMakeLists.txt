@@ -3,8 +3,16 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(ATT_TOOL_SOURCE_FILES att_lib_wrapper.cpp code.cpp filenames.cpp occupancy.cpp
-                          perfcounter.cpp profile_interface.cpp wave.cpp wstates.cpp)
+set(ATT_TOOL_SOURCE_FILES
+    att_lib_wrapper.cpp
+    code.cpp
+    filenames.cpp
+    occupancy.cpp
+    perfcounter.cpp
+    profile_interface.cpp
+    shaderdata.cpp
+    wave.cpp
+    wstates.cpp)
 
 set(ATT_TOOL_HEADER_FILES
     att_lib_wrapper.hpp
@@ -14,6 +22,7 @@ set(ATT_TOOL_HEADER_FILES
     outputfile.hpp
     perfcounter.hpp
     profile_interface.hpp
+    shaderdata.hpp
     util.hpp
     wave.hpp
     wstates.hpp)
@@ -32,5 +41,10 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf)
+
+if(ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS)
+    target_compile_definitions(rocprofiler-sdk-att-parser
+                               PRIVATE ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS=1)
+endif()
 
 add_subdirectory(waitcnt)

@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/runtime.hpp"
 #include "platform/program.hpp"
@@ -27,6 +13,7 @@
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
 
+#include <array>
 #include <map>
 #include <string>
 #include <sstream>
@@ -227,14 +214,14 @@ static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
     case AttrField::ReqdWorkGroupSize: {
       status = amd::Comgr::get_metadata_list_size(value, &size);
       if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-        std::vector<size_t> wrkSize;
+        std::array<size_t, 3> wrkSize;
         for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
           amd_comgr_metadata_node_t workgroupSize;
           status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
 
           if (status == AMD_COMGR_STATUS_SUCCESS &&
               getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            wrkSize.push_back(atoi(buf.c_str()));
+            wrkSize[i] = atoi(buf.c_str());
           }
           amd::Comgr::destroy_metadata(workgroupSize);
         }
@@ -246,14 +233,14 @@ static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
     case AttrField::WorkGroupSizeHint: {
       status = amd::Comgr::get_metadata_list_size(value, &size);
       if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
-        std::vector<size_t> hintSize;
+        std::array<size_t, 3> hintSize;
         for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
           amd_comgr_metadata_node_t workgroupSizeHint;
           status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
 
           if (status == AMD_COMGR_STATUS_SUCCESS &&
               getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            hintSize.push_back(atoi(buf.c_str()));
+            hintSize[i] = atoi(buf.c_str());
           }
           amd::Comgr::destroy_metadata(workgroupSizeHint);
         }
@@ -480,8 +467,9 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
   }
 
   if (itKernelField != KernelField::ReqdWorkGroupSize &&
-      itKernelField != KernelField::WorkGroupSizeHint) {
-    status = getMetaBuf(value, &buf);
+      itKernelField != KernelField::WorkGroupSizeHint &&
+      itKernelField != KernelField::ClusterDims) {
+       status = getMetaBuf(value, &buf);
   }
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return AMD_COMGR_STATUS_ERROR;
@@ -492,14 +480,14 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
     case KernelField::ReqdWorkGroupSize:
       status = amd::Comgr::get_metadata_list_size(value, &size);
       if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-        std::vector<size_t> wrkSize;
+        std::array<size_t, 3> wrkSize;
         for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
           amd_comgr_metadata_node_t workgroupSize;
           status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
 
           if (status == AMD_COMGR_STATUS_SUCCESS &&
               getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            wrkSize.push_back(atoi(buf.c_str()));
+            wrkSize[i] = atoi(buf.c_str());
           }
           amd::Comgr::destroy_metadata(workgroupSize);
         }
@@ -511,19 +499,37 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
     case KernelField::WorkGroupSizeHint:
       status = amd::Comgr::get_metadata_list_size(value, &size);
       if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
-        std::vector<size_t> hintSize;
+        std::array<size_t, 3> hintSize;
         for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
           amd_comgr_metadata_node_t workgroupSizeHint;
           status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
 
           if (status == AMD_COMGR_STATUS_SUCCESS &&
               getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-            hintSize.push_back(atoi(buf.c_str()));
+            hintSize[i] = atoi(buf.c_str());
           }
           amd::Comgr::destroy_metadata(workgroupSizeHint);
         }
         if (!hintSize.empty()) {
           kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
+        }
+      }
+      break;
+    case KernelField::ClusterDims:
+      status = amd::Comgr::get_metadata_list_size(value, &size);
+      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
+        std::vector<size_t> clusterSize;
+        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
+          amd_comgr_metadata_node_t clusterSizeNode;
+          status = amd::Comgr::index_list_metadata(value, i, &clusterSizeNode);
+          if (status == AMD_COMGR_STATUS_SUCCESS &&
+              getMetaBuf(clusterSizeNode, &buf) == AMD_COMGR_STATUS_SUCCESS) {
+            clusterSize.push_back(atoi(buf.c_str()));
+          }
+          amd::Comgr::destroy_metadata(clusterSizeNode);
+        }
+        if (!clusterSize.empty()) {
+          kernel->setClusterSize(clusterSize[0], clusterSize[1], clusterSize[2]);
         }
       }
       break;
@@ -593,6 +599,9 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.compileSize_[0] = 0;
   workGroupInfo_.compileSize_[1] = 0;
   workGroupInfo_.compileSize_[2] = 0;
+  workGroupInfo_.clusterSize_[0] = 1;
+  workGroupInfo_.clusterSize_[1] = 1;
+  workGroupInfo_.clusterSize_[2] = 1;
   workGroupInfo_.localMemSize_ = 0;
   workGroupInfo_.preferredSizeMultiple_ = 0;
   workGroupInfo_.privateMemSize_ = 0;
@@ -618,6 +627,7 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.wavesPerSimdHint_ = 0;
   workGroupInfo_.constMemSize_ = 0;
   workGroupInfo_.maxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.hasClusterAttr_ = false;
 }
 
 // ================================================================================================
@@ -631,6 +641,16 @@ bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters,
       }
 
       attribs << workGroupInfo_.compileSize_[i];
+    }
+    attribs << ")";
+  }
+  if (workGroupInfo_.clusterSize_[0] != 0) {
+    attribs << "cluster_dims(";
+    for (size_t i = 0; i < 3; ++i) {
+      if (i != 0) {
+        attribs << ",";
+      }
+      attribs << workGroupInfo_.clusterSize_[i];
     }
     attribs << ")";
   }
@@ -755,7 +775,8 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
 bool Kernel::GetAttrCodePropMetadata() {
   amd_comgr_metadata_node_t kernelMetaNode;
   if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
-    DevLogPrintfError("Cannot get program kernel metadata for %s \n", name().c_str());
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+             "Cannot get program kernel metadata for %s \n", name().c_str());
     return false;
   }
 
@@ -830,23 +851,27 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
   status = amd::Comgr::get_metadata_list_size(printfMeta, &printfSize);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    std::string buf;
+    size_t originalSize = printfStr->size();
+    printfStr->reserve(originalSize + printfSize);
     for (size_t i = 0; i < printfSize; ++i) {
       amd_comgr_metadata_node_t str;
       status = amd::Comgr::index_list_metadata(printfMeta, i, &str);
 
+      std::string buf;
       if (status == AMD_COMGR_STATUS_SUCCESS) {
         status = getMetaBuf(str, &buf);
         amd::Comgr::destroy_metadata(str);
       }
 
       if (status != AMD_COMGR_STATUS_SUCCESS) {
-        DevLogPrintfError("Comgr API failed with status: %d \n", status);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR,
+                "Comgr API failed with status: %d \n", status);
         amd::Comgr::destroy_metadata(printfMeta);
+        printfStr->resize(originalSize);  // restore the original size of the vector
         return false;
       }
 
-      printfStr->push_back(buf);
+      printfStr->push_back(std::move(buf));
     }
   }
 
@@ -858,6 +883,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
   // Iterate through the arguments and insert into parameterList
   device::Kernel::parameters_t params;
   device::Kernel::parameters_t hiddenParams;
+  hiddenParams.reserve(amd::KernelParameterDescriptor::Desc::MaxSize);
   size_t offset = 0;
 
   amd_comgr_metadata_node_t argsMeta;
@@ -871,6 +897,8 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
     hsaArgsMeta = true;
     status = amd::Comgr::get_metadata_list_size(argsMeta, &argsSize);
   }
+
+  params.reserve(argsSize);
 
   for (size_t i = 0; i < argsSize; ++i) {
     amd::KernelParameterDescriptor desc = {};

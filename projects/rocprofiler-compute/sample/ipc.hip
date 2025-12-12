@@ -1,35 +1,17 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+
 /*
-##############################################################################bl
-# MIT License
-#
-# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
-
-
-
 An example to explore IPC and divergence, written by Nicholas Curtis [AMD].
 This example may not work on all CDNA accelerators, but has been verified on MI2XX.
 */
 
 #include "common.h"
+
+// Define MFMA support for CDNA2+ architectures (MI200, MI300, MI350 series)
+#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#define HAS_MFMA_SUPPORT 1
+#endif
 
 template<int N=1000>
 __device__ void vrcp_op() {
@@ -59,6 +41,7 @@ __global__ void vmov() {
     vmov_op<N>();
 }
 
+#ifdef HAS_MFMA_SUPPORT
 template<int N=1000>
 __device__ void mfma_op() {
     int dummy;
@@ -72,6 +55,7 @@ template<int N=1000>
 __global__ void mfma() {
     mfma_op<N>();
 }
+#endif
 
 template<int N=1000>
 __device__ void snop_op() {
@@ -112,14 +96,18 @@ int main() {
     // warmups, spam to all CUs
     vrcp<<<1024 * 1024, 1024>>>();
     vmov<<<1024 * 1024, 1024>>>();
+#ifdef HAS_MFMA_SUPPORT
     mfma<<<1024 * 1024, 1024>>>();
+#endif
     snop<<<1024 * 1024, 1024>>>();
     smov<<<1024 * 1024, 1024>>>();
     vmov_with_divergence<<<1024 * 1024, 1024>>>();
     hipCheck(hipDeviceSynchronize());
     vrcp<<<1024 * 1024, 1024>>>();
     vmov<<<1024 * 1024, 1024>>>();
+#ifdef HAS_MFMA_SUPPORT
     mfma<<<1024 * 1024, 1024>>>();
+#endif
     snop<<<1024 * 1024, 1024>>>();
     smov<<<1024 * 1024, 1024>>>();
     vmov_with_divergence<<<1024 * 1024, 1024>>>();

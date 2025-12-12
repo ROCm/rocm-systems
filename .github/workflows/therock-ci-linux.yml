@@ -5,8 +5,24 @@ on:
     inputs:
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
+      package_version:
+        type: string
+        required: true
+      amdgpu_families:
+        type: string
+        default: "gfx94X-dcgpu"
+      test_runs_on:
+        type: string
+        default: "linux-gfx942-1gpu-core42-ossci-rocm"
+      build_runs_on:
+        type: string
+        default: "azure-linux-scale-rocm"
+      run_mi455_test:
+        type: string
+        default: "false"
+        description: "Set to 'true' to run MI455 tests for gfx125X builds"
 
 
 permissions:
@@ -15,18 +31,18 @@ permissions:
 jobs:
   therock-build-linux:
     name: Build Linux Packages
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:044b113562629f4bd2ec5d2e64b32eee11562d48fb1a75d7493daec9dd8d8292
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:a382085df3ba2419b58aa9051350883a0d0b732a4bc0a4ef60458f8161bb08c6 # 2026-06-11
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: "gfx94X-dcgpu"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
@@ -38,7 +54,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: eb8f187ff47eb6af9cd5aaa0b8d9a04b06b12796 # 2025-11-15 commit
+          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
 
       - name: Install python deps
         run: |
@@ -53,7 +69,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
@@ -64,29 +80,24 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
-
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
 
       - name: Patch rocm-systems
         run: |
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          package_version: ${{ inputs.package_version }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build TheRock/build --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -94,9 +105,6 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build/artifacts
@@ -111,6 +119,13 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
+
       - name: Post Build Upload
         if: always()
         run: |
@@ -123,9 +138,26 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+
+  # MI455 test job for gfx125X - only runs when explicitly enabled
+  # This is separate from therock-test-linux because gfx125X has no test_machine
+  # configured in therock-ci-config yet, but we have a dedicated MI455 runner.
+  therock-mi455-test-linux:
+    name: "MI455 Test"
+    needs: [therock-build-linux]
+    if: ${{ inputs.amdgpu_families == 'gfx125X-dcgpu' && inputs.run_mi455_test == 'true' }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: "hip-tests, rocrtst"
+      amdgpu_families: "gfx125X-dcgpu"
+      test_runs_on: "linux-mi455-gpu-rocm"
       platform: "linux"

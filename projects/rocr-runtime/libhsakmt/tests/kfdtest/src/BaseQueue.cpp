@@ -30,7 +30,8 @@
 
 BaseQueue::BaseQueue()
     :m_QueueBuf(NULL),
-    m_SkipWaitConsumption(true) {
+    m_SkipWaitConsumption(true),
+    m_KFDContext(NULL) {
 }
 
 BaseQueue::~BaseQueue(void) {
@@ -45,7 +46,7 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         // Queue already exists, one queue per object
         Destroy();
     }
-
+    m_KFDContext = g_baseTest->m_hsakmt_current_ctx;
     memset(&m_Resources, 0, sizeof(m_Resources));
 
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,
@@ -57,24 +58,26 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
     }
 
     if (type == HSA_QUEUE_SDMA_BY_ENG_ID)
-        status = hsaKmtCreateQueueExt(NodeId,
-                                      type,
-                                      DEFAULT_QUEUE_PERCENTAGE,
-                                      DEFAULT_PRIORITY,
-                                      m_SdmaEngineId,
-                                      m_QueueBuf->As<unsigned int*>(),
-                                      m_QueueBuf->Size(),
-                                      NULL,
-                                      &m_Resources);
+        status = HSAKMT_CALL(hsaKmtCreateQueueExt, m_KFDContext,
+                             NodeId,
+                             type,
+                             DEFAULT_QUEUE_PERCENTAGE,
+                             DEFAULT_PRIORITY,
+                             m_SdmaEngineId,
+                             m_QueueBuf->As<unsigned int*>(),
+                             m_QueueBuf->Size(),
+                             NULL,
+                             &m_Resources);
     else
-        status = hsaKmtCreateQueue(NodeId,
-                                   type,
-                                   DEFAULT_QUEUE_PERCENTAGE,
-                                   DEFAULT_PRIORITY,
-                                   m_QueueBuf->As<unsigned int*>(),
-                                   m_QueueBuf->Size(),
-                                   NULL,
-                                   &m_Resources);
+        status = HSAKMT_CALL(hsaKmtCreateQueue, m_KFDContext,
+                             NodeId,
+                             type,
+                             DEFAULT_QUEUE_PERCENTAGE,
+                             DEFAULT_PRIORITY,
+                             m_QueueBuf->As<unsigned int*>(),
+                             m_QueueBuf->Size(),
+                             NULL,
+                             &m_Resources);
 
     if (status != HSAKMT_STATUS_SUCCESS) {
         return status;
@@ -102,18 +105,20 @@ HSAKMT_STATUS BaseQueue::Update(unsigned int percent, HSA_QUEUE_PRIORITY priorit
     void* pNewBuffer = (nullifyBuffer ? NULL : m_QueueBuf->As<void*>());
     HSAuint64 newSize = (nullifyBuffer ? 0 : m_QueueBuf->Size());
 
-    return hsaKmtUpdateQueue(m_Resources.QueueId, percent, priority, pNewBuffer, newSize, NULL);
+    return HSAKMT_CALL(hsaKmtUpdateQueue, m_KFDContext,
+                      m_Resources.QueueId, percent, priority, pNewBuffer, newSize, NULL);
 }
 
 HSAKMT_STATUS BaseQueue::SetCUMask(unsigned int *mask, unsigned int mask_count) {
-    return hsaKmtSetQueueCUMask(m_Resources.QueueId, mask_count, mask);
+    return HSAKMT_CALL(hsaKmtSetQueueCUMask, m_KFDContext,
+                      m_Resources.QueueId, mask_count, mask);
 }
 
 HSAKMT_STATUS BaseQueue::Destroy() {
     HSAKMT_STATUS status =  HSAKMT_STATUS_SUCCESS;
 
     if (m_QueueBuf != NULL) {
-        status = hsaKmtDestroyQueue(m_Resources.QueueId);
+        status = HSAKMT_CALL(hsaKmtDestroyQueue, m_KFDContext, m_Resources.QueueId);
 
         if (status == HSAKMT_STATUS_SUCCESS) {
             delete m_QueueBuf;
@@ -125,13 +130,26 @@ HSAKMT_STATUS BaseQueue::Destroy() {
 }
 
 void BaseQueue::PlaceAndSubmitPacket(const BasePacket &packet) {
-    PlacePacket(packet);
+    /*
+     * Do not ring the doorbell if PlacePacket failed. ASSERT_* inside
+     * PlacePacket is fatal only to PlacePacket if we propergate it here
+     */
+    ASSERT_NO_FATAL_FAILURE(PlacePacket(packet));
     SubmitPacket();
 }
 
 void BaseQueue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
     ASSERT_TRUE(!event) << "Not supported!" << std::endl;
-    ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, RptrWhenConsumed(), timeOut));
+
+    const unsigned int expectedRptr = RptrWhenConsumed();
+    ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, expectedRptr, timeOut))
+        << "Timed out waiting for queue consumption"
+        << " queueId="       << m_Resources.QueueId
+        << " expectedRptr="  << expectedRptr
+        << " actualRptr="    << m_Resources.Queue_read_ptr
+        << " wptr="          << Wptr()
+        << " pendingWptr="   << m_pendingWptr
+        << " pendingWptr64=" << m_pendingWptr64;
 }
 
 bool BaseQueue::AllPacketsSubmitted() {
@@ -139,6 +157,7 @@ bool BaseQueue::AllPacketsSubmitted() {
 }
 
 void BaseQueue::PlacePacket(const BasePacket &packet) {
+    ASSERT_NOTNULL(m_QueueBuf);
     ASSERT_EQ(packet.PacketType(), PacketTypeSupported())
         << "Cannot add a packet since packet type doesn't match queue";
 
@@ -156,7 +175,15 @@ void BaseQueue::PlacePacket(const BasePacket &packet) {
     }
 
     unsigned int dwordsAvailable = (readPtr - 1 - writePtr + queueSizeInDWord) % queueSizeInDWord;
-    ASSERT_GE(dwordsAvailable, dwordsRequired) << "Cannot add a packet, buffer overrun";
+    ASSERT_GE(dwordsAvailable, dwordsRequired)
+        << "Cannot add a packet, buffer overrun"
+        << " queueId="       << m_Resources.QueueId
+        << " readPtr="       << readPtr
+        << " writePtr="      << writePtr
+        << " pendingWptr="   << m_pendingWptr
+        << " pendingWptr64=" << m_pendingWptr64
+        << " packetDwords="  << packetSizeInDwords
+        << " queueDwords="   << queueSizeInDWord;
 
     ASSERT_GE(queueSizeInDWord, packetSizeInDwords) << "Cannot add a packet, packet size too large";
 

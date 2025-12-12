@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef OBJECT_HPP_
 #define OBJECT_HPP_
@@ -221,7 +207,7 @@ struct Coord3D {
 
 template <class T> class SysmemPool {
  public:
-  SysmemPool() : chunk_access_(true) /* Sysmem Pool Lock */ {}
+  SysmemPool() {}
   ~SysmemPool() {
     if (free_chunk_num_ != max_chunk_idx_) {
       for (int i = 0; i < kActiveAllocSize; ++i) {
@@ -248,7 +234,7 @@ template <class T> class SysmemPool {
     size_t current = current_alloc_++;
     auto idx = current / kAllocChunkSize;
     while (idx >= max_chunk_idx_) {
-      ScopedLock lock(chunk_access_);
+      std::scoped_lock lock(chunk_access_);
       // Second check in a case of multiple waiters
       if (idx == max_chunk_idx_) {
         auto allocs = new MemoryObject[kAllocChunkSize];
@@ -299,7 +285,7 @@ template <class T> class SysmemPool {
       auto base = obj->base_;
       {
         // Make sure active chunks don't have a stale pointer
-        ScopedLock lock(chunk_access_);
+        std::scoped_lock lock(chunk_access_);
         for (int i = 0; i < kActiveAllocSize; ++i) {
           if (base->allocs_ == active_allocs_[i]) {
             active_allocs_[i] = nullptr;
@@ -332,7 +318,7 @@ template <class T> class SysmemPool {
   std::atomic<uint64_t> current_alloc_ = 0;             //!< Current allocation, global index
   std::atomic<size_t> max_chunk_idx_ = 0;               //!< Current max chunk index
   size_t free_chunk_num_ = 0;                           //!< The number of freed chunks
-  amd::Monitor chunk_access_;                           //!< Lock for the chunk list access
+  std::recursive_mutex chunk_access_;                   //!< Lock for the chunk list access
   MemoryObject* active_allocs_[kActiveAllocSize] = {};  //!< Active chunks for fast access
 };
 

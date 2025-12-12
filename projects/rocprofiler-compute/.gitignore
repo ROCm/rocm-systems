@@ -1,5 +1,6 @@
 # mongodb_connector files
 __pycache__
+.cline_storage
 
 # edit files
 *~
@@ -16,6 +17,8 @@ __pycache__
 saved_analysis
 pmc_kernel_top.csv
 VERSION.sha
+**/_build
+**/out
 
 # temp files
 /tests/Testing
@@ -23,3 +26,6 @@ VERSION.sha
 # documentation artifacts
 /_build
 _toc.yml
+
+# Backup directories
+.backups/

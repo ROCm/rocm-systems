@@ -41,6 +41,10 @@ generic_add_rocm()
 # provide git to utilities
 find_program(GIT NAMES git)
 
+# Set Lintian Support Flags
+set(BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides")
+set(BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build")
+
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
 get_version_from_file("include/amd_smi/amdsmi.h" "MAJOR")
@@ -61,7 +65,8 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
-                       ": u32 = ")
+                       ": u32 = "
+)
 
 # Make proper version for appending
 # Default Value is 99999
@@ -83,8 +88,11 @@ set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
-project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
-        HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
+project(
+    ${AMD_SMI_LIBS_TARGET}
+    DESCRIPTION "AMD System Management libraries"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -103,7 +111,13 @@ include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
-option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+else()
+    option(ENABLE_ESMI_LIB "Build ESMI Library" OFF)
+endif()
+
 option(BUILD_EXAMPLES "Build examples" OFF)
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
@@ -112,37 +126,98 @@ mark_as_advanced(CMAKE_POSITION_INDEPENDENT_CODE)
 
 include(CMakeDependentOption)
 # these options don't work without BUILD_SHARED_LIBS
-cmake_dependent_option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF "BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(BUILD_CLI "Build AMDSMI-CLI and install" ON "BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(BUILD_RUST_WRAPPER "Build rust wrapper and install" OFF "BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
+cmake_dependent_option(
+    BUILD_WRAPPER
+    "Rebuild AMDSMI-wrapper"
+    OFF
+    "BUILD_SHARED_LIBS"
+    OFF
+)
+cmake_dependent_option(
+    BUILD_CLI
+    "Build AMDSMI-CLI and install"
+    ON
+    "BUILD_SHARED_LIBS"
+    OFF
+)
+cmake_dependent_option(
+    BUILD_RUST_WRAPPER
+    "Build rust wrapper and install"
+    OFF
+    "BUILD_SHARED_LIBS"
+    OFF
+)
+cmake_dependent_option(
+    ENABLE_LDCONFIG
+    "Set library links and caches using ldconfig."
+    ON
+    "BUILD_SHARED_LIBS"
+    OFF
+)
+cmake_dependent_option(
+    AUTO_BUILD_STATIC_LIBS
+    "auto-build static library (tests/examples link to static)"
+    ON
+    "NOT BUILD_SHARED_LIBS OR BUILD_TESTS"
+    OFF
+)
+cmake_dependent_option(
+    BUILD_BOTH_LIBS
+    "Build both shared and static library"
+    ON
+    "BUILD_SHARED_LIBS AND AUTO_BUILD_STATIC_LIBS"
+    OFF
+)
 
 # Set share path here because project name != amd_smi
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
-set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE STRING "")
+set(PKG_MAINTAINER_NM "AMD-SMILib Support")
+set(PKG_MAINTAINER_EMAIL "amd-smi.support@amd.com")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>" CACHE STRING "")
 
 generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
+# Netlink libraries for network interface functionality (required)
+# TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
+find_package(PkgConfig REQUIRED)
+
+# Try to use CMake config files first (bundled sysdeps provide these)
+find_package(libnl CONFIG QUIET)
+find_package(libmnl CONFIG QUIET)
+
+if(libnl_FOUND AND libmnl_FOUND)
+    message(STATUS "Using bundled netlink libraries via CMake config")
+    set(USING_BUNDLED_NETLINK TRUE)
+else()
+    message(STATUS "Using system netlink libraries via pkg-config")
+    pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
+    pkg_check_modules(LIBNLGENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
+    pkg_check_modules(LIBMNL REQUIRED IMPORTED_TARGET libmnl)
+    set(USING_BUNDLED_NETLINK FALSE)
+endif()
+
 # Configuration
-function(get_imported_soname target out_var)
-    get_target_property(link_libs ${target} INTERFACE_LINK_LIBRARIES)
-    set(result)
+function(get_imported_target_info target out_soname out_include_dirs)
+    # Resolve include directories.
+    get_target_property(include_dirs "${target}" INTERFACE_INCLUDE_DIRECTORIES)
+    set("${out_include_dirs}" "${include_dirs}" PARENT_SCOPE)
+
+    # Resolve the soname of the link library so that it can be opened with dlopen.
+    get_target_property(link_libs "${target}" INTERFACE_LINK_LIBRARIES)
+    set(soname)
     foreach(link_lib ${link_libs})
-        if(result)
+        if(soname)
             message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
         endif()
-        execute_process(
-            COMMAND objdump -p "${link_lib}"
-            OUTPUT_VARIABLE OBJDUMP_OUTPUT
-            RESULT_VARIABLE OBJDUMP_RESULT
-        )
+        execute_process(COMMAND objdump -p "${link_lib}" OUTPUT_VARIABLE OBJDUMP_OUTPUT RESULT_VARIABLE OBJDUMP_RESULT)
         if(OBJDUMP_RESULT EQUAL 0)
             string(REGEX MATCH "SONAME +([^ \n]+)" SONAME_MATCH "${OBJDUMP_OUTPUT}")
             if(SONAME_MATCH)
@@ -151,18 +226,18 @@ function(get_imported_soname target out_var)
             else()
                 message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
             endif()
-            set(result "${SONAME_OF_MY_PKG}")
+            set(soname "${SONAME_OF_MY_PKG}")
         else()
             message(FATAL_ERROR "objdump failed for ${link_lib}")
         endif()
     endforeach()
-    if(NOT result)
+    if(NOT soname)
         message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
     endif()
-    set("${out_var}" "${result}" PARENT_SCOPE)
+    set("${out_soname}" "${soname}" PARENT_SCOPE)
 endfunction()
 
-get_imported_soname(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME)
+get_imported_target_info(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME LIBDRM_AMDGPU_INCLUDES)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
@@ -185,13 +260,16 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-4.2")
+    set(current_esmi_tag "esmi_pkg_ver-5.2.1.1")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
         message(STATUS "Adding esmi_ib_library...")
-        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                                ${PROJECT_SOURCE_DIR}/esmi_ib_library)
+        execute_process(
+            COMMAND
+                git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                ${PROJECT_SOURCE_DIR}/esmi_ib_library
+        )
     else()
         message(STATUS "esmi_ib_library already installed, checking version...")
 
@@ -200,19 +278,24 @@ if(ENABLE_ESMI_LIB)
             COMMAND git rev-list --tags --max-count=1
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_commit
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
         execute_process(
             COMMAND git describe --tags ${latest_commit} --match "*pkg*"
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
 
         # Update to latest tags if not matched
         if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
             message(STATUS "Updating esmi_ib_library...")
             execute_process(
-                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                        ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp RESULT_VARIABLE clone_result)
+                COMMAND
+                    git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                    ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
+                RESULT_VARIABLE clone_result
+            )
             if(clone_result EQUAL 0)
                 file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
                 file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
@@ -227,8 +310,10 @@ if(ENABLE_ESMI_LIB)
     endif()
 
     # Make sure to update the amd_hsmp.h file with the corresponding esmi version
-    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-         DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm")
+    file(
+        COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
+        DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm"
+    )
 
     add_definitions("-DENABLE_ESMI_LIB=1")
     set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
@@ -238,11 +323,12 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex                
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi 
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
+    ${LIBDRM_AMDGPU_INCLUDES}
 )
 
 set(CMN_SRC_LIST
@@ -253,6 +339,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
     "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
@@ -261,7 +348,8 @@ set(CMN_SRC_LIST
     "${SHR_MUTEX_DIR}/shared_mutex.cc"
     "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_npm.cc")
+    "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
+)
 
 if(ENABLE_ESMI_LIB)
     list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
@@ -280,6 +368,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_exception.h"
     "${ROCM_INC_DIR}/rocm_smi_counters.h"
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
+    "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
@@ -288,16 +377,16 @@ set(CMN_INC_LIST
     "${SHR_MUTEX_DIR}/shared_mutex.h"
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
     "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
-    "${ROCM_INC_DIR}/rocm_smi_npm.h")
+    "${ROCM_INC_DIR}/rocm_smi_npm.h"
+)
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
-    #add_subdirectory("tests/rocm_smi_test")
     add_subdirectory("tests/amd_smi_test")
-    add_subdirectory("tests/python_unittest")
+    add_subdirectory("tests/python")
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries
@@ -318,51 +407,61 @@ endif()
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
-    amd_smi-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake
+    amd_smi-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
-    PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR)
+    PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR
+)
 
-write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
-                                 VERSION "${CPACK_PACKAGE_VERSION}" COMPATIBILITY SameMajorVersion)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
+    VERSION "${CPACK_PACKAGE_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
+export(TARGETS ${AMD_SMI_EXPORT_TARGETS} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
 export(PACKAGE ${AMD_SMI})
 
-install(
-    EXPORT amd_smiTargets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
-    COMPONENT dev)
+install(EXPORT amd_smiTargets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI} COMPONENT dev)
 
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(ENABLE_ASAN_PACKAGING)
+    set(COMP_TYPE "asan")
     # install license file in share/doc/amd_smi-asan folder
     install(
         FILES ${CPACK_RESOURCE_FILE_LICENSE}
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}-asan
         RENAME LICENSE.txt
-        COMPONENT asan)
+        COMPONENT asan
+    )
+else()
+    set(COMP_TYPE "dev")
 endif()
+
 # docs are installed into different share directory from tests and examples
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     RENAME LICENSE.txt
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
-    COMPONENT dev)
+    COMPONENT dev
+)
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}
@@ -372,16 +471,20 @@ install(
     PATTERN "*.cc"
     PATTERN "*.txt"
     PATTERN "build*" EXCLUDE
-    PATTERN ".cache*" EXCLUDE)
+    PATTERN ".cache*" EXCLUDE
+)
 
 # Make for goamdsmi_shim library
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
+# some distros like Debian10 don't ship libdrm-amdgpu-dev, keep as recommends
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel"
+)
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
@@ -394,42 +497,27 @@ configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
     DEBIAN/postinst
     @ONLY
-    FILE_PERMISSIONS
-    OWNER_READ
-    OWNER_WRITE
-    OWNER_EXECUTE
-    GROUP_READ
-    GROUP_EXECUTE
-    WORLD_READ
-    WORLD_EXECUTE)
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in
     DEBIAN/prerm
     @ONLY
-    FILE_PERMISSIONS
-    OWNER_READ
-    OWNER_WRITE
-    OWNER_EXECUTE
-    GROUP_READ
-    GROUP_EXECUTE
-    WORLD_READ
-    WORLD_EXECUTE)
-list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
-     "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
+list(
+    APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
+)
 
 # Configure pre-rm for tests only
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm.in
     DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm
     @ONLY
-    FILE_PERMISSIONS
-    OWNER_READ
-    OWNER_WRITE
-    OWNER_EXECUTE
-    GROUP_READ
-    GROUP_EXECUTE
-    WORLD_READ
-    WORLD_EXECUTE)
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+)
 
 # Assign control scripts to the AMDSMI Lib & Tests packages
 set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
@@ -440,21 +528,25 @@ set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/copyright"
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 # RPM package specific variables
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+    "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+)
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
+# some distros like AzureLinux don't ship libdrm-amdgpu-devel, keep as suggests
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-amdgpu-devel")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
-set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+# note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 
@@ -492,7 +584,7 @@ endif()
 
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-# set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev")
+# set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
@@ -505,6 +597,32 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+
+# Custom installation for Debian Lintian File
+if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
+    set(OVERRIDE_FILE "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}")
+    set(OVERRIDE_TEMP_INSTALL_LOC
+        "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/runtime"
+    )
+    if(BUILD_SHARED_LIBS)
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+        )
+    else()
+        set(OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev")
+        set(OVERRIDE_FILE_STATIC_DEST
+            "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}"
+        )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
+        )
+    endif()
+endif()
 
 include(CPack)
 

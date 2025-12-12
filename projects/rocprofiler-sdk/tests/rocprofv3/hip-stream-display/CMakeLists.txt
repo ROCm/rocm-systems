@@ -30,53 +30,38 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
-
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 set(hip-stream-display-env "${PRELOAD_ENV}")
 
-add_test(
-    NAME rocprofv3-test-hip-stream-display-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-hip-stream-display
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-rename -s -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
-        --log-level env -- $<TARGET_FILE:hip-streams>)
+        --log-level env -- $<TARGET_FILE:hip-streams>
+    DEPENDS hip-streams
+    TIMEOUT 60
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-hip-stream-display
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams>>)
 
-set_tests_properties(
-    rocprofv3-test-hip-stream-display-execute
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${hip-stream-display-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams>>)
-
-add_test(
-    NAME rocprofv3-test-hip-stream-display-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
-        --kernel-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
-        --memory-copy-csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv)
-
-set_tests_properties(
-    rocprofv3-test-hip-stream-display-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-hip-stream-display-execute
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               DISABLED
-               $<NOT:$<TARGET_EXISTS:hip-streams>>)
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-hip-stream-display
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_results.pftrace
+         --kernel-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_kernel_trace.csv
+         --memory-copy-csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-streams-trace/out_memory_copy_trace.csv
+    TIMEOUT 60
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-hip-stream-display
+    DISABLED $<NOT:$<TARGET_EXISTS:hip-streams>>)

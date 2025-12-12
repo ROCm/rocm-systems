@@ -129,6 +129,7 @@ BLACKLIST_GFX12=\
 "KFDQMTest.CreateAqlCpQueue:"\
 "KFDPerfCountersTest.*:"\
 "KFDMemoryTest.FlatScratchAccess:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
 "KFDGWSTest.*"
 
 # KFDQMTest.CpuWriteCoherence fails. 0 dwordsAvailable (KFD-338)
@@ -352,6 +353,20 @@ FILTER[gfx1200]=\
 FILTER[gfx1201]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX12"
+
+FILTER[gfx1250]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX12:"\
+"KFDEventTest.SignalInvalidEvent:"\
+"KFDQMTest.ExtendedCuMasking:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch:"\
+"KFDCWSRTest.InternalRegTest:"\
+"KFDEvictTest.QueueTest:"\
+"KFDRASTest.*:"\
+"KFDExceptionTest.AddressFault:"\
+"KFDQMTest.GpuMemCopyTest:"\
+"KFDDBGTest.HitTrapOnWaveStartEndEvent:"\
+"KFDNegativeTest.*"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\

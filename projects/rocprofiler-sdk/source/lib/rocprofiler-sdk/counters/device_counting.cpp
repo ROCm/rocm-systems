@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -28,6 +29,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -38,6 +40,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -52,43 +55,71 @@ hsa_inited()
 }
 
 uint64_t
-submitPacket(hsa_queue_t* queue, const void* packet)
+submitPackets(hsa_queue_t* queue, const void** packets, size_t num_packets)
 {
+    // Handle edge case: no packets to submit
+    if(num_packets == 0)
+    {
+        return hsa::get_core_table()->hsa_queue_load_write_index_relaxed_fn(queue);
+    }
+
+    // Validate num_packets doesn't exceed queue capacity
+    if(num_packets > queue->size)
+    {
+        ROCP_FATAL << fmt::format(
+            "Cannot submit {} packets to queue with size {}. num_packets must be <= queue->size",
+            num_packets,
+            queue->size);
+    }
+
     const uint32_t pkt_size = 0x40;
 
-    // advance command queue
+    // Advance command queue by num_packets
     const uint64_t write_idx =
-        hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
-    while((write_idx - hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >=
-          queue->size)
+        hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, num_packets);
+
+    // Wait for queue space to be available for all num_packets
+    while((write_idx + num_packets - 1 -
+           hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >= queue->size)
     {
         sched_yield();
     }
 
-    const uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
-    // NOLINTBEGIN(performance-no-int-to-ptr)
-    uint32_t* queue_slot =
-        reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * pkt_size));
-    // NOLINTEND(performance-no-int-to-ptr)
+    // Submit all packets
+    for(size_t i = 0; i < num_packets; ++i)
+    {
+        const uint32_t slot_idx = (uint32_t)((write_idx + i) % queue->size);
+        // NOLINTBEGIN(performance-no-int-to-ptr)
+        uint32_t* queue_slot =
+            reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * pkt_size));
+        // NOLINTEND(performance-no-int-to-ptr)
 
-    const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
+        const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packets[i]);
 
-    // Copy buffered commands into the queue slot.
-    // Overwrite the AQL invalid header (first dword) last.
-    // This prevents the slot from being read until it's fully written.
-    memcpy(&queue_slot[1], &slot_data[1], pkt_size - sizeof(uint32_t));
-    std::atomic<uint32_t>* header_atomic_ptr =
-        reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
-    header_atomic_ptr->store(slot_data[0], std::memory_order_release);
+        // Copy buffered commands into the queue slot.
+        // Overwrite the AQL invalid header (first dword) last.
+        // This prevents the slot from being read until it's fully written.
+        memcpy(&queue_slot[1], &slot_data[1], pkt_size - sizeof(uint32_t));
+        std::atomic<uint32_t>* header_atomic_ptr =
+            reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+        header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
-    // ringdoor bell
-    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+        ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
+                                  slot_idx,
+                                  write_idx + i,
+                                  *static_cast<const hsa::rocprofiler_packet*>(packets[i]));
+    }
 
-    ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
-                              slot_idx,
-                              write_idx,
-                              *static_cast<const hsa::rocprofiler_packet*>(packet));
-    return write_idx;
+    // Ring doorbell once for all packets (doorbell should be last write index)
+    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal,
+                                                       write_idx + num_packets - 1);
+    return write_idx + num_packets - 1;
+}
+
+uint64_t
+submitPacket(hsa_queue_t* queue, const void* packet)
+{
+    return submitPackets(queue, &packet, 1);
 }
 
 namespace
@@ -149,7 +180,7 @@ bool
 agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     if(!data) return false;
-    const auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
+    auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
     const auto& prof_config = callback_data.profile;
 
@@ -171,6 +202,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     {
         // reset the signal to allow another sample to start
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+        callback_data.sample_in_flight.store(false, std::memory_order_release);
         return true;
     }
 
@@ -196,7 +228,17 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 
     // reset the signal to allow another sample to start
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+    callback_data.sample_in_flight.store(false, std::memory_order_release);
     return true;
+}
+
+void
+wait_for_sample_handler(rocprofiler::counters::agent_callback_data& callback_data)
+{
+    while(callback_data.sample_in_flight.load(std::memory_order_acquire))
+    {
+        std::this_thread::yield();
+    }
 }
 
 /**
@@ -246,34 +288,6 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
                                                                        &callback_data),
              HSA_STATUS_SUCCESS);
     // NOLINTEND(performance-no-int-to-ptr)
-
-    // If we do not have a completion handle, this is our first time profiling this agent.
-    // Setup our shared data structures.
-    static std::unordered_set<hsa_queue_t*> queues_init;
-    if(queues_init.find(callback_data.queue) != queues_init.end()) return;
-    queues_init.insert(callback_data.queue);
-
-    // Set state of the queue to allow profiling (may not be needed since AQL
-    // may do this in the future).
-    CHECK(agent.cpu_pool().handle != 0);
-    CHECK(agent.get_hsa_agent().handle != 0);
-
-    aql::set_profiler_active_on_queue(
-        agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-            pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
-            submitPacket(callback_data.queue, (void*) &pkt);
-            constexpr auto timeout_hint =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-            if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                                 HSA_SIGNAL_CONDITION_EQ,
-                                                                 0,
-                                                                 timeout_hint.count(),
-                                                                 HSA_WAIT_STATE_ACTIVE) != 0)
-            {
-                ROCP_FATAL << "Could not set agent to be profiled";
-            }
-            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
-        });
 }
 }  // namespace
 
@@ -341,6 +355,7 @@ read_agent_ctx(const context::context*                    ctx,
         // No AQL packet, nothing to do here.
         if(!callback_data.packet) continue;
 
+        wait_for_sample_handler(callback_data);
         wait_if_sync();
 
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0)
@@ -352,6 +367,7 @@ read_agent_ctx(const context::context*                    ctx,
         if(callback_data.profile->reqired_hw_counters.empty())
         {
             callback_data.user_data = user_data;
+            callback_data.sample_in_flight.store(true, std::memory_order_release);
             hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, -1);
             wait_if_sync();
             continue;
@@ -365,9 +381,6 @@ read_agent_ctx(const context::context*                    ctx,
                                   agent->get_rocp_agent()->cu_count,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
-        // Submit the read packet to the queue
-        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet);
-
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
         rocprofiler::hsa::rocprofiler_packet barrier{};
@@ -375,7 +388,12 @@ read_agent_ctx(const context::context*                    ctx,
         barrier.barrier_and.completion_signal = callback_data.completion;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
-        submitPacket(agent->profile_queue(), &barrier.barrier_and);
+        callback_data.sample_in_flight.store(true, std::memory_order_release);
+
+        // Submit both READ and BARRIER packets in a batch (single doorbell ring)
+        const void* packets[2] = {&callback_data.packet->packets.read_packet, &barrier.barrier_and};
+        submitPackets(agent->profile_queue(), packets, 2);
+
         wait_if_sync();
         if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0) callback_data.cached_counters = nullptr;
     }
@@ -430,12 +448,33 @@ start_agent_ctx(const context::context* ctx)
             break;
         }
 
+        // On-demand: create the profile queue now (destroyed in stop_agent_ctx)
+        if(hsa::use_ondemand_queue())
+        {
+            agent->init_device_counting_service_queue(*hsa::get_core_table(),
+                                                      *hsa::get_amd_ext_table());
+        }
+
         // But if we have an agent cache, we need a profile queue.
         if(!agent->profile_queue())
         {
             ROCP_ERROR << "No profile queue found for context: " << ctx->context_idx;
             status = ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE;
             break;
+        }
+
+        // Lock the device for profiling (non-fatal if it fails)
+        // Only lock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
+        }
+
+        // Disable PTL (non-fatal if it fails)
+        // Only disable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_disable(agent->get_rocp_agent());
         }
 
         callback_data.set_profile = false;
@@ -559,18 +598,54 @@ stop_agent_ctx(const context::context* ctx)
         const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
         if(!agent || !agent->profile_queue()) continue;
 
+        wait_for_sample_handler(callback_data);
+
         if(!callback_data.profile->reqired_hw_counters.empty())
         {
             // Remove when AQL is updated to not require stop to be called first
+            callback_data.packet->packets.stop_packet.completion_signal = callback_data.completion;
+            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 2);
             submitPacket(agent->profile_queue(), &callback_data.packet->packets.stop_packet);
         }
 
-        // Wait for the stop packet to complete
+        // Wait for the stop packet to complete (device decrements signal from 2 to 1)
         hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
                                                           HSA_SIGNAL_CONDITION_EQ,
                                                           1,
                                                           UINT64_MAX,
                                                           HSA_WAIT_STATE_ACTIVE);
+
+        // Re-enable PTL (non-fatal if it fails)
+        // Only re-enable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_enable(agent->get_rocp_agent());
+        }
+
+        // Unlock the device (non-fatal if it fails)
+        // Only unlock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+        }
+
+        // On-demand cleanup: destroy signals, reset packet, destroy queue
+        if(hsa::use_ondemand_queue())
+        {
+            if(callback_data.completion.handle != 0)
+            {
+                hsa::get_core_table()->hsa_signal_destroy_fn(callback_data.completion);
+                callback_data.completion.handle = 0;
+            }
+            if(callback_data.start_signal.handle != 0)
+            {
+                hsa::get_core_table()->hsa_signal_destroy_fn(callback_data.start_signal);
+                callback_data.start_signal.handle = 0;
+            }
+            callback_data.packet.reset();
+            callback_data.queue = nullptr;
+            agent->destroy_device_counting_service_queue();
+        }
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::DISABLED);

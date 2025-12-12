@@ -1,6 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -43,13 +43,13 @@ ncclVerifiablePremulScalar(int rank_me)
 }
 
 // Enqueue kernel to generate data which is to be reduced.
-void
+hipError_t
 ncclVerifiablePrepareInput(void* elts, intptr_t elt_n, int elt_ty, int red_op, int rank_n,
                            int rank_me, uint64_t seed, intptr_t elt_ix0,
                            cudaStream_t stream);
 
 // Enqueue kernel to generate expected results of reduction.
-void
+hipError_t
 ncclVerifiablePrepareExpected(void* elts, intptr_t elt_n, int elt_ty, int red_op,
                               int rank_n, uint64_t seed, intptr_t elt_ix0,
                               cudaStream_t stream);
@@ -60,8 +60,19 @@ ncclVerifiablePrepareExpected(void* elts, intptr_t elt_n, int elt_ty, int red_op
 // which can be costly. Thus if you plan to run the same reduction multiple
 // times it is advantageous to precompute the expected values with
 // ncclVerifiablePrepareExpected and pass them as `expected` here.
-void
+hipError_t
 ncclVerifiableVerify(void const* results, void const* expected, intptr_t elt_n,
                      int elt_ty, int red_op, int rank_n, uint64_t seed, intptr_t elt_ix0,
                      int64_t* bad_elt_n, cudaStream_t stream);
+
+// Enqueue kernel that applies bias to expected results
+void
+ncclVerifiableApplyBias(void* elts, void* bias, intptr_t elt_n, int elt_ty, int red_op,
+                        intptr_t elt_ix0, cudaStream_t stream);
+
+#ifdef NCCL_VERIFIABLE_SELF_TEST
+void
+ncclVerifiableLaunchSelfTest();
+#endif
+
 #endif

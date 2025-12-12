@@ -1,0 +1,26 @@
+{
+    "hardware_counters": {
+        "enabled": true,
+        "rocm_events": {
+            "value": [
+                "VALUUtilization",
+                "Occupancy"
+            ]
+        }
+    },
+    "metadata": {
+        "category": "gpu",
+        "cli_flag": "--trace-hw-counters",
+        "description": "Hardware counter collection: GPU performance counters during execution",
+        "name": "trace-hw-counters",
+        "use_case": "GPU performance analysis with hardware-level metrics (occupancy, VALU utilization)"
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "sampling": {
+        "cpus": {
+            "value": "none"
+        }
+    }
+}

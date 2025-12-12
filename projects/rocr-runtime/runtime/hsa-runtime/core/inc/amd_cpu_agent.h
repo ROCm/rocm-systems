@@ -70,21 +70,10 @@ class CpuAgent : public core::Agent {
   // @brief CpuAgent destructor.
   ~CpuAgent();
 
-  // @brief Invoke the user provided callback for each region accessible by
-  // this agent.
-  //
-  // @param [in] include_peer If true, the callback will be also invoked on each
-  // peer memory region accessible by this agent. If false, only invoke the
-  // callback on memory region owned by this agent.
-  // @param [in] callback User provided callback function.
-  // @param [in] data User provided pointer as input for @p callback.
-  //
-  // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
-  // region returns ::HSA_STATUS_SUCCESS.
+  // @brief Override from core::Agent.
   hsa_status_t VisitRegion(bool include_peer,
-                           hsa_status_t (*callback)(hsa_region_t region,
-                                                    void* data),
-                           void* data) const;
+                           hsa_status_t (*callback)(hsa_region_t region, void* data),
+                           void* data) const override;
 
   // @brief Override from core::Agent.
   hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region,
@@ -102,11 +91,16 @@ class CpuAgent : public core::Agent {
   // @brief Override from core::Agent.
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
+  core::Agent* GetNearestCpuAgent() const override { return const_cast<CpuAgent*>(this); }
+
+  // @brief Override from core::Agent.
+  void InitDerivedCuid() override;
+
   // @brief Override from core::Agent.
   hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
                            uint32_t private_segment_size, uint32_t group_segment_size,
-                           core::Queue** queue) override;
+                           bool metadata_queue, core::Queue** queue) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src, core::Agent& src_agent,
@@ -127,7 +121,7 @@ class CpuAgent : public core::Agent {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -151,7 +145,7 @@ class CpuAgent : public core::Agent {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -166,7 +160,7 @@ class CpuAgent : public core::Agent {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   DISALLOW_COPY_AND_ASSIGN(CpuAgent);
 };

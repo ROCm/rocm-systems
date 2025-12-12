@@ -1,0 +1,29 @@
+name: rocprofiler GHCR Package Cleanup
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Runs daily at 6 AM UTC, 1 hour after the GHCR containers are updated
+    - cron: 0 6 * * *
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-ghcr-cleanup.yml'
+
+jobs:
+  cleanup-rocprofiler-images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        os: [ 'ubuntu', 'rhel', 'opensuse', 'debian' ]
+
+    steps:
+      - name: Clean up GHCR rocprofiler-${{ matrix.os }} Docker CI Images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          package: rocprofiler-${{ matrix.os }}
+          older-than: 7 days
+          dry-run: ${{ github.event_name == 'pull_request' }}

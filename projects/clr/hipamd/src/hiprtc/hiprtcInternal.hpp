@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 - Present Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -74,8 +58,19 @@ inline std::string ToString() { return (""); }
 template <typename T, typename... Args> inline std::string ToString(T first, Args... args) {
   return ToString(first) + ", " + ToString(args...);
 }
+
+inline void PrintHiprtcPathOnce() {
+  static std::once_flag printed_flag;
+  std::call_once(printed_flag, []() { amd::Os::PrintLibraryLocation(); });
+}
+
 }  // namespace internal
 }  // namespace hiprtc
+
+#define PRINT_HIPRTC_PATH()                                                                        \
+  do {                                                                                             \
+    hiprtc::internal::PrintHiprtcPathOnce();                                                       \
+  } while (0)
 
 // hiprtcInit lock
 static amd::Monitor g_hiprtcInitlock{};
@@ -83,7 +78,8 @@ static amd::Monitor g_hiprtcInitlock{};
   amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
   if (!amd::Flag::init()) {                                                                        \
     HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
-  }
+  }                                                                                                \
+  PRINT_HIPRTC_PATH();
 
 #define HIPRTC_INIT_API(...)                                                                       \
   HIPRTC_INIT_API_INTERNAL(0, __VA_ARGS__)                                                         \
@@ -121,8 +117,8 @@ class RTCCompileProgram : public hip::RTCProgram {
   std::vector<std::string> compile_options_;
   std::vector<std::string> link_options_;
 
-  amd_comgr_data_set_t compile_input_;
-  amd_comgr_data_set_t link_input_;
+  hip::comgr_helper::ComgrDataSetUniqueHandle compile_input_;
+  hip::comgr_helper::ComgrDataSetUniqueHandle link_input_;
 
   bool fgpu_rdc_;
   std::vector<char> LLVMBitcode_;
@@ -141,10 +137,7 @@ class RTCCompileProgram : public hip::RTCProgram {
 
  public:
   RTCCompileProgram(std::string);
-  ~RTCCompileProgram() {
-    amd::Comgr::destroy_data_set(compile_input_);
-    amd::Comgr::destroy_data_set(link_input_);
-  }
+  ~RTCCompileProgram() {}
 
   // Converters
   inline static hiprtcProgram as_hiprtcProgram(RTCCompileProgram* p) {

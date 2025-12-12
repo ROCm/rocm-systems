@@ -2,6 +2,8 @@
 # configure packaging settings
 #
 
+include(CPackComponent)
+
 function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO _REPLACE_PARENTHESIS)
     string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
     if(_REPLACE_PARENTHESIS)
@@ -54,7 +56,7 @@ rocprofiler_add_feature(CPACK_PACKAGE_FILE_NAME "CPack filename")
 get_cmake_property(ROCPROFILER_PACKAGING_COMPONENTS COMPONENTS)
 
 rocprofiler_add_feature(ROCPROFILER_PACKAGING_COMPONENTS "Packaging components")
-list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
+list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified" "fmt_core")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
@@ -82,16 +84,22 @@ set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
 set(COMPONENT_NAME_benchmark "rocprofiler-sdk-benchmark")
 set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 
+set(_aqlprofile_pkg_dep)
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    set(_aqlprofile_pkg_dep "hsa-amd-aqlprofile (>= 1.0.0)")
+endif()
+
 set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})" ${_aqlprofile_pkg_dep})
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})"
+    ${_aqlprofile_pkg_dep})
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
 set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")
@@ -133,6 +141,8 @@ endif()
 # support general cache variables
 list(APPEND _DEB_PACKAGE_DEPENDS ${ROCPROFILER_CPACK_DEBIAN_PACKAGE_DEPENDS})
 list(APPEND _RPM_PACKAGE_REQUIRES ${ROCPROFILER_CPACK_RPM_PACKAGE_REQUIRES})
+
+include(CPackComponent)
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
@@ -247,5 +257,38 @@ set(CPACK_RPM_SPEC_MORE_DEFINE "%undefine __brp_mangle_shebangs")
 set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
     )
+
+# Make CPack use LLVM binutils so ELF64-AMDGPU (.hsaco) is supported
+find_program(
+    ROCM_LLVM_OBJCOPY
+    NAMES llvm-objcopy
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+find_program(
+    ROCM_LLVM_OBJDUMP
+    NAMES llvm-objdump
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+find_program(
+    ROCM_LLVM_READELF
+    NAMES llvm-readelf
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES llvm/bin bin)
+
+if(ROCM_LLVM_OBJCOPY)
+    set(CPACK_OBJCOPY_EXECUTABLE
+        "${ROCM_LLVM_OBJCOPY}"
+        CACHE FILEPATH "" FORCE)
+endif()
+if(ROCM_LLVM_OBJDUMP)
+    set(CPACK_OBJDUMP_EXECUTABLE
+        "${ROCM_LLVM_OBJDUMP}"
+        CACHE FILEPATH "" FORCE)
+endif()
+if(ROCM_LLVM_READELF)
+    set(CPACK_READELF_EXECUTABLE
+        "${ROCM_LLVM_READELF}"
+        CACHE FILEPATH "" FORCE)
+endif()
 
 include(CPack)

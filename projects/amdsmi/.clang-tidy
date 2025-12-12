@@ -31,3 +31,4 @@ Checks:
   -modernize-use-using,
   -performance*,
   -readability*,
+  readability-delete-null-pointer,

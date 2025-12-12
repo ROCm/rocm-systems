@@ -35,6 +35,7 @@ and tweak the default sampling values.
 
    # ...
    ROCPROFSYS_TRACE                = true
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -187,8 +188,8 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
 **Example 1: Using ``papi_array`` for a fixed list of events**
 
-.. code-block:: shell   
-   
+.. code-block:: shell
+
    # Enable profiling mode (required)
    export ROCPROFSYS_PROFILE=ON
 
@@ -197,30 +198,30 @@ There are two distinct approaches for collecting PAPI-based hardware counters, e
 
    # Specify which PAPI events to collect
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
-   
+
 
 **Example 2: Using ``papi_vector`` for dynamically allocated array of events**
 
-.. code-block:: shell 
-   
+.. code-block:: shell
+
    # Include papi_vector for dynamic event lists
    export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_vector"
 
    # Alternative: Use perf event names
    export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
-   
+
 
 2. **Sampling-based collection:** Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
 
-.. code-block:: shell 
-   
+.. code-block:: shell
+
    # Enable sampling mode (required)
    export ROCPROFSYS_USE_SAMPLING=ON
 
    # Specify PAPI events for sampling
    export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
 
-You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``: 
+You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``:
 
 .. code-block:: shell
 
@@ -265,22 +266,6 @@ operations to tracks corresponding to their HIP Stream ID. However, with the
 ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE=ON`` setting, the events are on separate tracks
 and grouped by hardware queue.
 
-ROCPROFSYS_USE_RCCLP
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Use the setting ``ROCPROFSYS_USE_RCCLP = ON`` to enable profiling and tracing of
-ROCm Communication Collectives Library (RCCL, also pronounced as 'Rickle'). When this setting is enabled,
-ROCm Systems Profiler will trace the RCCL API calls and collect performance metrics related to collective operations.
-
-The image below shows an example of a Perfetto trace with RCCL communication data and API tracing enabled:
-
-.. image:: ../data/rccl-comm-recv.png
-   :alt: Perfetto tracks with RCCL Communication Data and API tracing
-
-.. note::
-   There is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory.
-   This issue is being tracked internally.
-
 Exploring GPU Metrics
 ---------------------
 
@@ -297,7 +282,13 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``all`` (or empty), ``none``, ``busy``,
+``gfx_clock``, ``jpeg_activity``, ``mem_clock``, ``mem_usage``, ``pcie``, ``power``,
+``sdma_usage``, ``temp``, ``vcn_activity``, ``xgmi``.
+
+.. note::
+
+   The ``sdma_usage`` metric requires AMD GPU driver 31.40 or higher and an Instinct-family GPU.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
@@ -309,17 +300,134 @@ Use the following command to view the available domains:
 
 .. note::
 
-   Some settings can enable tracing for multiple domains, such as: 
-   
+   Some settings can enable tracing for multiple domains, such as:
+
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
-   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   * ``kfd_events`` which will enable all Kernel Fusion Driver (KFD) domains,
+     ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
+     ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
+     ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
+     GPU, and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later.
 
 For example, the following is a valid configuration:
 
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
+
+
+For KFD event tracing, first check whether your GPU supports XNACK by running
+``rocminfo | grep xnack``. If the output contains ``xnack-``, XNACK is available
+but disabled by default. Enable it by setting the environment variable
+``HSA_XNACK=1``; running ``rocminfo`` again should then show ``xnack+``.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+
+Then add ``kfd_events`` to ``ROCPROFSYS_ROCM_DOMAINS`` in your configuration file
+or on the command line. For example:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=kfd_events
+
+ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Enables generation of unified-memory profiling reports from KFD page-fault and
+page-migration events. Two files are written alongside the usual Perfetto and
+ROCpd outputs:
+
+* ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
+  trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
+  host-to-device / device-to-host effective migration throughput when migration
+  events are present.
+* ``unified_memory.json`` -- machine-readable equivalent with the same fields
+  plus an ``xnack_enabled`` flag and an always-present
+  ``device_to_device`` direction bucket for schema stability. Migration buckets
+  can remain at zero on systems that do not generate KFD migration events.
+
+The migration-throughput value is computed as migrated bytes divided by KFD
+page-migration event duration. It is an end-to-end migration-service metric and
+should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
+bandwidth.
+
+On MI300A and other systems where CPU and GPU agents point to the same physical
+HBM, page faults can occur without page migrations because there is no separate
+CPU memory and GPU memory to migrate between. In that topology, the
+unified-memory view is expected to be fault-only: page-fault totals and trigger
+breakdowns can populate, migration counters remain zero, and the Perfetto
+migration-throughput track is not shown.
+
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later. The KFD tracing domains
+(``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
+setting is on -- you do not need to add ``kfd_events`` to
+``ROCPROFSYS_ROCM_DOMAINS`` separately.
+
+.. code-block:: shell
+
+   export HSA_XNACK=1
+   export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
+
+By default, unified-memory reports are written next to the active trace backend
+output. Set ``ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH`` to write
+``unified_memory`` reports to a dedicated directory:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output
+
+For a step-by-step workflow with examples and sample output, see
+:doc:`Unified memory profiling <./unified-memory-profiling>`.
+
+ROCPROFSYS_SELECTED_REGIONS
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``ROCPROFSYS_SELECTED_REGIONS`` setting limits tracing to activity that occurs inside
+specific roctx regions. When set, only GPU kernel dispatches, HIP API calls, and other
+traced events that occur while a matching roctx region is active are recorded.
+Regions are matched against the message passed to ``roctxRangeStartA()`` /
+``roctxRangeStop()`` (process-wide range markers).
+
+The value is a comma-separated list of region names:
+
+.. code-block:: shell
+
+   ROCPROFSYS_SELECTED_REGIONS=Region1,Region2
+
+When this variable is empty (the default), all activity is traced regardless of roctx regions.
+
+Nested regions are supported. For example, if ``Region2`` is opened inside ``Region1``,
+filtering on ``Region1`` captures activity in both ``Region1`` and the nested ``Region2``.
+Filtering on ``Region2`` captures only activity inside the inner ``Region2`` scope.
+
+.. note::
+
+   ``ROCPROFSYS_SELECTED_REGIONS`` uses process-wide ``roctxRangeStartA`` / ``roctxRangeStop``
+   markers, not thread-local ``roctxRangePush`` / ``roctxRangePop``.
+
+   When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
+   outside an active target region is ignored — each region entry resets the pause state.
+
+.. note::
+
+   Counter tracks may show a small latency between the region boundary and the
+   closing zero-valued sentinel sample.  This is expected behavior — the sentinel
+   is written by a callback that executes after ``roctxRangeStop()`` returns, so a
+   gap of a few tens of microseconds is normal and does not indicate any problem
+   with the trace.  Increasing the process-sampling frequency
+   (``ROCPROFSYS_PROCESS_SAMPLING_FREQ``) will reduce this gap.
+
+Example: trace only activity inside a region named ``Compute``:
+
+.. code-block:: shell
+
+   rocprof-sys-run \
+       -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+       -e ROCPROFSYS_SELECTED_REGIONS=Compute \
+       -- ./my_app
 
 rocprof-sys-avail examples
 -----------------------------------
@@ -340,10 +448,10 @@ Generating a default configuration file
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
    ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
-   ROCPROFSYS_USE_ROCM                                 = true
    ROCPROFSYS_USE_AMD_SMI                              = true
    ROCPROFSYS_USE_KOKKOSP                              = false
    ROCPROFSYS_USE_CODE_COVERAGE                        = false
@@ -492,15 +600,16 @@ Viewing the setting descriptions
    | ROCPROFSYS_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
    | ROCPROFSYS_TIMING_UNITS                  | Set the units for components with u...  |
    | ROCPROFSYS_TIMING_WIDTH                  | Set the output width for components ... |
+   | ROCPROFSYS_SELECTED_REGIONS              | Comma-separated list of roctx region... |
    | ROCPROFSYS_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
    | ROCPROFSYS_TREE_OUTPUT                   | Write hierarchical json output files    |
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
+   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
-   | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
    | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
    | ROCPROFSYS_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
    | ROCPROFSYS_PROFILE                       | Enable timemory backend                 |
@@ -1346,6 +1455,7 @@ but do not override an existing value for the environment variable.
 
    # use fields
    ROCPROFSYS_TRACE                 = $ENABLE
+   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

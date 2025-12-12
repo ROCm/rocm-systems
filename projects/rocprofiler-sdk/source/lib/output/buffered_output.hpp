@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "counter_info.hpp"
 #include "generator.hpp"
+#include "kfd_info.hpp"
 #include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
@@ -183,14 +184,21 @@ using marker_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_marker_api_record_t, domain_type::MARKER>;
 using rccl_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rccl_api_record_t, domain_type::RCCL>;
+using ompt_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_ompt_record_t, domain_type::OMPT>;
 using counter_collection_buffered_output_t =
     buffered_output<tool_counter_record_t, domain_type::COUNTER_COLLECTION>;
+using spm_counter_collection_buffered_output_t =
+    buffered_output<tool_spm_counter_record_t, domain_type::SPM_COUNTER_COLLECTION>;
+using spm_counter_records_buffered_output_t =
+    buffered_output<tool_spm_counter_value_t, domain_type::SPM_COUNTER_VALUES>;
 using scratch_memory_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_scratch_memory_record_t,
                     domain_type::SCRATCH_MEMORY>;
 using memory_allocation_buffered_output_t =
     buffered_output<tool_buffer_tracing_memory_allocation_ext_record_t,
                     domain_type::MEMORY_ALLOCATION>;
+using kfd_buffered_output_t = buffered_output<tool_buffer_tracing_kfd_record_t, domain_type::KFD>;
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
                                          domain_type::COUNTER_VALUES>;

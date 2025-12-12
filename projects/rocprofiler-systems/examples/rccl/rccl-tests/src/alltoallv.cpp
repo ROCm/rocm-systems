@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 #define USE_RCCL_GATHER_SCATTER
 
@@ -101,8 +102,10 @@ AlltoAllvGetBw(size_t count, int typesize, double sec, double* algBw, double* bu
 
 testResult_t
 AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+                 ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                 void* bias = nullptr)
 {
+    (void) bias;
     int nranks;
     NCCLCHECK(ncclCommCount(comm, &nranks));
     int rank;
@@ -174,8 +177,9 @@ AlltoAllvRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t ty
     return testSuccess;
 }
 
-struct testColl alltoAllTest = { "AlltoAllv", AlltoAllvGetCollByteCount,
-                                 AlltoAllvInitData, AlltoAllvGetBw, AlltoAllvRunColl };
+struct testColl alltoAllTest = { "AlltoAllv",       AlltoAllvGetCollByteCount,
+                                 AlltoAllvInitData, AlltoAllvGetBw,
+                                 AlltoAllvRunColl,  nullptr };
 
 void
 AlltoAllvGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

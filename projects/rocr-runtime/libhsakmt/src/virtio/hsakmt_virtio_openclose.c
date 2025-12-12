@@ -22,6 +22,7 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
+#include "libhsakmt.h"
 
 pthread_mutex_t dev_mutex = PTHREAD_MUTEX_INITIALIZER;
 vhsakmt_device_handle dev_list = NULL;
@@ -85,11 +86,14 @@ static vhsakmt_device_handle vhsakmt_device_init(void) {
   if (!dev->vgdev) goto malloc_failed;
 
   rbtree_init(&dev->bo_rbt);
+  interval_tree_init(&dev->userptr_tree);
   atomic_store(&dev->next_blob_id, 1);
   atomic_store(&dev->refcount, 1);
   pthread_mutex_init(&dev->bo_handles_mutex, NULL);
   pthread_mutex_init(&dev->vhsakmt_mutex, NULL);
   dev_list = dev;
+
+  dev->use_svm = false;
 
   pthread_mutex_unlock(&dev_mutex);
   return dev;
@@ -102,25 +106,40 @@ open_failed:
   return dev;
 }
 
+static void vhsakmt_init_vars_from_env(void) {
+  char* env_val = NULL;
+
+  env_val = getenv("VHSAKMT_USE_SVM");
+  if (env_val && hsakmt_safe_env_to_int(env_val, 0)) vhsakmt_dev()->use_svm = true;
+
+  env_val = getenv("VHSAKMT_DEBUG_LEVEL");
+  if (env_val) vhsakmt_debug_level = hsakmt_safe_env_to_int(env_val, 0);
+}
+
 HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenKFD(void) {
   vhsakmt_device_handle dev;
-  char* d = getenv("VHSAKMT_DEBUG_LEVEL");
-  if (d) vhsakmt_debug_level = atoi(d);
 
   dev = vhsakmt_device_init();
   if (!dev) return HSAKMT_STATUS_ERROR;
+
+  vhsakmt_init_vars_from_env();
 
   return vhsakmt_openKFD_cmd(vhsakmt_dev());
 }
 
 static void vhsakmt_device_destroy(struct vhsakmt_device* dev) {
   pthread_mutex_destroy(&dev->bo_handles_mutex);
+  pthread_mutex_destroy(&dev->vhsakmt_mutex);
   vhsakmt_dereserve_va(dev->vm_start, dev->vm_size);
 
   if (dev->sys_props) free(dev->sys_props);
   if (dev->vhsakmt_nodes) free(dev->vhsakmt_nodes);
 
   virtio_gpu_close(dev->vgdev);
+  if (dev == dev_list)
+    dev_list = NULL;
+
+  free(dev);
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCloseKFD(void) {

@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -43,16 +44,23 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace rocprofiler
 {
@@ -62,7 +70,7 @@ namespace
 {
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
-using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+using external_corr_id_map_t = tracing::external_correlation_id_map_t;
 
 template <size_t OpIdx>
 struct code_object_info;
@@ -223,7 +231,7 @@ enum amd_kernel_code_property_t
 uint32_t
 arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
-    if(name == "gfx90a" || name.find("gfx94") == 0)
+    if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
                                  AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
                 1) *
@@ -243,7 +251,7 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
     if(name == "gfx908")
         return arch_vgpr_count(name, kernel_code);
-    else if(name == "gfx90a" || name.find("gfx94") == 0)
+    else if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return ((AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                                   AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
                  1) *
@@ -378,7 +386,14 @@ using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 std::vector<hsa::code_object_unload>
 shutdown(hsa_executable_t executable);
 
-bool is_shutdown = false;
+std::atomic<bool> is_shutdown{false};
+
+auto&
+get_destroy_mutex()
+{
+    static auto _v = std::mutex{};
+    return _v;
+}
 
 auto*
 get_executables()
@@ -409,6 +424,119 @@ get_hip_register_data()
     static auto*& _v =
         common::static_object<common::Synchronized<hip::hip_register_data>>::construct();
     return _v;
+}
+
+std::vector<char>
+read_code_object_file(int fd)
+{
+    struct stat info = {};
+    if(fd < 0)
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor is invalid: " << fd;
+        return {};
+    }
+
+    if(::fstat(fd, &info) != 0)
+    {
+        auto err = errno;
+        ROCP_CI_LOG(WARNING) << "failed to stat loaded code object file descriptor " << fd << ": "
+                             << std::strerror(err);
+        return {};
+    }
+
+    if(info.st_size <= 0)
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " did not report a positive size";
+        return {};
+    }
+
+    if(static_cast<uintmax_t>(info.st_size) > std::numeric_limits<size_t>::max())
+    {
+        ROCP_CI_LOG(WARNING) << "loaded code object file descriptor " << fd
+                             << " is too large to read: " << info.st_size;
+        return {};
+    }
+
+    auto buffer = std::vector<char>(static_cast<size_t>(info.st_size));
+    auto offset = size_t{0};
+    while(offset < buffer.size())
+    {
+        const auto remaining = buffer.size() - offset;
+        const auto read_count =
+            std::min<size_t>(remaining, static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+        const auto nread =
+            ::pread(fd, buffer.data() + offset, read_count, static_cast<off_t>(offset));
+        if(nread < 0)
+        {
+            if(errno == EINTR) continue;
+            auto err = errno;
+            ROCP_CI_LOG(WARNING) << "failed to read loaded code object file descriptor " << fd
+                                 << ": " << std::strerror(err);
+            return {};
+        }
+        if(nread == 0) break;
+        offset += static_cast<size_t>(nread);
+    }
+
+    if(offset != buffer.size())
+    {
+        ROCP_CI_LOG(WARNING) << "short read on loaded code object file descriptor " << fd
+                             << ": expected " << buffer.size() << " bytes, read " << offset;
+    }
+
+    buffer.resize(offset);
+    return buffer;
+}
+
+hip::kernel_symbol_hip_device_map_t
+get_loaded_code_object_symbol_map(const rocprofiler_callback_tracing_code_object_load_data_t& data)
+{
+    if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
+    {
+        if(data.memory_base == 0 || data.memory_size == 0)
+        {
+            ROCP_CI_LOG(WARNING) << "loaded memory code object has invalid storage: memory_base="
+                                 << data.memory_base << ", memory_size=" << data.memory_size;
+            return {};
+        }
+
+        // The loader reports memory_size as uint64_t while COMGR takes a size_t byte count.
+        if(data.memory_size > std::numeric_limits<size_t>::max())
+        {
+            ROCP_CI_LOG(WARNING) << "loaded memory code object is too large to parse: "
+                                 << data.memory_size;
+            return {};
+        }
+
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        const auto* executable = reinterpret_cast<const void*>(data.memory_base);
+        return hip::get_kernel_symbol_device_name_map_from_executable(
+            executable, static_cast<size_t>(data.memory_size));
+    }
+
+    if(data.storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    {
+        auto file_data = read_code_object_file(data.storage_file);
+        if(file_data.empty()) return {};
+        return hip::get_kernel_symbol_device_name_map_from_executable(file_data.data(),
+                                                                      file_data.size());
+    }
+
+    return {};
+}
+
+void
+populate_hip_symbol_map_from_loaded_code_object(
+    const rocprofiler_callback_tracing_code_object_load_data_t& data)
+{
+    auto symbol_map = get_loaded_code_object_symbol_map(data);
+    if(symbol_map.empty()) return;
+
+    CHECK_NOTNULL(get_hip_register_data())
+        ->wlock([&symbol_map](hip::hip_register_data& register_data) {
+            register_data.kernel_symbol_device_map.insert(symbol_map.begin(), symbol_map.end());
+        });
 }
 
 hsa_status_t
@@ -667,6 +795,8 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
+    populate_hip_symbol_map_from_loaded_code_object(data);
+
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
 
@@ -733,7 +863,8 @@ get_unloaded_code_objects(hsa_executable_t executable)
 {
     auto _unloaded = std::vector<hsa::code_object_unload>{};
 
-    if(!is_shutdown && get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects)
+    if(!is_shutdown.load(std::memory_order_acquire) &&
+       get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects)
         get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
             executable, code_object_unload_callback, &_unloaded);
 
@@ -773,30 +904,37 @@ get_hip_register_function_function()
 bool
 initialize_hip_binary_data()
 {
-    static bool is_initialized =
-        CHECK_NOTNULL(get_hip_register_data())->wlock([](hip::hip_register_data& data) {
-            ROCP_INFO_IF(!data.fat_binary) << "No binary registered for HIP";
-            if(!data.fat_binary) return false;
-            std::vector<const rocprofiler_agent_t*> rocp_agents = rocprofiler::agent::get_agents();
-            for(const auto* rocp_agent : rocp_agents)
+    static auto parsed_fat_binaries = std::unordered_set<const void*>{};
+
+    return CHECK_NOTNULL(get_hip_register_data())->wlock([](hip::hip_register_data& data) {
+        if(!data.fat_binary) return false;
+        if(parsed_fat_binaries.count(data.fat_binary) > 0) return true;
+
+        auto                                    found_mapping = false;
+        std::vector<const rocprofiler_agent_t*> rocp_agents   = rocprofiler::agent::get_agents();
+        for(const auto* rocp_agent : rocp_agents)
+        {
+            if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            auto hsa_agent = agent::get_hsa_agent(rocp_agent);
+            if(!hsa_agent.has_value()) continue;
+            for(auto& isa : hip::get_isa_offsets(hsa_agent.value(), data.fat_binary))
             {
-                if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-                auto hsa_agent = agent::get_hsa_agent(rocp_agent);
-                if(!hsa_agent.has_value()) continue;
-                for(auto& isa : hip::get_isa_offsets(hsa_agent.value(), data.fat_binary))
+                auto kernel_symbols_name_map =
+                    hip::get_kernel_symbol_device_name_map(isa, data.fat_binary);
+                // many to one mapping as the same kernel symbols can be found in multiple code
+                // objects
+                if(!kernel_symbols_name_map.empty())
                 {
-                    auto kernel_symbols_name_map =
-                        hip::get_kernel_symbol_device_name_map(isa, data.fat_binary);
-                    // many to one mapping as the same kernel symbols can be found in multiple code
-                    // objects
-                    if(!kernel_symbols_name_map.empty())
-                        data.kernel_symbol_device_map.insert(kernel_symbols_name_map.begin(),
-                                                             kernel_symbols_name_map.end());
+                    found_mapping = true;
+                    data.kernel_symbol_device_map.insert(kernel_symbols_name_map.begin(),
+                                                         kernel_symbols_name_map.end());
                 }
             }
-            return true;
-        });
-    return is_initialized;
+        }
+
+        if(found_mapping) parsed_fat_binaries.emplace(data.fat_binary);
+        return found_mapping;
+    });
 }
 
 // Contains all operations for tracing we do after a successful executable_freeze
@@ -805,11 +943,9 @@ initialize_hip_binary_data()
 hsa_status_t
 executable_freeze_internal(hsa_executable_t executable)
 {
-    // before iterating code-object populate the host function map from registered binary
-    bool is_initialized = initialize_hip_binary_data();
-    ROCP_INFO_IF(!is_initialized) << "hip mapping data not initialized";
-
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
+    (void) initialize_hip_binary_data();
+
     CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
         data.emplace_back(executable);
     });
@@ -837,7 +973,7 @@ executable_freeze_internal(hsa_executable_t executable)
 
     if(!ctxs.empty())
     {
-        code_obj_vec->rlock([](const code_object_array_t& data) {
+        code_obj_vec->wlock([](code_object_array_t& data) {
             auto tidx = common::get_tid();
             // set the contexts for each code object
             for(const auto& ditr : data)
@@ -864,8 +1000,10 @@ executable_freeze_internal(hsa_executable_t executable)
                             // invoke callback
                             auto& cb_data =
                                 citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                            auto& user_data = ditr->user_data[citr];
-                            cb_data.callback(record, &user_data, cb_data.data);
+                            ditr->user_data.wlock([&](auto& user_data_map) {
+                                auto& user_data = user_data_map[citr];
+                                cb_data.callback(record, &user_data, cb_data.data);
+                            });
                         }
                     }
 
@@ -889,52 +1027,57 @@ executable_freeze_internal(hsa_executable_t executable)
                                 // invoke callback
                                 auto& cb_data =
                                     citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                                auto& user_data = sitr->user_data[citr];
-                                cb_data.callback(record, &user_data, cb_data.data);
+                                sitr->user_data.wlock([&](auto& user_data_map) {
+                                    auto& user_data = user_data_map[citr];
+                                    cb_data.callback(record, &user_data, cb_data.data);
 
-                                std::string device_name =
-                                    CHECK_NOTNULL(get_hip_register_data())
-                                        ->rlock([sym_data](
+                                    std::string device_name =
+                                        CHECK_NOTNULL(get_hip_register_data())
+                                            ->rlock(
+                                                [sym_data](
                                                     const hip::hip_register_data& register_data) {
-                                            const auto& sym_map =
-                                                register_data.kernel_symbol_device_map;
-                                            const auto it = sym_map.find(*CHECK_NOTNULL(
-                                                common::get_string_entry(sym_data.kernel_name)));
-                                            if(it != sym_map.end()) return it->second;
-                                            return std::string();
-                                        });
-                                // Does not have a host function, skip
-                                if(device_name.empty()) continue;
-                                auto host_data =
-                                    CHECK_NOTNULL(get_hip_register_data())
-                                        ->rlock([device_name](
-                                                    const hip::hip_register_data& register_data) {
-                                            // Add check for out of range here
-                                            const auto it =
-                                                register_data.host_function_map.find(device_name);
-                                            if(it == register_data.host_function_map.end())
-                                            {
-                                                return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
-                                            }
-                                            return it->second;
-                                        });
-                                // when kernel_symbol_device_map kernels are not present in
-                                // host_function_map, skip.
-                                if(host_data.device_function == nullptr) continue;
-                                host_data.code_object_id   = sym_data.code_object_id;
-                                host_data.kernel_id        = sym_data.kernel_id;
-                                host_data.host_function_id = ++get_host_function_id();
-                                auto hip_record            = rocprofiler_callback_tracing_record_t{
-                                    .context_id     = rocprofiler_context_id_t{citr->context_idx},
-                                    .thread_id      = tidx,
-                                    .correlation_id = rocprofiler_correlation_id_t{},
-                                    .kind           = CODE_OBJECT_KIND,
-                                    .operation      = CODE_OBJECT_HOST_SYMBOL,
-                                    .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                    .payload        = static_cast<void*>(&host_data)};
+                                                    const auto& sym_map =
+                                                        register_data.kernel_symbol_device_map;
+                                                    const auto it = sym_map.find(
+                                                        *CHECK_NOTNULL(common::get_string_entry(
+                                                            sym_data.kernel_name)));
+                                                    if(it != sym_map.end()) return it->second;
+                                                    return std::string();
+                                                });
+                                    // Does not have a host function, skip
+                                    if(device_name.empty()) return;
+                                    auto host_data =
+                                        CHECK_NOTNULL(get_hip_register_data())
+                                            ->rlock([device_name](const hip::hip_register_data&
+                                                                      register_data) {
+                                                // Add check for out of range here
+                                                const auto it =
+                                                    register_data.host_function_map.find(
+                                                        device_name);
+                                                if(it == register_data.host_function_map.end())
+                                                {
+                                                    return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
+                                                }
+                                                return it->second;
+                                            });
+                                    // when kernel_symbol_device_map kernels are not present in
+                                    // host_function_map, skip.
+                                    if(host_data.device_function == nullptr) return;
+                                    host_data.code_object_id   = sym_data.code_object_id;
+                                    host_data.kernel_id        = sym_data.kernel_id;
+                                    host_data.host_function_id = ++get_host_function_id();
+                                    auto hip_record = rocprofiler_callback_tracing_record_t{
+                                        .context_id = rocprofiler_context_id_t{citr->context_idx},
+                                        .thread_id  = tidx,
+                                        .correlation_id = rocprofiler_correlation_id_t{},
+                                        .kind           = CODE_OBJECT_KIND,
+                                        .operation      = CODE_OBJECT_HOST_SYMBOL,
+                                        .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                        .payload        = static_cast<void*>(&host_data)};
 
-                                // invoke callback
-                                cb_data.callback(hip_record, &user_data, cb_data.data);
+                                    // invoke callback
+                                    cb_data.callback(hip_record, &user_data, cb_data.data);
+                                });
                             }
                         }
                     }
@@ -961,10 +1104,19 @@ executable_freeze(hsa_executable_t executable, const char* options)
     return rocprofiler::code_object::executable_freeze_internal(executable);
 }
 
-hsa_status_t
-executable_destroy(hsa_executable_t executable)
+// Performs all SDK bookkeeping for an executable being destroyed (unload notifications,
+// kernel object map cleanup, code object / executable list cleanup) without calling the
+// underlying HSA destroy function.  Called from both the HSA-hook path and the attach
+// destruction callback path.
+void
+executable_destroy_internal(hsa_executable_t executable)
 {
-    if(is_shutdown) return HSA_STATUS_SUCCESS;
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
+    if(is_shutdown.load(std::memory_order_acquire))
+    {
+        return;
+    }
 
     auto _unloaded = shutdown(executable);
 
@@ -986,7 +1138,10 @@ executable_destroy(hsa_executable_t executable)
         CHECK_NOTNULL(get_code_objects())->wlock([executable](code_object_array_t& data) {
             for(auto& itr : data)
             {
-                if(itr->hsa_executable.handle == executable.handle) itr.reset();
+                if(itr->hsa_executable.handle == executable.handle)
+                {
+                    itr.reset();
+                }
             }
             data.erase(std::remove_if(
                            data.begin(), data.end(), [](auto& itr) { return (itr == nullptr); }),
@@ -1005,7 +1160,16 @@ executable_destroy(hsa_executable_t executable)
                        data.end());
         });
     }
+}
 
+hsa_status_t
+executable_destroy(hsa_executable_t executable)
+{
+    // Serialize all executable_destroy calls to prevent:
+    // 1. Concurrent access to code objects in shutdown()
+    // 2. Use-after-free when multiple threads destroy same executable
+    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
+    executable_destroy_internal(executable);
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
 
@@ -1014,11 +1178,16 @@ hip_register_fat_binary(const void* data)
 {
     const hip::hip_fat_binary_wrapper* fbwrapper =
         reinterpret_cast<const hip::hip_fat_binary_wrapper*>(data);
-    ROCP_ERROR_IF((fbwrapper->magic != hip::HIP_FAT_MAGIC || fbwrapper->version != 1))
-        << "register fat binary failed";
-    CHECK_NOTNULL(get_hip_register_data())->wlock([fbwrapper](hip::hip_register_data& reg_data) {
-        reg_data.fat_binary = fbwrapper->binary;
-    });
+    ROCP_ERROR_IF(!hip::is_valid_fat_binary_wrapper(*fbwrapper)) << "register fat binary failed";
+    // HIPK wrappers carry kpack metadata here, not a HIP fatbin. Kernel metadata is populated from
+    // the HSA loader's actual loaded code object bytes instead.
+    if(hip::has_hip_fat_binary_payload(*fbwrapper))
+    {
+        CHECK_NOTNULL(get_hip_register_data())
+            ->wlock([fbwrapper](hip::hip_register_data& reg_data) {
+                reg_data.fat_binary = fbwrapper->binary;
+            });
+    }
     return CHECK_NOTNULL(get_hip_register_fatbinary_function())(data);
 }
 
@@ -1073,6 +1242,11 @@ shutdown(hsa_executable_t executable)
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
 
+    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
+    // queue-interposition completion records first so pending dispatch records are delivered while
+    // that metadata is still valid.
+    ::rocprofiler::hsa::queue_interposition::interposition_sync();
+
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
     constexpr auto CODE_OBJECT_KERNEL_SYMBOL =
@@ -1098,9 +1272,11 @@ shutdown(hsa_executable_t executable)
                         .payload        = static_cast<void*>(&itr.object->rocp_data)};
 
                     // invoke callback
-                    auto& cb_data   = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                    auto& user_data = itr.object->user_data.at(citr);
-                    cb_data.callback(record, &user_data, cb_data.data);
+                    auto& cb_data = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                    itr.object->user_data.wlock([&](auto& user_data_map) {
+                        auto& user_data = user_data_map.at(citr);
+                        cb_data.callback(record, &user_data, cb_data.data);
+                    });
                 }
             }
 
@@ -1123,9 +1299,11 @@ shutdown(hsa_executable_t executable)
                             .payload        = static_cast<void*>(&sitr->rocp_data)};
 
                         // invoke callback
-                        auto& cb_data   = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                        auto& user_data = sitr->user_data.at(citr);
-                        cb_data.callback(record, &user_data, cb_data.data);
+                        auto& cb_data = citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                        sitr->user_data.wlock([&](auto& user_data_map) {
+                            auto& user_data = user_data_map.at(citr);
+                            cb_data.callback(record, &user_data, cb_data.data);
+                        });
                     }
                 }
             }
@@ -1150,17 +1328,25 @@ get_attach_table()
 }
 
 void
-iterate_attach_code_object(hsa_executable_t executable, void*)
+attach_code_object_event(hsa_executable_t                       executable,
+                         rocprofiler_attach_code_object_phase_t phase,
+                         void* /*data*/)
 {
-    executable_freeze_internal(executable);
+    if(phase == ROCPROFILER_ATTACH_CODE_OBJECT_CREATED)
+    {
+        executable_freeze_internal(executable);
+    }
+    else
+    {
+        executable_destroy_internal(executable);
+    }
 }
 
 void
 load_attach_code_objects()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
-    attach_table->rocprofiler_attach_iterate_all_code_objects(iterate_attach_code_object, nullptr);
-    attach_table->rocprofiler_attach_notify_new_code_object = iterate_attach_code_object;
+    attach_table->rocprofiler_attach_add_code_object_cb(attach_code_object_event, nullptr);
 }
 
 }  // namespace
@@ -1226,7 +1412,8 @@ get_kernel_id(uint64_t kernel_object)
 void
 finalize()
 {
-    if(is_shutdown || !get_executables() || !get_code_objects()) return;
+    if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
+        return;
 
     CHECK_NOTNULL(get_executables())->rlock([](const executable_array_t& edata) {
         auto tmp = edata;
@@ -1237,13 +1424,14 @@ finalize()
 
     CHECK_NOTNULL(get_code_objects())->wlock([](code_object_array_t& data) { data.clear(); });
 
-    is_shutdown = true;
+    is_shutdown.store(true, std::memory_order_release);
 }
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func)
 {
-    if(is_shutdown || !get_executables() || !get_code_objects()) return;
+    if(is_shutdown.load(std::memory_order_acquire) || !get_executables() || !get_code_objects())
+        return;
     CHECK_NOTNULL(get_code_objects())
         ->rlock(
             [](const code_object_array_t& data, code_object_iterator_t&& func_v) {

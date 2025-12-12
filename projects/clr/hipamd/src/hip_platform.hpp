@@ -1,22 +1,9 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
 #pragma once
 
 #include "hip_internal.hpp"
@@ -31,49 +18,27 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz);
 }  // namespace hip_impl
 
-// Unique file descriptor class
-struct UniqueFD {
-  UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
-
-  const std::string fpath_;        //!< File path of this unique file
-  const amd::Os::FileDesc fdesc_;  //!< File Descriptor
-  const size_t fsize_;             //!< File Size
-};
-
 namespace hip {
 class PlatformState {
-  // Guards PlatformState globals
-  amd::Monitor lock_{true};
-
-  // global level lock for unique file descritor map: ufd_map_
-  // Unique FD Store Lock
-  amd::Monitor ufd_lock_{true};
-
-  // Singleton object
-  static PlatformState* platform_;
-  PlatformState() {}
-  ~PlatformState() {}
-
  public:
-  void init();
+  void Init();
 
   // Dynamic Code Objects functions
-  hipError_t loadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
-  hipError_t unloadModule(hipModule_t hmod);
-  bool isValidDynFunc(const void* hfunc);
-  hipError_t getDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
-  hipError_t getFuncCount(unsigned int* count, hipModule_t hmod);
-  hipError_t getDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
+  hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
+  hipError_t UnloadModule(hipModule_t hmod);
+  bool IsValidDynFunc(const void* hfunc);
+  hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
+  hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
+  hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
                              size_t* size_ptr);
-  hipError_t getDynTexRef(const char* hostVar, hipModule_t hmod, textureReference** texRef);
+  hipError_t GetDynTexRef(const char* hostVar, hipModule_t hmod, textureReference** texRef);
 
-  hipError_t registerTexRef(textureReference* texRef, hipModule_t hmod, std::string name);
-  hipError_t getDynTexGlobalVar(textureReference* texRef, hipDeviceptr_t* dev_ptr,
+  hipError_t RegisterTexRef(textureReference* texRef, hipModule_t hmod, std::string name);
+  hipError_t GetDynTexGlobalVar(textureReference* texRef, hipDeviceptr_t* dev_ptr,
                                 size_t* size_ptr);
 
   // Singleton instance
-  static PlatformState& instance() {
+  static PlatformState& Instance() {
     if (platform_ == nullptr) {
       // __hipRegisterFatBinary() will call this when app starts, thus
       // there is no multiple entry issue here.
@@ -82,73 +47,65 @@ class PlatformState {
     return *platform_;
   }
 
-  // Static Code Objects functions
-  hip::FatBinaryInfo** addFatBinary(const void* data, bool& success);
-  hipError_t removeFatBinary(hip::FatBinaryInfo** module);
-  hipError_t digestFatBinary(const void* data, hip::FatBinaryInfo*& programs);
-
-  hipError_t registerStatFunction(const void* hostFunction, hip::Function* func);
-  hipError_t registerStatGlobalVar(const void* hostVar, hip::Var* var);
-  hipError_t registerStatManagedVar(hip::Var* var);
-
-  const char* getStatFuncName(const void* hostFunction);
-  hipError_t getStatFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
-  hipError_t getStatFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
-  hipError_t getStatGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
-                              size_t* size_ptr);
-
-  hipError_t initStatManagedVarDevicePtr(int deviceId);
-
   // Load hip dynamic library
-  void* getDynamicLibraryHandle();
-  void setDynamicLibraryHandle(void* handle);
+  void* GetDynamicLibraryHandle();
+  void SetDynamicLibraryHandle(void* handle);
 
   // Exec Functions
-  void setupArgument(const void* arg, size_t size, size_t offset);
-  void configureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
-  void popExec(ihipExec_t& exec);
+  void SetupArgument(const void* arg, size_t size, size_t offset);
+  void ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
+  void PopExec(ihipExec_t& exec);
 
-  std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
-  bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
+  // Logging lock accessor
+  std::recursive_mutex& GetLogLock() { return lg_lock_; }
 
-  size_t UfdMapSize() const { return ufd_map_.size(); }
+  // Friend functions for logging access
+  friend hipError_t hipExtEnableLogging();
+  friend hipError_t hipExtDisableLogging();
+  friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
-    amd::ScopedLock lock(lock_);
-    if (library_functions_.find(f) == library_functions_.end()) {
-      library_functions_.insert(std::make_pair(f, l));
-      return true;
-    }
-    return false;
+    std::scoped_lock lock(lock_);
+    return library_functions_.try_emplace(f, l).second;
   }
+
   inline bool UnregisterLibraryFunction(const hipKernel_t f) {
-    amd::ScopedLock lock(lock_);
-    if (library_functions_.find(f) != library_functions_.end()) {
-      library_functions_.erase(f);
-      return true;
-    }
-    return false;
+    std::scoped_lock lock(lock_);
+    return library_functions_.erase(f) > 0;
   }
 
   inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
-    amd::ScopedLock lock(lock_);
-    if (library_functions_.find(f) != library_functions_.end()) {
-      *lib = library_functions_[f];
+    std::scoped_lock lock(lock_);
+    auto it = library_functions_.find(f);
+    if (it != library_functions_.end()) {
+      *lib = it->second;
       return true;
     }
     return false;
   }
 
+  hip::StatCO& StatCO() { return statCO_; }  //!< Static Code object var
+  bool IsInitialized() const { return initialized_; }
+
  private:
-  // Dynamic Code Object map, keyin module to get the corresponding object
+  PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
+  ~PlatformState() {}
+
+  std::recursive_mutex lock_;       //!< Guards PlatformState globals
+  std::recursive_mutex lg_lock_;    //!< Lock for logging operations
+  static PlatformState* platform_;  //!< Singleton instance
+
+  //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
-  hip::StatCO statCO_;  //!< Static Code object var
-  bool initialized_{false};
+  hip::StatCO statCO_;              //!< Static Code object var
+  bool initialized_{false};         //!< Platform initialization state
+  //! Texture reference map: texRef -> (module, name)
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
-
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map
-
-  void* dynamicLibraryHandle_{nullptr};
+  void* dynamicLibraryHandle_{nullptr};  //!< Handle to dynamic library
+  //! Library function map: kernel -> library
   std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;
+  size_t log_level_;  //!< Logging level
+  size_t log_size_;   //!< Logging buffer size
+  size_t log_mask_;   //!< Logging mask
 };
 }  // namespace hip

@@ -1,34 +1,11 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 from utils.logger import console_debug, console_error, console_warning
+from vendored import yaml
 
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
@@ -43,6 +20,10 @@ class MIGPUSpecs:
     _num_xcds_dict: dict[str, dict[str, int]] = {}  # key: gpu_model
     _chip_id_dict: dict[int, str] = {}  # key: chip_id (int)
     _perfmon_config: dict[str, Any] = {}  # key: gpu_arch
+
+    # key: gpu_model, identifies die specs, and allows for reverse search of gpu arch
+    # and gpu series by model identifier
+    _gpu_design: dict[str, dict[str, int]] = {}
 
     # key: gpu_arch, used for gpu archs containing only one gpu model and
     # thus one compute partition
@@ -82,7 +63,7 @@ class MIGPUSpecs:
         """
 
         console_debug("mi_gpu_spec", "[load_yaml]")
-        with open(file_path) as file:
+        with open(file_path, encoding="utf-8") as file:
             data = yaml.safe_load(file)
             return data or {}
 
@@ -101,6 +82,10 @@ class MIGPUSpecs:
                     |-- partition_mode
                         | -- compute partition mode
                         | -- memory partition mode
+                    |-- design
+                        | -- physical_aid (CDNA)
+                        | -- logical_partitions_per_die (CDNA)
+                        | -- memory_levels
         """
 
         current_dir = Path(__file__).parent
@@ -132,7 +117,8 @@ class MIGPUSpecs:
                     cls._all_gpu_models.append(curr_gpu_model)
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
                     cls._num_xcds_dict[curr_gpu_model] = (
-                        models.get("partition_mode", {})
+                        models
+                        .get("partition_mode", {})
                         .get("compute_partition_mode", {})
                         .get("num_xcds", {})
                     )
@@ -145,6 +131,10 @@ class MIGPUSpecs:
                         cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
                             curr_gpu_model
                         )
+
+                    cls._gpu_design[curr_gpu_model] = models.get("design", {})
+                    cls._gpu_design[curr_gpu_model]["gpu_arch"] = curr_gpu_arch
+                    cls._gpu_design[curr_gpu_model]["gpu_series"] = curr_gpu_series
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -280,6 +270,21 @@ class MIGPUSpecs:
         return DEFAULT_NUM_XCD
 
     @classmethod
+    def is_partition_supported(
+        cls, gpu_arch: Optional[str], gpu_model: Optional[str]
+    ) -> bool:
+        """Return True if the GPU supports compute partitions."""
+        try:
+            partition_supported_series = {"mi300", "mi350"}
+            if bool(gpu_arch):
+                series = cls.get_gpu_series(gpu_arch.lower().strip())
+            elif bool(gpu_model):
+                series = cls._gpu_design[gpu_model.lower().strip()]["gpu_series"]
+            return series.lower() in partition_supported_series
+        except Exception:
+            return False
+
+    @classmethod
     def get_num_xcds(
         cls,
         gpu_arch: Optional[str] = None,
@@ -296,9 +301,6 @@ class MIGPUSpecs:
         3. Model + partition-based lookup (fallback)
         4. Default settings (last resort)
         """
-        # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx908", "gfx90a"}
-        LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison
         gpu_arch_norm = gpu_arch.lower().strip() if gpu_arch else ""
@@ -307,7 +309,9 @@ class MIGPUSpecs:
 
         # 1. Return 1 XCDs for archs/models not supporting compute partition
         # NOTE: gpu arch is enough to verify this logic, gpu model is used as a backup.
-        if gpu_arch_norm in LEGACY_ARCHS or gpu_model_norm in LEGACY_MODELS:
+        if not cls.is_partition_supported(
+            gpu_arch=gpu_arch_norm, gpu_model=gpu_model_norm
+        ):
             return 1
 
         # 2. Try architecture-based lookup first (preferred method)
@@ -362,6 +366,25 @@ class MIGPUSpecs:
 
         # 4. Last resort: use default settings
         return cls.set_default_gpu_settings(gpu_arch, gpu_model, compute_partition)
+
+    @classmethod
+    def get_num_dies(cls, gpu_arch: str, gpu_model: str) -> int:
+        """
+        Some CDNA models have larger physical AIDs that software divides into
+        distinct logical AID partitions. Models without these keys (including
+        single-die gfx115x) resolve to a single die.
+        """
+        design = cls._gpu_design.get(gpu_model.lower(), {})
+        return design.get("physical_aid", 1) * design.get(
+            "logical_partitions_per_die", 1
+        )
+
+    @classmethod
+    def get_memory_levels(cls, gpu_model: str) -> list[str]:
+        """
+        Return a list of the cache and memory levels supported by the specific gpu model
+        """
+        return cls._gpu_design[gpu_model.lower()].get("memory_levels", [])
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:

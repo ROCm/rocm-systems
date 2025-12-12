@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems-run target
@@ -7,19 +10,23 @@
 add_executable(
     rocprofiler-systems-run
     ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-run.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-run.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../common/tool_runner.cpp
 )
 
 target_compile_definitions(rocprofiler-systems-run PRIVATE TIMEMORY_CMAKE=1)
-target_include_directories(rocprofiler-systems-run PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(
+    rocprofiler-systems-run
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..
+)
 target_link_libraries(
     rocprofiler-systems-run
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-common-library
+        rocprofiler-systems::rocprofiler-systems-bin-common
         rocprofiler-systems::rocprofiler-systems-core
+        rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-sanitizer
 )
 set_target_properties(

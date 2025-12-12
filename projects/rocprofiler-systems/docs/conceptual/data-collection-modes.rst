@@ -30,7 +30,7 @@ ROCm Systems Profiler supports several modes of recording trace and profiling da
 |                             | dynamic library/executable, like ``pthread_mutex_lock`` |
 |                             | in ``libpthread.so`` or ``MPI_Init`` in the MPI library |
 +-----------------------------+---------------------------------------------------------+
-| User API                    | User-defined regions and controls for User API ROCm     |
+| User API (deprecated)       | User-defined regions and controls for User API ROCm     |
 |                             | Systems Profiler                                        |
 +-----------------------------+---------------------------------------------------------+
 
@@ -176,7 +176,13 @@ Primary collection modes
 Trace mode (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true`` or ``ROCPROFSYS_MODE=trace`` setting.
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true``, ``ROCPROFSYS_MODE=trace``, or by using the ``--trace`` / ``-T`` CLI flag.
+
+ROCm Systems Profiler provides two tracing implementations:
+
+- **Cached Mode (default)**: By default, when tracing is enabled, ROCm Systems Profiler uses deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
+
+- **Legacy Mode**: ``ROCPROFSYS_TRACE_LEGACY=true`` or ``--trace-legacy`` / ``-L`` enables direct mode where trace data is written immediately during execution. This mode provides real-time trace generation but has higher runtime overhead compared to cached mode.
 
 Additional configuration options to control the tracing behavior include:
 
@@ -199,6 +205,39 @@ Profile types:
 
 .. tip:: Start with a flat profile to identify high-impact functions, then use a hierarchical profile to analyze critical paths.
 
+Selecting output formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``--output-format`` flag (available in ``rocprof-sys-run`` and ``rocprof-sys-sample``) selects which output format(s) to produce in a single, intuitive option. The selection is authoritative: only the formats you name are produced. Use either ``--output-format`` or the legacy individual flags, not both.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 35 50
+
+   * - Token
+     - Output
+     - Equivalent environment variable(s)
+   * - ``proto``
+     - Perfetto trace
+     - ``ROCPROFSYS_TRACE=true``
+   * - ``rocpd``
+     - RocPD SQLite database
+     - ``ROCPROFSYS_USE_ROCPD=true``
+   * - ``json``
+     - Timemory profile, JSON serialization
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_JSON_OUTPUT=true``
+   * - ``text`` (alias ``txt``)
+     - Timemory profile, text serialization
+     - ``ROCPROFSYS_PROFILE=true`` and ``ROCPROFSYS_TEXT_OUTPUT=true``
+
+Tokens are space- or comma-separated and can be combined, for example:
+
+.. code-block:: shell
+
+   rocprof-sys-run --output-format proto rocpd -- ./myapp
+
+The ``--trace``, ``--profile``, ``--flat-profile``, and ``--profile-format`` flags and their environment variables remain available, but cannot be combined with ``--output-format`` on the same command line: because ``--output-format`` is authoritative over the same settings, mixing it with those flags is rejected to avoid an ambiguous result. Use either ``--output-format`` or the individual flags, not both.
+
 Sampling mode
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -208,7 +247,7 @@ Sampling types:
 
 1. **CPU-Time sampling** (default)
 
-* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--cputime`` (rocprof-sys-sample), ``--sample-cputime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_CPUTIME=ON`` or ``--sample-cputime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_CPUTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_CPUTIME_DELAY``
@@ -216,7 +255,7 @@ Sampling types:
 
 2. **Real-Time sampling**
 
-* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--realtime`` (rocprof-sys-sample), ``--sample-realtime`` (rocprof-sys-run). The sampling can be controlled using:
+* Enabled using ``ROCPROFSYS_SAMPLING_REALTIME=ON`` or ``--sample-realtime`` (both rocprof-sys-run and rocprof-sys-sample). The sampling can be controlled using:
 
   * ``ROCPROFSYS_SAMPLING_REALTIME_FREQ``
   * ``ROCPROFSYS_SAMPLING_REALTIME_DELAY``
@@ -244,8 +283,8 @@ Sampling types:
 To enable sampling:
 
 1. Use ``rocprof-sys-sample`` (auto-enables sampling).
-2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``. 
-3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
+2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``.
+3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``.
 4. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. For more details, see :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
 
 Causal mode

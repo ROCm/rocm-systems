@@ -28,33 +28,33 @@
 
 #define JSON_ARRAY_INITIAL_CAPACITY 16
 
-JsonValue *json_create_null(void) {
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+JsonValue* json_create_null(void) {
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
   val->type = JSON_NULL;
   return val;
 }
 
-JsonValue *json_create_bool(bool b) {
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+JsonValue* json_create_bool(bool b) {
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
   val->type = JSON_BOOL;
   val->data.boolean = b;
   return val;
 }
 
-JsonValue *json_create_number(double num) {
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+JsonValue* json_create_number(double num) {
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
   val->type = JSON_NUMBER;
   val->data.number = num;
   return val;
 }
 
-JsonValue *json_create_string(const char *str) {
+JsonValue* json_create_string(const char* str) {
   if (!str) return NULL;
 
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
 
   val->type = JSON_STRING;
@@ -66,20 +66,20 @@ JsonValue *json_create_string(const char *str) {
   return val;
 }
 
-JsonValue *json_create_object(void) {
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+JsonValue* json_create_object(void) {
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
   val->type = JSON_OBJECT;
   val->data.object = NULL;
   return val;
 }
 
-JsonValue *json_create_array(void) {
-  JsonValue *val = calloc(1, sizeof(JsonValue));
+JsonValue* json_create_array(void) {
+  JsonValue* val = calloc(1, sizeof(JsonValue));
   if (!val) return NULL;
 
   val->type = JSON_ARRAY;
-  val->data.array.items = malloc(sizeof(JsonValue *) * JSON_ARRAY_INITIAL_CAPACITY);
+  val->data.array.items = malloc(sizeof(JsonValue*) * JSON_ARRAY_INITIAL_CAPACITY);
   if (!val->data.array.items) {
     free(val);
     return NULL;
@@ -89,14 +89,14 @@ JsonValue *json_create_array(void) {
   return val;
 }
 
-void json_object_set(JsonValue *obj, const char *key, JsonValue *value) {
+void json_object_set(JsonValue* obj, const char* key, JsonValue* value) {
   if (!obj || obj->type != JSON_OBJECT || !key || !value) {
     json_free(value);
     return;
   }
 
   // Check if key already exists and update it
-  JsonPair *current = obj->data.object;
+  JsonPair* current = obj->data.object;
   while (current) {
     if (strcmp(current->key, key) == 0) {
       json_free(current->value);
@@ -107,7 +107,7 @@ void json_object_set(JsonValue *obj, const char *key, JsonValue *value) {
   }
 
   // Key doesn't exist, create new pair
-  JsonPair *pair = malloc(sizeof(JsonPair));
+  JsonPair* pair = malloc(sizeof(JsonPair));
   if (!pair) {
     json_free(value);
     return;
@@ -126,7 +126,7 @@ void json_object_set(JsonValue *obj, const char *key, JsonValue *value) {
   if (!obj->data.object) {
     obj->data.object = pair;
   } else {
-    JsonPair *last = obj->data.object;
+    JsonPair* last = obj->data.object;
     while (last->next) {
       last = last->next;
     }
@@ -134,10 +134,10 @@ void json_object_set(JsonValue *obj, const char *key, JsonValue *value) {
   }
 }
 
-JsonValue *json_object_get(JsonValue *obj, const char *key) {
+JsonValue* json_object_get(JsonValue* obj, const char* key) {
   if (!obj || obj->type != JSON_OBJECT || !key) return NULL;
 
-  JsonPair *current = obj->data.object;
+  JsonPair* current = obj->data.object;
   while (current) {
     if (strcmp(current->key, key) == 0) {
       return current->value;
@@ -147,17 +147,17 @@ JsonValue *json_object_get(JsonValue *obj, const char *key) {
   return NULL;
 }
 
-bool json_object_has_key(JsonValue *obj, const char *key) {
+bool json_object_has_key(JsonValue* obj, const char* key) {
   return json_object_get(obj, key) != NULL;
 }
 
-bool json_array_push(JsonValue *arr, JsonValue *value) {
+bool json_array_push(JsonValue* arr, JsonValue* value) {
   if (!arr || arr->type != JSON_ARRAY || !value) return false;
 
   // Resize array if needed
   if (arr->data.array.count >= arr->data.array.capacity) {
     size_t new_capacity = arr->data.array.capacity * 2;
-    JsonValue **new_items = realloc(arr->data.array.items, sizeof(JsonValue *) * new_capacity);
+    JsonValue** new_items = realloc(arr->data.array.items, sizeof(JsonValue*) * new_capacity);
     if (!new_items) return false;
 
     arr->data.array.items = new_items;
@@ -169,19 +169,19 @@ bool json_array_push(JsonValue *arr, JsonValue *value) {
   return true;
 }
 
-JsonValue *json_array_get(JsonValue *arr, size_t index) {
+JsonValue* json_array_get(JsonValue* arr, size_t index) {
   if (!arr || arr->type != JSON_ARRAY || index >= arr->data.array.count) {
     return NULL;
   }
   return arr->data.array.items[index];
 }
 
-size_t json_array_size(JsonValue *arr) {
+size_t json_array_size(JsonValue* arr) {
   if (!arr || arr->type != JSON_ARRAY) return 0;
   return arr->data.array.count;
 }
 
-void json_free(JsonValue *val) {
+void json_free(JsonValue* val) {
   if (!val) return;
 
   switch (val->type) {
@@ -189,9 +189,9 @@ void json_free(JsonValue *val) {
       free(val->data.string);
       break;
     case JSON_OBJECT: {
-      JsonPair *current = val->data.object;
+      JsonPair* current = val->data.object;
       while (current) {
-        JsonPair *next = current->next;
+        JsonPair* next = current->next;
         free(current->key);
         json_free(current->value);
         free(current);

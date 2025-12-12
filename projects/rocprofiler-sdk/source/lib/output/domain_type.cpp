@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,7 @@ DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "MEMORY_ALLOCATION",
                         "memory_allocation_trace",
                         "memory_allocation_stats")
+DEFINE_BUFFER_TYPE_NAME(KFD, "KFD", "kfd_trace", "kfd_stats")
 DEFINE_BUFFER_TYPE_NAME(COUNTER_VALUES, "COUNTER_VALUES", "counter_values", "no_filename")
 DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
                         "PC_SAMPLING_HOST_TRAP",
@@ -67,6 +68,15 @@ DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_STOCHASTIC,
                         "PC_SAMPLING_STOCHASTIC",
                         "pc_sampling_stochastic",
                         "pc_sampling_stochastic_stats")
+DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_COLLECTION,
+                        "SPM_COUNTER_COLLECTION",
+                        "spm_counter_collection",
+                        "spm_counter_collection_stats")
+DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
+                        "SPM_COUNTER_VALUES",
+                        "SPM_counter_values",
+                        "SPM_counter_values")
+DEFINE_BUFFER_TYPE_NAME(OMPT, "OMPT", "ompt_trace", "ompt_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

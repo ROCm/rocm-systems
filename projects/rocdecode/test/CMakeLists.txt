@@ -1,0 +1,411 @@
+# ##############################################################################
+# Copyright (c) 2023 - 2026 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# ##############################################################################
+cmake_minimum_required(VERSION 3.10)
+
+if(NOT DEFINED ENHANCED_MESSAGE)
+  string(ASCII 27 Esc)
+  set(ColourReset "${Esc}[m")
+  set(Red         "${Esc}[31m")
+  set(Green       "${Esc}[32m")
+  set(Yellow      "${Esc}[33m")
+  set(White       "${Esc}[37m")
+endif()
+
+# ROCM Path
+if(DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
+elseif(ROCM_PATH)
+  message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
+else()
+  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+endif()
+# Set AMD Clang as default compiler
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS ON)
+if (NOT DEFINED CMAKE_CXX_COMPILER)
+  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+endif()
+
+project(rocdecode-test)
+
+# make test with CTest
+enable_testing()
+include(CTest)
+
+# add ROCm find Config location
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
+list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/share/rocdecode/cmake)
+
+# find rocdecode
+if(BUILD_FROM_SOURCE)
+  message("-- ${White}${PROJECT_NAME}: CTests requires rocdecode installed before running CTests")
+else()
+  find_package(rocdecode QUIET)
+  if(rocdecode_FOUND)
+    message("-- ${White}${PROJECT_NAME}: rocdecode found with find_package(rocdecode QUIET)${ColourReset}")
+    message("-- \t${White}rocdecode_INCLUDE_DIR -- ${rocdecode_INCLUDE_DIR}${ColourReset}")
+    message("-- \t${White}rocdecode_LIB_DIR -- ${rocdecode_LIB_DIR}${ColourReset}")
+    message("-- \t${White}rocdecode_LIBRARY -- ${rocdecode_LIBRARY}${ColourReset}")
+    message("-- \t${White}rocdecode_FOUND -- ${rocdecode_FOUND}${ColourReset}")
+    message("-- \t${White}rocdecode_VERSION -- ${rocdecode_VERSION}${ColourReset}")
+    message("-- \t${White}rocdecode_VERSION_MAJOR -- ${rocdecode_VERSION_MAJOR}${ColourReset}")
+    message("-- \t${White}rocdecode_VERSION_MINOR -- ${rocdecode_VERSION_MINOR}${ColourReset}")
+    message("-- \t${White}rocdecode_VERSION_PATCH -- ${rocdecode_VERSION_PATCH}${ColourReset}")
+  else()
+    message("-- ${Yellow}${PROJECT_NAME} requires rocdecode. Install rocdecode before running CTests")
+  endif(rocdecode_FOUND)
+  find_package(rocdecode-host QUIET)
+  if(rocdecode-host_FOUND)
+    message("-- ${White}${PROJECT_NAME}: rocdecode-host found with find_package(rocdecode-host QUIET)${ColourReset}")
+    message("-- \t${White}rocdecode-host_INCLUDE_DIR -- ${rocdecode-host_INCLUDE_DIR}${ColourReset}")
+    message("-- \t${White}rocdecode-host_LIB_DIR -- ${rocdecode-host_LIB_DIR}${ColourReset}")
+    message("-- \t${White}rocdecode-host_LIBRARY -- ${rocdecode-host_LIBRARY}${ColourReset}")
+    message("-- \t${White}rocdecode-host_FOUND -- ${rocdecode-host_FOUND}${ColourReset}")
+    message("-- \t${White}rocdecode-host_VERSION -- ${rocdecode-host_VERSION}${ColourReset}")
+    message("-- \t${White}rocdecode-host_VERSION_MAJOR -- ${rocdecode-host_VERSION_MAJOR}${ColourReset}")
+    message("-- \t${White}rocdecode-host_VERSION_MINOR -- ${rocdecode-host_VERSION_MINOR}${ColourReset}")
+    message("-- \t${White}rocdecode-host_VERSION_PATCH -- ${rocdecode-host_VERSION_PATCH}${ColourReset}")
+  else()
+    message("-- ${Yellow}${PROJECT_NAME} rocdecode-host is optional. Install rocdecode-host to run additional tests before running CTests")
+  endif(rocdecode-host_FOUND)
+endif(BUILD_FROM_SOURCE)
+find_package(FFmpeg QUIET)
+
+# Check if ASAN is enabled via environment variables or compiler flags
+set(ASAN_ENABLED OFF)
+# Check common ASAN environment variables
+if(DEFINED ENV{ASAN_OPTIONS} OR DEFINED ENV{ASAN_SYMBOLIZER_PATH} OR DEFINED ENV{LSAN_OPTIONS})
+  set(ASAN_ENABLED ON)
+endif()
+# Check if -fsanitize=address is in the compiler flags
+if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_C_FLAGS MATCHES "-fsanitize=address" OR
+   CMAKE_EXE_LINKER_FLAGS MATCHES "-fsanitize=address")
+  set(ASAN_ENABLED ON)
+endif()
+
+# Locate the ASAN runtime library if ASAN is enabled
+set(ASAN_PRELOAD "")
+if(ASAN_ENABLED)
+  set(ASAN_LIB_PATH "${ROCM_PATH}/lib/llvm/lib/clang")
+  # Try to get the clang version from the compiler
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} --version
+    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  # Extract major version (e.g., "19" from "clang version 19.0.0")
+  if(CLANG_VERSION_OUTPUT MATCHES "clang version ([0-9]+)")
+    set(CLANG_MAJOR_VERSION "${CMAKE_MATCH_1}")
+    set(ASAN_LIB_CANDIDATE "${ASAN_LIB_PATH}/${CLANG_MAJOR_VERSION}/lib/linux/libclang_rt.asan-x86_64.so")
+    if(EXISTS "${ASAN_LIB_CANDIDATE}")
+      set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+      message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found -- ${ASAN_PRELOAD}${ColourReset}")
+    endif()
+  endif()
+  # Fallback: search available versions (sorted descending) if compiler detection failed
+  if(NOT ASAN_PRELOAD)
+    file(GLOB CLANG_VERSION_DIRS "${ASAN_LIB_PATH}/*")
+    list(SORT CLANG_VERSION_DIRS ORDER DESCENDING)
+    foreach(CLANG_DIR ${CLANG_VERSION_DIRS})
+      if(IS_DIRECTORY ${CLANG_DIR})
+        set(ASAN_LIB_CANDIDATE "${CLANG_DIR}/lib/linux/libclang_rt.asan-x86_64.so")
+        if(EXISTS "${ASAN_LIB_CANDIDATE}")
+          set(ASAN_PRELOAD "${ASAN_LIB_CANDIDATE}")
+          message("-- ${White}${PROJECT_NAME}: ASAN enabled, runtime library found (fallback) -- ${ASAN_PRELOAD}${ColourReset}")
+          break()
+        endif()
+      endif()
+    endforeach()
+  endif()
+  if(NOT ASAN_PRELOAD)
+    message(WARNING "${PROJECT_NAME}: ASAN detected but libclang_rt.asan-x86_64.so not found in ${ASAN_LIB_PATH}")
+  endif()
+endif()
+
+# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
+set(USING_THE_ROCK OFF)
+if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  set(USING_THE_ROCK ON)
+  set(THEROCK_SYSDEPS_LIB "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+  set(VA_LIBS "${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va.so.2:${THEROCK_SYSDEPS_LIB}/librocm_sysdeps_va-drm.so.2")
+  if(ASAN_PRELOAD)
+    set(THEROCK_ENV
+      "LD_PRELOAD=${ASAN_PRELOAD}:${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
+    )
+  else()
+    set(THEROCK_ENV
+      "LD_PRELOAD=${VA_LIBS};LIBVA_DRIVERS_PATH=${THEROCK_SYSDEPS_LIB}"
+    )
+  endif()
+endif()
+
+# Helper macro: apply test environment (ASAN preload and/or TheRock VA libs)
+macro(set_test_env TEST_NAME)
+  if(USING_THE_ROCK)
+    set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "${THEROCK_ENV}")
+  elseif(ASAN_PRELOAD)
+    set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT "LD_PRELOAD=${ASAN_PRELOAD}")
+  endif()
+endmacro()
+
+# Option to enable extended tests
+option(ENABLE_EXTENDED_TESTS "Enable extended FFmpeg-based tests" OFF)
+
+# 1 - videoDecodeRaw HEVC
+add_test(
+  NAME
+    video_decodeRaw-HEVC
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw-HEVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecoderaw"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.265
+)
+set_test_env(video_decodeRaw-HEVC)
+
+# 2 - videoDecodeRaw AVC
+add_test(
+  NAME
+    video_decodeRaw-AVC
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw-AVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecoderaw"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.264
+)
+set_test_env(video_decodeRaw-AVC)
+
+# 3 - videoDecodeRaw AV1
+add_test(
+  NAME
+    video_decodeRaw-AV1
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw-AV1"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecoderaw"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.ivf
+)
+set_test_env(video_decodeRaw-AV1)
+
+# 4 - videoDecodeRaw VP9
+add_test(
+  NAME
+    video_decodeRaw-VP9
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRaw"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRaw-VP9"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecoderaw"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+)
+set_test_env(video_decodeRaw-VP9)
+
+# 5 - rocdecDecode
+add_test(
+  NAME
+    rocdec_Decode-HEVC
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/rocdecDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/rocdecDecode"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "rocdecdecode"
+            -i ${ROCM_PATH}/share/rocdecode/frames
+)
+set_test_env(rocdec_Decode-HEVC)
+
+# 6 - rocDecodeNegativeApiTests
+add_test(
+  NAME
+  rocDecode_Negative_API_Tests
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/test/rocDecodeNegativeApiTests"
+                              "${CMAKE_CURRENT_BINARY_DIR}/rocdecodenegativetest"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "rocdecodenegativetest"
+)
+set_test_env(rocDecode_Negative_API_Tests)
+
+if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
+  # 7 - videoDecode HEVC
+  add_test(
+    NAME
+      video_decode-HEVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecode-HEVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecode"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+  )
+  set_test_env(video_decode-HEVC)
+
+  # 8 - videoDecode AVC
+  add_test(
+    NAME
+      video_decode-AVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecode-AVC"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecode"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
+  )
+  set_test_env(video_decode-AVC)
+
+  # 9 - videoDecode AV1
+  add_test(
+    NAME
+      video_decode-AV1
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecode-AV1"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecode"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
+  )
+  set_test_env(video_decode-AV1)
+
+  # 10 - videoDecode VP9
+  add_test(
+    NAME
+      video_decode-VP9
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecode-VP9"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecode"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+  )
+  set_test_env(video_decode-VP9)
+
+  # 11 - videoDecodePerf
+  add_test(
+    NAME
+      video_decodePerf-HEVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodePerf"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodePerf"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodeperf"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+  )
+  set_test_env(video_decodePerf-HEVC)
+
+  # 12 - videoDecodeBatch
+  add_test(
+    NAME
+      video_decodeBatch
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeBatch"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeBatch"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodebatch"
+            -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
+  )
+  set_test_env(video_decodeBatch)
+
+  # 13 - videoDecodeRGB
+  add_test(
+    NAME
+      video_decodeRGB-HEVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRGB"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRGB"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodergb"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4 -of rgb
+  )
+  set_test_env(video_decodeRGB-HEVC)
+
+  # 14 - videoDecodeMem
+  add_test(
+    NAME
+      video_decodeMem-HEVC
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeMem"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeMem"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodemem"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+  )
+  set_test_env(video_decodeMem-HEVC)
+
+  # 15 - videoDecodeRGBResize
+  add_test(
+    NAME
+      video_decodeRGB-Resize
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecodeRGB"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecodeRGB-Resize"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecodergb"
+            -i "${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4" -resize 640x360 -of rgb
+  )
+  set_test_env(video_decodeRGB-Resize)
+
+  if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
+    # 16 - videoDecode Host backend
+    add_test(
+      NAME
+        video_decode-Host-Backend
+      COMMAND
+        "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocdecode/samples/videoDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/videoDecode-Host"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "videodecode"
+            -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+            -backend 1
+    )
+  else()
+    if(NOT rocdecode-host_FOUND)
+      message("-- ${Yellow}${PROJECT_NAME} rocdecode-host NOT found. rocdecode tests requiring rocdecode-host excluded")
+    endif()
+  endif(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
+else()
+  if(NOT FFMPEG_FOUND)
+    message("-- ${Yellow}${PROJECT_NAME} FFmpeg NOT found. rocdecode tests requiring FFmpeg excluded")
+  endif()
+endif(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)

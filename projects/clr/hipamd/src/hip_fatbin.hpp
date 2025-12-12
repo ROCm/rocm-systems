@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_FAT_BINARY_HPP
 #define HIP_FAT_BINARY_HPP
@@ -28,20 +12,29 @@ THE SOFTWARE.
 #include "hip_internal.hpp"
 #include "platform/program.hpp"
 
-// Forward declaration for Unique FD
-struct UniqueFD;
+#include <optional>
 
 namespace hip {
 
 // Fat Binary Info
 class FatBinaryInfo {
  public:
+  // Parameters for kpack'd (split device code) binaries
+  struct KpackParams {
+    const void* metadata;      //!< Msgpack metadata from .rocm_kpack_ref section
+    std::string binary_path;   //!< Path to the host binary
+    uint64_t bundle_index;     //!< Bundle index for multi-TU binaries (0-based)
+  };
+
   FatBinaryInfo(const char* fname, const void* image);
+  // Constructor for kpack'd (split device code) binaries
+  explicit FatBinaryInfo(KpackParams kpack_params);
   ~FatBinaryInfo();
 
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
+  hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
-                           size_t binary_offset);
+                           amd::Os::FileDesc fdesc);
   hipError_t BuildProgram(const int device_id);
 
   // Device Id bounds check
@@ -69,7 +62,7 @@ class FatBinaryInfo {
   }
 
   //! Returns the lock for this fatbinary access
-  amd::Monitor& FatBinaryLock() { return fb_lock_; }
+  std::recursive_mutex& FatBinaryLock() { return fb_lock_; }
 
  private:
   void ReleaseImageAndFile();
@@ -77,17 +70,22 @@ class FatBinaryInfo {
   std::string fname_;  //!< File name
   size_t foffset_;     //!< File Offset where the fat binary is present.
 
-  // Even when file is passed image will be mmapped till ~desctructor.
+  // When loaded from a file, image_ is the mmap address; fd is closed once
+  // ExtractFatBinaryUsingCOMGR has dup'd it for every per-device handoff.
   const void* image_;  //!< Image
+  size_t image_size_;  //!< Mapped image size (only valid when image_mapped_ is true)
   bool image_mapped_;  //!< flag to detect if image is mapped
 
   // Only used for FBs where image is directly passed
   std::string uri_;  //!< Uniform resource indicator
 
+  // Kpack parameters for split device code binaries (nullopt for normal fat binaries)
+  std::optional<KpackParams> kpack_params_;
+
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
-  std::shared_ptr<UniqueFD> ufd_;  //!< Unique file descriptor
-  amd::Monitor fb_lock_{true};     //!< Lock for the fat binary access
+  std::recursive_mutex fb_lock_;                          //!< Lock for the fat binary access
+  std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };
 
 };  // namespace hip

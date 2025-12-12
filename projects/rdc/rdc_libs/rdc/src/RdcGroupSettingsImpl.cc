@@ -35,9 +35,18 @@ namespace rdc {
 RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
     : partition_(partition) {
   // Add the default job stats fields
-  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
-                              RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
-                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_MEM_CLOCK,   RDC_FI_GPU_TEMP};
+  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
+                              RDC_FI_POWER_USAGE,
+                              RDC_FI_GPU_CLOCK,
+                              RDC_FI_GPU_UTIL,
+                              RDC_FI_PCIE_TX,
+                              RDC_FI_PCIE_RX,
+                              RDC_FI_PCIE_BANDWIDTH,
+                              RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,
+                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,
+                              RDC_FI_PCIE_NAK_SENT_COUNT_ACC,
+                              RDC_FI_MEM_CLOCK,
+                              RDC_FI_GPU_TEMP};
   char job_field_group[] = "JobStatsFields";
   rdc_field_grp_t fgid = JOB_FIELD_ID;
 
@@ -64,7 +73,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(const char* group_name,
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_destroy(rdc_gpu_group_t p_rdc_group_id) {
   std::lock_guard<std::mutex> guard(group_mutex_);
-  if (!gpu_group_.erase(p_rdc_group_id)) return RDC_ST_NOT_FOUND;
+  if (!gpu_group_.erase(p_rdc_group_id)) return RDC_ST_GROUP_NOT_FOUND;
   return RDC_ST_OK;
 }
 
@@ -72,7 +81,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   std::lock_guard<std::mutex> guard(group_mutex_);
   auto ite = gpu_group_.find(groupId);
   if (ite == gpu_group_.end()) {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_GROUP_NOT_FOUND;
   }
 
   rdc_entity_info_t entity_info = rdc_get_info_from_entity_index(gpu_index);
@@ -133,7 +142,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_get_info(rdc_gpu_group_t p_rdc_
       p_rdc_group_info->entity_ids[i] = info.entity_ids[i];
     }
   } else {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_GROUP_NOT_FOUND;
   }
 
   return RDC_ST_OK;
@@ -186,13 +195,41 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(uint32_t num_field_ids
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcGroupSettingsImpl::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                             rdc_field_t field_id) {
+  std::lock_guard<std::mutex> guard(field_group_mutex_);
+
+  auto ite = field_group_.find(rdc_field_group_id);
+  if (ite == field_group_.end()) {
+    return RDC_ST_FLDGROUP_NOT_FOUND;
+  }
+
+  // Check if field already exists in the group
+  for (uint32_t i = 0; i < ite->second.count; i++) {
+    if (ite->second.field_ids[i] == field_id) {
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+
+  // Check if we have room for another field
+  if (ite->second.count >= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    return RDC_ST_MAX_LIMIT;
+  }
+
+  // Add the field to the group
+  ite->second.field_ids[ite->second.count] = field_id;
+  ite->second.count++;
+
+  return RDC_ST_OK;
+}
+
 rdc_status_t RdcGroupSettingsImpl::rdc_group_field_destroy(rdc_field_grp_t rdc_field_group_id) {
   if (rdc_field_group_id == JOB_FIELD_ID) {
     RDC_LOG(RDC_INFO, "Cannot delete system JOB_FIELD_ID field group");
     return RDC_ST_BAD_PARAMETER;
   }
   std::lock_guard<std::mutex> guard(field_group_mutex_);
-  if (!field_group_.erase(rdc_field_group_id)) return RDC_ST_NOT_FOUND;
+  if (!field_group_.erase(rdc_field_group_id)) return RDC_ST_FLDGROUP_NOT_FOUND;
   return RDC_ST_OK;
 }
 
@@ -208,7 +245,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_get_info(
       field_group_info->field_ids[i] = info.field_ids[i];
     }
   } else {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_FLDGROUP_NOT_FOUND;
   }
   return RDC_ST_OK;
 }

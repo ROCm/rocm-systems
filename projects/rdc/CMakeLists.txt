@@ -23,9 +23,13 @@
 #
 cmake_minimum_required(VERSION 3.15)
 
-set( COMP_TYPE "runtime" )
-set( BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" )
-set( BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" )
+set(COMP_TYPE "runtime")
+set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
+set(BUILD_DEBIAN_PKGING_FLAG
+    ON
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
 set(RDC "rdc" CACHE INTERNAL "")
 set(RDC_PACKAGE ${RDC} CACHE STRING "")
 
@@ -89,7 +93,7 @@ include(utils)
 set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # Provide git to utilities
 find_program(GIT NAMES git)
-get_version_from_tag("1.2.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.3.1" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${VERSION_STRING}")
 
@@ -107,7 +111,7 @@ option(BUILD_PROFILER "Build targets for librdc_rocp.so" OFF)
 
 # When cmake -DBUILD_RVS=off, it will not build the librdc_rvs.so
 # which requires the RocmValidationSuite
-option(BUILD_RVS "Build targets for librdc_rvs.so" ON)
+option(BUILD_RVS "Build targets for librdc_rvs.so" OFF)
 
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
@@ -159,7 +163,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.67.1 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.78.1 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
@@ -167,8 +171,8 @@ set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gn
 
 # configure packaging
 # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
-set(PKG_MAINTAINER_NM  "RDC Support")
-set(PKG_MAINTAINER_EMAIL  "rdc.support@amd.com")
+set(PKG_MAINTAINER_NM "RDC Support")
+set(PKG_MAINTAINER_EMAIL "rdc.support@amd.com")
 set(CPACK_PACKAGE_NAME ${RDC_PACKAGE} CACHE INTERNAL "")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
@@ -433,7 +437,7 @@ install(
 )
 
 #Identify between SLES and Centos for setting symlink for rdc.service
-#SLES need serice file in /usr/lib/systemd/system/rdc.service
+#SLES need service file in /usr/lib/systemd/system/rdc.service
 #CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
 file(STRINGS /etc/os-release LINUX_DISTRO LIMIT_COUNT 1 REGEX "NAME=")
 message("Using Linux Distro: ${LINUX_DISTRO}")
@@ -542,8 +546,7 @@ set(CPACK_RPM_PACKAGE_REQUIRES "amd-smi-lib")
 # rdc-tests need rdc
 set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}")
 list(
-    APPEND
-    CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/lib"
     "/usr/sbin"
     "/lib/systemd"
@@ -565,7 +568,7 @@ set(CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RP
 set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
 set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
 
-configure_pkg( ${RDC} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL} )
+configure_pkg( ${RDC} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 include(CPack)
 

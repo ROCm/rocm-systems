@@ -27,7 +27,7 @@
 #   4) Run "make"
 #
 
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.12.0)
 
 # Set Name for Samples Project
 #
@@ -112,7 +112,7 @@ endif()
 set(DEFAULT_TARGETS "gfx700;gfx701;gfx702;gfx801;gfx802;gfx803;gfx805;gfx810"
                     "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
                     "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+                    "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201;gfx1250;gfx1251")
 
 #
 # Currently support for Windows platform is not present
@@ -134,50 +134,215 @@ endif()
 find_package(hsa-runtime64 REQUIRED)
 find_package(amd_smi REQUIRED)
 
+# Find yaml-cpp library with proper target handling
+set(HAVE_YAML_CPP FALSE)
+set(YAML_CPP_TARGET "")
+
+# Try TheRock's yaml-cpp first (if building with TheRock)
+find_package(therock-yaml-cpp QUIET CONFIG)
+if(therock-yaml-cpp_FOUND)
+  if(TARGET therock-yaml-cpp::therock-yaml-cpp)
+    set(YAML_CPP_TARGET therock-yaml-cpp::therock-yaml-cpp)
+    set(HAVE_YAML_CPP TRUE)
+    message(STATUS "Found yaml-cpp via TheRock: therock-yaml-cpp::therock-yaml-cpp")
+  elseif(TARGET therock-yaml-cpp)
+    set(YAML_CPP_TARGET therock-yaml-cpp)
+    set(HAVE_YAML_CPP TRUE)
+    message(STATUS "Found yaml-cpp via TheRock: therock-yaml-cpp")
+  endif()
+endif()
+
+# If not found via TheRock, try regular yaml-cpp
+if(NOT HAVE_YAML_CPP)
+  find_package(yaml-cpp QUIET CONFIG)
+  if(yaml-cpp_FOUND)
+    # Check for modern target name
+    if(TARGET yaml-cpp::yaml-cpp)
+      set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via CMake package: yaml-cpp::yaml-cpp")
+    elseif(TARGET yaml-cpp)
+      set(YAML_CPP_TARGET yaml-cpp)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via CMake package: yaml-cpp")
+    endif()
+  endif()
+endif()
+
+# Fallback to pkg-config if CMake package not found
+if(NOT HAVE_YAML_CPP AND PKG_CONFIG_FOUND)
+  pkg_check_modules(YAML_CPP_PC yaml-cpp)
+  if(YAML_CPP_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(YAML_CPP_LIBRARY_FILE
+      NAMES yaml-cpp
+      HINTS ${YAML_CPP_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(YAML_CPP_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(yaml-cpp_imported SHARED IMPORTED)
+      set_target_properties(yaml-cpp_imported PROPERTIES
+        IMPORTED_LOCATION "${YAML_CPP_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${YAML_CPP_PC_INCLUDE_DIRS}"
+      )
+      set(YAML_CPP_TARGET yaml-cpp_imported)
+      set(HAVE_YAML_CPP TRUE)
+      message(STATUS "Found yaml-cpp via pkg-config (SHARED): ${YAML_CPP_LIBRARY_FILE}")
+      message(STATUS "  Include dirs: ${YAML_CPP_PC_INCLUDE_DIRS}")
+      message(STATUS "  Library dirs: ${YAML_CPP_PC_LIBRARY_DIRS}")
+    endif()
+  endif()
+endif()
+
+if(NOT HAVE_YAML_CPP)
+  message(FATAL_ERROR "yaml-cpp library not found. Install libyaml-cpp-dev (Debian/Ubuntu) or yaml-cpp-devel (RHEL/CentOS)")
+endif()
+
 set (ONLY64STR "64")
 
-if (DEFINED LLVM_DIR)
-  set(CLANG ${LLVM_DIR}/clang)
-  if (NOT EXISTS ${CLANG})
-    message("ERROR: path to clang (${CLANG}) is not valid. Is define LLVM_DIR correct?")
-    return()
-  endif()
-else()
-    message("WARNING: LLVM_DIR define is not set. Kernels will not be built.")
+# Find LLVM/Clang using find_package instead of hardcoded LLVM_DIR
+find_package(LLVM REQUIRED CONFIG)
+if(NOT LLVM_FOUND)
+  message(FATAL_ERROR "LLVM not found. Cannot build kernels.")
 endif()
 
-if (DEFINED OPENCL_DIR)
-  set(OPENCL_INC_DIR ${OPENCL_DIR}/include)
-  set(OPENCL_LIB_DIR ${OPENCL_DIR}/lib)
-else()
-    message("WARNING: OPENCL_DIR define is not set. Kernels will not be built.")
-endif()
+# Add LLVM CMake modules to module path
+list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
+include(AddLLVM)
 
+# Find clang executable from LLVM package
+find_program(CLANG
+  NAMES clang
+  HINTS ${LLVM_TOOLS_BINARY_DIR}
+  NO_DEFAULT_PATH
+  REQUIRED
+)
+
+message(STATUS "Found LLVM: ${LLVM_PACKAGE_VERSION}")
+message(STATUS "LLVM Binary Dir: ${LLVM_TOOLS_BINARY_DIR}")
+message(STATUS "LLVM Library Dir: ${LLVM_LIBRARY_DIR}")
+message(STATUS "Found Clang: ${CLANG}")
+
+# Set OpenCL version
 if (DEFINED OPENCL_VER)
   set(OPENCL_VER ${OPENCL_VER})
 else()
-  message("OPENCL_VER define is not set. Using default")
+  message(STATUS "OPENCL_VER not defined, using default: 2.0")
   set(OPENCL_VER "2.0")
 endif()
 
+# Find OpenCL headers using clang's resource directory
+execute_process(
+  COMMAND ${CLANG} -print-resource-dir
+  OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  RESULT_VARIABLE CLANG_RESULT
+)
+
+if(NOT CLANG_RESULT EQUAL 0)
+  message(FATAL_ERROR "Failed to get clang resource directory")
+endif()
+
+set(OPENCL_INC_DIR "${CLANG_RESOURCE_DIR}/include")
+
 if(NOT EXISTS "${OPENCL_INC_DIR}/opencl-c.h")
-  if(DEFINED ENV{LLVM_PROJECT_ROOT})
-    set(OPENCL_INC_DIR "$ENV{LLVM_PROJECT_ROOT}/clang/lib/Headers/")
+  message(FATAL_ERROR "opencl-c.h not found in ${OPENCL_INC_DIR}")
+endif()
+
+message(STATUS "OpenCL headers: ${OPENCL_INC_DIR}")
+message(STATUS "OpenCL version: ${OPENCL_VER}")
+
+# Find AMD Device Libraries (bitcode files) using find_package or manual search
+find_package(AMDDeviceLibs QUIET CONFIG)
+
+if(AMDDeviceLibs_FOUND)
+  # Use the package-provided location
+  message(STATUS "Found AMDDeviceLibs via CONFIG")
+  # Try to get the bitcode directory from any target
+  if(TARGET AMDDeviceLibs::oclc_isa_version_803)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+  elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
   else()
-    set(OPENCL_INC_DIR "${OPENCL_DIR}/../../../external/llvm-project/clang/lib/Headers/")
-  endif()
-  if(NOT EXISTS "${OPENCL_INC_DIR}/opencl-c.h")
-    message(WARNING "opencl-c.h not found.")
+    # Fallback to manual search even if package was found
+    set(AMDDeviceLibs_FOUND FALSE)
   endif()
 endif()
 
-if (NOT DEFINED TARGET_DEVICES)
-  message("No targets devices provided on command line")
-  message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
-  message("  Using default target of ${DEFAULT_TARGETS}")
-  list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+if(NOT AMDDeviceLibs_FOUND)
+  # Fallback: search relative to LLVM installation
+  message(STATUS "Searching for AMD Device Libraries manually...")
+
+  find_path(BITCODE_DIR 
+    NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
+    HINTS
+      "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
+      "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/lib/amdgcn/bitcode"
+    NO_DEFAULT_PATH
+  )
+  
+  if(NOT BITCODE_DIR)
+    message(FATAL_ERROR 
+      "AMD Device Libraries (bitcode) not found!\n"
+      "Searched locations:\n"
+      "  ${LLVM_LIBRARY_DIR}/amdgcn/bitcode\n"
+      "  ${LLVM_LIBRARY_DIR}/../amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode\n"
+      "Please ensure device-libs are built and installed.")
+  endif()
 endif()
 
+message(STATUS "Found Device Libraries: ${BITCODE_DIR}")
+
+# Validate bitcode files exist
+if(NOT EXISTS "${BITCODE_DIR}")
+  message(FATAL_ERROR "BITCODE_DIR does not exist: ${BITCODE_DIR}")
+endif()
+
+# Check for either old or new device-libs layout
+if(EXISTS "${BITCODE_DIR}/opencl.amdgcn.bc")
+  message(STATUS "Using new device-libs layout (opencl.amdgcn.bc)")
+elseif(EXISTS "${BITCODE_DIR}/opencl.bc")
+  message(STATUS "Using old device-libs layout (opencl.bc)")
+else()
+  message(WARNING 
+    "No standard device library files found in ${BITCODE_DIR}\n"
+    "Expected either 'opencl.amdgcn.bc' or 'opencl.bc'\n"
+    "Will attempt to continue, but kernel builds may fail.")
+endif()
+
+# Target devices configuration
+if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
+  if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    message(STATUS "Using GPU_TARGETS from build system: ${GPU_TARGETS}")
+    set(TARGET_DEVICES ${GPU_TARGETS})
+  elseif(DEFINED AMDGPU_TARGETS AND NOT AMDGPU_TARGETS STREQUAL "")
+    message(STATUS "Using AMDGPU_TARGETS from build system: ${AMDGPU_TARGETS}")
+    set(TARGET_DEVICES ${AMDGPU_TARGETS})
+  else()
+    message("No target devices provided on command line")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  Using default target of ${DEFAULT_TARGETS}")
+    list(APPEND TARGET_DEVICES ${DEFAULT_TARGETS})
+  endif()
+endif()
+
+# Strip feature suffixes (e.g., ":xnack+", ":sramecc+") from TARGET_DEVICES.
+# rocrtst compiles kernels with bare -mcpu (producing xnack=any code objects)
+# and LocateKernelFile() searches by bare HSA_AGENT_INFO_NAME.
+list(TRANSFORM TARGET_DEVICES REPLACE ":.*$" "")
+list(REMOVE_DUPLICATES TARGET_DEVICES)
+
+# Build type configuration
 string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
 if("${tmp}" STREQUAL release)
   set(BUILD_TYPE "Release")
@@ -186,19 +351,6 @@ else()
   set(BUILD_TYPE "Debug")
   set(ISDEBUG 1)
 endif()
-
-find_path(BITCODE_DIR NAMES "opencl.bc" "opencl.amdgcn.bc"
-  PATHS
-    "${ROCM_DIR}/amdgcn/bitcode"
-    "${ROCM_DIR}/lib/bitcode"
-    "${ROCM_DIR}/lib"
-    "${ROCM_DIR}/lib/x86_64/bitcode"
-    "${OPENCL_DIR}/amdgcn/bitcode"
-    "${OPENCL_DIR}/lib/x86_64/bitcode"
-    "${LLVM_DIR}/../lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/x86_64/bitcode")
 
 #
 # Print out the build configuration being used:
@@ -220,8 +372,10 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("------Target Devices: ${TARGET_DEVICES}")
 message("----------Clang path: " ${CLANG})
-message("----------OpenCL Dir: " ${OPENCL_DIR})
+message("------OpenCL Inc Dir: " ${OPENCL_INC_DIR})
 message("-------OpenCL version " ${OPENCL_VER})
+message("-------BITCODE_DIR: " ${BITCODE_DIR})
+message("------------LLVM Dir: " ${LLVM_DIR})
 message("")
 
 set(KERNELS_DIR ${PROJECT_SOURCE_DIR}/kernels)
@@ -297,6 +451,14 @@ aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
 
+# Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
+# Force disabled by default to avoid building the NUMA test source.
+set(ENABLE_COPY_NUMA OFF CACHE BOOL "Build Memory_Async_Copy_NUMA test" FORCE)
+list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
+
+# Optional: enable hwloc membind nodeset call in NUMA test
+set(ENABLE_COPY_NUMA_MEMBIND_NODESET OFF CACHE BOOL "Enable hwloc membind nodeset in NUMA test")
+
 # Header file include path
 
 include_directories(${ROCRTST_ROOT})
@@ -311,11 +473,10 @@ function(build_kernel S_NAME TARG_DEV)
   set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
   set(SNAME_KERNEL "${S_NAME}_kernels.hsaco")
 
-  set(TARG_NAME "${S_NAME}_hsaco.${TARG_DEV}")
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
   string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
-   "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
   add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
 endfunction(build_kernel)
 
@@ -326,6 +487,25 @@ function(build_sample_for_devices S_NAME)
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
 endfunction(build_sample_for_devices)
 
+# Use this function to build any samples that have kernels to be built
+function(build_kernel_kernarg_preload S_NAME TARG_DEV)
+  set(KERNEL_DIR ${PROJECT_BINARY_DIR}/${TARG_DEV})
+  set(SNAME_KERNEL "${S_NAME}_kernels_argpreload.hsaco")
+
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} "${KERNEL_DIR}/${SNAME_KERNEL}" PARENT_SCOPE)
+  string(SUBSTRING ${TARG_DEV} 3 -1 gfxNum)
+  separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
+    "-D ROCRTST_GPU=0x${gfxNum} -x cl -target amdgcn-amd-amdhsa -include ${OPENCL_INC_DIR}/opencl-c.h -mcpu=${TARG_DEV} ${BITCODE_ARGS} -cl-std=CL${OPENCL_VER} -mcode-object-version=4 -mllvm -amdgpu-kernarg-preload-count=16 ${CL_FILE_LIST} -o ${KERNEL_DIR}/${SNAME_KERNEL}")
+  add_custom_command(OUTPUT "${KERNEL_DIR}/${SNAME_KERNEL}" COMMAND ${CLANG} ${CLANG_ARG_LIST} DEPENDS ${CL_FILE_LIST} ${CLANG} COMMENT "BUILDING ${KERNEL_DIR}/${SNAME_KERNEL}" VERBATIM)
+endfunction(build_kernel_kernarg_preload)
+
+function(build_sample_for_devices_kernarg_preload S_NAME)
+  foreach(t ${TARGET_DEVICES})
+    build_kernel_kernarg_preload(${S_NAME} ${t})
+  endforeach(t)
+  set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
+endfunction(build_sample_for_devices_kernarg_preload)
+
 # Make directories for each possible target device
 # List of symlinks per directory
 set(ROCRTST_LINKS_LIST "")
@@ -333,7 +513,9 @@ foreach(td ${TARGET_DEVICES})
   file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/${td})
   add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}" COMMAND ${CMAKE_COMMAND} -E create_symlink "../${ROCRTST}" "${td}/${ROCRTST}" COMMENT "BUILDING ${td}/${ROCRTST}" VERBATIM)
   set(ROCRTST_LINKS_LIST ${ROCRTST_LINKS_LIST} "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}")
-  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td} DESTINATION bin )
+  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td}
+            DESTINATION share/rocrtst
+            PATTERN "${ROCRTST}" EXCLUDE )
 endforeach(td)
 
 ######################
@@ -355,6 +537,11 @@ endif()
 set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
 build_sample_for_devices("test_case_template")
+
+## Test Case Template example
+set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
+set(CL_FILE_LIST "${KERNELS_DIR}/test_case_template_kernels.cl")
+build_sample_for_devices_kernarg_preload("test_case_template")
 
 # P2P Memory Access
 #set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
@@ -406,13 +593,304 @@ set(BITCODE_LIBS "${COMMON_BITCODE_LIBS}")
 set(CL_FILE_LIST "${KERNELS_DIR}/cu_mask_kernels.cl")
 build_sample_for_devices("cu_mask")
 
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+# Configure RPATH settings before creating executable target
+set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.14")
+  set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+endif()
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Force disable NUMA copy functionality
+option(ENABLE_COPY_NUMA "Enable NUMA async copy tests" OFF)
+
+# Always exclude memory_async_copy_numa.cc since ENABLE_COPY_NUMA is forced OFF
+message(STATUS "ENABLE_COPY_NUMA is OFF - excluding memory_async_copy_numa.cc from build")
+list(FILTER performanceSources EXCLUDE REGEX ".*memory_async_copy_numa\\.cc$")
+
+# Check for numa library and header
+find_package(PkgConfig)
+set(HAVE_NUMA FALSE)
+set(NUMA_TARGET "")
+
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(NUMA_PC numa)
+  if(NUMA_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(NUMA_LIBRARY_FILE
+      NAMES numa rocm_sysdeps_numa
+      HINTS ${NUMA_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(NUMA_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(numa_imported SHARED IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        IMPORTED_LOCATION "${NUMA_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+      )
+      message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
+    else()
+      # Fallback to INTERFACE target if we only have link flags
+      add_library(numa_imported INTERFACE IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES "${NUMA_PC_LIBRARIES}"
+        INTERFACE_LINK_DIRECTORIES "${NUMA_PC_LIBRARY_DIRS}"
+      )
+      message(STATUS "Found NUMA via pkg-config (INTERFACE): ${NUMA_PC_LIBRARIES}")
+    endif()
+
+    set(NUMA_TARGET numa_imported)
+    set(HAVE_NUMA TRUE)
+    message(STATUS "  Include dirs: ${NUMA_PC_INCLUDE_DIRS}")
+    message(STATUS "  Library dirs: ${NUMA_PC_LIBRARY_DIRS}")
+  endif()
+endif()
+
+if(NOT HAVE_NUMA)
+  find_package(NUMA)
+  if(NUMA_FOUND)
+    add_library(numa_imported INTERFACE IMPORTED)
+    set_target_properties(numa_imported PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIRS}"
+      INTERFACE_LINK_LIBRARIES "${NUMA_LIBRARIES}"
+    )
+    set(NUMA_TARGET numa_imported)
+    set(HAVE_NUMA TRUE)
+    message(STATUS "Found NUMA package: ${NUMA_LIBRARIES}")
+  else()
+    # Last resort: manual detection
+    find_library(NUMA_LIBRARY NAMES numa)
+    if(NUMA_LIBRARY)
+      add_library(numa_imported INTERFACE IMPORTED)
+      set_target_properties(numa_imported PROPERTIES
+        INTERFACE_LINK_LIBRARIES "${NUMA_LIBRARY}"
+      )
+      set(NUMA_TARGET numa_imported)
+      set(HAVE_NUMA TRUE)
+      message(STATUS "Found numa library (manual): ${NUMA_LIBRARY}")
+    else()
+      message(WARNING "NUMA library not found. Building without numa support.")
+      message(WARNING "  Install libnuma-dev (Debian/Ubuntu) or numactl-devel (RHEL/CentOS)")
+    endif()
+  endif()
+endif()
 
 # Build rules
 add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeSources} ${stressSources}
                                            ${common_srcs} ${testCommonSources})
 
-target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib/libhwloc.so.5)
+# Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
+
+# Detect AddressSanitizer and define ROCRTST_ASAN
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fsanitize=address" COMPILER_HAS_ASAN)
+if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_C_FLAGS MATCHES "-fsanitize=address"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_ASAN=1)
+  message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
+endif()
+
+# Find hwloc library
+set(HAVE_HWLOC FALSE)
+set(HWLOC_TARGET "")
+
+# First priority: Try to find hwloc via CMake package (from TheRock sysdeps)
+find_package(hwloc QUIET CONFIG)
+if(hwloc_FOUND AND TARGET hwloc::hwloc)
+  set(HWLOC_TARGET hwloc::hwloc)
+  set(HAVE_HWLOC TRUE)
+  message(STATUS "Found hwloc via CMake package (TheRock sysdeps)")
+endif()
+
+# Second priority: Try pkg-config
+if(NOT HAVE_HWLOC AND PKG_CONFIG_FOUND)
+  pkg_check_modules(HWLOC_PC hwloc)
+  if(HWLOC_PC_FOUND)
+    # Try to find the actual library file for SHARED IMPORTED target
+    find_library(HWLOC_LIBRARY_FILE
+      NAMES hwloc
+      HINTS ${HWLOC_PC_LIBRARY_DIRS}
+      NO_DEFAULT_PATH
+    )
+
+    if(HWLOC_LIBRARY_FILE)
+      # Create SHARED IMPORTED target for proper RPATH handling
+      add_library(hwloc_imported SHARED IMPORTED)
+      set_target_properties(hwloc_imported PROPERTIES
+        IMPORTED_LOCATION "${HWLOC_LIBRARY_FILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${HWLOC_PC_INCLUDE_DIRS}"
+      )
+      set(HWLOC_TARGET hwloc_imported)
+      set(HAVE_HWLOC TRUE)
+      message(STATUS "Found hwloc via pkg-config (SHARED): ${HWLOC_LIBRARY_FILE}")
+      message(STATUS "  Include dirs: ${HWLOC_PC_INCLUDE_DIRS}")
+      message(STATUS "  Library dirs: ${HWLOC_PC_LIBRARY_DIRS}")
+    endif()
+  endif()
+endif()
+
+if(NOT HAVE_HWLOC)
+  # Fallback: Search in thirdparty (may have symbol version incompatibilities with TheRock's numa)
+  find_library(HWLOC_LIBRARY
+    NAMES hwloc
+    HINTS ${ROCRTST_ROOT}/thirdparty/lib
+    PATH_SUFFIXES lib lib64
+    NO_DEFAULT_PATH
+  )
+
+  # If not found, try versioned library directly (e.g., libhwloc.so.5)
+  if(NOT HWLOC_LIBRARY)
+    find_file(HWLOC_LIBRARY
+      NAMES libhwloc.so.5 libhwloc.so.15
+      HINTS ${ROCRTST_ROOT}/thirdparty/lib
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH
+    )
+  endif()
+
+  if(HWLOC_LIBRARY)
+    add_library(hwloc_imported SHARED IMPORTED)
+    set_target_properties(hwloc_imported PROPERTIES
+      IMPORTED_LOCATION "${HWLOC_LIBRARY}"
+    )
+    set(HWLOC_TARGET hwloc_imported)
+    set(HAVE_HWLOC TRUE)
+    message(STATUS "Found hwloc library (fallback): ${HWLOC_LIBRARY}")
+    message(WARNING "Using pre-built hwloc from thirdparty/lib - may have symbol version incompatibilities with TheRock's numa")
+  else()
+    message(FATAL_ERROR "hwloc library not found. Install libhwloc-dev (Debian/Ubuntu) or hwloc-devel (RHEL/CentOS) or add hwloc as a TheRock dependency")
+  endif()
+endif()
+
+# Add HAVE_HWLOC compile definition
+target_compile_definitions(${ROCRTST} PRIVATE HAVE_HWLOC=$<BOOL:${HAVE_HWLOC}>)
+
+# Link libraries - CMake will automatically handle RPATH for imported targets
+target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} ${YAML_CPP_TARGET} c stdc++ dl pthread rt)
+if(HAVE_NUMA)
+  target_link_libraries(${ROCRTST} ${NUMA_TARGET})
+endif()
+if(HAVE_HWLOC)
+  target_link_libraries(${ROCRTST} ${HWLOC_TARGET})
+endif()
+
+enable_testing()
+
+get_filename_component(HSA_RUNTIME_ROOT "${ROCRTST_ROOT}/../runtime/hsa-runtime" ABSOLUTE)
+set(HOTSWAP_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/hotswap")
+
+# Keep COMGR out of rocrtst link/package dependencies. These optional build
+# runpaths only let the hotswap tests exercise ROCR's lazy dlopen path locally.
+set(HOTSWAP_BUILD_RPATH "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(HOTSWAP_COMGR_WITHOUT_OPTIONS "")
+  set(HOTSWAP_SYMBOL_TOOL "${CMAKE_NM}")
+  if(NOT HOTSWAP_SYMBOL_TOOL)
+    find_program(HOTSWAP_SYMBOL_TOOL NAMES llvm-nm nm HINTS ${LLVM_TOOLS_BINARY_DIR})
+  endif()
+
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    foreach(_libdir IN ITEMS lib lib64 tools/comgr/lib)
+      foreach(_comgr_name IN ITEMS libamd_comgr.so.3 libamd_comgr.so)
+        set(_comgr_library "${_prefix}/${_libdir}/${_comgr_name}")
+        if(HOTSWAP_SYMBOL_TOOL AND EXISTS "${_comgr_library}")
+          execute_process(
+            COMMAND "${HOTSWAP_SYMBOL_TOOL}" -D "${_comgr_library}"
+            RESULT_VARIABLE _comgr_symbol_result
+            OUTPUT_VARIABLE _comgr_symbols
+            ERROR_QUIET)
+          if(_comgr_symbol_result EQUAL 0 AND
+             _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite_with_options")
+            list(APPEND HOTSWAP_BUILD_RPATH "${_prefix}/${_libdir}")
+            break()
+          elseif(_comgr_symbol_result EQUAL 0 AND
+                 _comgr_symbols MATCHES "amd_comgr_hotswap_rewrite")
+            list(APPEND HOTSWAP_COMGR_WITHOUT_OPTIONS "${_comgr_library}")
+          endif()
+        endif()
+      endforeach()
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES HOTSWAP_BUILD_RPATH)
+  list(REMOVE_DUPLICATES HOTSWAP_COMGR_WITHOUT_OPTIONS)
+  if(NOT HOTSWAP_BUILD_RPATH AND HOTSWAP_COMGR_WITHOUT_OPTIONS)
+    message(WARNING
+      "Found COMGR without amd_comgr_hotswap_rewrite_with_options: "
+      "${HOTSWAP_COMGR_WITHOUT_OPTIONS}. hotswap_rewrite requires a "
+      "ROCm/llvm-project#3008-capable COMGR for local test RPATH setup.")
+  endif()
+endif()
+
+set(HOTSWAP_GFX1250_ASM "${HOTSWAP_TEST_ROOT}/fixtures/gfx1250_min.s")
+set(HOTSWAP_GFX1250_HSACO "${PROJECT_BINARY_DIR}/gfx1250_min.hsaco")
+set(HOTSWAP_GFX1250_HSACO_HDR "${PROJECT_BINARY_DIR}/gfx1250_min_hsaco.h")
+set(HOTSWAP_GENERATE_HSACO_HDR
+    "${HOTSWAP_TEST_ROOT}/fixtures/generate_hsaco_header.cmake")
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO}"
+  COMMAND ${CLANG}
+          -x assembler
+          -target amdgcn-amd-amdhsa
+          -mcpu=gfx1250
+          -o "${HOTSWAP_GFX1250_HSACO}"
+          "${HOTSWAP_GFX1250_ASM}"
+  DEPENDS "${HOTSWAP_GFX1250_ASM}" ${CLANG}
+  COMMENT "BUILDING ${HOTSWAP_GFX1250_HSACO}"
+  VERBATIM)
+
+add_custom_command(
+  OUTPUT "${HOTSWAP_GFX1250_HSACO_HDR}"
+  COMMAND ${CMAKE_COMMAND}
+          -DINPUT=${HOTSWAP_GFX1250_HSACO}
+          -DOUTPUT=${HOTSWAP_GFX1250_HSACO_HDR}
+          -P "${HOTSWAP_GENERATE_HSACO_HDR}"
+  DEPENDS "${HOTSWAP_GFX1250_HSACO}" "${HOTSWAP_GENERATE_HSACO_HDR}"
+  COMMENT "GENERATING ${HOTSWAP_GFX1250_HSACO_HDR}"
+  VERBATIM)
+
+add_custom_target(hotswap_gfx1250_fixture DEPENDS "${HOTSWAP_GFX1250_HSACO_HDR}")
+
+add_executable(hotswap_gfx_query
+  ${HOTSWAP_TEST_ROOT}/hotswap_gfx_query_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp)
+target_include_directories(hotswap_gfx_query PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${ROCRTST_ROOT}/gtest/include)
+target_link_libraries(hotswap_gfx_query ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME hotswap_gfx_query COMMAND hotswap_gfx_query)
+set_tests_properties(hotswap_gfx_query PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 60)
+
+add_executable(hotswap_rewrite
+  ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
+  ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
+  "${HOTSWAP_GFX1250_HSACO_HDR}")
+add_dependencies(hotswap_rewrite hotswap_gfx1250_fixture)
+target_include_directories(hotswap_rewrite PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${PROJECT_BINARY_DIR}
+  ${ROCRTST_ROOT}/gtest/include)
+target_compile_definitions(hotswap_rewrite PRIVATE ROCR_HOTSWAP_TESTING)
+target_link_libraries(hotswap_rewrite ${GOOGLE_TEST_FRWK_NAME} ${CMAKE_DL_LIBS} pthread)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(hotswap_rewrite PROPERTIES
+    LINK_FLAGS "-Wl,--enable-new-dtags"
+    INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../lib64")
+  if(HOTSWAP_BUILD_RPATH)
+    set_property(TARGET hotswap_rewrite PROPERTY
+      BUILD_RPATH "${HOTSWAP_BUILD_RPATH}")
+  endif()
+endif()
+add_test(NAME hotswap_rewrite COMMAND hotswap_rewrite)
+set_tests_properties(hotswap_rewrite PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;hotswap"
+  TIMEOUT 120)
 
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
@@ -420,15 +898,101 @@ add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 #Build symlinks
 add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 
-## Set RUNPATH to pickup local copy of hwloc
-set_property(TARGET ${ROCRTST} PROPERTY INSTALL_RPATH "$ORIGIN;$ORIGIN/thirdparty/lib;$ORIGIN/../lib/rocrtst/thirdparty/lib" )
-set_property(TARGET ${ROCRTST} PROPERTY LINK_FLAGS "-Wl,--enable-new-dtags")
+# CMake automatically sets RPATH for linked libraries when CMAKE_INSTALL_RPATH_USE_LINK_PATH is TRUE
+# This works for SHARED IMPORTED targets (numa, hwloc) found via pkg-config
+set_target_properties(${ROCRTST} PROPERTIES
+  LINK_FLAGS "-Wl,--enable-new-dtags"
+  INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
+  BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
+)
 
 install(TARGETS ${ROCRTST}
         ARCHIVE DESTINATION lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
+install(TARGETS hotswap_gfx_query hotswap_rewrite
+        RUNTIME DESTINATION bin)
+
+# Install platform configuration file
+install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
+        DESTINATION share/rocrtst)
+
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../thirdparty/lib DESTINATION lib/rocrtst )
+
+# ROCm Systems root (for shared/ctest and other shared resources)
+if(NOT ROCM_SYSTEMS_ROOT)
+    get_filename_component(
+        ROCM_SYSTEMS_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.."
+        ABSOLUTE
+    )
+endif()
+
+set(TEST_CATEGORIES_CMAKE "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
+set(TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+
+if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
+    include("${TEST_CATEGORIES_CMAKE}")
+    include(GNUInstallDirs)
+    enable_testing()
+
+    # Install-time CTestTestfile referencing the binary by relative path
+    # (parser writes `add_test(name "../<target>" ...)` so this file must
+    # live one directory below where the rocrtst64 binary is installed).
+    set(INSTALL_TEST_FILE
+        "${PROJECT_BINARY_DIR}/install_CTestTestfile.cmake"
+    )
+    file(
+        WRITE
+        "${INSTALL_TEST_FILE}"
+        [=[
+# Generated by rocrtst for install-time ctest.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+    )
+
+    message(STATUS "Applying test categories for rocrtst64")
+    apply_test_category_labels(
+      rocrtst64
+      "${TEST_CATEGORIES_YAML}"
+      "${PROJECT_BINARY_DIR}"
+      "${INSTALL_TEST_FILE}"
+    )
+
+    file(
+        APPEND
+        "${INSTALL_TEST_FILE}"
+        "\n"
+        "add_test(hotswap_gfx_query \"../hotswap_gfx_query\")\n"
+        "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
+        "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
+        "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
+    )
+
+    install(
+        FILES "${INSTALL_TEST_FILE}"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/rocrtst"
+        COMPONENT tests
+        RENAME "CTestTestfile.cmake"
+    )
+else()
+    if(NOT EXISTS "${TEST_CATEGORIES_CMAKE}")
+        message(
+            STATUS
+            "Shared CTest categories not found at "
+            "${TEST_CATEGORIES_CMAKE} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
+    if(NOT EXISTS "${TEST_CATEGORIES_YAML}")
+        message(
+            STATUS
+            "Test categories YAML not found at "
+            "${TEST_CATEGORIES_YAML} - "
+            "skipping test categorization for rocrtst64"
+        )
+    endif()
+endif()
 
 include ( CPack )

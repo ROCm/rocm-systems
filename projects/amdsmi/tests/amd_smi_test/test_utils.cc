@@ -20,12 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "test_utils.h"
+
 #include <map>
 
 #include "amd_smi/amdsmi.h"
-#include "test_utils.h"
 
-static const std::map<amdsmi_fw_block_t, const char *> kDevFWNameMap = {
+static const std::map<amdsmi_fw_block_t, const char*> kDevFWNameMap = {
     {AMDSMI_FW_ID_ASD, "asd"},
     {AMDSMI_FW_ID_CP_CE, "ce"},
     {AMDSMI_FW_ID_DMCU_ERAM, "dmcu"},  // TODO(bliu): double check
@@ -34,7 +35,7 @@ static const std::map<amdsmi_fw_block_t, const char *> kDevFWNameMap = {
     {AMDSMI_FW_ID_CP_MEC1, "mec1"},
     {AMDSMI_FW_ID_CP_MEC2, "mec2"},
     {AMDSMI_FW_ID_CP_MES, "mes"},
-    {AMDSMI_FW_ID_MES_KIQ, "mes_kiq"}, // TODO: double check
+    {AMDSMI_FW_ID_MES_KIQ, "mes_kiq"},  // TODO: double check
     {AMDSMI_FW_ID_CP_PFP, "pfp"},
     {AMDSMI_FW_ID_RLC, "rlc"},
     {AMDSMI_FW_ID_RLC_SRLG, "rlc_srlg"},
@@ -50,13 +51,9 @@ static const std::map<amdsmi_fw_block_t, const char *> kDevFWNameMap = {
     {AMDSMI_FW_ID_VCN, "vcn"},
 };
 
-const char *
-NameFromFWEnum(amdsmi_fw_block_t blk) {
-  return kDevFWNameMap.at(blk);
-}
+const char* NameFromFWEnum(amdsmi_fw_block_t blk) { return kDevFWNameMap.at(blk); }
 
-static const std::map<amdsmi_evt_notification_type_t, const char *>
-                                                      kEvtNotifEvntNameMap = {
+static const std::map<amdsmi_evt_notification_type_t, const char*> kEvtNotifEvntNameMap = {
     {AMDSMI_EVT_NOTIF_VMFAULT, "AMDSMI_EVT_NOTIF_VMFAULT"},
     {AMDSMI_EVT_NOTIF_THERMAL_THROTTLE, "AMDSMI_EVT_NOTIF_THERMAL_THROTTLE"},
     {AMDSMI_EVT_NOTIF_GPU_PRE_RESET, "AMDSMI_EVT_NOTIF_GPU_PRE_RESET"},
@@ -71,7 +68,6 @@ static const std::map<amdsmi_evt_notification_type_t, const char *>
     {AMDSMI_EVT_NOTIF_PROCESS_START, "AMDSMI_EVT_NOTIF_PROCESS_START"},
     {AMDSMI_EVT_NOTIF_PROCESS_END, "AMDSMI_EVT_NOTIF_PROCESS_END"},
 };
-const char *
-NameFromEvtNotifType(amdsmi_evt_notification_type_t evt) {
+const char* NameFromEvtNotifType(amdsmi_evt_notification_type_t evt) {
   return kEvtNotifEvntNameMap.at(evt);
 }

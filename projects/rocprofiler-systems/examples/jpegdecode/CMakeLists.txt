@@ -1,27 +1,28 @@
-################################################################################
-# Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+# Set AMD Clang as default compiler for standalone builds
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+    find_program(
+        _AMDCLANG
+        NAMES amdclang++
+        HINTS ${ROCM_PATH} $ENV{ROCM_PATH} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+    if(_AMDCLANG)
+        set(CMAKE_CXX_COMPILER ${_AMDCLANG})
+    endif()
+    unset(_AMDCLANG)
+endif()
+
+project(rocprofiler-systems-jpegdecode-example LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
 
 # This example requires hip and rocjpeg.
 find_package(HIP QUIET)
@@ -31,13 +32,6 @@ if(NOT HIP_FOUND)
     return()
 endif()
 
-# Set AMD Clang as default compiler
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-    set(CMAKE_C_COMPILER ${ROCmVersion_DIR}/bin/amdclang)
-    set(CMAKE_CXX_COMPILER ${ROCmVersion_DIR}/bin/amdclang++)
-endif()
-
-project(rocprofiler-systems-jpegdecode-example)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 
@@ -48,17 +42,6 @@ list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocjpeg/cmake)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
-
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
-endif()
 
 # find rocJPEG - library and headers
 find_path(
@@ -105,12 +88,12 @@ find_package(rocprofiler-register QUIET)
 
 # Copy image files to build directory
 function(copy_image_files_and_make_copies)
-    if(EXISTS "${ROCmVersion_DIR}/share/rocjpeg/images")
+    if(EXISTS "${rocjpeg_ROOT_DIR}/share/rocjpeg/images")
         if(NOT EXISTS "${CMAKE_BINARY_DIR}/images")
             file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/images")
         endif()
 
-        file(GLOB_RECURSE image_files "${ROCmVersion_DIR}/share/rocjpeg/images/*")
+        file(GLOB_RECURSE image_files "${rocjpeg_ROOT_DIR}/share/rocjpeg/images/*")
         file(COPY ${image_files} DESTINATION ${CMAKE_BINARY_DIR}/images)
         set(NUM_COPIES 20)
 
@@ -127,7 +110,7 @@ function(copy_image_files_and_make_copies)
     else()
         message(
             AUTHOR_WARNING
-            "Source directory ${ROCmVersion_DIR}/share/rocjpeg/images does not exist"
+            "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist"
         )
     endif()
 endfunction()
@@ -157,11 +140,15 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     target_compile_options(jpegdecode PRIVATE ${_FLAGS})
     copy_image_files_and_make_copies()
 
-    if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(TARGETS jpegdecode DESTINATION bin COMPONENT rocprofiler-systems-examples)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET jpegdecode)
         install(
-            FILES ${CMAKE_BINARY_DIR}/images
-            DESTINATION share/rocprofiler-systems/tests/images
+            TARGETS jpegdecode
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+        install(
+            DIRECTORY ${CMAKE_BINARY_DIR}/images/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
             COMPONENT rocprofiler-systems-examples
         )
     endif()

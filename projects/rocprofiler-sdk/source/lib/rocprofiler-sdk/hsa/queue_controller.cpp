@@ -25,9 +25,13 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+
+#include <hsa/amd_hsa_queue.h>
 
 #include <rocprofiler-sdk/fwd.h>
+#include <algorithm>
 #include <memory>
 
 namespace rocprofiler
@@ -52,16 +56,42 @@ create_queue(hsa_agent_t        agent,
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
-            auto new_queue = std::make_unique<Queue>(agent_info,
-                                                     size,
-                                                     type,
-                                                     callback,
-                                                     data,
-                                                     private_segment_size,
-                                                     group_segment_size,
-                                                     controller->get_core_table(),
-                                                     controller->get_ext_table(),
-                                                     queue);
+            std::unique_ptr<Queue> new_queue;
+            if(queue_interposition::supports_queue_interposition())
+            {
+                ROCP_INFO << "[queue-intercept] creating queue via INLINE path for agent "
+                          << agent.handle;
+                auto status = controller->get_core_table().hsa_queue_create_fn(agent,
+                                                                               size,
+                                                                               type,
+                                                                               callback,
+                                                                               data,
+                                                                               private_segment_size,
+                                                                               group_segment_size,
+                                                                               queue);
+                if(status != HSA_STATUS_SUCCESS) return status;
+
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    *queue,
+                                                    [](write_interceptor_t, void*) {});
+            }
+            else
+            {
+                ROCP_INFO << "[queue-intercept] creating queue via LEGACY path for agent "
+                          << agent.handle;
+                new_queue = std::make_unique<Queue>(agent_info,
+                                                    size,
+                                                    type,
+                                                    callback,
+                                                    data,
+                                                    private_segment_size,
+                                                    group_segment_size,
+                                                    controller->get_core_table(),
+                                                    controller->get_ext_table(),
+                                                    queue);
+            }
 
             controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
                 serializer.add_queue(queue, *new_queue);
@@ -189,13 +219,27 @@ queue_controller_iterate_attach_queue(hsa_queue_t* queue, hsa_agent_t agent, voi
 }
 
 void
+queue_controller_attach_queue_event(hsa_queue_t*                     queue,
+                                    hsa_agent_t                      agent,
+                                    rocprofiler_attach_queue_phase_t phase,
+                                    void* /*data*/)
+{
+    if(phase == ROCPROFILER_ATTACH_QUEUE_CREATED)
+    {
+        queue_controller_iterate_attach_queue(queue, agent, nullptr);
+    }
+    else if(auto* qc = get_queue_controller())
+    {
+        qc->destroy_queue(queue);
+    }
+}
+
+void
 queue_controller_load_attach_queues()
 {
     auto* attach_table = CHECK_NOTNULL(*(get_attach_table()));
 
-    attach_table->rocprofiler_attach_iterate_all_queues(queue_controller_iterate_attach_queue,
-                                                        nullptr);
-    attach_table->rocprofiler_attach_notify_new_queue = queue_controller_iterate_attach_queue;
+    attach_table->rocprofiler_attach_add_queue_cb(queue_controller_attach_queue_event, nullptr);
 }
 
 }  // namespace
@@ -204,20 +248,24 @@ void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().get_rocp_agent()->id.handle;
-            map[id]             = std::move(queue);
-            for(const auto& [cbid, cb_tuple] : callbacks)
+            map[id] = std::move(queue);
+            for(const auto& [cbid, cb_data] : callbacks)
             {
-                auto& [agent, qcb, ccb] = cb_tuple;
-                if(agent.id.handle == default_agent.id.handle || agent.id.handle == agent_id)
+                auto& [agent, cb] = cb_data;
+                if(agent.id == default_agent.id || agent.id == agent_id)
                 {
-                    map[id]->register_callback(cbid, qcb, ccb);
+                    map[id]->register_callback(cbid, cb);
                 }
             }
         });
     });
+
+    // Register queue state for SDK-level write pointer interception
+    queue_interposition::create_queue_state(id);
 }
 
 void
@@ -230,31 +278,26 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
-    ROCP_INFO << "destroying queue...";
-
+    queue_interposition::destroy_queue_state(id);
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
-
-    ROCP_INFO << "queue destroyed";
 }
 
 ClientID
-QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
-                              Queue::queue_cb_t                  qcb,
-                              Queue::completed_cb_t              ccb)
+QueueController::add_callback(std::optional<rocprofiler_agent_t> agent, queue_callbacks_t callbacks)
 {
-    static std::atomic<ClientID> client_id = 1;
-    ClientID                     return_id;
+    static auto client_id = std::atomic<ClientID>{1};
+    ClientID    return_id = -1;
     _callback_cache.wlock([&](auto& cb_cache) {
         return_id = client_id;
         if(agent)
         {
-            cb_cache[client_id] = std::tuple(*agent, qcb, ccb);
+            cb_cache[client_id] = std::make_tuple(*agent, callbacks);
         }
         else
         {
-            cb_cache[client_id] = std::tuple(default_agent, qcb, ccb);
+            cb_cache[client_id] = std::make_tuple(default_agent, callbacks);
         }
         client_id++;
 
@@ -263,7 +306,7 @@ QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
             {
                 if(!agent || queue->get_agent().get_rocp_agent()->id.handle == agent->id.handle)
                 {
-                    queue->register_callback(return_id, qcb, ccb);
+                    queue->register_callback(return_id, callbacks);
                 }
             }
         });
@@ -505,7 +548,7 @@ enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 216UL;
+        constexpr auto expected_context_size = 224UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -517,24 +560,37 @@ enable_queue_intercept()
         bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
-        if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
-           itr->dispatch_thread_trace)
+        if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
+           itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
+           itr->device_thread_trace || itr->dispatch_thread_trace)
             return true;
     }
-
     return false;
+}
+
+bool
+context_needs_queue_interposition_tracing(const context::context* ctx)
+{
+    return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 }
 
 void
 queue_controller_init(HsaApiTable* table)
 {
     CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 void
 queue_controller_sync()
 {
+    // sync the queue interceptor
+    queue_interposition::interposition_sync();
+
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
@@ -542,8 +598,13 @@ queue_controller_sync()
 void
 queue_controller_fini()
 {
-    if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    // synchronize first
+    queue_controller_sync();
+
+    // finalize queue data (e.g. clean up signal pool)
+    if(enable_queue_intercept()) queue_fini();
+
+    queue_interposition::interposition_fini();
 }
 
 void
@@ -559,6 +620,8 @@ queue_controller_init(RocAttachDispatchTable* attach_table)
                "may not be instrumented correctly.";
     }
     *(get_attach_table()) = attach_table;
+
+    if(enable_queue_intercept()) queue_init();
 }
 
 }  // namespace hsa

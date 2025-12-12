@@ -125,6 +125,41 @@ typedef enum rocprofiler_hsa_amd_ext_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_write,
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ais_file_read,
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_acquire,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_counted_queue_release,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_batch_copy,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0B
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_preload,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0C
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_discard_batch_async,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_get_event_id,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0E
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_open,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore_handle_close,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0F
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_fabric_handle,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_fabric_handle,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_create,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_signal_external_semaphore,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_wait_external_semaphore,
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_image_create_v2,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_map_buffer_with_size,
+#    endif
 #endif
 
     ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,

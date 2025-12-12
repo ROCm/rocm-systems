@@ -1,30 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "common.hpp"
+#include "core/demangler.hpp"
 
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 
 #include <algorithm>
@@ -43,7 +24,7 @@ get_categories(type_list<Tp...>)
     };
     (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-    auto _vec = str_vec_t{ _cleanup(demangle<Tp>(), "tim::")... };
+    auto _vec = str_vec_t{ _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::")... };
     std::sort(_vec.begin(), _vec.end(), [](const auto& lhs, const auto& rhs) {
         // prioritize project category
         auto lpos = lhs.find("project::");

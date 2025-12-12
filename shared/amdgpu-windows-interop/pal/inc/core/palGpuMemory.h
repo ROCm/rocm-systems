@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -77,7 +77,7 @@ enum class GpuMemPriorityOffset : uint32
     Count
 };
 
-/// Speicfies access mode for unmapped pages in a virtual Gpu Memory.
+/// Specifies access mode for unmapped pages in a virtual GPU memory.
 enum class VirtualGpuMemAccessMode : uint32
 {
     Undefined = 0x0, ///< Used in situations where no special accessMode needed.
@@ -133,8 +133,12 @@ union GpuMemoryCreateFlags
                                                   ///  indicating the driver must manage both
                                                   ///  CPU caches and GPU caches that are not flushed on
                                                   ///  command buffer boundaries.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 948
         uint64 xdmaBuffer                   :  1; ///< GPU memory will be used for an XDMA cache buffer for
                                                   ///  transferring data
+#else
+        uint64 reserved1                    :  1; ///< Delete this bit when the MAJOR_VERSION backcompat is removed.
+#endif
                                                   ///  between GPUs in a multi-GPU configuration.
         uint64 turboSyncSurface             :  1; ///< The memory will be used for TurboSync private swapchain primary.
         uint64 typedBuffer                  :  1; ///< GPU memory will be permanently considered a single
@@ -203,7 +207,14 @@ union GpuMemoryCreateFlags
 #endif
         uint64 directCaptureSource          :  1; ///< Memory will be mapped to DirectCapture resource's KMD-managed
                                                   ///  private VA.
-        uint64 reserved                     : 28; ///< Reserved for future use.
+        uint64 videoEncoder                 :  1; ///< Video encoder output butffer stream.
+        uint64 videoDecoder                 :  1; ///< Video decoder input butffer stream.
+        uint64 notifyResidency              :  1; ///< Request KMD residency notification (WDDM NotifyResidency).
+                                                  ///  KMD will callback with the MC ADDRESS after MakeResident
+                                                  ///  completes. Required for ISP camera capture surfaces
+                                                  ///  (D3D11_DDI_BIND_CAPTURE) and any other allocation that
+                                                  ///  needs post-residency MC address notification.
+        uint64 reserved                     : 25; ///< Reserved for future use.
     };
     uint64     u64All;                            ///< Flags packed as 64-bit uint.
 };
@@ -287,9 +298,9 @@ struct GpuMemoryCreateInfo
                                            ///  This GPU memory will be permanently considered a typed buffer.
 
     VirtualGpuMemAccessMode virtualAccessMode; ///< Access mode for virtual GPU memory's unmapped pages, WDDM only.
-    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addresable Memory.
+    gpusize                 surfaceBusAddr;    ///< Surface bus address of Bus Addressable Memory.
                                                ///  Only valid when GpuMemoryCreateFlags::sdiExternal is set.
-    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addresable Memory. The client can:
+    gpusize                 markerBusAddr;     ///< Marker bus address of Bus Addressable Memory. The client can:
                                                ///  1. Write to marker
                                                ///  2. Let GPU wait until a value is written to marker before issuing
                                                ///     the next command.
@@ -398,7 +409,7 @@ struct ExternalGpuMemoryOpenInfo
     } flags;                        ///< External Gpu memory open info flags.
 };
 
-/// The fundemental information that describes a GPU memory object that is stored directly in each IGpuMemory.
+/// The fundamental information that describes a GPU memory object that is stored directly in each IGpuMemory.
 /// It can be accessed without a virtual call via IGpuMemory::Desc().
 struct GpuMemoryDesc
 {
@@ -548,7 +559,7 @@ struct GpuMemoryExportInfo
  * @see IDevice::OpenExternalSharedGpuMemory
  *
  *
- * All of these kinds of GPU memory are assigned a set of fundemental properties specified in GpuMemoryDesc which are
+ * All of these kinds of GPU memory are assigned a set of fundamental properties specified in GpuMemoryDesc which are
  * either specified by the client or by PAL.  There are specific rules these properties must follow; those rules are
  * documented here to avoid duplication.  Violating these rules will cause the device's corresponding "get size"
  * functions to return an error code, the create/open functions may not validate their arguments.
@@ -645,7 +656,7 @@ public:
     virtual OsExternalHandle ExportExternalHandle(const GpuMemoryExportInfo& exportInfo) const = 0;
 #endif
 
-    /// Returns a structure containing some fundemental information that describes this GPU memory object.
+    /// Returns a structure containing some fundamental information that describes this GPU memory object.
     ///
     /// @returns A reference to this allocation's GpuMemoryDesc.
     const GpuMemoryDesc& Desc() const { return m_desc; }

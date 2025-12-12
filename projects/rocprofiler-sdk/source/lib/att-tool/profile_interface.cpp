@@ -26,11 +26,13 @@
 #endif
 
 #include "profile_interface.hpp"
+#include "filenames.hpp"
 #include "perfcounter.hpp"
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
 #include <cxxabi.h>
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 
@@ -68,6 +70,24 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
+#if !defined(ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT)
+    {
+        ROCP_FATAL_IF(trace_size != 1) << "Expected one ATT event record, got " << trace_size;
+        const auto*   event = static_cast<const trace_event_t*>(trace_events);
+        trace_event_t rec{};
+        std::memcpy(&rec, event, std::min<size_t>(event->size, sizeof(rec)));
+        tool.config.events.emplace_back(rec);
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH)
+    {
+        ROCP_FATAL_IF(trace_size != 1) << "Expected one ATT dispatch record, got " << trace_size;
+        const auto* dispatch = static_cast<const dispatch_t*>(trace_events);
+        dispatch_t  rec{};
+        std::memcpy(&rec, dispatch, std::min<size_t>(dispatch->size, sizeof(rec)));
+        tool.config.dispatches.emplace_back(rec);
+    }
+#endif
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY)
     {
         if(tool.config.realtime && trace_size != 0)
@@ -78,6 +98,28 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         if(tool.config.realtime && trace_size != 0)
             tool.config.realtime->add(
                 tool.config.shader_engine, static_cast<realtime_t*>(trace_events), trace_size);
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD)
+    {
+        using inst_t    = rocprofiler_thread_trace_decoder_inst_other_simd_t;
+        const auto* ptr = static_cast<const inst_t*>(trace_events);
+
+        if(trace_size > 0 && ptr != nullptr)
+        {
+            std::vector<inst_t> recs(ptr, ptr + trace_size);
+            const int           se = tool.config.shader_engine;
+            tool.config.filemgr->add_other_simd_data(se, recs);
+        }
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
+    {
+        using shaderdata_t = rocprofiler_thread_trace_decoder_shaderdata_t;
+        const auto* ptr    = static_cast<const shaderdata_t*>(trace_events);
+        if(trace_size > 0)
+        {
+            const int se = tool.config.shader_engine;
+            tool.config.filemgr->add_shaderdata_data(se, ptr, trace_size);
+        }
     }
 
     if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;

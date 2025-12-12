@@ -1,0 +1,20 @@
+// Auto-generated from share/rocprofiler-systems/presets/*.json — do not edit.
+#pragma once
+
+#include <string_view>
+
+namespace rocprofsys
+{
+namespace embedded_presets
+{
+
+struct entry
+{
+    const char* name;
+    const char* json;
+};
+
+@EMBEDDED_PRESET_ENTRIES@
+
+}  // namespace embedded_presets
+}  // namespace rocprofsys

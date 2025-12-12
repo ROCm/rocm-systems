@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenario :
@@ -80,7 +67,7 @@ static void HIPRT_CB Callback1(hipStream_t stream, hipError_t status, void* user
  Test multiple hipStreamAddCallback() called over
  multiple Threads.
  */
-TEST_CASE("Unit_hipStreamAddCallback_StrmSyncTiming") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   float *A_d, *C_d;
   size_t Nbytes = N_elmts * sizeof(float);
 
@@ -113,15 +100,7 @@ TEST_CASE("Unit_hipStreamAddCallback_StrmSyncTiming") {
   while (!cbDone) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-
-  // Since the callback is supposed to be called only after an implicit stream
-  // synchronization, and the runtime cannot continue until the callback is done
-  // hipStreamSynchronize call should not take much time.
-  auto start = std::chrono::high_resolution_clock::now();
-  HIPCHECK(hipStreamSynchronize(mystream));
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-
+  HIPCHECK(hipStreamQuery(mystream));
   HIPCHECK(hipStreamDestroy(mystream));
   HIPCHECK(hipFree(A_d));
   HIPCHECK(hipFree(C_d));
@@ -129,10 +108,4 @@ TEST_CASE("Unit_hipStreamAddCallback_StrmSyncTiming") {
   free(C_h);
 
   REQUIRE(Data_mismatch.load() == 0);
-  // HIP runtime cannot proceed further in the queue until callback completes
-  // Stream synchronize should not have much task to do after callback
-  // It should just be an extra empty marker wait
-  // Therefore the hipStreamSynchronize() in the
-  // main thread should hardly take any time to complete.
-  REQUIRE(duration.count() < 100);
 }

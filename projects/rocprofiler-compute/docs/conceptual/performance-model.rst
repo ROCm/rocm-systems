@@ -1,181 +1,56 @@
 .. meta::
-   :description: ROCm Compute Profiler performance model
-   :keywords: Omniperf, ROCm Compute Profiler, ROCm, performance, model, profiler, tool, Instinct,
-              accelerator, AMD, CDNA
+   :description: Performance model overview in ROCm Compute Profiler, covering CDNA and RDNA architectures, GPU metrics, panel layouts, and profiling concepts.
+   :keywords: ROCm Compute Profiler, performance model, CDNA, RDNA, Instinct, Radeon
 
 *****************
 Performance model
 *****************
 
-ROCm Compute Profiler makes available an extensive list of metrics to better understand
-achieved application performance on AMD Instinct™ MI-series accelerators
-including Graphics Core Next™ (GCN) GPUs like the AMD Instinct MI50, CDNA™
-accelerators like the MI100, CDNA2 accelerators such as the AMD Instinct MI250X, MI250,
-and MI210, CDNA3 accelerators such as the AMD Instinct MI300A, MI300X, MI325X, and CDNA4 accelerators such as MI350X and MI355X.
+ROCm Compute Profiler exposes detailed metrics for CDNA™ architecture-based AMD Instinct™
+MI-series GPUs and for select RDNA™ architecture-based AMD Ryzen™ APUs with
+the supported analysis configurations.
 
-The table provides key details and support available for the different architectures:
+Use the following pages for architecture-specific naming, panel layout, and conceptual
+overview:
 
-✅: Supported
-❌: Unsupported
+* **Instinct (CDNA)** - :doc:`AMD CDNA architecture (CDNA-CDNA4) <cdna/cdna-performance-model>`:
+  Architecture and data-type tables, top-level CDNA block diagrams, MI-series terminology,
+  and chapters for:
 
-**Architecture details**
+  * :doc:`cdna/system-speed-of-light`
 
-.. table::
-  :widths: 30 30 30 30 30
+  * :doc:`cdna/compute-unit`
 
-  +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
-  |Architecture     |CDNA       |CDNA 2                           |CDNA 3                               |CDNA 4                   |
-  +=================+===========+=================================+=====================================+=========================+
-  |Chip packaging   |Single Die |Two graphics Compute Dies (GCDs) |One logical processor with dozen     |Similar to CDNA3,        |
-  |                 |           |into single package.             |chiplets, configurable with partition|Multi-Die chiplet, but   |
-  |                 |           |                                 |modes.                               |with two I/O Dies (IODs) |
-  +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
-  |Supported series |MI100      |MI200                            |MI300A                               |MI350X                   |
-  |                 |           +---------------------------------+-------------------------------------+-------------------------+
-  |                 |           |MI210                            |MI300X                               |MI355X                   |
-  |                 |           +---------------------------------+-------------------------------------+-------------------------+
-  |                 |           |MI250                            |MI325X                               |                         |
-  +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
-  |Spatial partition|❌         |❌                               |Compute partition mode and           |Compute partition mode   |
-  |mode             |           |                                 |Memory partition mode                |and Memory partition mode|
-  +-----------------+-----------+---------------------------------+-------------------------------------+-------------------------+
+  * :doc:`cdna/l2-cache`
 
-**Data type support**
+  * :doc:`cdna/shader-engine`
 
-.. list-table::
-      :header-rows: 1
+  * :doc:`cdna/command-processor`
 
-      *
-        - Architecture
-        - FP32
-        - FP64
-        - FP16
-        - INT32 ADD/LOGIC/MAD
-        - INT8 DOT
-        - INT4 DOT
-        - FP32 GEMM
-        - FP64 GEMM
-        - FP16 GEMM
-        - BF16 GEMM
-        - INT8 GEMM
-        - Packed FP32
-        - TF32 GEMM
-        - FP8/BF8
-      *
-        - CDNA
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ❌
-        - ❌
-        - ❌
-        - ❌
-        - ❌
-        - ❌
-        - ❌
-      *
-        - CDNA2
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ❌
-        - ❌
-      *
-        - CDNA3
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-      *
-        - CDNA4
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ✅
-        - ❌
-        - ✅
+  * :doc:`cdna/references`
 
-To best use profiling data, it's important to understand the role of various
-hardware blocks of AMD Instinct accelerators. Refer to the following top level GPU architecture diagram to understand the hardware blocks of each architectures. 
+* **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx115x panels, and chapters for:
+  
+  * :doc:`rdna/system-speed-of-light`
 
-.. tab-set::
+  * :doc:`rdna/shader-engine` (overview)
 
-  .. tab-item:: CDNA
+    * :doc:`rdna/spi`
 
-    .. image:: ../data/conceptual/CDNA.png
-      :alt: CDNA top level architecture diagram with zoomed view of Compute unit
+    * :doc:`rdna/wgp`
 
-  .. tab-item:: CDNA2
+    * :doc:`rdna/gl0-cache`
 
-    .. image:: ../data/conceptual/CDNA2.png
-      :alt: CDNA2 top level architecture diagram with zoomed view of Compute unit
+    * :doc:`rdna/gl1-cache`
 
-  .. tab-item:: CDNA3
+  * :doc:`rdna/gl2-cache`
 
-    .. image:: ../data/conceptual/CDNA3.png
-      :alt: CDNA3 top level architecture diagram with zoomed view of Accelerator Complex Dies (XCDs)
+  * :doc:`rdna/gcea`
 
-  .. tab-item:: CDNA4
+  * :doc:`rdna/command-processor`
 
-    .. image:: ../data/conceptual/CDNA4.png
-      :alt: CDNA4 top level architecture diagram
+  * :doc:`rdna/grbm`
 
-This section describes each hardware block on the accelerator as interacted with by a software developer to
-give a deeper understanding of the metrics reported by profiling data. Refer to
-:doc:`/tutorial/profiling-by-example` for more practical examples and details on how
-to use ROCm Compute Profiler to optimize your code.
+  * :doc:`rdna/references`
 
-.. _mixxx-note:
-
-.. note::
-
-   In this documentation, **MI2XX** refers to any of the CDNA2 architecture-based MI200 series accelerators such as AMD
-   Instinct MI250X, MI250, and MI210 accelerators interchangeably in cases
-   where the exact product at hand is not relevant. For product details, see `AMD Instinct GPUs <https://www.amd.com/en/products/accelerators/instinct.html>`_.
-
-   For a comparison of AMD Instinct accelerator specifications, refer to
-   :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
-
-In this chapter, the AMD Instinct performance model used by ROCm Compute Profiler is divided into a handful of
-key hardware blocks, each detailed in the following sections:
-
-* :doc:`compute-unit`
-
-* :doc:`l2-cache`
-
-* :doc:`shader-engine`
-
-* :doc:`command-processor`
-
-* :doc:`system-speed-of-light`
+For practical profiling walkthroughs, see :doc:`/tutorial/profiling-by-example`.

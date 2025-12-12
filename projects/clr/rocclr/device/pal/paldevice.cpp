@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
@@ -51,6 +37,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <ctype.h>
 #include <fstream>
 #include <iostream>
@@ -76,33 +63,34 @@ struct PalDevice {
   uint32_t gfxipMajor_;             //!< The core engine GFXIP Major version
   uint32_t gfxipMinor_;             //!< The core engine GFXIP Minor version
   uint32_t gfxipStepping_;          //!< The core engine GFXIP Stepping version
-  Pal::GfxIpLevel gfxIpLevel_;      //!< PAL gfx IP level
   const char* palName_;             //!< PAL device name
   Pal::AsicRevision asicRevision_;  //!< PAL AsicRevision
 };
 
 static constexpr PalDevice supportedPalDevices[] = {
-    // GFX Version PAL GFX IP Level            PAL Name         PAL ASIC Revision
-    {10, 1, 0, Pal::GfxIpLevel::GfxIp10_1, "gfx1010", Pal::AsicRevision::Navi10},
-    {10, 1, 1, Pal::GfxIpLevel::GfxIp10_1, "gfx1011", Pal::AsicRevision::Navi12},
-    {10, 1, 2, Pal::GfxIpLevel::GfxIp10_1, "gfx1012", Pal::AsicRevision::Navi14},
-    {10, 3, 0, Pal::GfxIpLevel::GfxIp10_3, "gfx1030", Pal::AsicRevision::Navi21},
-    {10, 3, 1, Pal::GfxIpLevel::GfxIp10_3, "gfx1031", Pal::AsicRevision::Navi22},
-    {10, 3, 2, Pal::GfxIpLevel::GfxIp10_3, "gfx1032", Pal::AsicRevision::Navi23},
-    {10, 3, 4, Pal::GfxIpLevel::GfxIp10_3, "gfx1034", Pal::AsicRevision::Navi24},
-    {10, 3, 5, Pal::GfxIpLevel::GfxIp10_3, "gfx1035", Pal::AsicRevision::Rembrandt},
-    {10, 3, 6, Pal::GfxIpLevel::GfxIp10_3, "gfx1036", Pal::AsicRevision::Raphael},
-    {11, 0, 0, Pal::GfxIpLevel::GfxIp11_0, "gfx1100", Pal::AsicRevision::Navi31},
-    {11, 0, 1, Pal::GfxIpLevel::GfxIp11_0, "gfx1101", Pal::AsicRevision::Navi32},
-    {11, 0, 2, Pal::GfxIpLevel::GfxIp11_0, "gfx1102", Pal::AsicRevision::Navi33},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::Phoenix1},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::Phoenix2},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint1},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint2},
-    {11, 5, 0, Pal::GfxIpLevel::GfxIp11_5, "gfx1150", Pal::AsicRevision::Strix1},
-    {11, 5, 1, Pal::GfxIpLevel::GfxIp11_5, "gfx1151", Pal::AsicRevision::StrixHalo},
-    {12, 0, 0, Pal::GfxIpLevel::GfxIp12, "gfx1200", Pal::AsicRevision::Navi44},
-    {12, 0, 1, Pal::GfxIpLevel::GfxIp12, "gfx1201", Pal::AsicRevision::Navi48},
+    // GFX Version  PAL Name   PAL ASIC Revision
+    {10, 1, 0, "gfx1010", Pal::AsicRevision::Navi10},
+    {10, 1, 1, "gfx1011", Pal::AsicRevision::Navi12},
+    {10, 1, 2, "gfx1012", Pal::AsicRevision::Navi14},
+    {10, 3, 0, "gfx1030", Pal::AsicRevision::Navi21},
+    {10, 3, 1, "gfx1031", Pal::AsicRevision::Navi22},
+    {10, 3, 2, "gfx1032", Pal::AsicRevision::Navi23},
+    {10, 3, 4, "gfx1034", Pal::AsicRevision::Navi24},
+    {10, 3, 5, "gfx1035", Pal::AsicRevision::Rembrandt},
+    {10, 3, 6, "gfx1036", Pal::AsicRevision::Raphael},
+    {11, 0, 0, "gfx1100", Pal::AsicRevision::Navi31},
+    {11, 0, 1, "gfx1101", Pal::AsicRevision::Navi32},
+    {11, 0, 2, "gfx1102", Pal::AsicRevision::Navi33},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::Phoenix1},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::Phoenix2},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::HawkPoint1},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::HawkPoint2},
+    {11, 5, 0, "gfx1150", Pal::AsicRevision::Strix1},
+    {11, 5, 1, "gfx1151", Pal::AsicRevision::StrixHalo},
+    {11, 5, 2, "gfx1152", Pal::AsicRevision::Krackan1},
+    {11, 5, 3, "gfx1153", Pal::AsicRevision::Krackan2},
+    {12, 0, 0, "gfx1200", Pal::AsicRevision::Navi44},
+    {12, 0, 1, "gfx1201", Pal::AsicRevision::Navi48},
 };
 
 static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uint32_t gfxipMinor,
@@ -125,9 +113,9 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
 
-static std::tuple<Pal::GfxIpLevel, Pal::AsicRevision, const char*> findPal(uint32_t gfxipMajor,
-                                                                           uint32_t gfxipMinor,
-                                                                           uint32_t gfxipStepping) {
+static std::tuple<Pal::AsicRevision, const char*> findPal(uint32_t gfxipMajor,
+                                                          uint32_t gfxipMinor,
+                                                          uint32_t gfxipStepping) {
   auto palDeviceIter = std::find_if(std::begin(supportedPalDevices), std::end(supportedPalDevices),
                                     [&](const PalDevice& palDevice) {
                                       return palDevice.gfxipMajor_ == gfxipMajor &&
@@ -135,10 +123,9 @@ static std::tuple<Pal::GfxIpLevel, Pal::AsicRevision, const char*> findPal(uint3
                                              palDevice.gfxipStepping_ == (gfxipStepping & 0xF);
                                     });
   if (palDeviceIter == std::end(supportedPalDevices)) {
-    return std::make_tuple(Pal::GfxIpLevel::None, Pal::AsicRevision::Unknown, nullptr);
+    return std::make_tuple(Pal::AsicRevision::Unknown, nullptr);
   }
-  return std::make_tuple(palDeviceIter->gfxIpLevel_, palDeviceIter->asicRevision_,
-                         palDeviceIter->palName_);
+  return std::make_tuple(palDeviceIter->asicRevision_, palDeviceIter->palName_);
 }
 
 }  // namespace
@@ -172,7 +159,7 @@ Pal::IDevice* gDeviceList[Pal::MaxDevices] = {};
 uint32_t gStartDevice = 0;
 uint32_t gNumDevices = 0;
 
-NullDevice::NullDevice() : amd::Device(), ipLevel_(Pal::GfxIpLevel::None), palName_(nullptr) {}
+NullDevice::NullDevice() : amd::Device(), palName_(nullptr) {}
 
 bool NullDevice::init() {
   // Create offline devices for all ISAs not already associated with an online
@@ -183,22 +170,17 @@ bool NullDevice::init() {
         (isa->xnack() == amd::Isa::Feature::Any)) {
       continue;
     }
-    bool isOnline = false;
+
     // Check if the particular device is online
-    for (size_t i = 0; i < devices.size(); i++) {
-      if (&(devices[i]->isa()) == isa) {
-        isOnline = true;
-        break;
-      }
-    }
+    bool isOnline = std::any_of(devices.begin(), devices.end(),
+                                [isa](Device* device) { return &(device->isa()) == isa; });
     if (isOnline) {
       continue;
     }
 
-    Pal::GfxIpLevel gfxIpLevel;
     Pal::AsicRevision asicRevision;
     const char* palName;
-    std::tie(gfxIpLevel, asicRevision, palName) =
+    std::tie(asicRevision, palName) =
         findPal(isa->versionMajor(), isa->versionMinor(), isa->versionStepping());
     if (asicRevision == Pal::AsicRevision::Unknown) {
       // PAL does not support this asic.
@@ -210,7 +192,7 @@ bool NullDevice::init() {
       LogPrintfError("Error allocating new instance of offline PAL Device %s", isa->targetId());
       return false;
     }
-    if (!nullDevice->create(palName, *isa, gfxIpLevel, asicRevision)) {
+    if (!nullDevice->create(palName, *isa, asicRevision)) {
       // Skip over unsupported devices
       LogPrintfError("Skipping creating new instance of offline PAL Device %s", isa->targetId());
       continue;
@@ -220,8 +202,7 @@ bool NullDevice::init() {
   return true;
 }
 
-bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLevel ipLevel,
-                        Pal::AsicRevision asicRevision) {
+bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevision asicRevision) {
   if (!isa.runtimePalSupported()) {
     LogPrintfError("Offline PAL device %s is not supported", isa.targetId());
     return false;
@@ -233,11 +214,9 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
   // Use fake GFX IP for the device init
   asicRevision_ = asicRevision;
-  ipLevel_ = ipLevel;
   properties.revision = asicRevision;
-  properties.gfxLevel = ipLevel;
   properties.gfxTriple.major = isa.versionMajor();
-  properties.gfxTriple.major = isa.versionMinor();
+  properties.gfxTriple.minor = isa.versionMinor();
   properties.gfxTriple.stepping = isa.versionStepping();
   uint subtarget = 0;
 
@@ -312,7 +291,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
                                ? palProp.gfxipProperties.shaderCore.numAvailableCus / 2
                                : palProp.gfxipProperties.shaderCore.numAvailableCus;
   info_.maxPhysicalComputeUnits_ = info_.maxComputeUnits_;
-  info_.numberOfShaderEngines = palProp.gfxipProperties.shaderCore.numShaderEngines;
+  info_.numberOfShaderEngines_ = palProp.gfxipProperties.shaderCore.numShaderEngines;
 
   // SI parts are scalar.  Also, reads don't need to be 128-bits to get peak rates.
   // For example, float4 is not faster than float as long as all threads fetch the same
@@ -512,6 +491,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.maxWorkItemSizes_[2] = info_.maxWorkGroupSize_;
   info_.preferredWorkGroupSize_ = settings().preferredWorkGroupSize_;
 
+  info_.maxGridDim_[0] = std::numeric_limits<int32_t>::max();
+  info_.maxGridDim_[1] = std::numeric_limits<uint16_t>::max();
+  info_.maxGridDim_[2] = std::numeric_limits<uint16_t>::max();
+
   info_.localMemType_ = CL_LOCAL;
   info_.localMemSize_ = settings().hwLDSSize_;
   info_.extensions_ = getExtensionString();
@@ -630,8 +613,12 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #endif  // _WIN64
   }
   info_.virtualMemoryManagement_ = true;
-  info_.virtualMemAllocGranularity_ =
+  info_.gpuDirectRdmaWithHipVmmSupported_ =
+      info_.virtualMemoryManagement_ && info_.dmabufSupported_;
+  info_.virtualMemAllocGranularityMinimum_ =
       static_cast<size_t>(palProp.gpuMemoryProperties.virtualMemAllocGranularity);
+  info_.virtualMemAllocGranularityRecommended_ =
+      static_cast<size_t>(palProp.gpuMemoryProperties.largePageSizeInBytes);
   info_.vgprAllocGranularity_ = palProp.gfxipProperties.shaderCore.vgprAllocGranularity;
   info_.vgprsPerSimd_ = palProp.gfxipProperties.shaderCore.vgprsPerSimd;
   info_.availableVGPRs_ = palProp.gfxipProperties.shaderCore.numAvailableVgprs;
@@ -649,6 +636,11 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
       }
     }
   }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
+  info_.hasExpertSchedMode_ = palProp.gfxTriple >= Pal::IpLevel(12, 0);
+#else
+  info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
+#endif
 }
 
 Device::XferBuffers::~XferBuffers() {
@@ -690,7 +682,7 @@ Memory& Device::XferBuffers::acquire() {
   size_t listSize;
 
   // Lock the operations with the staged buffer list
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(lock_);
   listSize = freeBuffers_.size();
 
   // If the list is empty, then attempt to allocate a staged buffer
@@ -726,7 +718,7 @@ void Device::XferBuffers::release(VirtualGPU& gpu, Memory& buffer) {
   // the next aquire can come from different queue
   buffer.wait(gpu);
   // Lock the operations with the staged buffer list
-  amd::ScopedLock l(lock_);
+  std::scoped_lock l(lock_);
   freeBuffers_.push_back(&buffer);
   --acquiredCnt_;
 }
@@ -757,13 +749,6 @@ Device::ScopedLockVgpus::~ScopedLockVgpus() {
 Device::Device()
     : NullDevice(),
       numOfVgpus_(0),
-      lockAsyncOps_(true),    /* Device Async Ops Lock */
-      lockForInitHeap_(true), /* Initialization of Heap Resource */
-      lockPAL_(true),         /* PAL Ops Lock */
-      vgpusAccess_(true),     /* Virtual GPU List Ops Lock */
-      scratchAlloc_(true),    /* Scratch Allocation Lock */
-      mapCacheOps_(true),     /* Map Cache Lock */
-      lockResourceOps_(true), /* Resource List Ops Lock */
       xferRead_(nullptr),
       mapCache_(nullptr),
       resourceCache_(nullptr),
@@ -840,7 +825,7 @@ Device::~Device() {
 extern const char* SchedulerSourceCode;
 extern const char* SchedulerSourceCode20;
 
-constexpr int TrapHandlerABIVersion = 10;
+constexpr int TrapHandlerABIVersion = 11;
 extern const char* TrapHandlerCode;
 
 // ================================================================================================
@@ -858,8 +843,6 @@ bool Device::create(Pal::IDevice* device) {
     return false;
   }
 
-  // Save the IP level for the offline detection
-  ipLevel_ = properties().gfxLevel;
   asicRevision_ = flagIsDefault(PAL_FORCE_ASIC_REVISION)
                       ? properties().revision
                       : static_cast<Pal::AsicRevision>(PAL_FORCE_ASIC_REVISION);
@@ -994,8 +977,7 @@ bool Device::create(Pal::IDevice* device) {
   computeEnginesId_.resize(std::min(numComputeEngines(), settings().numComputeRings_));
 
   amd::Context::Info info = {0};
-  std::vector<amd::Device*> devices;
-  devices.push_back(this);
+  std::vector<amd::Device*> devices{this};
 
   // Create a dummy context
   context_ = new amd::Context(devices, info);
@@ -1092,7 +1074,7 @@ void PAL_STDCALL Device::PalDeveloperCallback(void* pPrivateData, const Pal::uin
 
 // ================================================================================================
 bool Device::initializeHeapResources() {
-  amd::ScopedLock k(lockForInitHeap_);
+  std::scoped_lock k(lockForInitHeap_);
   if (!heapInitComplete_) {
     Pal::DeviceFinalizeInfo finalizeInfo = {};
 
@@ -1191,7 +1173,12 @@ bool Device::initializeHeapResources() {
           // Loader returns an absolute address, but PAL accepts base + offset, hense find offset
           auto offset = program->GetTrapHandlerAddress() - memRef.pGpuMemory->Desc().gpuVirtAddr;
           // Bind the trap handler's executable to the kernel mode driver
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 974
+          result = iDev()->SetHipTrapHandler(
+              memRef.pGpuMemory->Desc().gpuVirtAddr + offset, 0);
+#else
           result = iDev()->SetHipTrapHandler(memRef.pGpuMemory, offset, nullptr, 0);
+#endif
           if (result != Pal::Result::Success) {
             LogError("KMD failed to setup the trap handler");
           }
@@ -1223,8 +1210,8 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   }
 
   // Not safe to add a queue. So lock the device
-  amd::ScopedLock k(lockAsyncOps());
-  amd::ScopedLock lock(vgpusAccess());
+  std::scoped_lock k(lockAsyncOps());
+  std::scoped_lock lock(vgpusAccess());
 
   // Initialization of heap and other resources occur during the command queue creation time.
   if (!initializeHeapResources()) {
@@ -1516,7 +1503,7 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
       amd::Memory* amdParent = owner.parent();
       {
         // Lock memory object, so only one commitment will occur
-        amd::ScopedLock lock(amdParent->lockMemoryOps());
+        std::scoped_lock lock(amdParent->lockMemoryOps());
         amdParent->commitSvmMemory();
         amdParent->setHostMem(amdParent->getSvmPtr());
       }
@@ -2078,7 +2065,7 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
-  amd::ScopedLock lk(mapCacheOps_);
+  std::scoped_lock lk(mapCacheOps_);
 
   amd::Memory* map = nullptr;
   size_t minSize = 0;
@@ -2133,7 +2120,7 @@ amd::Memory* Device::findMapTarget(size_t size) const {
 
 bool Device::addMapTarget(amd::Memory* memory) const {
   // Must be serialised for access
-  amd::ScopedLock lk(mapCacheOps_);
+  std::scoped_lock lk(mapCacheOps_);
 
   // the svm memory shouldn't be cached
   if (!memory->canBeCached()) {
@@ -2164,7 +2151,7 @@ void Device::ScratchBuffer::destroyMemory() {
 bool Device::allocScratch(uint regNum, const VirtualGPU* vgpu, uint vgprs) {
   if (regNum > 0 && vgprs > 0) {
     // Serialize the scratch buffer allocation code
-    amd::ScopedLock lk(scratchAlloc_);
+    std::scoped_lock lk(scratchAlloc_);
     uint sb = vgpu->hwRing();
     static const uint WaveSizeLimit = ((1 << 21) - 256);
     const uint threadSizeLimit = WaveSizeLimit / info().wavefrontWidth_;
@@ -2360,7 +2347,7 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 }
 
 void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
-                        const void* agentInfo) const {
+                        const void* agentInfo, bool allowAllAgentsAccess) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
@@ -2487,9 +2474,144 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
+static inline address NextSubBufferPtr(const amd::Memory* mem) {
+  return reinterpret_cast<address>(mem->getSvmPtr()) + mem->getSize();
+}
+
+// ================================================================================================
+// Direct synchronous map path bypassing VirtualMapCommand. Reuses the
+// device-level VirtualGPU (xferQueue_).
+// Locks execution() to serialize against this device's command submission,
+// then issues Pal::IQueue::RemapVirtualMemoryPages on MainEngine and waits
+// the fence. The HIP layer is responsible for draining peer-device queues
+// from the CPU side before calling virtualMap
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("PAL virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  VirtualGPU* vgpu = xferQueue_;
+  if (vgpu == nullptr) {
+    LogError("PAL virtualMap: device has no VirtualGPU available");
+    return CL_INVALID_VALUE;
+  }
+
+  // Serialize against this device's command submission.
+  std::scoped_lock lock(vgpu->execution());
+
+  amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    LogPrintfError("PAL virtualMap: no virtual VA reservation for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+  if (vaddr_sub_obj == nullptr) {
+    LogError("PAL virtualMap: MapMemObjBookkeeping failed");
+    return CL_INVALID_VALUE;
+  }
+
+  pal::Memory* phys_pal_mem = getGpuMemory(phys);
+  Pal::IGpuMemory* phymem_igpu_mem = phys_pal_mem->iMem();
+  size_t phys_offset = phys_pal_mem->offset();
+
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+
+  pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
+  Pal::VirtualMemoryRemapRange range{
+      vaddr_pal_mem->iMem(), vaddr_offset, phymem_igpu_mem,
+      phys_offset,           size,         Pal::VirtualGpuMemAccessMode::NoAccess};
+
+  vgpu->eventBegin(MainEngine);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  GpuEvent event;
+  vgpu->eventEnd(MainEngine, event);
+  vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
+
+  if (result != Pal::Result::Success) {
+    LogPrintfError("PAL virtualMap: RemapVirtualMemoryPages (map) failed: %d",
+                   static_cast<int>(result));
+    // Roll back sub_obj — FinalizeMapMemObjBookkeeping was not called, so
+    // MemObjMap doesn't contain va and the cross-links aren't wired. Tear
+    // down the sub-buffer view directly.
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+    vaddr_sub_obj->release();
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  constexpr bool kImportVmmForInterprocess = false;
+  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
+// Direct synchronous unmap path. Symmetric to virtualMap, but preceded by
+// WaitForIdleCompute/Sdma on this device only. HIP layer must handle device sync
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  VirtualGPU* vgpu = xferQueue_;
+  if (vgpu == nullptr) {
+    LogError("PAL virtualUnmap: device has no VirtualGPU available");
+    return CL_INVALID_VALUE;
+  }
+
+  // Serialize against this device's command submission.
+  std::scoped_lock lock(vgpu->execution());
+
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  if (vaddr_sub_obj == nullptr) {
+    LogPrintfError("PAL virtualUnmap: no sub_obj for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
+  if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    LogPrintfError("PAL virtualUnmap: no virtual VA reservation for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
+                        reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
+
+  pal::Memory* vaddr_pal_mem = getGpuMemory(vaddr_base_obj);
+  // Unmap: no physical backing on the range.
+  Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(),
+                                     vaddr_offset,
+                                     nullptr,
+                                     0,
+                                     size,
+                                     Pal::VirtualGpuMemAccessMode::NoAccess};
+
+  // Drain in-flight work touching the VA range on this device's queues.
+  vgpu->WaitForIdleCompute();
+  vgpu->WaitForIdleSdma();
+
+  vgpu->eventBegin(MainEngine);
+  auto result = vgpu->queue(MainEngine).iQueue_->RemapVirtualMemoryPages(1, &range, false, nullptr);
+  GpuEvent event;
+  vgpu->eventEnd(MainEngine, event);
+  vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
+
+  if (result != Pal::Result::Success) {
+    LogPrintfError("PAL virtualUnmap: RemapVirtualMemoryPages (unmap) failed: %d",
+                   static_cast<int>(result));
+    // Keep HW state and bookkeeping consistent — bail out before tearing
+    // down sub_obj/MemObjMap entries.
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kDestroyVirtualBuffer = true;
+  constexpr bool kReleaseSubObj = true;
+  UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
+  return CL_SUCCESS;
+}
+
 // ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                          VmmLocationType access_location) {
+                          VmmLocationType access_location, int numaNode) {
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
   if (amd_mem_obj == nullptr) {
     // If the amd_mem_obj is null, the check if this is a valid va_addr, but not-mapped,
@@ -2502,15 +2624,12 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
     LogPrintfError("Virtual address present, but not mapped yet: 0x%x \n", va_addr);
   }
 
-  // Check for valid size.
-  if (va_size > amd_mem_obj->getSize()) {
-    LogPrintfError("Given size: %u cannot be greater than mem_size: %u \n", va_size,
-                   amd_mem_obj->getSize());
-    return false;
+  address range_end_address = reinterpret_cast<address>(amd_mem_obj->getSvmPtr()) + va_size;
+  while (amd_mem_obj && NextSubBufferPtr(amd_mem_obj) <= range_end_address) {
+    device::Memory* dev_mem_obj = amd_mem_obj->getDeviceMemory(*this);
+    dev_mem_obj->SetAccess(static_cast<device::Memory::MemAccess>(access_flags));
+    amd_mem_obj = amd::MemObjMap::FindMemObj(NextSubBufferPtr(amd_mem_obj));
   }
-
-  device::Memory* dev_mem_obj = amd_mem_obj->getDeviceMemory(*this);
-  dev_mem_obj->SetAccess(static_cast<device::Memory::MemAccess>(access_flags));
 
   return true;
 }
@@ -2732,23 +2851,23 @@ bool Device::createBlitProgram() {
   // note: It's not critical for runtime functionality to fail trap handler initialization
   auto asm_program = new amd::Program(*context_, TrapHandlerAsm.c_str(), amd::Program::Assembly);
   if (asm_program != nullptr) {
-    std::vector<amd::Device*> devices;
-    devices.push_back(this);
+    std::vector<amd::Device*> devices{this};
     std::string opt = "-cl-internal-kernel ";
     if (auto retval =
             asm_program->build(devices, opt.c_str(), nullptr, nullptr, false) != CL_SUCCESS) {
-      DevLogPrintfError("Build failed for trap handler with error code: %d\n", retval);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+              "Build failed for trap handler with error code: %d\n", retval);
       asm_program->release();
     } else {
       if (asm_program->load()) {
         trap_handler_ = asm_program;
       } else {
-        DevLogError("Could not load the trap handler \n");
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Could not load the trap handler \n");
         asm_program->release();
       }
     }
   } else {
-    DevLogError("Trap handler creation failed\n");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Trap handler creation failed\n");
   }
 
   blitProgram_ = new BlitProgram(context_);

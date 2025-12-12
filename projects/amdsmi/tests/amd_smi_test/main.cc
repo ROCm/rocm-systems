@@ -21,51 +21,57 @@
  */
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 
-#include "rocm_smi/rocm_smi_utils.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "test_common.h"
-#include "test_base.h"
-
+#include "functional/api_support_read.h"
+#include "functional/computepartition_memallocmode_read_write.h"
+#include "functional/computepartition_read_write.h"
+#include "functional/cross_process_serialization.h"
+#include "functional/err_cnt_read.h"
+#include "functional/evt_notif_read_write.h"
+#include "functional/fabric_read.h"
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
-#include "functional/evt_notif_read_write.h"
-#include "functional/perf_cntr_read_write.h"
-#include "functional/hw_topology_read.h"
-#include "functional/xgmi_read_write.h"
-#include "functional/api_support_read.h"
-#include "functional/process_info_read.h"
-#include "functional/gpu_busy_read.h"
-#include "functional/gpu_metrics_read.h"
-#include "functional/gpu_partition_metrics_read.h"
-#include "functional/err_cnt_read.h"
-#include "functional/power_read.h"
-#include "functional/power_read_write.h"
-#include "functional/power_cap_read_write.h"
-#include "functional/mem_util_read.h"
-#include "functional/mem_page_info_read.h"
 #include "functional/frequencies_read.h"
 #include "functional/frequencies_read_write.h"
+#include "functional/gpu_busy_read.h"
+#include "functional/gpu_cache_read.h"
+#include "functional/gpu_metrics_read.h"
+#include "functional/gpu_partition_metrics_read.h"
+#include "functional/hw_topology_read.h"
+#include "functional/id_info_read.h"
+#include "functional/kfd_atfork_read.h"
+#include "functional/mem_page_info_read.h"
+#include "functional/mem_util_read.h"
+#include "functional/memory_read_write.h"
+#include "functional/memorypartition_read_write.h"
+#include "functional/metrics_counter_read.h"
+#include "functional/mutual_exclusion.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
-#include "functional/temp_read.h"
-#include "functional/volt_read.h"
-#include "functional/volt_freq_curv_read.h"
+#include "functional/pci_read_write.h"
+#include "functional/perf_cntr_read_write.h"
+#include "functional/perf_determinism.h"
 #include "functional/perf_level_read.h"
 #include "functional/perf_level_read_write.h"
-#include "functional/pci_read_write.h"
-#include "functional/perf_determinism.h"
+#include "functional/power_cap_read_write.h"
+#include "functional/power_read.h"
+#include "functional/power_read_write.h"
+#include "functional/process_info_read.h"
 #include "functional/sys_info_read.h"
-#include "functional/id_info_read.h"
-#include "functional/metrics_counter_read.h"
+#include "functional/temp_read.h"
 #include "functional/version_read.h"
-#include "functional/memorypartition_read_write.h"
-#include "functional/computepartition_read_write.h"
-#include "functional/gpu_cache_read.h"
+#include "functional/volt_freq_curv_read.h"
+#include "functional/volt_read.h"
+#include "functional/xgmi_read_write.h"
+#include "rocm_smi/rocm_smi_utils.h"
+#include "test_base.h"
+#include "test_common.h"
 
-static AMDSMITstGlobals *sRSMIGlvalues = nullptr;
+static AMDSMITstGlobals* sRSMIGlvalues = nullptr;
 
-static void SetFlags(TestBase *test) {
+static void SetFlags(TestBase* test) {
   assert(sRSMIGlvalues != nullptr);
 
   test->set_verbosity(sRSMIGlvalues->verbosity);
@@ -74,7 +80,7 @@ static void SetFlags(TestBase *test) {
   test->set_num_iterations(sRSMIGlvalues->num_iterations);
 }
 
-static void RunCustomTestProlog(TestBase *test) {
+static void RunCustomTestProlog(TestBase* test) {
   SetFlags(test);
 
   if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
@@ -83,7 +89,7 @@ static void RunCustomTestProlog(TestBase *test) {
   test->SetUp();
   test->Run();
 }
-static void RunCustomTestEpilog(TestBase *tst) {
+static void RunCustomTestEpilog(TestBase* tst) {
   if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
     tst->DisplayResults();
   }
@@ -96,7 +102,7 @@ static void RunCustomTestEpilog(TestBase *tst) {
 //   * RunCustomTestProlog(test)  // Run() should contain minimal code
 //   * <insert call to actual test function within test case>
 //   * RunCustomTestEpilog(test)
-static void RunGenericTest(TestBase *test) {
+static void RunGenericTest(TestBase* test) {
   RunCustomTestProlog(test);
   RunCustomTestEpilog(test);
 }
@@ -109,118 +115,155 @@ static void RunGenericTest(TestBase *test) {
 //  // from the standard pattern implemented there.
 //  RunGenericTest(&<test_obj>);
 // }
+
 TEST(amdsmitstReadOnly, TestVersionRead) {
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, FanRead) {
   TestFanRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, FanReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFanReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TempRead) {
   TestTempRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, VoltRead) {
   TestVoltRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestVoltCurvRead) {
   TestVoltCurvRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestPerfLevelRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPerfLevelReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestOverdriveRead) {
   TestOverdriveRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestOverdriveReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestOverdriveReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestFrequenciesRead) {
   TestFrequenciesRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPciReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestSysInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestGPUBusyRead) {
   TestGPUBusyRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestPowerRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPowerReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
   RunGenericTest(&tst);
 }
+
+TEST(amdsmitstReadOnly, TestKfdAtforkRead) {
+  TestKfdAtforkRead tst;
+  RunGenericTest(&tst);
+}
+
 TEST(amdsmitstReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPerfCntrReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
   RunGenericTest(&tst);
@@ -229,29 +272,36 @@ TEST(amdsmitstReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestPerfDeterminism) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadWrite, TestXGMIReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestXGMIReadWrite tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
   RunGenericTest(&tst);
 }
+
 TEST(amdsmitstReadOnly, TestAPISupportRead) {
   TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
-/*
+
 TEST(amdsmitstReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
@@ -260,21 +310,39 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-*/
+
+TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
+  TestCrossProcessSerialization tst;
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
+  tst.Run();
+  RunCustomTestEpilog(&tst);
+}
 
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
+TEST(amdsmitstReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestComputePartitionMemAllocModeReadWrite tst;
+  RunGenericTest(&tst);
+}
+
 TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestMemoryPartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
@@ -284,6 +352,19 @@ TEST(amdsmitstReadOnly, TestGPUCacheRead) {
   TestGPUCacheRead tst;
   RunGenericTest(&tst);
 }
+
+TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestMemoryReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestFabricRead) {
+  TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
 /*
 TEST(amdsmitstReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
@@ -313,5 +394,6 @@ int main(int argc, char** argv) {
   }
 
   sRSMIGlvalues = &settings;
+  SetTestVerbosity(settings.verbosity);
   return RUN_ALL_TESTS();
 }

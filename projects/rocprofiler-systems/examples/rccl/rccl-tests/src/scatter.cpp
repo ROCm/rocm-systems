@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 ScatterGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -55,8 +56,10 @@ ScatterGetBw(size_t count, int typesize, double sec, double* algBw, double* busB
 
 testResult_t
 ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-               ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+               ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+               void* bias = nullptr)
 {
+    (void) bias;
     int nRanks;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
     int rank;
@@ -79,8 +82,8 @@ ScatterRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type
     return testSuccess;
 }
 
-struct testColl scatterTest = { "Scatter", ScatterGetCollByteCount, ScatterInitData,
-                                ScatterGetBw, ScatterRunColl };
+struct testColl scatterTest = { "Scatter",    ScatterGetCollByteCount, ScatterInitData,
+                                ScatterGetBw, ScatterRunColl,          nullptr };
 
 void
 ScatterGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)

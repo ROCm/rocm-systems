@@ -24,15 +24,22 @@ application that lets you view results from your preferred web browser.
 
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
-Launch the standalone GUI analyzer
-----------------------------------
+.. note::
 
-To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
-desired analysis command. For example:
+   The standalone GUI analyzer is an experimental feature. You must include the
+   ``--experimental`` flag to enable it.
+
+Launch the standalone GUI analyzer
+==================================
+
+To launch the ROCm Compute Profiler GUI analyzer, include the ``--experimental --gui`` flags with your
+desired analysis command.
+
+For example:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --gui
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --experimental --gui
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -66,7 +73,7 @@ At this point, you can launch your web browser of choice and navigate to
 .. tip::
 
    To launch the standalone GUI analyzer web app on a port other than ``8050``,
-   include the optional argument ``--gui <desired port>``.
+   include the ``--experimental`` flag along with ``--gui <desired port>``.
 
 When no filters are applied, you'll see five basic sections derived from your
 application's profiling data:
@@ -74,8 +81,8 @@ application's profiling data:
 #. Memory Chart Analysis
 #. Empirical Roofline Analysis
 
-   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline PDFs in the standalone analysis GUI.
-   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one PDF with FP32 and FP64 stacked, and one PDF with INT32.
+   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline HTMLs in the standalone analysis GUI.
+   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one HTML with FP32 and FP64 stacked, and one HTML with INT32.
    Default roofline data type plotted is FP32.
 
 #. Top Stats (Top Kernel Statistics)

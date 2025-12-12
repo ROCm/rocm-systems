@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -47,7 +31,7 @@ static void hipGraphRetainUserObject_Functional_1(void* object, void destroyObj(
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE("Unit_hipGraphRetainUserObject_Functional_1") {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_1) {
   SECTION("Called with int Object") {
     int* object = new int();
     REQUIRE(object != nullptr);
@@ -72,7 +56,7 @@ TEST_CASE("Unit_hipGraphRetainUserObject_Functional_1") {
 
 /* 2) Create UserObject and GraphUserObject and retain using custom reference
       count and release it by calling hipGraphReleaseUserObject with count. */
-TEST_CASE("Unit_hipGraphRetainUserObject_Functional_2") {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Functional_2) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -151,7 +135,7 @@ TEST_CASE("Unit_hipGraphRetainUserObject_Functional_2") {
  5) Pass flag as 0
  6) Pass flag as INT_MAX
  */
-TEST_CASE("Unit_hipGraphRetainUserObject_Negative") {
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -187,7 +171,11 @@ TEST_CASE("Unit_hipGraphRetainUserObject_Negative") {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE("Unit_hipGraphRetainUserObject_Negative_Basic") {
+// This test releases the user object with a ref count more than the count
+// it was retained. The API is expected to return success in such cases
+// though the underlying user object is not released. This is most likely
+// done to match CUDA behavior, but this can cause undefined behavior.
+HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -211,6 +199,11 @@ TEST_CASE("Unit_hipGraphRetainUserObject_Negative_Basic") {
   // Release graph object with reference count 8
   HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8));
 
+  // Release user object with reference count 2
   HIP_CHECK(hipUserObjectRelease(hObject, 2));
+
+  // Finally, release user object with reference count 1
+  // This will avoid memory leaks
+  HIP_CHECK(hipUserObjectRelease(hObject, 1));
   HIP_CHECK(hipGraphDestroy(graph));
 }

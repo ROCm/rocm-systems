@@ -101,6 +101,7 @@ struct system_info_t {
     bool xnack_enabled;
     bool dmabuf_support;
     bool vmm_support;
+    bool fabric_handle_supported;
 };
 
 // This structure holds agent information acquired through hsa info related
@@ -137,10 +138,10 @@ struct agent_info_t {
   uint32_t simds_per_cu;
   uint32_t shader_engs;
   uint32_t shader_arrs_per_sh_eng;
+  uint32_t bdf_id;
   hsa_isa_t agent_isa;
   hsa_dim3_t grid_max_dim;
   uint16_t workgroup_max_dim[3];
-  uint16_t bdf_id;
   bool fast_f16;
   bool coherent_host_access;
   uint32_t pkt_processor_ucode_ver;
@@ -195,6 +196,7 @@ static const uint32_t kIndentSize = 2;
 
 static bool wsl_env = false;
 static bool dtif_env = false;
+static bool model_env = false;
 
 enum rocmi_int_format {
   ROCMI_INT_FORMAT_DEC = 1,
@@ -239,6 +241,15 @@ static void DetectWSLEnvironment() {
     fclose(file);
     wsl_env = true;
   }
+}
+
+static void DetectModelEnvironment() {
+  char *var = getenv("HSA_MODEL_TOPOLOGY");
+  if (var == NULL)
+    return;
+
+  printf("Model: environment detected with topology path: %s\n", var);
+  model_env = true;
 }
 
 static void DetectDTIFEnvironment() {
@@ -340,6 +351,11 @@ static hsa_status_t AcquireSystemInfo(system_info_t *sys_info) {
                                                      &sys_info->vmm_support);
   RET_IF_HSA_ERR(err);
 
+  // Get Fabric Handles supported
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED,
+                                                     &sys_info->fabric_handle_supported);
+  RET_IF_HSA_ERR(err);
+
   return err;
 }
 
@@ -379,6 +395,9 @@ static void DisplaySystemInfo(system_info_t const *sys_info) {
 
   printLabel("VMM Support:");
   printf("%s\n", sys_info->vmm_support ? "YES" : "NO");
+
+  printLabel("Fabric Support:");
+  printf  ("%s\n", sys_info->fabric_handle_supported ? "YES" : "NO");
 
   printf("\n");
 }
@@ -1316,8 +1335,9 @@ int main() {
 
   DetectWSLEnvironment();
   DetectDTIFEnvironment();
+  DetectModelEnvironment();
 
-  if (!(wsl_env || dtif_env) && CheckInitialState()) {
+  if (!(wsl_env || dtif_env || model_env) && CheckInitialState()) {
     return 1;
   }
   err = hsa_init();

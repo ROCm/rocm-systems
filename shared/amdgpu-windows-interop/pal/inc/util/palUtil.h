@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) Advanced Micro Devices, Inc., or its affiliates. All rights reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 
 #pragma once
 
+#include "palVersion.h"
+
 /// Utility macro for turning another macro into a string literal.
 #define _PAL_STRINGIFY(_x) #_x
 #define PAL_STRINGIFY(_x) _PAL_STRINGIFY(_x)
@@ -41,8 +43,6 @@
 #define PAL_CPLUSPLUS_14 201402L
 /// C++17 standard version.
 #define PAL_CPLUSPLUS_17 201703L
-/// C++ feature version from September 2017 contains a few C++20 features.
-#define PAL_CPLUSPLUS_1709 201709L
 /// C++20 standard version.
 #define PAL_CPLUSPLUS_20 202002L
 
@@ -59,21 +59,16 @@
 #define PAL_CPLUSPLUS_AT_LEAST(v) (PAL_CPLUSPLUS >= (v))
 
 static_assert(
-    PAL_CPLUSPLUS_AT_LEAST(PAL_CPLUSPLUS_1709),
-    "C++ standard version " PAL_STRINGIFY(PAL_CPLUSPLUS_1709) " is required to build PAL. "
+    PAL_CPLUSPLUS_AT_LEAST(PAL_CPLUSPLUS_20),
+    "C++ standard version " PAL_STRINGIFY(PAL_CPLUSPLUS_20) " is required to build PAL. "
     "Found " PAL_STRINGIFY(PAL_CPLUSPLUS) ".");
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 878
 /// We already declare NOMINMAX publicly, but that won't stop clients from defining their own min/max macros.
 /// These macros confuse the compiler when using functions named min/max, leading to build errors.
 #if defined(min) || defined(max)
 static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 #endif
-#endif
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 873
-#include <chrono>
-#endif
 #include <cstddef>
 
 /// stdint is included instead of cstdint to allow Visual Studio Intellisense to work for Linux builds. This can be
@@ -99,6 +94,7 @@ static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 // Equates to [__declspec(align(__x))](https://github.com/MicrosoftDocs/cpp-docs/blob/master/docs/cpp/align-cpp.md) on Windows.
 #define PAL_ALIGN(__x) __declspec(align(__x))
 #define PAL_FORCE_INLINE __forceinline
+#define PAL_NO_INLINE __declspec(noinline)
 #else
 /// Undefined on GCC platforms.
 #define PAL_STDCALL
@@ -107,6 +103,7 @@ static_assert(false, "Clients may not define macros named \"min\" or \"max\".");
 /// Undefined on GCC platforms.
 #define PAL_ALIGN(__x)
 #define PAL_FORCE_INLINE __attribute__((always_inline)) inline
+#define PAL_NO_INLINE __attribute__((noinline))
 #endif
 
 /// Platform cache line size in bytes.
@@ -483,7 +480,7 @@ enum class Result : int32
     /// The returned results were incomplete.
     ErrorIncompleteResults                  = -(0x00000060),
 
-    /// The display mode is imcompatible with framebuffer or CRTC.
+    /// The display mode is incompatible with framebuffer or CRTC.
     ErrorIncompatibleDisplayMode            = -(0x00000061),
 
     /// Implicit fullscreen exclusive mode is not safe because the specified window size doesn't match the
@@ -556,40 +553,6 @@ struct StoreFlags
     };
 };
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 873
-/// Seconds stored as a float instead of an integer.
-using fseconds      = std::chrono::duration<float>;
-/// Milliseconds stored as a float instead of an integer.
-using fmilliseconds = std::chrono::duration<float, std::milli>;
-/// Microseconds stored as a float instead of an integer.
-using fmicroseconds = std::chrono::duration<float, std::micro>;
-/// Nanoseconds stored as a float instead of an integer.
-using fnanoseconds  = std::chrono::duration<float, std::nano>;
-
-/// A time_point who's epoch is January 1st 1970 and uses seconds for the duration.
-/// C++20 guarantees us that system_clock's epoch is always January 1st 1970 on all platforms.
-/// system_clock's internal duration is still implementation defined.
-/// On Windows it's hundreds of nanoseconds and on Linux it's seconds.
-/// However time_point has it's own duration type.
-/// As long as we go through the time_point to interpret the duration then everything should be in terms of seconds.
-using SecondsSinceEpoch = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
-
-/// Like std::chrono::duration_cast, but it preserves the special 'infinite' value used in timeouts.
-template <class ToDuration, class Rep, class Period>
-constexpr ToDuration TimeoutCast(
-    const std::chrono::duration<Rep, Period>& d)
-{
-    if (d == (std::chrono::duration<Rep,Period>::max)())
-    {
-        return (ToDuration::max)();
-    }
-    else
-    {
-        return std::chrono::duration_cast<ToDuration, Rep, Period>(d);
-    }
-}
-#endif
-
 /// Inline function to determine if a Result enum is considered an error.
 constexpr bool IsErrorResult(Result result) { return (static_cast<int32>(result) < 0); }
 
@@ -598,6 +561,71 @@ constexpr bool IsErrorResult(Result result) { return (static_cast<int32>(result)
 /// are errors, the first Result is returned.
 constexpr Result CollapseResults(Result lhs, Result rhs)
     { return (IsErrorResult(lhs) || (static_cast<uint32>(lhs) > static_cast<uint32>(rhs))) ? lhs : rhs; }
+
+/// A simple enum-to-string helper function. Given a result like Result::ErrorOutOfMemory, it returns a pointer to a
+/// global string containing "ErrorOutOfMemory". The caller must not try to free the returned string.
+///
+/// @param [in] result    The Result code to turn into a string.
+///
+/// @returns A valid pointer to the appropriate global string or to "FixTheTables!!!" if someone forgot to update the
+///          internal string tables when they added a new Result value. It's impossible for this to return nullptr.
+extern const char* ResultToString(
+    Result result);
+
+/**
+ ***********************************************************************************************************************
+ * @brief A StickyResult wraps a Result with sticky error tracking semantics.
+ *
+ * A new StickyResult starts out set to Success. The first time it's set to any error Result it will get stuck to that
+ * specific error value. Even if you assign it a new error value it will ignore you and keep the first error value.
+ * This behavior is useful when execution must continue even if an error occurs, but we must also report the first
+ * error up to the caller.
+ *
+ * Assignment and conversion operator overloads are provided to make StickyResult and Result interop naturally.
+ ***********************************************************************************************************************
+ */
+class StickyResult
+{
+public:
+    /// Default Constructor
+    StickyResult() : m_value(Result::Success) {}
+
+    /// Resets this StickyResult back to Success. This is the only way to "unstick" an error.
+    void Reset() { m_value = Result::Success; }
+
+    /// Sets this StickyResult to the given result if the current value is not an error.
+    ///
+    /// @param [in] result  The Result the caller would like us to remember.
+    void Set(Result result)
+    {
+        if (IsErrorResult(m_value) == false)
+        {
+            m_value = result;
+        }
+    }
+
+    /// An assignment operator overload which simply calls Set.
+    ///
+    /// @param [in] result  The Result the caller would like us to remember.
+    StickyResult& operator=(Result result)
+    {
+        Set(result);
+        return *this;
+    }
+
+    /// Gets this StickyResult's current Result value.
+    ///
+    /// @returns The current Result value.
+    Result Get() const { return m_value; }
+
+    /// An implicit conversion operator overload which gets this StickyResult's current Result value.
+    ///
+    /// @returns The current Result value.
+    operator Result() const { return m_value; }
+
+private:
+    Result m_value; ///< The current underlying Result value.
+};
 
 /**
  ***********************************************************************************************************************

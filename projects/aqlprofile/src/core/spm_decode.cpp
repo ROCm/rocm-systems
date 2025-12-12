@@ -1,6 +1,5 @@
 #include <assert.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -15,7 +14,11 @@
 #include <cstring>
 #include "src/core/include/spm_common.hpp"
 
+#ifdef _WIN32
+#define PUBLIC_API
+#else
 #define PUBLIC_API __attribute__((visibility("default")))
+#endif
 
 PUBLIC_API hsa_status_t aqlprofile_spm_decode_query(
     aqlprofile_spm_buffer_desc_t desc_bin,

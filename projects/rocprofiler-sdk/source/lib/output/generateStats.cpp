@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <unistd.h>
 #include <cstdint>
@@ -188,6 +189,14 @@ generate_stats(const output_config& /*cfg*/,
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
                const metadata& /*tool_metadata*/,
+               const generator<tool_buffer_tracing_kfd_record_t>& /*data*/)
+{
+    return stats_entry_t{};
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
                const generator<tool_counter_record_t>& /*data*/)
 {
     return stats_entry_t{};
@@ -229,6 +238,9 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rccl_stats);
 }
 
+// NOTE: OMPT is rocpd-only; it is exported via `rocpd convert`, so there is
+// intentionally no generate_stats() overload for OMPT.
+
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
                const metadata& tool_metadata,
@@ -263,6 +275,14 @@ generate_stats(const output_config& /*cfg*/,
     }
 
     return get_stats(rocjpeg_stats);
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<tool_spm_counter_record_t>& /*data*/)
+{
+    return stats_entry_t{};
 }
 
 namespace

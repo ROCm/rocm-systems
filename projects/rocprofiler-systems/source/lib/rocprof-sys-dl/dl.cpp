@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #if !defined(ROCPROFSYS_DL_SOURCE)
 #    define ROCPROFSYS_DL_SOURCE 1
@@ -26,6 +7,7 @@
 
 #define ROCPROFSYS_COMMON_LIBRARY_NAME "dl"
 
+#include <cstdint>
 #include <timemory/log/color.hpp>
 
 #define ROCPROFSYS_COMMON_LIBRARY_LOG_START                                              \
@@ -45,23 +27,19 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
-#if ROCPROFSYS_USE_ROCM > 0
+#include <rocprofiler-sdk/version.h>
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#    include <rocprofiler-sdk/experimental/registration.h>
+#else
 #    include <rocprofiler-sdk/registration.h>
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
@@ -105,16 +83,16 @@ namespace
 inline int
 get_rocprofsys_env()
 {
-    auto&& _debug = get_env("ROCPROFSYS_DEBUG", false);
-    return get_env("ROCPROFSYS_VERBOSE", (_debug) ? 100 : 0);
+    auto&& _debug = get_env(env_vars::DEBUG_MODE, false);
+    return get_env(env_vars::VERBOSE, (_debug) ? 100 : 0);
 }
 
 inline int
 get_rocprofsys_dl_env()
 {
-    return get_env("ROCPROFSYS_DL_DEBUG", false)
+    return get_env(env_vars::DL_DEBUG, false)
                ? 100
-               : get_env("ROCPROFSYS_DL_VERBOSE", get_rocprofsys_env());
+               : get_env(env_vars::DL_VERBOSE, get_rocprofsys_env());
 }
 
 inline bool&
@@ -131,7 +109,7 @@ inline bool
 get_rocprofsys_preload()
 {
     static bool _v = []() {
-        auto&& _preload      = get_env("ROCPROFSYS_PRELOAD", true);
+        auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
                 _preload_libs.find("librocprof-sys-dl.so") != std::string::npos);
@@ -154,8 +132,8 @@ inline pid_t
 get_rocprofsys_root_pid()
 {
     auto _pid = getpid();
-    setenv("ROCPROFSYS_ROOT_PROCESS", std::to_string(_pid).c_str(), 0);
-    return get_env("ROCPROFSYS_ROOT_PROCESS", _pid);
+    setenv(env_vars::ROOT_PROCESS, std::to_string(_pid).c_str(), 0);
+    return get_env(env_vars::ROOT_PROCESS, _pid);
 }
 
 void
@@ -296,6 +274,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_set_env_f, m_omnihandle, "rocprofsys_set_env");
         ROCPROFSYS_DLSYM(rocprofsys_set_mpi_f, m_omnihandle, "rocprofsys_set_mpi");
         ROCPROFSYS_DLSYM(rocprofsys_push_trace_f, m_omnihandle, "rocprofsys_push_trace");
+        ROCPROFSYS_DLSYM(rocprofsys_push_trace_with_args_f, m_omnihandle,
+                         "rocprofsys_push_trace_with_args");
         ROCPROFSYS_DLSYM(rocprofsys_pop_trace_f, m_omnihandle, "rocprofsys_pop_trace");
         ROCPROFSYS_DLSYM(rocprofsys_push_region_f, m_omnihandle,
                          "rocprofsys_push_region");
@@ -311,6 +291,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_progress_f, m_omnihandle, "rocprofsys_progress");
         ROCPROFSYS_DLSYM(rocprofsys_annotated_progress_f, m_omnihandle,
                          "rocprofsys_annotated_progress");
+        ROCPROFSYS_DLSYM(rocprofsys_register_pause_callbacks_f, m_omnihandle,
+                         "rocprofsys_external_register_pause_callbacks");
 
         ROCPROFSYS_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
         ROCPROFSYS_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
@@ -359,8 +341,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(kokkosp_dual_view_modify_f, m_omnihandle,
                          "kokkosp_dual_view_modify");
 
-#if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
+#if ROCPROFILER_VERSION >= 10200
+        ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
+                         "rocprofiler_configure_attach");
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -400,11 +384,12 @@ public:
     void (*rocprofsys_init_f)(const char*, bool, const char*)                  = nullptr;
     void (*rocprofsys_finalize_f)(void)                                        = nullptr;
     void (*rocprofsys_set_env_f)(const char*, const char*)                     = nullptr;
-    void (*rocprofsys_set_mpi_f)(bool, bool)                                   = nullptr;
+    void (*rocprofsys_set_mpi_f)(bool)                                         = nullptr;
     void (*rocprofsys_register_source_f)(const char*, const char*, size_t, size_t,
                                          const char*)                          = nullptr;
     void (*rocprofsys_register_coverage_f)(const char*, const char*, size_t)   = nullptr;
     void (*rocprofsys_push_trace_f)(const char*)                               = nullptr;
+    void (*rocprofsys_push_trace_with_args_f)(const char*, const char*)        = nullptr;
     void (*rocprofsys_pop_trace_f)(const char*)                                = nullptr;
     int (*rocprofsys_push_region_f)(const char*)                               = nullptr;
     int (*rocprofsys_pop_region_f)(const char*)                                = nullptr;
@@ -415,47 +400,53 @@ public:
     void (*rocprofsys_progress_f)(const char*)                                 = nullptr;
     void (*rocprofsys_annotated_progress_f)(const char*, rocprofsys_annotation_t*,
                                             size_t)                            = nullptr;
+    void (*rocprofsys_register_pause_callbacks_f)(void (*)(), void (*)())      = nullptr;
 
     // librocprof-sys-user functions
     int (*rocprofsys_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
 
     // KokkosP functions
-    void (*kokkosp_print_help_f)(char*)                                       = nullptr;
-    void (*kokkosp_parse_args_f)(int, char**)                                 = nullptr;
-    void (*kokkosp_declare_metadata_f)(const char*, const char*)              = nullptr;
-    void (*kokkosp_request_tool_settings_f)(const uint32_t,
-                                            Kokkos_Tools_ToolSettings*)       = nullptr;
-    void (*kokkosp_init_library_f)(const int, const uint64_t, const uint32_t,
-                                   void*)                                     = nullptr;
-    void (*kokkosp_finalize_library_f)()                                      = nullptr;
-    void (*kokkosp_begin_parallel_for_f)(const char*, uint32_t, uint64_t*)    = nullptr;
-    void (*kokkosp_end_parallel_for_f)(uint64_t)                              = nullptr;
-    void (*kokkosp_begin_parallel_reduce_f)(const char*, uint32_t, uint64_t*) = nullptr;
-    void (*kokkosp_end_parallel_reduce_f)(uint64_t)                           = nullptr;
-    void (*kokkosp_begin_parallel_scan_f)(const char*, uint32_t, uint64_t*)   = nullptr;
-    void (*kokkosp_end_parallel_scan_f)(uint64_t)                             = nullptr;
-    void (*kokkosp_begin_fence_f)(const char*, uint32_t, uint64_t*)           = nullptr;
-    void (*kokkosp_end_fence_f)(uint64_t)                                     = nullptr;
-    void (*kokkosp_push_profile_region_f)(const char*)                        = nullptr;
-    void (*kokkosp_pop_profile_region_f)()                                    = nullptr;
-    void (*kokkosp_create_profile_section_f)(const char*, uint32_t*)          = nullptr;
-    void (*kokkosp_destroy_profile_section_f)(uint32_t)                       = nullptr;
-    void (*kokkosp_start_profile_section_f)(uint32_t)                         = nullptr;
-    void (*kokkosp_stop_profile_section_f)(uint32_t)                          = nullptr;
+    void (*kokkosp_print_help_f)(char*)                                        = nullptr;
+    void (*kokkosp_parse_args_f)(int, char**)                                  = nullptr;
+    void (*kokkosp_declare_metadata_f)(const char*, const char*)               = nullptr;
+    void (*kokkosp_request_tool_settings_f)(const std::uint32_t,
+                                            Kokkos_Tools_ToolSettings*)        = nullptr;
+    void (*kokkosp_init_library_f)(const int, const std::uint64_t, const std::uint32_t,
+                                   void*)                                      = nullptr;
+    void (*kokkosp_finalize_library_f)()                                       = nullptr;
+    void (*kokkosp_begin_parallel_for_f)(const char*, std::uint32_t,
+                                         std::uint64_t*)                       = nullptr;
+    void (*kokkosp_end_parallel_for_f)(std::uint64_t)                          = nullptr;
+    void (*kokkosp_begin_parallel_reduce_f)(const char*, std::uint32_t,
+                                            std::uint64_t*)                    = nullptr;
+    void (*kokkosp_end_parallel_reduce_f)(std::uint64_t)                       = nullptr;
+    void (*kokkosp_begin_parallel_scan_f)(const char*, std::uint32_t,
+                                          std::uint64_t*)                      = nullptr;
+    void (*kokkosp_end_parallel_scan_f)(std::uint64_t)                         = nullptr;
+    void (*kokkosp_begin_fence_f)(const char*, std::uint32_t, std::uint64_t*)  = nullptr;
+    void (*kokkosp_end_fence_f)(std::uint64_t)                                 = nullptr;
+    void (*kokkosp_push_profile_region_f)(const char*)                         = nullptr;
+    void (*kokkosp_pop_profile_region_f)()                                     = nullptr;
+    void (*kokkosp_create_profile_section_f)(const char*, std::uint32_t*)      = nullptr;
+    void (*kokkosp_destroy_profile_section_f)(std::uint32_t)                   = nullptr;
+    void (*kokkosp_start_profile_section_f)(std::uint32_t)                     = nullptr;
+    void (*kokkosp_stop_profile_section_f)(std::uint32_t)                      = nullptr;
     void (*kokkosp_allocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                    const uint64_t)                           = nullptr;
+                                    const std::uint64_t)                       = nullptr;
     void (*kokkosp_deallocate_data_f)(const SpaceHandle, const char*, const void* const,
-                                      const uint64_t)                         = nullptr;
+                                      const std::uint64_t)                     = nullptr;
     void (*kokkosp_begin_deep_copy_f)(SpaceHandle, const char*, const void*, SpaceHandle,
-                                      const char*, const void*, uint64_t)     = nullptr;
-    void (*kokkosp_end_deep_copy_f)()                                         = nullptr;
-    void (*kokkosp_profile_event_f)(const char*)                              = nullptr;
-    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)    = nullptr;
-    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)  = nullptr;
+                                      const char*, const void*, std::uint64_t) = nullptr;
+    void (*kokkosp_end_deep_copy_f)()                                          = nullptr;
+    void (*kokkosp_profile_event_f)(const char*)                               = nullptr;
+    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)     = nullptr;
+    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)   = nullptr;
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
-        uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+        std::uint32_t, const char*, std::uint32_t, rocprofiler_client_id_t*) = nullptr;
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
+        std::uint32_t, const char*, std::uint32_t, rocprofiler_client_id_t*) = nullptr;
 #endif
 
     // OpenMP functions
@@ -483,9 +474,9 @@ get_indirect()
 {
     rocprofsys_preinit_library();
 
-    static auto  _libomni = get_env("ROCPROFSYS_LIBRARY", "librocprof-sys.so");
-    static auto  _libuser = get_env("ROCPROFSYS_USER_LIBRARY", "librocprof-sys-user.so");
-    static auto  _libdlib = get_env("ROCPROFSYS_DL_LIBRARY", "librocprof-sys-dl.so");
+    static auto  _libomni = get_env(env_vars::LIBRARY, "librocprof-sys.so");
+    static auto  _libuser = get_env(env_vars::USER_LIBRARY, "librocprof-sys-user.so");
+    static auto  _libdlib = get_env(env_vars::DL_LIBRARY, "librocprof-sys-dl.so");
     static auto* _v       = new indirect{ _libomni, _libuser, _libdlib };
     return *_v;
 }
@@ -521,7 +512,7 @@ get_user_api_active()
 auto&
 get_enabled()
 {
-    static auto* _v = new std::atomic<bool>{ get_env("ROCPROFSYS_INIT_ENABLED", true) };
+    static auto* _v = new std::atomic<bool>{ get_env(env_vars::INIT_ENABLED, true) };
     return *_v;
 }
 
@@ -535,7 +526,7 @@ get_thread_enabled()
 auto&
 get_thread_count()
 {
-    static thread_local int64_t _v = 0;
+    static thread_local std::int64_t _v = 0;
     return _v;
 }
 
@@ -549,7 +540,7 @@ get_thread_status()
 InstrumentMode&
 get_instrumented()
 {
-    static auto _v = get_env("ROCPROFSYS_INSTRUMENT_MODE", InstrumentMode::None);
+    static auto _v = get_env(env_vars::INSTRUMENT_MODE, InstrumentMode::None);
     return _v;
 }
 
@@ -596,7 +587,8 @@ extern "C"
 {
     void rocprofsys_preinit_library(void)
     {
-        if(rocprofsys::common::get_env("ROCPROFSYS_MONOCHROME", tim::log::monochrome()))
+        if(rocprofsys::common::get_env(rocprofsys::env_vars::MONOCHROME,
+                                       tim::log::monochrome()))
             tim::log::monochrome() = true;
     }
 
@@ -682,6 +674,27 @@ extern "C"
         if(dl::get_thread_enabled())
         {
             ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+    }
+
+    void rocprofsys_push_trace_with_args(const char* name, const char* serialized_args)
+    {
+        if(!dl::get_active()) return;
+        if(dl::get_thread_enabled())
+        {
+            if(get_indirect().rocprofsys_push_trace_with_args_f)
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_with_args_f,
+                                     name, serialized_args);
+            }
+            else
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+            }
         }
         else
         {
@@ -776,14 +789,14 @@ extern "C"
         // ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_env_f, a, b);
     }
 
-    void rocprofsys_set_mpi(bool a, bool b)
+    void rocprofsys_set_mpi(bool a)
     {
         if(dl::get_inited() && dl::get_active())
         {
-            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a, b);
+            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a);
             return;
         }
-        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a, b);
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a);
     }
 
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
@@ -887,6 +900,13 @@ extern "C"
                                     _annotations, _annotation_count);
     }
 
+    void rocprofsys_external_register_pause_callbacks(void (*pause_fn)(),
+                                                      void (*resume_fn)())
+    {
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_register_pause_callbacks_f,
+                             pause_fn, resume_fn);
+    }
+
     void rocprofsys_set_instrumented(int _mode)
     {
         ROCPROFSYS_DL_LOG(2, "%s(%i)\n", __FUNCTION__, _mode);
@@ -925,15 +945,15 @@ extern "C"
                                     value);
     }
 
-    void kokkosp_request_tool_settings(const uint32_t             version,
+    void kokkosp_request_tool_settings(const std::uint32_t        version,
                                        Kokkos_Tools_ToolSettings* settings)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_request_tool_settings_f,
                                     version, settings);
     }
 
-    void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
-                              const uint32_t devInfoCount, void* deviceInfo)
+    void kokkosp_init_library(const int loadSeq, const std::uint64_t interfaceVer,
+                              const std::uint32_t devInfoCount, void* deviceInfo)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_init_library_f, loadSeq,
                                     interfaceVer, devInfoCount, deviceInfo);
@@ -944,46 +964,49 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_finalize_library_f);
     }
 
-    void kokkosp_begin_parallel_for(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_for(const char* name, std::uint32_t devid,
+                                    std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_for_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_for(uint64_t kernid)
+    void kokkosp_end_parallel_for(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_for_f, kernid);
     }
 
-    void kokkosp_begin_parallel_reduce(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_reduce(const char* name, std::uint32_t devid,
+                                       std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_reduce_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_reduce(uint64_t kernid)
+    void kokkosp_end_parallel_reduce(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_reduce_f, kernid);
     }
 
-    void kokkosp_begin_parallel_scan(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_parallel_scan(const char* name, std::uint32_t devid,
+                                     std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_parallel_scan_f, name,
                                     devid, kernid);
     }
 
-    void kokkosp_end_parallel_scan(uint64_t kernid)
+    void kokkosp_end_parallel_scan(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_parallel_scan_f, kernid);
     }
 
-    void kokkosp_begin_fence(const char* name, uint32_t devid, uint64_t* kernid)
+    void kokkosp_begin_fence(const char* name, std::uint32_t devid, std::uint64_t* kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_fence_f, name, devid,
                                     kernid);
     }
 
-    void kokkosp_end_fence(uint64_t kernid)
+    void kokkosp_end_fence(std::uint64_t kernid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_end_fence_f, kernid);
     }
@@ -998,38 +1021,38 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_pop_profile_region_f);
     }
 
-    void kokkosp_create_profile_section(const char* name, uint32_t* secid)
+    void kokkosp_create_profile_section(const char* name, std::uint32_t* secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_create_profile_section_f, name,
                                     secid);
     }
 
-    void kokkosp_destroy_profile_section(uint32_t secid)
+    void kokkosp_destroy_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_destroy_profile_section_f,
                                     secid);
     }
 
-    void kokkosp_start_profile_section(uint32_t secid)
+    void kokkosp_start_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_start_profile_section_f,
                                     secid);
     }
 
-    void kokkosp_stop_profile_section(uint32_t secid)
+    void kokkosp_stop_profile_section(std::uint32_t secid)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_stop_profile_section_f, secid);
     }
 
     void kokkosp_allocate_data(const SpaceHandle space, const char* label,
-                               const void* const ptr, const uint64_t size)
+                               const void* const ptr, const std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_allocate_data_f, space, label,
                                     ptr, size);
     }
 
     void kokkosp_deallocate_data(const SpaceHandle space, const char* label,
-                                 const void* const ptr, const uint64_t size)
+                                 const void* const ptr, const std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_deallocate_data_f, space,
                                     label, ptr, size);
@@ -1037,7 +1060,8 @@ extern "C"
 
     void kokkosp_begin_deep_copy(SpaceHandle dst_handle, const char* dst_name,
                                  const void* dst_ptr, SpaceHandle src_handle,
-                                 const char* src_name, const void* src_ptr, uint64_t size)
+                                 const char* src_name, const void* src_ptr,
+                                 std::uint64_t size)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().kokkosp_begin_deep_copy_f, dst_handle,
                                     dst_name, dst_ptr, src_handle, src_name, src_ptr,
@@ -1073,13 +1097,21 @@ extern "C"
     //
     //----------------------------------------------------------------------------------//
 
-#if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
-        uint32_t version, const char* runtime_version, uint32_t priority,
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
         rocprofiler_client_id_t* client_id)
     {
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_f, version,
                                     runtime_version, priority, client_id);
+    }
+
+#if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        std::uint32_t version, const char* runtime_version, std::uint32_t priority,
+        rocprofiler_client_id_t* client_id)
+    {
+        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
+                                    version, runtime_version, priority, client_id);
     }
 #endif
 
@@ -1152,7 +1184,7 @@ get_link_map(const char* _name, std::vector<int>&& _open_modes)
 const char*
 get_default_mode()
 {
-    if(get_env("ROCPROFSYS_USE_CAUSAL", false)) return "causal";
+    if(get_env(env_vars::USE_CAUSAL, false)) return "causal";
 
     auto _link_map = get_link_map(nullptr);
     for(const auto& itr : _link_map)
@@ -1173,12 +1205,11 @@ rocprofsys_preinit()
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
-            auto _use_mpip = get_env("ROCPROFSYS_USE_MPIP", false);
-            auto _use_mpi  = get_env("ROCPROFSYS_USE_MPI", _use_mpip);
-            auto _causal   = get_env("ROCPROFSYS_USE_CAUSAL", false);
-            auto _mode     = get_env("ROCPROFSYS_MODE", get_default_mode());
+            auto _use_mpip = get_env(env_vars::USE_MPIP, false);
+            auto _use_mpi  = get_env(env_vars::USE_MPI, _use_mpip);
+            auto _causal   = get_env(env_vars::USE_CAUSAL, false);
+            auto _mode     = get_env(env_vars::MODE, get_default_mode());
 
             if(_use_mpi && !(_causal && _mode == "causal"))
             {
@@ -1188,8 +1219,7 @@ rocprofsys_preinit()
                 // If _use_mpi defaults to true above, calling this
                 // will override can current env or config value for
                 // ROCPROFSYS_USE_PID.
-                rocprofsys_set_mpi(_use_mpi, dl::get_instrumented() ==
-                                                 dl::InstrumentMode::ProcessAttach);
+                rocprofsys_set_mpi(_use_mpi);
             }
             break;
         }
@@ -1208,7 +1238,6 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
             if(_exe.empty())
                 _exe = tim::filepath::readlink(join('/', "/proc", getpid(), "exe"));
@@ -1233,11 +1262,11 @@ bool
 rocprofsys_preload()
 {
     auto _preload = get_rocprofsys_is_preloaded() && get_rocprofsys_preload() &&
-                    get_env("ROCPROFSYS_ENABLED", true);
+                    get_env(env_vars::ENABLED, true);
 
     auto _link_map = get_link_map(nullptr);
     auto _instr_mode =
-        get_env("ROCPROFSYS_INSTRUMENT_MODE", dl::InstrumentMode::BinaryRewrite);
+        get_env(env_vars::INSTRUMENT_MODE, dl::InstrumentMode::BinaryRewrite);
     for(const auto& itr : _link_map)
     {
         if(itr.find("librocprof-sys-rt.so") != std::string::npos ||
@@ -1277,7 +1306,6 @@ verify_instrumented_preloaded()
     switch(dl::get_instrumented())
     {
         case dl::InstrumentMode::None:
-        case dl::InstrumentMode::ProcessAttach:
         case dl::InstrumentMode::ProcessCreate:
         case dl::InstrumentMode::PythonProfile:
         {
@@ -1521,7 +1549,7 @@ extern "C"
             }
         }
 
-        auto _mode = get_env("ROCPROFSYS_MODE", get_default_mode());
+        auto _mode = get_env(rocprofsys::env_vars::MODE, get_default_mode());
         rocprofsys_init(_mode.c_str(),
                         dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
                         argv[0]);

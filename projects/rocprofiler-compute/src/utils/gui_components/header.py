@@ -1,35 +1,11 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from typing import Any, Union
 
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import dcc, html
-
-from utils import schema
 
 AVAIL_NORMALIZATIONS = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
@@ -53,12 +29,11 @@ def create_span(input_value: str) -> dict[str, Union[html.Span, str]]:
 def get_header(
     raw_pmc: pd.DataFrame, input_filters: dict[str, Any], kernel_names: list[str]
 ) -> html.Header:
-    pmc_data = raw_pmc[schema.PMC_PERF_FILE_PREFIX]
-    kernel_names = [str(name).strip() for name in pmc_data["Kernel_Name"]]
+    kernel_names = [str(name).strip() for name in raw_pmc["Kernel_Name"]]
 
     # Extract GPU and Dispatch IDs
-    gpu_ids = [str(gpu_id) for gpu_id in pmc_data["GPU_ID"]]
-    dispatch_ids = [str(dispatch_id) for dispatch_id in pmc_data["Dispatch_ID"]]
+    gpu_ids = [str(gpu_id) for gpu_id in raw_pmc["GPU_ID"]]
+    dispatch_ids = [str(dispatch_id) for dispatch_id in raw_pmc["Dispatch_ID"]]
 
     return html.Header(
         id="home",

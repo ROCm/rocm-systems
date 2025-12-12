@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #ifndef __HSA_UTILITY__
 #define __HSA_UTILITY__
 
@@ -152,7 +152,7 @@ struct float2
         temp.s1 = (this->s1) + fl.s1;
         return temp;
     }
-    
+
     float2 operator - (float2 fl)
     {
         float2 temp;
@@ -192,7 +192,7 @@ struct uint2
         temp.s1 = (this->s1) + fl.s1;
         return temp;
     }
-    
+
     uint2 operator - (uint2 fl)
     {
         uint2 temp;
@@ -217,14 +217,14 @@ template<typename T> T RoundToPowerOf2(T val);
 template<typename T> int FillRandom(T * arrayPtr, const int width, const int height, const T rangeMin, const T rangeMax, unsigned int seed=123);
 
 //get a memory region that can be used for global memory allocations.
-hsa_status_t get_global_region(hsa_region_t region, void* data); 
+hsa_status_t get_global_region(hsa_region_t region, void* data);
 
 /*
  * Finds the specified symbols offset in the specified brig_module.
- * If the symbol is found the function returns HSA_STATUS_SUCCESS, 
+ * If the symbol is found the function returns HSA_STATUS_SUCCESS,
  * otherwise it returns HSA_STATUS_ERROR.
  */
- 
+
 //hsa_status_t find_symbol_offset(hsa_ext_brig_module_t* brig_module, char* symbol_name, hsa_ext_brig_code_section_offset32_t* offset);
 
 /*

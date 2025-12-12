@@ -43,24 +43,25 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/fan_read_write.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/fan_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
 TestFanReadWrite::TestFanReadWrite() : TestBase() {
   set_title("RSMI Fan Read/Write Test");
-  set_description("The Fan Read tests verifies that the fan monitors can be "
-                  "read and controlled properly.");
+  set_description(
+      "The Fan Read tests verifies that the fan monitors can be "
+      "read and controlled properly.");
 }
 
-TestFanReadWrite::~TestFanReadWrite(void) {
-}
+TestFanReadWrite::~TestFanReadWrite(void) {}
 
 void TestFanReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -68,9 +69,7 @@ void TestFanReadWrite::SetUp(void) {
   return;
 }
 
-void TestFanReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestFanReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestFanReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -82,7 +81,6 @@ void TestFanReadWrite::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestFanReadWrite::Run(void) {
   rsmi_status_t ret;
@@ -100,44 +98,34 @@ void TestFanReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Current Fan Speed: ";
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Current Fan Speed: "; }
 
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA){
-       IF_VERB(STANDARD) {
-          std::cout << "\t** Not supported on this machine" << std::endl;
-        }
-        return;
+    if (ret == RSMI_STATUS_NOT_SUPPORTED || ret == RSMI_STATUS_UNEXPECTED_DATA) {
+      IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine" << std::endl; }
+      return;
     } else {
-        CHK_ERR_ASRT(ret)
+      CHK_ERR_ASRT(ret)
     }
-    IF_VERB(STANDARD) {
-      std::cout << "Original fan speed: " << orig_speed << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Original fan speed: " << orig_speed << std::endl; }
 
     if (orig_speed == 0) {
-      std::cout << "***System fan speed value is 0. Skip fan test." <<
-                                                                    std::endl;
+      std::cout << "***System fan speed value is 0. Skip fan test." << std::endl;
       return;
     }
 
     ret = rsmi_dev_fan_speed_max_get(dv_ind, 0, &max_speed);
     CHK_ERR_ASRT(ret)
 
-    new_speed = 1.1 * orig_speed;
+    new_speed = static_cast<int64_t>(1.1 * static_cast<double>(orig_speed));
 
     if (new_speed > static_cast<int64_t>(max_speed)) {
-      std::cout <<
-      "***System fan speed value is close to max. Will not adjust upward." <<
-                                                                     std::endl;
+      std::cout << "***System fan speed value is close to max. Will not adjust upward."
+                << std::endl;
       continue;
     }
 
-    IF_VERB(STANDARD) {
-      std::cout << "Setting fan speed to " << new_speed << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Setting fan speed to " << new_speed << std::endl; }
 
     ret = rsmi_dev_fan_speed_set(dv_ind, 0, new_speed);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
@@ -151,24 +139,20 @@ void TestFanReadWrite::Run(void) {
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_speed);
     CHK_ERR_ASRT(ret)
 
-    IF_VERB(STANDARD) {
-      std::cout << "New fan speed: " << cur_speed << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "New fan speed: " << cur_speed << std::endl; }
 
     // EXPECT_TRUE((cur_speed > 0.95 * new_speed &&
     //                cur_speed < 1.1 * new_speed) ||
     //                    cur_speed > 0.95 * RSMI_MAX_FAN_SPEED);
     IF_VERB(STANDARD) {
-      if (!((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
-                                (cur_speed > 0.95 * RSMI_MAX_FAN_SPEED))) {
-        std::cout << "WARNING: Fan speed is not within the expected range!" <<
-                                                                      std::endl;
+      if (!((static_cast<double>(cur_speed) > 0.95 * static_cast<double>(new_speed) &&
+             static_cast<double>(cur_speed) < 1.1 * static_cast<double>(new_speed)) ||
+            (static_cast<double>(cur_speed) > 0.95 * RSMI_MAX_FAN_SPEED))) {
+        std::cout << "WARNING: Fan speed is not within the expected range!" << std::endl;
       }
     }
 
-    IF_VERB(STANDARD) {
-      std::cout << "Resetting fan control to auto..." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Resetting fan control to auto..." << std::endl; }
 
     ret = rsmi_dev_fan_reset(dv_ind, 0);
     CHK_ERR_ASRT(ret)
@@ -178,8 +162,6 @@ void TestFanReadWrite::Run(void) {
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_speed);
     CHK_ERR_ASRT(ret)
 
-    IF_VERB(STANDARD) {
-      std::cout << "End fan speed: " << cur_speed << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "End fan speed: " << cur_speed << std::endl; }
   }
 }

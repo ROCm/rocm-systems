@@ -1,33 +1,14 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
+#include "common/env_vars.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
-#include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 
@@ -49,9 +30,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
@@ -132,8 +111,8 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return 1;
     };
 
-    static bool _keep_suffix = tim::get_env<bool>(
-        "ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
+    static bool _keep_suffix = rocprofsys::get_env<bool>(
+        env_vars::SAMPLING_KEEP_DYNINST_SUFFIX, get_debug_sampling());
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
@@ -150,7 +129,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     _ret.reserve(_data.size());
     for(const auto& itr : _data)
     {
-        auto _name = tim::demangle(_patch_label(itr.name));
+        auto _name = rocprofsys::utility::demangle(_patch_label(itr.name));
         auto _use  = _use_label(_name);
         if(_use == -1) break;
         if(_use == 0) continue;

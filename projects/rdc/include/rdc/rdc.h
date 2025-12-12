@@ -80,6 +80,9 @@ typedef enum {
   RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
+  RDC_ST_GROUP_NOT_FOUND,     //!< Specified group not found
+  RDC_ST_FLDGROUP_NOT_FOUND,  //!< Specified field group not found
+
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 
@@ -152,6 +155,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_VERSION_STR_LENGTH 60
 
 /**
+ * @brief Max number of GPUs tracked per job
+ */
+#define RDC_MAX_NUM_GPUS_PER_JOB 16
+
+/**
  * @brief Max configuration can be collected using the configuration get
  */
 #define RDC_MAX_CONFIG_SETTINGS 32
@@ -171,19 +179,27 @@ typedef enum {
   RDC_FI_NUM_OF_COMPUTE_UNITS,     //!< Number of compute units
   RDC_FI_UUID,                     //!< Device UUID
   RDC_FI_GPU_PARTITION_COUNT,
+  RDC_FI_KFD_ID,
 
   /**
    * @brief Frequency related fields
    */
   RDC_FI_GPU_CLOCK = 100,  //!< The current clock for the GPU
   RDC_FI_MEM_CLOCK,        //!< Clock for the memory
+  RDC_FI_GPU_CLOCK_MIN,    //!< Minimum GPU clock frequency
+  RDC_FI_GPU_CLOCK_MAX,    //!< Maximum GPU clock frequency
+  RDC_FI_SOC_CLOCK,        //!< Current SOC clock frequency
+  RDC_FI_VCLK0,            //!< Current Video clock 0 frequency
+  RDC_FI_DCLK0,            //!< Current Display clock 0 frequency
 
   /*
    * @brief Physical monitor fields
    */
   RDC_FI_MEMORY_TEMP = 200,  //!< Memory temperature for the device
   RDC_FI_GPU_TEMP,           //!< Current temperature for the device
+  RDC_FI_GPU_JUNCTION_TEMP,  //!< Junction/hotspot temperature for the device
   RDC_FI_POWER_USAGE = 300,  //!< Power usage for the device
+  RDC_FI_GPU_ENERGY,         //!< GPU energy accumulator (microjoules)
 
   /**
    * @brief PCIe related fields
@@ -192,7 +208,14 @@ typedef enum {
   RDC_FI_PCIE_RX,        //!< PCIe Rx utilization information
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
-  RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_BANDWIDTH,                   //!< PCIe bandwidth in Mbps
+  RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  //!< PCIe link recovery count
+  RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,          //!< PCIe NAK received count
+  RDC_FI_PCIE_NAK_SENT_COUNT_ACC,          //!< PCIe NAK sent count
+  RDC_FI_PCIE_SPEED,                       //!< Current PCIe speed in MT/s
+  RDC_FI_PCIE_MAX_SPEED,                   //!< Maximum PCIe speed in MT/s
+  RDC_FI_PCIE_REPLAY_ROLLOVER,             //!< PCIe replay rollover count
+  RDC_FI_PCIE_BANDWIDTH_BIDIR,             //!< PCIe bidirectional bandwidth
 
   /**
    * @brief GPU usage related fields
@@ -204,9 +227,22 @@ typedef enum {
   RDC_FI_GPU_MM_DEC_UTIL,           //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,       //!< Memory busy percentage
   RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in
-                                    // Mb/Second
-  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
+                                    // Gb/Second
+  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Gb/Second
   RDC_FI_GPU_BUSY_PERCENT,          //<! The GPU busy percentage
+  RDC_FI_GFX_ACTIVITY_ACC,          //!< GFX activity accumulated counter
+  RDC_FI_MEM_ACTIVITY_ACC,          //!< Memory activity accumulated counter
+  RDC_FI_ACCUMULATION_COUNTER,      //!< Accumulation cycle counter (normalization denominator)
+  RDC_FI_GPU_MEMORY_FREE,           //!< Free VRAM memory of the GPU instance
+  RDC_FI_GPU_VIS_VRAM_TOTAL,        //!< Total visible VRAM memory
+  RDC_FI_GPU_VIS_VRAM_USED,         //!< Used visible VRAM memory
+  RDC_FI_GPU_VIS_VRAM_FREE,         //!< Free visible VRAM memory
+  RDC_FI_GPU_GTT_TOTAL,             //!< Total GTT memory
+  RDC_FI_GPU_GTT_USED,              //!< Used GTT memory
+  RDC_FI_GPU_GTT_FREE,              //!< Free GTT memory
+  RDC_FI_GPU_GFX_BUSY_INST,         //!< Instantaneous GFX busy percentage
+  RDC_FI_GPU_VCN_BUSY_INST,         //!< Instantaneous VCN busy percentage
+  RDC_FI_GPU_JPEG_BUSY_INST,        //!< Instantaneous JPEG busy percentage
 
   /**
    * @brief GPU page related fields
@@ -257,7 +293,30 @@ typedef enum {
   RDC_FI_ECC_IH_UE,
   RDC_FI_ECC_MPIO_CE,
   RDC_FI_ECC_MPIO_UE,
-  RDC_FI_ECC_LAST = RDC_FI_ECC_MPIO_UE,
+  /**
+   * @brief ECC deferred error fields
+   */
+  RDC_FI_ECC_SDMA_DE,
+  RDC_FI_ECC_GFX_DE,
+  RDC_FI_ECC_MMHUB_DE,
+  RDC_FI_ECC_ATHUB_DE,
+  RDC_FI_ECC_PCIE_BIF_DE,
+  RDC_FI_ECC_HDP_DE,
+  RDC_FI_ECC_XGMI_WAFL_DE,
+  RDC_FI_ECC_DF_DE,
+  RDC_FI_ECC_SMN_DE,
+  RDC_FI_ECC_SEM_DE,
+  RDC_FI_ECC_MP0_DE,
+  RDC_FI_ECC_MP1_DE,
+  RDC_FI_ECC_FUSE_DE,
+  RDC_FI_ECC_UMC_DE,
+  RDC_FI_ECC_MCA_DE,
+  RDC_FI_ECC_VCN_DE,
+  RDC_FI_ECC_JPEG_DE,
+  RDC_FI_ECC_IH_DE,
+  RDC_FI_ECC_MPIO_DE,
+  RDC_FI_ECC_DEFERRED_TOTAL,  //!< Total accumulated deferred ECC errors
+  RDC_FI_ECC_LAST = RDC_FI_ECC_DEFERRED_TOTAL,
 
   // In new ASCI, such as MI300, the XGMI events is not supported
   // Using below XGMI related fields to calculate the bandwidth.
@@ -341,7 +400,6 @@ typedef enum {
   RDC_FI_PROF_CPF_CPF_TCIU_IDLE,
   RDC_FI_PROF_CPF_CPF_TCIU_STALL,
   RDC_FI_PROF_SIMD_UTILIZATION,
-  RDC_FI_PROF_KFD_ID,
 
   /**
    * @brief Raw XGMI counter events
@@ -420,6 +478,24 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+  RDC_HEALTH_VIOLATION_COUNTER,      //!< Accumulated violation counter
+  RDC_HEALTH_PROCHOT_RESIDENCY_ACC,  //!< Processor hot violation accumulated count
+  RDC_HEALTH_PROCHOT_RESIDENCY_PCT,  //!< Processor hot violation percentage
+  RDC_HEALTH_PPT_RESIDENCY_PCT,      //!< PPT power violation percentage
+  RDC_HEALTH_SOCKET_THRM_ACC,        //!< Socket thermal violation accumulated count
+  RDC_HEALTH_SOCKET_THRM_PCT,        //!< Socket thermal violation percentage
+  RDC_HEALTH_VR_THRM_ACC,            //!< Voltage regulator thermal violation accumulated count
+  RDC_HEALTH_VR_THRM_PCT,            //!< Voltage regulator thermal violation percentage
+  RDC_HEALTH_HBM_THRM_ACC,           //!< HBM thermal violation accumulated count
+  RDC_HEALTH_HBM_THRM_PCT,           //!< HBM thermal violation percentage
+  RDC_HEALTH_GFX_CLK_LMT_PWR_ACC,    //!< Gfx clock below host limit power accumulated count
+  RDC_HEALTH_GFX_CLK_LMT_PWR_PCT,    //!< Gfx clock below host limit power violation percentage
+  RDC_HEALTH_GFX_CLK_LMT_THM_ACC,    //!< Gfx clock below host limit thermal accumulated count
+  RDC_HEALTH_GFX_CLK_LMT_THM_PCT,    //!< Gfx clock below host limit thermal violation percentage
+  RDC_HEALTH_LOW_UTIL_ACC,           //!< Low utilization violation accumulated count
+  RDC_HEALTH_LOW_UTIL_PCT,           //!< Low utilization violation percentage
+  RDC_HEALTH_GFX_CLK_LMT_TOTAL_ACC,  //!< Gfx clock below host limit total accumulated count
+  RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT,  //!< Gfx clock below host limit total violation percentage
 
   /**
    * @brief RDC CPU related fields
@@ -508,19 +584,22 @@ typedef struct {
   uint64_t start_time;  //!< The time to start the watching
   uint64_t end_time;    //!< The time to stop the watching
 
-  uint64_t energy_consumed;             //!< GPU Energy consumed
-  uint64_t ecc_correct;                 //!< Correctable errors
-  uint64_t ecc_uncorrect;               //!< Uncorrectable errors
-  rdc_stats_summary_t pcie_tx;          //!< Bytes sent over PCIe stats
-  rdc_stats_summary_t pcie_rx;          //!< Bytes received over PCIe stats
-  rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
-                                        //!< pcie_tx/pcie_rx are not available on mi300, max integer
-                                        //!< returned, so use pcie_total
-  rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
-  rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
-  rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
-  rdc_stats_summary_t gpu_utilization;  //!< GPU Utilization stats
-  rdc_stats_summary_t gpu_temperature;  //!< GPU temperature stats
+  uint64_t energy_consumed;        //!< GPU Energy consumed
+  uint64_t ecc_correct;            //!< Correctable errors
+  uint64_t ecc_uncorrect;          //!< Uncorrectable errors
+  rdc_stats_summary_t pcie_tx;     //!< Bytes sent over PCIe stats
+  rdc_stats_summary_t pcie_rx;     //!< Bytes received over PCIe stats
+  rdc_stats_summary_t pcie_total;  //!< Total PCIe bandwidth stats
+                                   //!< pcie_tx/pcie_rx are not available on mi300, max integer
+                                   //!< returned, so use pcie_total
+  uint32_t pcie_lc_perf_other_end_recovery_count;  //!< PCIE other end recovery count
+  uint32_t pcie_nak_sent_count_acc;                //!< PCIE NAK sent accumulated count
+  uint32_t pcie_nak_rcvd_count_acc;                //!< PCIE NAK received accumulated count
+  rdc_stats_summary_t power_usage;                 //!< GPU Power usage stats
+  rdc_stats_summary_t gpu_clock;                   //!< GPU Clock speed stats
+  rdc_stats_summary_t memory_clock;                //!< Mem. Clock speed stats
+  rdc_stats_summary_t gpu_utilization;             //!< GPU Utilization stats
+  rdc_stats_summary_t gpu_temperature;             //!< GPU temperature stats
 
   uint64_t max_gpu_memory_used;            //!< Maximum GPU memory used
   rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
@@ -542,11 +621,11 @@ typedef struct {
  * @brief The structure to hold the job stats
  */
 typedef struct {
-  uint32_t num_gpus;              //!< Number of GPUs used by job
-  rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
-                                  //!< (overall)
-  rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
-  uint32_t num_processes;         //!< Number of processes tracked
+  uint32_t num_gpus;                                    //!< Number of GPUs used by job
+  rdc_gpu_usage_info_t summary;                         //!< Job usage summary statistics
+                                                        //!< (overall)
+  rdc_gpu_usage_info_t gpus[RDC_MAX_NUM_GPUS_PER_JOB];  //!< Job usage summary statistics by GPU
+  uint32_t num_processes;                               //!< Number of processes tracked
   rdc_process_status_info_t
       processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
 } rdc_job_info_t;
@@ -1236,6 +1315,23 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
                                     rdc_field_grp_t* rdc_field_group_id);
 
 /**
+ *  @brief Add a field to an existing field group
+ *
+ *  @details Add a single field ID to an existing field group created by
+ *  rdc_group_field_create
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] rdc_field_group_id The field group ID to add the field to
+ *
+ *  @param[in] field_id The field ID to be added to the field group
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
+                                       rdc_field_grp_t rdc_field_group_id, rdc_field_t field_id);
+
+/**
  *  @brief Get information about a field group
  *
  *  @details Get detail information about a field group created by
@@ -1531,6 +1627,8 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
   int64_t value;                     //!< The current value that meet the condition
+  uint32_t gpu_index;                //!< GPU index that hit the condition
+  bool reset_triggered;              //!< if reset was attempted
 } rdc_policy_callback_response_t;
 
 /**
@@ -1679,7 +1777,7 @@ rdc_status_t rdc_config_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_config_setting_t setting);
 
 /**
- *  @brief Get the configrations
+ *  @brief Get the configurations
  *
  *  @details Get all the configurations for all nodes belong to the given group
  *

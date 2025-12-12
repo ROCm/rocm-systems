@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -110,8 +111,8 @@ write_perfetto(
         buffer_config->set_fill_policy(
             ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
     else
-        ROCP_FATAL << "Unsupport perfetto buffer fill policy: '" << ocfg.perfetto_buffer_fill_policy
-                   << "'. Supported: discard, ring_buffer";
+        ROCP_FATAL << "Unsupported perfetto buffer fill policy: '"
+                   << ocfg.perfetto_buffer_fill_policy << "'. Supported: discard, ring_buffer";
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");  // this MUST be track_event
@@ -124,7 +125,7 @@ write_perfetto(
     else if(ocfg.perfetto_backend == "system")
         args.backends |= ::perfetto::kSystemBackend;
     else
-        ROCP_FATAL << "Unsupport perfetto backend: '" << ocfg.perfetto_backend
+        ROCP_FATAL << "Unsupported perfetto backend: '" << ocfg.perfetto_backend
                    << "'. Supported: inprocess, system";
 
     ::perfetto::Tracing::Initialize(args);
@@ -268,7 +269,6 @@ write_perfetto(
 
     for(const auto& aitr : agent_queue_ids)
     {
-        uint32_t nqueue = 0;
         for(auto qitr : aitr.second)
         {
             const auto* _agent = _get_agent(aitr.first);
@@ -276,8 +276,11 @@ write_perfetto(
             auto _namess = std::stringstream{};
             auto agent_index_info =
                 tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            ROCP_WARNING_IF(qitr.handle == 0) << fmt::format(
+                "Queue ID handle should be a positive int greater than 0, but it is {}",
+                qitr.handle);
             _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
-                    << "] QUEUE [" << nqueue++ << "] ";
+                    << "] QUEUE [" << (qitr.handle > 0 ? qitr.handle - 1 : 0) << "] ";
             _namess << agent_index_info.type;
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
@@ -311,8 +314,7 @@ write_perfetto(
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
     {
-        // Counter records now contain agent-encoded IDs (reconstructed in tool.cpp),
-        // so we use the full agent-encoded ID from metadata as the map key
+        // Use counter ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
     }
 
@@ -674,6 +676,19 @@ write_perfetto(
                                 mid);
                             (*it)->end_timestamp     = mid;
                             (*next)->start_timestamp = mid;
+
+                            // The modified start may have pushed *next behind multiple later
+                            // records. Find the correct insertion point and rotate in one
+                            // shot so subsequent iterations see correct neighbors.
+                            auto insert_it =
+                                std::upper_bound(std::next(next),
+                                                 qitr.second.end(),
+                                                 (*next)->start_timestamp,
+                                                 [](rocprofiler_timestamp_t lhs, const auto* rhs) {
+                                                     return lhs < rhs->start_timestamp;
+                                                 });
+                            if(insert_it != std::next(next))
+                                std::rotate(next, std::next(next), insert_it);
                         }
 
                         if(demangled.find(name) == demangled.end())
@@ -892,7 +907,7 @@ write_perfetto(
                 else if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_FREE ||
                         itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE)
                 {
-                    // Store free memory operations in seperate vector to pair with agent
+                    // Store free memory operations in separate vector to pair with agent
                     // and allocation size in following loop
                     free_mem_info.push_back(free_memory_information{
                         itr.start_timestamp, itr.end_timestamp, itr.address});
@@ -1204,44 +1219,46 @@ write_perfetto(
     tracing_session->FlushBlocking();
     tracing_session->StopBlocking();
 
-    auto filename = std::string{"results"};
-    auto ofs      = get_output_stream(ocfg, filename, ".pftrace");
-
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
+    struct read_trace_state
+    {
+        std::mutex          mtx{};
+        std::atomic<size_t> amount_read{0};
+        output_stream       ofs{};
     };
+
+    auto state = std::make_shared<read_trace_state>();
+    state->ofs = get_output_stream(ocfg, std::string{"results"}, ".pftrace");
 
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+
+        auto is_done = std::make_shared<std::promise<void>>();
+        auto _reader = [state, is_done](::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{state->mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                state->ofs.stream->write(_args.data, _args.size);
+                state->amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && state->amount_read > 0)
+                << "Wrote " << state->amount_read << " B to perfetto trace file";
+            if(!_args.has_more) is_done->set_value();
+        };
         tracing_session->ReadTrace(_reader);
-        is_done.get_future().wait();
+        is_done->get_future().wait();
     }
 
     ROCP_TRACE << "Destroying tracing session...";
     tracing_session.reset();
 
     ROCP_TRACE << "Flushing trace output stream...";
-    (*ofs.stream) << std::flush;
+    (*state->ofs.stream) << std::flush;
 
     ROCP_TRACE << "Destroying trace output stream...";
-    ofs.close();
+    state->ofs.close();
 }
 
 }  // namespace tool

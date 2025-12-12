@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_ 
-#define OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_ 
+#ifndef OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_
+#define OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_
 
 namespace rocr {
 namespace AMD {
@@ -459,4 +459,4 @@ static const unsigned int kCodeTrapHandler10[] = {
 }  // namespace AMD
 }  // namespace rocr
 
-#endif  //OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_ 
+#endif  //OPENSRC_HSA_RUNTIME_CORE_INC_AMD_TRAP_HANDLER_V1_H_

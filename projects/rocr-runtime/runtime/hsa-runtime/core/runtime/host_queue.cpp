@@ -50,7 +50,7 @@ namespace core {
 
 HostQueue::HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint32_t ring_size,
                      hsa_queue_type32_t type, uint32_t features, hsa_signal_t doorbell_signal)
-    : Queue(shared_queue, 0), size_(ring_size) {
+    : Queue(shared_queue, 0, nullptr), size_(ring_size) {
   HSA::hsa_memory_register(this, sizeof(HostQueue));
   MAKE_NAMED_SCOPE_GUARD(registerGuard,
                          [&]() { HSA::hsa_memory_deregister(this, sizeof(HostQueue)); });

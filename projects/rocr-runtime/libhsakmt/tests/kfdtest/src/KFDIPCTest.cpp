@@ -83,9 +83,9 @@ void KFDIPCTest::BasicTestChildProcess(int defaultGPUNode, int *pipefd, HsaMemFl
     /* Read from Pipe the shared Handle. Import shared Local Memory */
     ASSERT_GE(read(pipefd[0], reinterpret_cast<void*>(&sharedHandleLM), sizeof(sharedHandleLM)), 0);
 
-    ASSERT_SUCCESS(hsaKmtRegisterSharedHandle(&sharedHandleLM,
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtRegisterSharedHandle, m_hsakmt_current_ctx, &sharedHandleLM,
                   reinterpret_cast<void**>(&sharedLocalBuffer), &sharedSize));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPUNodes(sharedLocalBuffer, sharedSize, NULL,
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, sharedLocalBuffer, sharedSize, NULL,
                   mapFlags, 1, reinterpret_cast<HSAuint32 *>(&defaultGPUNode)));
 
     /* Check for pattern in the shared Local Memory */
@@ -101,7 +101,7 @@ void KFDIPCTest::BasicTestChildProcess(int defaultGPUNode, int *pipefd, HsaMemFl
     sdmaQueue.Wait4PacketConsumption();
 
     HsaPointerInfo ptrInfo;
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(sharedLocalBuffer, &ptrInfo));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, sharedLocalBuffer, &ptrInfo));
     EXPECT_EQ(ptrInfo.Type, HSA_POINTER_REGISTERED_SHARED);
     EXPECT_EQ(ptrInfo.Node, (HSAuint32)defaultGPUNode);
     EXPECT_EQ(ptrInfo.GPUAddress, (HSAuint64)sharedLocalBuffer);
@@ -110,8 +110,8 @@ void KFDIPCTest::BasicTestChildProcess(int defaultGPUNode, int *pipefd, HsaMemFl
 
     /* Clean up */
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(sharedLocalBuffer));
-    EXPECT_SUCCESS(hsaKmtDeregisterMemory(sharedLocalBuffer));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, sharedLocalBuffer));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, sharedLocalBuffer));
 }
 
 /* Fill a pattern into Local Memory and share with the child process.
@@ -129,9 +129,9 @@ void KFDIPCTest::BasicTestParentProcess(int defaultGPUNode, pid_t cpid, int *pip
     HsaSharedMemoryHandle sharedHandleLM;
     HsaMemMapFlags mapFlags = {0};
 
-    ASSERT_SUCCESS(hsaKmtAllocMemory(defaultGPUNode, size, mflags, &toShareLocalBuffer));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, defaultGPUNode, size, mflags, &toShareLocalBuffer));
     /* Fill a Local Buffer with a pattern */
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPUNodes(toShareLocalBuffer, size, &AlternateVAGPU,
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, toShareLocalBuffer, size, &AlternateVAGPU,
                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&defaultGPUNode)));
     tempSysBuffer.Fill(0xAAAAAAAA);
 
@@ -142,7 +142,7 @@ void KFDIPCTest::BasicTestParentProcess(int defaultGPUNode, pid_t cpid, int *pip
     sdmaQueue.Wait4PacketConsumption();
 
     /* Share it with the child process */
-    ASSERT_SUCCESS(hsaKmtShareMemory(toShareLocalBuffer, size, &sharedHandleLM));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtShareMemory, m_hsakmt_current_ctx, toShareLocalBuffer, size, &sharedHandleLM));
 
     ASSERT_GE(write(pipefd[1], reinterpret_cast<void*>(&sharedHandleLM), sizeof(sharedHandleLM)), 0);
 
@@ -159,7 +159,7 @@ void KFDIPCTest::BasicTestParentProcess(int defaultGPUNode, pid_t cpid, int *pip
     EXPECT_TRUE(WaitOnValue(tempSysBuffer.As<HSAuint32*>(), 0xBBBBBBBB));
 
     /* Clean up */
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(toShareLocalBuffer));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, toShareLocalBuffer));
     EXPECT_SUCCESS(sdmaQueue.Destroy());
 }
 

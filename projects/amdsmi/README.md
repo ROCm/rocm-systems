@@ -8,8 +8,8 @@ For information on available features, installation steps, API reference materia
 documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
 
 >[!NOTE]
->This project is a successor to [rocm_smi_lib](https://github.com/ROCm/rocm_smi_lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).  
+>This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib)
+>and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
 >This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
 ## Supported platforms
@@ -44,7 +44,7 @@ The following are required to install and use the AMD SMI library through its la
 ### Note: No module named more_itertools warning on Azure Linux 3
 During the driver installation process on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. This warning is a result of the reintroduction of `python3-wheel` and `python3-setuptools` dependencies in the CMake of AMD SMI, which requires `more_itertools` to build these Python libraries. This issue will be fixed in a future ROCm release. As a workaround, use the following command before installation:
 ```
-sudo python3 -m pip install more_itertools 
+sudo python3 -m pip install more_itertools
 ```
 
 ### Go API prerequisites
@@ -137,10 +137,13 @@ In order to build the AMD SMI Python package, the following components are requi
 
 ### Build steps
 
-1. Clone the AMD SMI repository to your local Linux machine.
+1. Clone the rocm-systems repository to your local Linux machine
+   and sparse-checkout the AMD SMI project.
 
    ```shell
-   git clone https://github.com/ROCm/amdsmi.git
+   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
+   git -C rocm-systems sparse-checkout set projects/amdsmi
+   cd rocm-systems/projects/amdsmi
    ```
 
 2. The default installation location for the library and headers is `/opt/rocm`. Before installation, any old ROCm
@@ -188,7 +191,7 @@ on compile.
 ### Build the tests
 
 To verify the build and capabilities of AMD SMI on your system, as well as to see practical examples of its usage, you
-can build and run the available [tests in the repository](https://github.com/ROCm/amdsmi/tree/amd-staging/tests). Follow
+can build and run the available [tests in the repository](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/tests). Follow
 these steps to build the tests:
 
 ```bash
@@ -206,7 +209,7 @@ be found at `build/tests/amd_smi_test/`.
 ### Build the docs
 
 To build the documentation, follow the instructions at
-[Building documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
+[Building documentation](https://rocm.docs.amd.com/projects/amdsmi/en/develop/install/build.html#build-the-docs).
 
 ## DISCLAIMER
 

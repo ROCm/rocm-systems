@@ -41,6 +41,9 @@ Parallelism API support
 * HSA
 * Pthreads
 * MPI
+* RCCL
+* UCX (Unified Communication X)
+* OpenSHMEM (SHMEM)
 * Kokkos-Tools (KokkosP)
 * OpenMP-Tools (OMPT)
 
@@ -64,9 +67,9 @@ GPU metrics
   * JPEG activity
   * XGMI interconnect metrics (link width, link speed, read/write data)
   * PCIe metrics (link width, link speed, bandwidth)
-  
+
   .. note::
-  
+
     The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
 
 CPU metrics

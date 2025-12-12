@@ -1,0 +1,91 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *****************************************************************************/
+
+#include "single_heap.hpp"
+
+#include <sstream>
+#include "log.hpp"
+
+#include "dlmalloc.hpp"
+#include "default_allocator.hpp"
+
+namespace rocshmem {
+
+HIPAllocator *default_allocator_{nullptr};
+
+SingleHeap::SingleHeap() {
+
+  allocator_ = get_default_allocator();
+  heap_mem_ = new HeapMemoryType(*allocator_, envvar::heap_size.get_value());
+  assert(heap_mem_ != nullptr);
+
+  strat_ = new DLAllocatorStrategy<HeapMemoryType>(static_cast<HeapMemoryType *>(heap_mem_));
+}
+
+SingleHeap::~SingleHeap() {
+  if (strat_) {
+    delete strat_;
+    strat_ = nullptr;
+  }
+  if (heap_mem_) {
+    delete heap_mem_;
+    heap_mem_ = nullptr;
+  }
+}
+void SingleHeap::malloc(void** ptr, size_t size) {
+  strat_->alloc(reinterpret_cast<char**>(ptr), size);
+}
+
+__device__ void SingleHeap::malloc([[maybe_unused]] void** ptr, [[maybe_unused]] size_t size) {}
+
+void SingleHeap::free(void* ptr) {
+  if (!ptr) {
+    return;
+  }
+  strat_->free(reinterpret_cast<char*>(ptr));
+}
+
+__device__ void SingleHeap::free([[maybe_unused]] void* ptr) {}
+
+void* SingleHeap::realloc([[maybe_unused]] void* ptr, [[maybe_unused]] size_t size) { return nullptr; }
+
+void SingleHeap::malign(void** ptr, size_t alignment, size_t size) {
+  strat_->align(reinterpret_cast<char**>(ptr), alignment, size);
+}
+
+char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
+
+size_t SingleHeap::get_size() { return heap_mem_->get_size(); }
+
+size_t SingleHeap::get_used() { return strat_->get_used(); }
+
+size_t SingleHeap::get_avail() { return get_size() - get_used(); }
+
+AllocatorType SingleHeap::get_type() { return heap_mem_->type_; }
+
+size_t SingleHeap::get_granularity() { return heap_mem_->granularity_; }
+
+HIPAllocator *SingleHeap::get_allocator() { return allocator_; }
+
+}  // namespace rocshmem

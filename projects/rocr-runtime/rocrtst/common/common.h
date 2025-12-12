@@ -112,6 +112,34 @@ struct agent_pools_t{
 
 extern size_t pool_size_limit;
 
+/// Platform types for test filtering
+enum class PlatformType {
+  REAL_HARDWARE,
+  EMULATOR,
+  FFM_SIMULATOR,
+  UNKNOWN
+};
+
+/// Platform detection utilities
+class PlatformDetector {
+public:
+  /// Detect the current platform type
+  /// \returns PlatformType indicating the detected platform
+  static PlatformType detectPlatform();
+
+  /// Check if FFM simulator environment is active
+  /// \returns true if HSA_MODEL_TOPOLOGY environment variable is set
+  static bool isFFMEnvironment();
+
+  /// Get string name for platform type
+  /// \param platform The platform type
+  /// \returns String representation of the platform type
+  static const char* platformName(PlatformType platform);
+};
+
+/// Check if emulator mode is enabled
+/// This function is used for test size adjustments on slow emulators
+/// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
 /// Fill in the pool_info_t structure for the provided pool.
@@ -158,6 +186,15 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
 ///  to the agent upon return
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data);
+
+/// If the provided agent is associated with an AIE, return that agent through
+/// output parameter. This function is meant to be the call-back function used
+/// with hsa_iterate_agents to find  all the AIE agents.
+/// \param[in] agent Agent to evaluate if AIE
+/// \param[out] data If agent is associated with an AIE, this pointer will point
+///  to the agent upon return
+/// \returns HSA_STATUS_SUCCESS if no errors are encountered.
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data);
 
 /// Find a GLOBAL memory pool. By this, we mean not a kernel args pool.
 /// This function is meant to be the call-back function used
@@ -231,6 +268,14 @@ hsa_status_t DumpPointerInfo(void* ptr);
 
 hsa_status_t GetAgentPools(
                     std::vector<std::shared_ptr<agent_pools_t>> *agent_pools);
+
+#ifdef ROCRTST_ASAN
+/// Maximum single allocation size used by tests running under ASAN.
+/// ASAN's shadow-memory VMA overhead prevents large contiguous
+/// allocations. Using 512 MB because, it is safely below the typical
+/// ASAN shadow limit.
+static constexpr size_t kMaxTestAllocAsan = 512ULL * 1024 * 1024;  // 512 MB
+#endif
 
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_COMMON_H_

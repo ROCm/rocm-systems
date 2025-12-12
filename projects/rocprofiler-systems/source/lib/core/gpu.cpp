@@ -1,26 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "agent.hpp"
+#include "agent_info.hpp"
+#include <cstdint>
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
     {                                                                                    \
@@ -31,13 +14,6 @@
     }  // namespace ::tim::cereal
 
 #include "common/defines.h"
-
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
-#include "debug.hpp"
-#include "defines.hpp"
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>
@@ -46,12 +22,15 @@
 
 #include "core/agent_manager.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/cxx/serialization.hpp>
-#    include <rocprofiler-sdk/fwd.h>
-#endif
+#include "core/amd_smi.hpp"
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
+#include <rocprofiler-sdk/fwd.h>
+
+#include "logger/debug.hpp"
+
+#include <atomic>
+#include <mutex>
 
 namespace rocprofsys
 {
@@ -59,9 +38,8 @@ namespace gpu
 {
 namespace
 {
-#if ROCPROFSYS_USE_ROCM > 0
-#    define ROCPROFSYS_AMD_SMI_CALL(ERROR_CODE)                                          \
-        ::rocprofsys::gpu::check_amdsmi_error(ERROR_CODE, __FILE__, __LINE__)
+#define ROCPROFSYS_AMD_SMI_CALL(ERROR_CODE)                                              \
+    ::rocprofsys::gpu::check_amdsmi_error(ERROR_CODE, __FILE__, __LINE__)
 
 void
 check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
@@ -70,55 +48,46 @@ check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
     const char* _msg = nullptr;
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW(
+    {
+        throw std::runtime_error(fmt::format(
             "amdsmi_status_code_to_string failed. No error message available. "
-            "Error code %i originated at %s:%i\n",
-            static_cast<int>(_code), _file, _line);
-    ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
-                     _msg);
+            "Error code {} originated at {}:{}",
+            static_cast<int>(_code), _file, _line));
+    }
+    throw std::runtime_error(fmt::format("[{}:{}] Error code {} :: {}", _file, _line,
+                                         static_cast<int>(_code), _msg));
 }
 
-// Ensures initialization happens only once
-std::once_flag amdsmi_once;
-
-// Tracks whether AMD SMI is initialized
-bool&
-_amdsmi_is_initialized()
-{
-    static bool initialized = false;
-    return initialized;
-}
+std::atomic<bool> amdsmi_initialized{ false };
 
 bool
 amdsmi_init()
 {
-    auto _amdsmi_init = []() {
-        try
-        {
-            // Currently, only AMDSMI_INIT_AMD_GPUS is supported
-            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
-            get_processor_handles();
-            _amdsmi_is_initialized() = true;  // Mark as initialized
-        } catch(std::exception& _e)
-        {
-            ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown initializing amd-smi: %s\n",
-                                     _e.what());
-            _amdsmi_is_initialized() = false;  // Mark as not initialized
-            return false;
-        }
-        return true;
-    }();
+    if(amdsmi_initialized.exchange(true)) return true;
 
-    return _amdsmi_init;
+    try
+    {
+        // Currently, only AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_NICS are supported
+        std::uint64_t init_flags = AMDSMI_INIT_AMD_GPUS;
+#ifdef AINIC_SUPPORTED
+        init_flags |= AMDSMI_INIT_AMD_NICS;
+#endif
+        ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(init_flags));
+        get_processor_handles();
+    } catch(std::exception& _e)
+    {
+        LOG_ERROR("Exception thrown initializing amd-smi: {}", _e.what());
+        amdsmi_initialized.store(false);
+        return false;
+    }
+    return true;
 }
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 size_t
 query_rocm_agents()
 {
     size_t _dev_cnt = 0;
-#if ROCPROFSYS_USE_ROCM > 0
-    auto iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
+    auto   iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
                        const void** agents, size_t num_agents,
                        [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
         auto& _agent_manager = get_agent_manager_instance();
@@ -128,7 +97,7 @@ query_rocm_agents()
             agent       cur_agent;
             cur_agent.type =
                 (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                            : agent_type::CPU);
+                                                              : agent_type::CPU);
             cur_agent.handle               = _agent->id.handle;
             cur_agent.device_id            = _agent->device_id;
             cur_agent.node_id              = _agent->node_id;
@@ -138,6 +107,9 @@ query_rocm_agents()
             cur_agent.model_name           = std::string(_agent->model_name);
             cur_agent.vendor_name          = std::string(_agent->vendor_name);
             cur_agent.product_name         = std::string(_agent->product_name);
+
+            cur_agent.agent_info = agent_info::to_json_string(*_agent);
+
             _agent_manager.insert_agent(cur_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
@@ -149,12 +121,10 @@ query_rocm_agents()
                                            sizeof(rocprofiler_agent_v0_t), nullptr);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            1, "Exception thrown getting the rocm agents: %s. _dev_cnt=%ld\n", _e.what(),
-            _dev_cnt);
+        LOG_ERROR("Exception thrown getting the rocm agents: {}. _dev_cnt={}", _e.what(),
+                  _dev_cnt);
     }
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
-#endif
     return _dev_cnt;
 }
 }  // namespace
@@ -162,24 +132,23 @@ query_rocm_agents()
 int
 device_count()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     static int _num_devices = query_rocm_agents();
     return _num_devices;
-#else
-    return 0;
-#endif
 }
 
 bool
 initialize_amdsmi()
 {
-#if ROCPROFSYS_USE_ROCM > 0
-    // Ensure initialization happens only once
-    std::call_once(amdsmi_once, amdsmi_init);
-    return _amdsmi_is_initialized();
-#else
-    return false;
-#endif
+    return amdsmi_init();
+}
+
+bool
+reinitialize_amdsmi()
+{
+    static std::mutex           mtx;
+    std::lock_guard<std::mutex> lock(mtx);
+    amdsmi_initialized.store(false);
+    return amdsmi_init();
 }
 
 template <typename ArchiveT>
@@ -189,7 +158,6 @@ add_device_metadata(ArchiveT& ar)
     namespace cereal = tim::cereal;
     using cereal::make_nvp;
 
-#if ROCPROFSYS_USE_ROCM > 0
     using agent_vec_t = std::vector<rocprofiler_agent_v0_t>;
 
     auto iterator_cb = []([[maybe_unused]] rocprofiler_agent_version_t version,
@@ -214,14 +182,10 @@ add_device_metadata(ArchiveT& ar)
                                            sizeof(rocprofiler_agent_v0_t), &_agents_vec);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown getting the rocm agents: %s.\n",
-                                 _e.what());
+        LOG_ERROR("Exception thrown getting the rocm agents: {}", _e.what());
     }
 
     ar(make_nvp("rocm_agents", _agents_vec));
-#else
-    (void) ar;
-#endif
 }
 
 void
@@ -229,23 +193,22 @@ add_device_metadata()
 {
     if(device_count() == 0) return;
 
-    ROCPROFSYS_METADATA([](auto& ar) {
+    ::tim::manager::add_metadata([](auto& ar) {
         try
         {
             add_device_metadata(ar);
         } catch(std::runtime_error& _e)
         {
-            ROCPROFSYS_VERBOSE(2, "%s\n", _e.what());
+            LOG_ERROR("Exception thrown adding device metadata: {}", _e.what());
         }
     });
 }
 
-#if ROCPROFSYS_USE_ROCM > 0
 /*
  * Required amdsmi methods to get processors and handles
  */
 
-uint32_t                             processors::total_processor_count  = 0;
+std::uint32_t                        processors::total_processor_count  = 0;
 std::vector<amdsmi_processor_handle> processors::processors_list        = {};
 std::vector<bool>                    processors::vcn_device_level_only  = {};
 std::vector<bool>                    processors::jpeg_device_level_only = {};
@@ -254,12 +217,16 @@ std::vector<bool>                    processors::jpeg_busy_supported    = {};
 std::vector<bool>                    processors::xgmi_supported         = {};
 std::vector<bool>                    processors::pcie_supported         = {};
 
+std::vector<amdsmi_processor_handle> processors::ainic_list        = {};
+std::uint32_t                        processors::total_ainic_count = 0;
+
 void
 get_processor_handles()
 {
-    uint32_t socket_count;
-    uint32_t processor_count;
+    std::uint32_t socket_count;
+    std::uint32_t processor_count;
     processors::processors_list.clear();
+    processors::ainic_list.clear();
 
     // Passing nullptr will return us the number of sockets available for read in this
     // system
@@ -291,10 +258,16 @@ get_processor_handles()
         {
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor, &processor_type);
+#ifdef AINIC_SUPPORTED
+            if(processor_type == AMDSMI_PROCESSOR_TYPE_AMD_NIC)
+            {
+                processors::ainic_list.push_back(processor);
+                continue;
+            }
+#endif  // AINIC_SUPPORTED
             if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             {
-                ROCPROFSYS_THROW("Not AMD_GPU device type!");
-                return;
+                throw std::runtime_error("Not AMD_GPU device type!");
             }
             processors::processors_list.push_back(processor);
 
@@ -355,62 +328,62 @@ get_processor_handles()
         }
     }
     processors::total_processor_count = processors::processors_list.size();
+    processors::total_ainic_count     = processors::ainic_list.size();
 }
 
 bool
-vcn_is_device_level_only(uint32_t dev_id)
+vcn_is_device_level_only(std::uint32_t dev_id)
 {
     if(dev_id >= processors::vcn_device_level_only.size()) return false;
     return processors::vcn_device_level_only[dev_id];
 }
 
 bool
-jpeg_is_device_level_only(uint32_t dev_id)
+jpeg_is_device_level_only(std::uint32_t dev_id)
 {
     if(dev_id >= processors::jpeg_device_level_only.size()) return false;
     return processors::jpeg_device_level_only[dev_id];
 }
 
 bool
-is_vcn_busy_supported(uint32_t dev_id)
+is_vcn_busy_supported(std::uint32_t dev_id)
 {
     if(dev_id >= processors::vcn_busy_supported.size()) return false;
     return processors::vcn_busy_supported[dev_id];
 }
 
 bool
-is_jpeg_busy_supported(uint32_t dev_id)
+is_jpeg_busy_supported(std::uint32_t dev_id)
 {
     if(dev_id >= processors::jpeg_busy_supported.size()) return false;
     return processors::jpeg_busy_supported[dev_id];
 }
 
 bool
-is_xgmi_supported(uint32_t dev_id)
+is_xgmi_supported(std::uint32_t dev_id)
 {
     if(dev_id >= processors::xgmi_supported.size()) return false;
     return processors::xgmi_supported[dev_id];
 }
 
 bool
-is_pcie_supported(uint32_t dev_id)
+is_pcie_supported(std::uint32_t dev_id)
 {
     if(dev_id >= processors::pcie_supported.size()) return false;
     return processors::pcie_supported[dev_id];
 }
 
-uint32_t
+std::uint32_t
 get_processor_count()
 {
     return processors::total_processor_count;
 }
 
 amdsmi_processor_handle
-get_handle_from_id(uint32_t dev_id)
+get_handle_from_id(std::uint32_t dev_id)
 {
     return processors::processors_list[dev_id];
 }
-#endif
 
 }  // namespace gpu
 }  // namespace rocprofsys

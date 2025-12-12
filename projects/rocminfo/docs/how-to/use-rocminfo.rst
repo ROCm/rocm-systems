@@ -1,25 +1,25 @@
 .. meta::
-  :description: Using ROCmInfo
+  :description: Using rocminfo
   :keywords: rocminfo, enumerator, info, AMD, ROCm, HSA, hsa
 
 
 ================
-Using ROCmInfo
+Using rocminfo
 ================
 
-The ROCmInfo command provides information about the Heterogenous System Architecture (HSA) system attributes and agents. Each agent represents a device and a device can be a CPU or a GPU.
+The rocminfo command provides information about Heterogenous System Architecture (HSA) system attributes and agents. Each agent represents a device, which can be either a CPU or a GPU.
 
 The output has the following two sections:
 
-* HSA System Attributes - List of general information of the system.
+* HSA System Attributes: A list of system-level information.
 
-* HSA agents - List of devices in the system.
+* HSA agents: A list of devices in the system.
 
-See the following example output of the ROCmInfo command on a system with MI300X:
+See the following example output of the rocminfo command on a system with MI300X:
 
 .. code-block::
 
-        HSA System Attributes 
+        HSA System Attributes
         =====================
         Runtime Version:         1.1
         Runtime Ext Version:     1.6
@@ -175,7 +175,7 @@ See the following example output of the ROCmInfo command on a system with MI300X
               Default Rounding Mode:   NEAR
               Fast f16:                TRUE
               Workgroup Max Size:      1024(0x400
-        
+
               Workgroup Max Size per Dimension:
                 x                        1024(0x400)
                 y                        1024(0x400)
@@ -185,6 +185,6 @@ See the following example output of the ROCmInfo command on a system with MI300X
                 x                        4294967295(0xffffffff)
                 y                        4294967295(0xffffffff)
                 z                        4294967295(0xffffffff)
-        
+
         *** Done ***
 

@@ -1,22 +1,8 @@
-/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "utils/flags.hpp"
@@ -45,5 +31,64 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
 }
 
 void Signal::Reset(uint64_t value) { Hsa::signal_store_screlease(signal_, value); }
+
+// ================================================================================================
+// IpcSignal implementation
+// ================================================================================================
+
+IpcSignal::~IpcSignal() {
+  if (signal_.handle != 0) {
+    Hsa::signal_destroy(signal_);
+  }
+}
+
+bool IpcSignal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
+  hsa_status_t status = Hsa::signal_create(init, 0, nullptr, HSA_AMD_SIGNAL_IPC, &signal_);
+  if (status != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+  ws_ = ws;
+  return true;
+}
+
+uint64_t IpcSignal::Wait(uint64_t value, device::Signal::Condition c, uint64_t timeout) {
+  return Hsa::signal_wait_scacquire(signal_, static_cast<hsa_signal_condition_t>(c), value,
+                                    timeout, static_cast<hsa_wait_state_t>(ws_));
+}
+
+void IpcSignal::Reset(uint64_t value) { Hsa::signal_store_screlease(signal_, value); }
+
+uint64_t IpcSignal::Load() {
+  return Hsa::signal_load_relaxed(signal_);
+}
+
+bool IpcSignal::IpcExport(void* handle, size_t handle_size) {
+  if (handle_size < sizeof(hsa_amd_ipc_signal_t)) {
+    return false;
+  }
+  hsa_amd_ipc_signal_t ipc_handle;
+  hsa_status_t status = Hsa::ipc_signal_create(signal_, &ipc_handle);
+  if (status != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+  memcpy(handle, &ipc_handle, sizeof(ipc_handle));
+  return true;
+}
+
+bool IpcSignal::IpcImport(const void* handle, size_t handle_size) {
+  if (handle_size < sizeof(hsa_amd_ipc_signal_t)) {
+    return false;
+  }
+  hsa_amd_ipc_signal_t ipc_handle;
+  memcpy(&ipc_handle, handle, sizeof(ipc_handle));
+
+  hsa_status_t status = Hsa::ipc_signal_attach(&ipc_handle, &signal_);
+  if (status != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  ws_ = WaitState::Active;
+  return true;
+}
 
 };  // namespace amd::roc

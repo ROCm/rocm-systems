@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  Functional test for Memset3D and Memset3DAsync
@@ -31,8 +15,7 @@ THE SOFTWARE.
 /**
  * Basic Functional test of hipMemset3D
  */
-TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -81,8 +64,7 @@ TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
 /**
  * Basic Functional test of hipMemset3DAsync
  */
-TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
-  CHECK_IMAGE_SUPPORT
+HIP_TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
 
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
@@ -107,6 +89,7 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
@@ -143,15 +126,15 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
+HIP_TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
   char* A_h;
   hipPitchedPtr A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int row, col, dep;
-  row = GENERATE(3, 4, 100);
-  col = GENERATE(3, 4, 100);
-  dep = GENERATE(3, 4, 100);
+  row = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  col = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
+  dep = isQuickLevel() ? GENERATE(3, 100) : GENERATE(3, 4, 100);
   hipStream_t stream;
 
   A_h = reinterpret_cast<char*>(malloc(sizeof(char) * row * col * dep));
@@ -183,4 +166,36 @@ TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(A_d.ptr));
   free(A_h);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset3D while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset3D.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_Capture) {
+
+  constexpr int memsetval = 0x22;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  constexpr size_t depth = 10;
+  size_t width = numW * sizeof(char);
+
+  hipExtent extent = make_hipExtent(width, numH, depth);
+  hipPitchedPtr devPitchedPtr;
+
+  HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset3D(devPitchedPtr, memsetval, extent), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(devPitchedPtr.ptr));
 }

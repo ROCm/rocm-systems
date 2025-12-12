@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include "hsa_base_util.h"
 #include "HSAILAmdExt.h"
 
@@ -38,8 +38,8 @@ bool HSA_UTIL::HsaInit()
  	err = hsa_init();
  	check(Initializing the hsa runtime, err);
 
-	/* 
-	 * Iterate over the agents and pick the gpu agent using 
+	/*
+	 * Iterate over the agents and pick the gpu agent using
 	 * the find_gpu callback.
 	 */
 	err = hsa_iterate_agents(find_gpu, &device);
@@ -57,7 +57,7 @@ bool HSA_UTIL::HsaInit()
 	err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
 	check(Querying the device maximum queue size, err);
 
-	/*  
+	/*
 	 * Create a queue using the maximum size.
 	 */
 	err = hsa_queue_create(device, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &command_queue);
@@ -66,15 +66,15 @@ bool HSA_UTIL::HsaInit()
 	profile = hsa_profile_t(108);
        hsa_agent_get_info(device, HSA_AGENT_INFO_PROFILE, &profile);
 
-       if (profile == HSA_PROFILE_BASE) 
+       if (profile == HSA_PROFILE_BASE)
 	{
 	    memset(hail_file_name_full, 0, sizeof(char)*128);
            cout << "Loading base profile!!!" << endl;
-           strcpy(hail_file_name_full, hail_file_name_base); //overwrite full hsail file name with base 
-       } 
-   
+           strcpy(hail_file_name_full, hail_file_name_base); //overwrite full hsail file name with base
+       }
+
         amd::hsail::registerExtensions();
-        if (!tool.assembleFromFile(hail_file_name_full)) 
+        if (!tool.assembleFromFile(hail_file_name_full))
 	{
           std::cout << tool.output();
           return false;
@@ -124,7 +124,7 @@ bool HSA_UTIL::HsaInit()
 	check("get symbol handle", err);
 
 	// Get code handle.
-	
+
 	err = hsa_executable_symbol_get_info(kernelSymbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &codeHandle);
 	check("Get code handle", err);
 
@@ -199,7 +199,7 @@ double HSA_UTIL::Run(int dim, int group_x, int group_y, int group_z, int s_size,
 	hsa_agent_iterate_regions(device, get_kernarg, &kernarg_region);
 	err = (kernarg_region.handle== 0) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS;
 	check(Finding a kernarg memory region, err);
-	
+
 */
 
         void* local_kernel_arg_buffer = NULL;
@@ -211,24 +211,24 @@ double HSA_UTIL::Run(int dim, int group_x, int group_y, int group_z, int s_size,
 	memcpy(local_kernel_arg_buffer, kernel_args, kernel_args_size);
 	local_dispatch_packet.kernarg_address = local_kernel_arg_buffer;
 
-	/*	
+	/*
 	 * Obtain the current queue write index.
 	 */
 	uint64_t index = hsa_queue_load_write_index_relaxed(command_queue);
 
-	/*	
+	/*
 	 * Write the aql packet at the calculated queue index address.
 	 */
 	const uint32_t queueMask = command_queue->size - 1;
 	((hsa_kernel_dispatch_packet_t*)(command_queue->base_address))[index&queueMask]=local_dispatch_packet;
 
-	/*	
+	/*
 	 * Increment the write index and ring the doorbell to dispatch the kernel.
 	 */
 	hsa_queue_store_write_index_relaxed(command_queue, index+1);
 	hsa_signal_store_release(command_queue->doorbell_signal, index);
 
-	/*	
+	/*
 	 * Wait on the dispatch signal until all kernel are finished.
 	 */
 	while (hsa_signal_wait_acquire(local_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE)  != 0);
@@ -262,7 +262,7 @@ double HSA_UTIL::GetSetupTime()
 
 void HSA_UTIL::Close()
 {
-	err = hsa_executable_destroy(hsaExecutable); 
+	err = hsa_executable_destroy(hsaExecutable);
 	check(Destroying the hsaExecutable, err)
 
 	err = hsa_code_object_destroy(code_object);
@@ -275,12 +275,12 @@ void HSA_UTIL::Close()
 	check(Shutting down the runtime, err);
 }
 
-void* HSA_UTIL::AllocateLocalMemory(size_t size) 
+void* HSA_UTIL::AllocateLocalMemory(size_t size)
 {
   void *buffer = NULL;
 
   // Allocate in local memory only if it is available
-  if (mem_region.coarse_region.handle != 0) 
+  if (mem_region.coarse_region.handle != 0)
   {
       cout << "Allocating in local memory" << endl;
       err = hsa_memory_allocate(mem_region.coarse_region, size, (void **)&buffer);
@@ -304,18 +304,18 @@ void* HSA_UTIL::AllocateSysMemory( size_t size)
     return (err == HSA_STATUS_SUCCESS) ? buffer : NULL;
 }
 
-bool HSA_UTIL::TransferData(void *dest, void *src, uint length, bool host_to_dev) 
+bool HSA_UTIL::TransferData(void *dest, void *src, uint length, bool host_to_dev)
 {
 
   hsa_status_t status;
 
   void *buffer = (host_to_dev) ? dest : src;
   err = hsa_memory_assign_agent(buffer, device, HSA_ACCESS_PERMISSION_RW);
-  if (err != HSA_STATUS_SUCCESS) 
+  if (err != HSA_STATUS_SUCCESS)
   {
       return false;
   }
-  err = hsa_memory_copy(dest, src, length);  // first is dest, second is src 
+  err = hsa_memory_copy(dest, src, length);  // first is dest, second is src
   return (err == HSA_STATUS_SUCCESS);
 
 }

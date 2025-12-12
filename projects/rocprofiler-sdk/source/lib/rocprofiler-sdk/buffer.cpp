@@ -90,13 +90,11 @@ get_buffer(rocprofiler_buffer_id_t buffer_id)
 {
     if(is_valid_buffer_id(buffer_id) && get_buffers())
     {
-        for(auto& itr : *get_buffers())
-        {
-            if(itr && itr->buffer_id == buffer_id.handle)
-            {
-                return itr.get();
-            }
-        }
+        // Use direct indexing instead of linear search (same pattern as destroy_buffer)
+        // See allocate_buffer below that the idx is assigned based on the size + address
+        auto  idx = buffer_id.handle - get_buffer_offset();
+        auto& buf = get_buffers()->at(idx);
+        return buf ? buf.get() : nullptr;
     }
     return nullptr;
 }
@@ -161,18 +159,25 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     if(wait) task_group->wait();
 
+    auto idx = buff->buffer_idx++;
+    idx %= buff->buffers.size();
+
+    ROCP_INFO << fmt::format("executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
+
     // buffer is currently being flushed or destroyed
-    if(buff->syncer.test_and_set())
+    if(buff->syncer.at(idx).test_and_set())
     {
+        ROCP_INFO << fmt::format(
+            "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
         if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
-        while(buff->syncer.test_and_set())
+        while(buff->syncer.at(idx).test_and_set())
         {
+            ROCP_TRACE << fmt::format(
+                "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
             std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::microseconds{10});
+            std::this_thread::sleep_for(buff->sync_wait_usec);
         }
     }
-
-    auto idx = buff->buffer_idx++;
 
     auto _task = [buffer_id, idx, offset]() {
         ROCP_ERROR_IF(registration::get_fini_status() > 0)
@@ -248,7 +253,9 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
             ROCP_INFO << "buffer at " << buffer_id.handle << " is empty...";
         }
 
-        buff_v->syncer.clear();
+        ROCP_INFO << fmt::format(
+            "completed buffer flush [id={}, index={}]...", buffer_id.handle, idx);
+        buff_v->syncer.at(idx).clear();
     };
 
     task_group->exec(std::move(_task));
@@ -331,12 +338,17 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     // buffer is currently being flushed or destroyed
-    if(buff->syncer.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    for(auto& itr : buff->syncer)
+    {
+        if(itr.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    }
 
     for(auto& itr : buff->buffers)
         itr.reset();
 
-    buff->syncer.clear();
+    for(auto& itr : buff->syncer)
+        itr.clear();
+
     buff.reset();
 
     return ROCPROFILER_STATUS_SUCCESS;

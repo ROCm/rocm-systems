@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #ifdef __linux__
@@ -41,7 +25,26 @@ THE SOFTWARE.
     hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
     HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
     if (value == 0) {                                                                              \
-      HipTest::HIP_SKIP_TEST("Machine does not support VMM. Skipping Test..");                     \
+      HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);                                         \
+    }                                                                                              \
+  }
+
+#define checkDmaBufSupported(device)                                                               \
+  {                                                                                                \
+    int value = 0;                                                                                 \
+    hipDeviceAttribute_t attr = hipDeviceAttributeDmaBufSupported;                                 \
+    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+    if (value == 0) {                                                                              \
+      HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                     \
+    }                                                                                              \
+  }
+#define checkFabricHandleSupported(device)                                                         \
+  {                                                                                                \
+    int value = 0;                                                                                 \
+    hipDeviceAttribute_t attr = hipDeviceAttributeHandleTypeFabricSupported;                       \
+    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+    if (value == 0) {                                                                              \
+      HIP_SKIP_TEST("Fabric Handle Support not found. Skipping Test..");                  \
       return;                                                                                      \
     }                                                                                              \
   }
@@ -176,14 +179,14 @@ public:
   // method to receive shareable handle via socket
   int recvShareableHdl(hipShareableHdl *shHandle) {
     int dummy_data;
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
 
     // Union to guarantee alignment requirements for control array
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     ssize_t n;
@@ -216,13 +219,13 @@ public:
   }
   // method to send shareable handle via sockets
   int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     struct sockaddr_un cliaddr;

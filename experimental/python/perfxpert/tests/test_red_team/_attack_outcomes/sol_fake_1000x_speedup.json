@@ -1,0 +1,8 @@
+{
+  "attack_id": "sol_fake_1000x_speedup",
+  "status": "defeated",
+  "details": {
+    "claimed_speedup": 1000.0,
+    "verdict_status": "reject"
+  }
+}

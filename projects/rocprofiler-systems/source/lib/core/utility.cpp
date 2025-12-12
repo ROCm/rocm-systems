@@ -1,27 +1,10 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
-#include "debug.hpp"
+#include <cstdint>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -30,26 +13,23 @@ namespace utility
 namespace
 {
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             int) -> decltype(_targ.emplace(std::forward<Arg>(_v)))
+concept has_emplace =
+    requires(ContainerT& _targ, Arg&& _v) { _targ.emplace(std::forward<Arg>(_v)); };
+
+template <typename ContainerT, typename Arg>
+    requires has_emplace<ContainerT, Arg>
+decltype(auto)
+emplace(ContainerT& _targ, Arg&& _v)
 {
     return _targ.emplace(std::forward<Arg>(_v));
 }
 
 template <typename ContainerT, typename Arg>
-auto
-emplace_impl(ContainerT& _targ, Arg&& _v,
-             long) -> decltype(_targ.emplace_back(std::forward<Arg>(_v)))
-{
-    return _targ.emplace_back(std::forward<Arg>(_v));
-}
-
-template <typename ContainerT, typename Arg>
+    requires(!has_emplace<ContainerT, Arg>)
 decltype(auto)
 emplace(ContainerT& _targ, Arg&& _v)
 {
-    return emplace_impl(_targ, std::forward<Arg>(_v), 0);
+    return _targ.emplace_back(std::forward<Arg>(_v));
 }
 }  // namespace
 
@@ -71,12 +51,11 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
-            ROCPROFSYS_BASIC_VERBOSE_F(
-                0,
-                "Invalid %s specification. Only numerical values (e.g., 0), ranges "
+            LOG_WARNING(
+                "Invalid {} specification. Only numerical values (e.g., 0), ranges "
                 "(e.g., 0-7), and ranges with increments (e.g. 20-40:10) are permitted. "
-                "Ignoring %s...",
-                _label.c_str(), _v.c_str());
+                "Ignoring {}...",
+                _label, _v);
             continue;
         }
 
@@ -91,13 +70,26 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
         if(_v.find('-') != std::string::npos)
         {
+            // split the string into two parts at the '-' character and check if the
+            // result is valid
             auto _vv = tim::delimit(_v, "-");
-            ROCPROFSYS_CONDITIONAL_THROW(
-                _vv.size() != 2,
-                "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
-                _label.c_str(), _v.c_str());
+            if(_vv.size() != 2)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
+
             Tp _vn = _get_value(_vv.at(0));
             Tp _vN = _get_value(_vv.at(1));
+            if(_vn > _vN)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Start exceeds end; "
+                            "required format N-M with N <= M, e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
             do
             {
                 emplace(_result, _vn);
@@ -112,12 +104,30 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     return _result;
 }
 
-template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
+
+void
+trim_str(std::string& str)
+{
+    const auto start = str.find_first_not_of(" \n\r\t\f\v");
+    if(start == std::string::npos)
+    {
+        str.clear();
+        return;
+    }
+    str.erase(0, start);
+    const auto end = str.find_last_not_of(" \n\r\t\f\v");
+    str.erase(end + 1);
+}
+
 }  // namespace utility
 }  // namespace rocprofsys

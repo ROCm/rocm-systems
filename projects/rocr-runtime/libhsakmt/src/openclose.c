@@ -37,13 +37,18 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h>
+#include <errno.h>
 #include <strings.h>
 #include "fmm.h"
 #include <dlfcn.h>
 #include <string.h>
 
 int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
+int (*hsakmt_fn_amdgpu_device_initialize2)(int fd,
+					 bool deduplicate_device,
+					 uint32_t *major_version,
+					 uint32_t *minor_version,
+					 HsaAMDGPUDeviceHandle *device_handle);
 
 static const char kfd_device_name[] = "/dev/kfd";
 static const char kfd_udmabuf_device_name[] = "/dev/udmabuf";
@@ -51,7 +56,11 @@ static pid_t parent_pid = -1;
 int hsakmt_debug_level;
 bool hsakmt_forked;
 
-HsaKFDContext hsakmt_primary_kfd_ctx = {.fd = -1};
+HsaKFDContext hsakmt_primary_kfd_ctx = {
+	.fd = -1,
+	.hsakmt_is_primary_ctx = true,
+	.hsakmt_is_svm_api_supported = false,
+};
 
 /* hsakmt_is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
@@ -106,12 +115,14 @@ static void clear_after_fork(HsaKFDContext *ctx)
 	hsakmt_clear_process_doorbells(ctx);
 	hsakmt_clear_events_page(ctx);
 	hsakmt_fmm_clear_all_mem(ctx);
-	hsakmt_destroy_device_debugging_memory();
+	hsakmt_destroy_device_debugging_memory(ctx);
 
 	int fd = ctx->fd;
 	if (fd >= 0) {
+		/* Don't close the memfd when using model - FFM owns its lifecycle */
+		if (!hsakmt_use_model)
+			close(fd);
 		hsakmt_kfdcontext_clear_context(ctx);
-		close(fd);
  	}
 	if (hsakmt_udmabuf_dev_fd > 0) {
 		close(hsakmt_udmabuf_dev_fd);
@@ -140,7 +151,7 @@ static HSAKMT_STATUS init_vars_from_env(void)
 
 	envvar = getenv("HSAKMT_DEBUG_LEVEL");
 	if (envvar) {
-		debug_level = atoi(envvar);
+		debug_level = hsakmt_safe_env_to_int(envvar, HSAKMT_DEBUG_LEVEL_DEFAULT);
 		if (debug_level >= HSAKMT_DEBUG_LEVEL_ERR &&
 				debug_level <= HSAKMT_DEBUG_LEVEL_DEBUG)
 			hsakmt_debug_level = debug_level;
@@ -149,8 +160,11 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	/* Check whether to support Zero frame buffer */
 	envvar = getenv("HSA_ZFB");
 	if (envvar)
-		hsakmt_zfb_support = atoi(envvar);
+		hsakmt_zfb_support = hsakmt_safe_env_to_int(envvar, 0);
 
+	envvar = getenv("PM4_TARGET_XCC");
+	if (envvar)
+		hsakmt_pm4_target_xcc = hsakmt_safe_env_to_int(envvar, 0);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -181,6 +195,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 		else
 			pr_info("amdgpu_device_get_fd is available %p\n", hsakmt_fn_amdgpu_device_get_fd);
 
+		hsakmt_fn_amdgpu_device_initialize2 = dlsym(RTLD_DEFAULT, "amdgpu_device_initialize2");
+		if ((error = dlerror()) != NULL)
+			pr_err("amdgpu_device_initialize2 is not available: %s\n", error);
+		else
+			pr_info("amdgpu_device_initialize2 is available %p\n", hsakmt_fn_amdgpu_device_initialize2);
+
 		result = init_vars_from_env();
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto open_failed;
@@ -195,7 +215,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 				goto open_failed;
 			}
-			hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
+			if (hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx)) {
+				close(fd);
+				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto open_failed;
+			}
 		}
 
 		init_page_size();
@@ -206,7 +231,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 
 		/* check if udmabuf is enabled by env HSA_USE_UDMABUF */
 		useUdmaBuf = getenv("HSA_USE_UDMABUF");
-		if (useUdmaBuf && atoi(useUdmaBuf)) {
+		if (useUdmaBuf && hsakmt_safe_env_to_int(useUdmaBuf, 0)) {
 			/* open udmabuf device */
 			hsakmt_udmabuf_dev_fd = open(kfd_udmabuf_device_name, 0);
 			if (hsakmt_udmabuf_dev_fd < 0)
@@ -217,19 +242,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 			pr_debug("udmabuf is not enabled\n");
 
 		useSvmStr = getenv("HSA_USE_SVM");
-		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-		if(!hsakmt_use_model)
-			result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
+		hsakmt_primary_kfd_ctx.hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
+		result = hsakmt_topology_sysfs_get_system_props(&hsakmt_primary_kfd_ctx, &sys_props);
 
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;
 
 		hsakmt_kfd_open_count = 1;
 
-		if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
+		if (hsakmt_init_device_debugging_memory(&hsakmt_primary_kfd_ctx, sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
 			pr_warn("Insufficient Memory. Debugging unavailable\n");
 
-		hsakmt_init_counter_props(sys_props.NumNodes);
+		hsakmt_init_counter_props(&hsakmt_primary_kfd_ctx, sys_props.NumNodes);
 		*pCtx = &hsakmt_primary_kfd_ctx;
 
 		if (!atfork_installed) {
@@ -269,9 +293,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 
 	if (hsakmt_kfd_open_count > 0)	{
 		if (--hsakmt_kfd_open_count == 0) {
-			hsakmt_destroy_counter_props();
-			hsakmt_destroy_device_debugging_memory();
+			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
+			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+
+			if (hsakmt_use_model && hsakmt_primary_kfd_ctx.fd >= 0) {
+				/* Don't close the memfd - FFM owns its lifecycle and
+				 * hands the same fd back on the next OpenKFDCtx. Closing
+				 * it here would let the kernel reassign the fd number,
+				 * causing later mmap()s through cached drm_render_fds
+				 * to target the wrong file. Just drop our reference by
+				 * clearing the context so model_init_env_vars's
+				 * assert(fd < 0) holds on re-init.
+				 */
+				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
+			}
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;
@@ -292,4 +328,79 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 {
 	return hsaKmtCloseKFDCtx();
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
+{
+	HSAKMT_STATUS result = HSAKMT_STATUS_SUCCESS;
+	int kfd_fd = -1;
+	HsaKFDContext *new_ctx = NULL;
+
+	CHECK_KFD_OPEN();
+	pthread_mutex_lock(&hsakmt_mutex);
+
+	kfd_fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
+	if (kfd_fd < 0) {
+		result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+	} else {
+		struct kfd_ioctl_create_process_args args = {};
+		if (hsakmt_ioctl(kfd_fd, AMDKFD_IOC_CREATE_PROCESS, &args)) {
+			if (errno == EINVAL || errno == ENOTTY)
+				result = HSAKMT_STATUS_NOT_SUPPORTED;
+			else
+				result = HSAKMT_STATUS_ERROR;
+			goto create_process_failed;
+		} else {
+			new_ctx = calloc(1, sizeof(HsaKFDContext));
+			if (!new_ctx) {
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto create_process_failed;
+			}
+			if (hsakmt_kfdcontext_init_context(kfd_fd, new_ctx)) {
+				close(kfd_fd);
+				hsakmt_kfdcontext_clear_context(new_ctx);
+				free(new_ctx);
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto create_process_failed;
+			}
+			new_ctx->hsakmt_is_primary_ctx = false;
+			new_ctx->hsakmt_is_svm_api_supported = false;
+
+			*pCtx = new_ctx;
+		}
+	}
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+	return result;
+
+create_process_failed:
+	if (kfd_fd >= 0)
+		close(kfd_fd);
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCloseSecondaryKFDCtx(HsaKFDContext *ctx)
+{
+	HSAKMT_STATUS result = HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pthread_mutex_lock(&hsakmt_mutex);
+
+	if (ctx && !ctx->hsakmt_is_primary_ctx && ctx->fd >= 0) {
+		hsakmt_clear_events_page(ctx);
+		hsakmt_destroy_counter_props(ctx);
+		hsakmt_destroy_device_debugging_memory(ctx);
+		hsakmt_fmm_clear_all_aperture(ctx);
+
+		close(ctx->fd);
+		hsakmt_kfdcontext_clear_context(ctx);
+		free(ctx);
+
+		result = HSAKMT_STATUS_SUCCESS;
+	}
+
+	pthread_mutex_unlock(&hsakmt_mutex);
+
+	return result;
 }

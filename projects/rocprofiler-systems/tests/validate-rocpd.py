@@ -13,12 +13,25 @@ from pathlib import Path
 class validation_rule:
     """Class to represent a validation rule as defined in JSON file"""
 
-    def __init__(self, description, query, expected_result, comparison, error_message):
+    def __init__(
+        self,
+        description,
+        query,
+        expected_result,
+        comparison,
+        error_message,
+        requires=None,
+        expected_result_max=None,
+        gpu_category_to_skip=None,
+    ):
         self.description = description
         self.query = query
         self.expected_result = expected_result
         self.comparison = comparison
         self.error_message = error_message
+        self.requires = requires
+        self.expected_result_max = expected_result_max
+        self.gpu_category_to_skip = gpu_category_to_skip or []
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -41,8 +54,24 @@ class validation_rule:
             return result <= self.expected_result
         elif self.comparison == "not_equals":
             return result != self.expected_result
+        elif self.comparison == "between_inclusive":
+            if self.expected_result_max is None:
+                raise ValueError(
+                    "between_inclusive requires expected_result (min) and "
+                    "expected_result_max (max) in the rule JSON"
+                )
+            return self.expected_result <= result <= self.expected_result_max
         else:
             raise ValueError(f"Unknown comparison operator: {self.comparison}")
+
+    def expected_summary(self):
+        """Human-readable expected value for failure messages."""
+        if self.comparison == "between_inclusive":
+            return (
+                f"{self.comparison} [{self.expected_result}, "
+                f"{self.expected_result_max}]"
+            )
+        return f"{self.comparison} {self.expected_result}"
 
 
 class required_table:
@@ -75,8 +104,7 @@ class required_table:
 
 def print_help():
     """Print out the help message"""
-    print(
-        f"""
+    print(f"""
     ROCPD Database Validation Tool
 
     DESCRIPTION:
@@ -91,6 +119,9 @@ def print_help():
 
     OPTIONAL ARGUMENTS:
         -r, --validation_rules PATH [PATH ...]  One or more JSON rules files (default: default_rules.json)
+        --gpu-category-to-skip CAT [CAT ...]    Skip validation queries tagged with these GPU
+                                                categories in the rules JSON via
+                                                "gpu_category_to_skip" (e.g. apu). Default: none.
         -h, --help                  Show this help message and exit
 
     EXAMPLES:
@@ -103,23 +134,37 @@ def print_help():
         # Validate database with multiple rules files
         {os.path.basename(__file__)} --database my_profile.db -r validation_rules.json amd_smi_rules.json
 
+        # Skip queries tagged for APUs (e.g. when shared HBM means no PAGE_MIGRATE events)
+        {os.path.basename(__file__)} --database my_profile.db --gpu-category-to-skip apu
+
     VALIDATION FEATURES:
         - Checks for presence of required tables
         - Verifies required columns exist in each table
         - Ensures minimum row count requirements are met
         - Executes custom SQL validation queries
-        - Supports various comparison operators (equals, greater_than, less_than, etc.)
+        - Supports various comparison operators (equals, greater_than, less_than,
+          between_inclusive, etc.)
 
     EXIT CODES:
         0  - All validations passed successfully
         64 - Invalid command line arguments (EX_USAGE)
         65 - Validation failures detected (EX_DATAERR)
         1  - General error (database connection, file not found, etc.)
-    """
-    )
+    """)
 
 
-def validate_table(cursor, rule, tables) -> bool:
+def _query_skip_categories(
+    query_gpu_category_to_skip: list[str], gpu_category_to_skip: set[str]
+) -> list[str]:
+    """Return GPU categories that validation query should be skipped for."""
+    if not query_gpu_category_to_skip or not gpu_category_to_skip:
+        return []
+    return sorted(set(query_gpu_category_to_skip) & gpu_category_to_skip)
+
+
+def validate_table(
+    cursor, rule, tables, available_metrics=None, gpu_category_to_skip=None
+) -> bool:
     """
     Validates a database table against a set of rules.
     This function checks if a table specified by `rule` exists in the provided `tables` list,
@@ -135,6 +180,9 @@ def validate_table(cursor, rule, tables) -> bool:
         bool: True if table is found in the database and if all validation queries pass,
               False if any validation fails or matching table not found in database.
     """
+
+    if gpu_category_to_skip is None:
+        gpu_category_to_skip = set()
 
     matching_tables = []
 
@@ -197,6 +245,28 @@ def validate_table(cursor, rule, tables) -> bool:
 
             all_queries_passed = True
             for validation_query in rule.validation_queries:
+                # Check if metric is available (based on union across all GPUs for now)
+                if (
+                    validation_query.requires
+                    and available_metrics is not None
+                    and validation_query.requires not in available_metrics
+                ):
+                    print(
+                        f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
+                        f"(requires '{validation_query.requires}', not available)"
+                    )
+                    continue
+
+                matched_categories = _query_skip_categories(
+                    validation_query.gpu_category_to_skip, gpu_category_to_skip
+                )
+                if matched_categories:
+                    print(
+                        f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
+                        f"(gpu_category_to_skip: matched {matched_categories})"
+                    )
+                    continue
+
                 try:
                     query = validation_query.query.replace("{table_name}", table_name)
                     cursor.execute(query)
@@ -212,7 +282,8 @@ def validate_table(cursor, rule, tables) -> bool:
                             f"❌ ERROR: {validation_query.error_message} (Table: '{table_name}')"
                         )
                         print(
-                            f"   Expected: {validation_query.comparison} {validation_query.expected_result}, Got: {actual_result}"
+                            f"   Expected: {validation_query.expected_summary()}, "
+                            f"Got: {actual_result}"
                         )
                         all_queries_passed = False
                     else:
@@ -237,7 +308,9 @@ def validate_table(cursor, rule, tables) -> bool:
     return all_tables_passed
 
 
-def validate_rocpd(cursor, rules, tables) -> bool:
+def validate_rocpd(
+    cursor, rules, tables, available_metrics=None, gpu_category_to_skip=None
+) -> bool:
     """
     Validation of a ROCPD database by applying a set of validation rules to specified tables.
     It iterates through each rule, validates the corresponding table, and provides feedback on the validation status.
@@ -257,7 +330,9 @@ def validate_rocpd(cursor, rules, tables) -> bool:
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(cursor, rule, tables)
+        table_valid = validate_table(
+            cursor, rule, tables, available_metrics, gpu_category_to_skip
+        )
         db_valid = db_valid and table_valid
 
     if db_valid:
@@ -305,6 +380,9 @@ def load_validation_rules(validation_rules) -> list:
                             expected_result=vq["expected_result"],
                             comparison=vq.get("comparison", "equals"),
                             error_message=vq["error_message"],
+                            requires=vq.get("requires", None),
+                            expected_result_max=vq.get("expected_result_max"),
+                            gpu_category_to_skip=vq.get("gpu_category_to_skip", []),
                         )
                         validation_queries.append(validation_query_obj)
 
@@ -353,6 +431,16 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--gpu-category-to-skip",
+        nargs="*",
+        default=[],
+        help=(
+            "GPU categories to skip tagged validation queries for "
+            "(e.g. apu instinct). Passed from pytest tests after detect_gpu()."
+        ),
+    )
+
+    parser.add_argument(
         "-h", "--help", action="store_true", help="Prints out the help message"
     )
 
@@ -368,7 +456,48 @@ if __name__ == "__main__":
 
         sys.exit(os.EX_USAGE)
 
+    # Auto-detect available GPU metrics via amd-smi
+    available_metrics = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from check_amd_smi_metrics import get_available_metrics
+
+        gpus = get_available_metrics()
+        available_metrics = set()
+        from check_amd_smi_metrics import collect_metric_names
+
+        print("\n--- Platform GPU Metric Availability ---")
+        for gpu in gpus:
+            gpu_metrics = collect_metric_names(gpu)
+            available_metrics |= gpu_metrics
+            print(f"GPU {gpu.gpu_id}:")
+            print(
+                f"  Activity:    gfx={gpu.gfx_activity}  umc={gpu.umc_activity}  mm={gpu.mm_activity}"
+            )
+            print(
+                f"  Temperature: hotspot={gpu.hotspot_temperature}  edge={gpu.edge_temperature}"
+            )
+            print(f"  Power:       socket={gpu.current_socket_power}")
+            print(
+                f"  VCN/JPEG:    vcn_activity={gpu.vcn_activity}  vcn_busy={gpu.vcn_busy}  jpeg_activity={gpu.jpeg_activity}  jpeg_busy={gpu.jpeg_busy}"
+            )
+            print(
+                f"  Other:       mem_usage={gpu.mem_usage}  xgmi={gpu.xgmi}  pcie={gpu.pcie}"
+            )
+        print(
+            f"Detected available metrics (union): {', '.join(sorted(available_metrics))}"
+        )
+        print("---\n")
+    except Exception as e:
+        print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
+
+    gpu_category_to_skip = set(args.gpu_category_to_skip)
+    if gpu_category_to_skip:
+        categories = ", ".join(sorted(gpu_category_to_skip))
+        print(f"GPU category to skip: {categories}")
+
     print(f"Validating ROCPD. Database file: {args.database}")
+
     db_path = args.database
     validation_rules_files = args.validation_rules
     rules = load_validation_rules(validation_rules_files)
@@ -391,7 +520,9 @@ if __name__ == "__main__":
         cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
         tables = cursor.fetchall()
 
-        validation_result = validate_rocpd(cursor, rules, tables)
+        validation_result = validate_rocpd(
+            cursor, rules, tables, available_metrics, gpu_category_to_skip
+        )
 
         conn.close()
 

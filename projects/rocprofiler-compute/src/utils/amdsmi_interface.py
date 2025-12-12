@@ -1,32 +1,12 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
-##############################################################################
-
+import functools
 import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any, Callable, Optional
 
 from utils.logger import (
     console_debug,
@@ -34,18 +14,35 @@ from utils.logger import (
     console_warning,
 )
 
-sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+_amdsmi_module = None
 
-try:
-    import amdsmi
-except ImportError as e:
-    console_warning(f"Unhandled import error: {e}")
-    console_error("Failed to import the amdsmi Python library.")
+
+# Ignore undefined name amdsmi since it's dynamically imported
+def import_amdsmi_module() -> "amdsmi":  # noqa: F821
+    """
+    Dynamically import the amdsmi module because we only
+    want profile time dependency on amdsmi.
+    Uses global cache to avoid repeated imports.
+    """
+    global _amdsmi_module
+
+    if not _amdsmi_module:
+        sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+        try:
+            import amdsmi
+
+            _amdsmi_module = amdsmi
+        except ImportError as e:
+            console_warning(f"Unhandled import error: {e}")
+            console_error("Failed to import the amdsmi Python library.")
+
+    return _amdsmi_module
 
 
 @contextmanager
 def amdsmi_ctx() -> Iterator[None]:
     """Context manager to initialize and shutdown amdsmi."""
+    amdsmi = import_amdsmi_module()
     try:
         amdsmi.amdsmi_init()
         yield
@@ -58,79 +55,160 @@ def amdsmi_ctx() -> Iterator[None]:
             console_warning(f"amd-smi shutdown failed: {e}")
 
 
-def get_device_handle() -> "amdsmi.ProcessorHandle | None":
-    """Get the first AMD device handle."""
+# Ignore undefined name amdsmi since it's dynamically imported
+def get_device_handles() -> "list[amdsmi.ProcessorHandle]":  # noqa: F821
+    """
+    Get all AMD device handles.
+    We query all handles since some handles cannot be
+    used as they are hidden by ROCR or HIP environment variables.
+    """
+    amdsmi = import_amdsmi_module()
     try:
         devices = amdsmi.amdsmi_get_processor_handles()
-        if len(devices) == 0:
-            console_warning("No AMD GPU detected!")
-            return None
+        if not devices:
+            console_warning("No AMD device(s) detected!")
+            return []
         console_debug(f"Found {len(devices)} AMD device(s).")
-        return devices[0]
+        return devices
     except Exception as e:
-        console_warning(f"Error getting device handle: {e}")
-        return None
+        console_warning(f"Error getting device handles: {e}")
+        return []
 
 
-def get_mem_max_clock() -> float:
+def _per_device_query(
+    fn: Callable,
+    *,
+    default_return: object,
+    warning_label: str,
+) -> Callable:
+    """
+    Try fn(device, amdsmi) on each device; return first success.
+    On all-failure, warn with warning_label and return default_return.
+    """
+
+    @functools.wraps(fn)
+    def wrapper() -> object:
+        amdsmi = import_amdsmi_module()
+        error = None
+        for device in get_device_handles():
+            try:
+                return fn(device, amdsmi)
+            except Exception as e:
+                error = e
+        console_warning(f"Error getting {warning_label}: {error}")
+        return default_return
+
+    return wrapper
+
+
+@functools.partial(
+    _per_device_query, default_return=0.0, warning_label="max memory clock"
+)
+def get_mem_max_clock(device: Any, amdsmi: Any) -> float:  # noqa: ANN401
     """Get the maximum memory clock of the device."""
-    try:
-        return amdsmi.amdsmi_get_clock_info(
-            get_device_handle(), amdsmi.AmdSmiClkType.GFX
-        )["max_clk"]
-    except Exception as e:
-        console_warning(f"Error getting memory clocks: {e}")
-        return 0.0
+    return amdsmi.amdsmi_get_clock_info(device, amdsmi.AmdSmiClkType.MEM)["max_clk"]
 
 
-def get_gpu_model() -> str:
-    """Get the GPU model name."""
-    try:
-        gpu_model_info = (
-            # board -> product_name
-            amdsmi.amdsmi_get_gpu_board_info(get_device_handle())["product_name"],
-            # asic -> market_name
-            amdsmi.amdsmi_get_gpu_asic_info(get_device_handle())["market_name"],
-            # vbios -> name
-            amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())["name"],
-        )
-        console_debug(f"gpu model info: {str(gpu_model_info)}")
-        return gpu_model_info
-    except Exception as e:
-        console_warning(f"Error getting gpu model info: {e}")
-        return "N/A"
+@functools.partial(
+    _per_device_query,
+    default_return=("N/A", "N/A", "N/A"),
+    warning_label="gpu model info",
+)
+def get_gpu_model(device: Any, amdsmi: Any) -> tuple[str, str, str]:  # noqa: ANN401
+    """Get GPU model related names."""
+    gpu_model_info = (
+        amdsmi.amdsmi_get_gpu_board_info(device)["product_name"],
+        amdsmi.amdsmi_get_gpu_asic_info(device)["market_name"],
+        amdsmi.amdsmi_get_gpu_vbios_info(device)["name"],
+    )
+    console_debug(f"gpu model info: {str(gpu_model_info)}")
+    return gpu_model_info
 
 
-def get_gpu_vbios_part_number() -> str:
+@functools.partial(
+    _per_device_query,
+    default_return="N/A",
+    warning_label="GPU VBIOS part number",
+)
+def get_gpu_vbios_part_number(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
     """Get the GPU VBIOS part number."""
-    try:
-        vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())[
-            "part_number"
-        ]
-        console_debug(f"GPU VBIOS Part Number: {vbios_part_number}")
-        return vbios_part_number
-    except Exception as e:
-        console_warning(f"Error getting GPU VBIOS part number: {e}")
-        return "N/A"
+    vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(device)["part_number"]
+    console_debug(f"GPU VBIOS Part Number: {vbios_part_number}")
+    return vbios_part_number
 
 
-def get_gpu_compute_partition() -> str:
+@functools.partial(
+    _per_device_query,
+    default_return="N/A",
+    warning_label="GPU compute partition",
+)
+def get_gpu_compute_partition(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
     """Get the GPU compute partition."""
-    try:
-        compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(get_device_handle())
-        console_debug(f"GPU Compute Partition: {compute_partition}")
-        return compute_partition
-    except Exception as e:
-        console_warning(f"Error getting GPU compute partition: {e}")
-        return "N/A"
+    compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(device)
+    console_debug(f"GPU Compute Partition: {compute_partition}")
+    return compute_partition
 
 
-def get_gpu_memory_partition() -> str:
+@functools.partial(
+    _per_device_query,
+    default_return="N/A",
+    warning_label="GPU memory partition",
+)
+def get_gpu_memory_partition(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
     """Get the GPU memory partition."""
-    try:
-        memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(get_device_handle())
-        console_debug(f"GPU Memory Partition: {memory_partition}")
-        return memory_partition
-    except Exception as e:
-        console_warning(f"Error getting GPU memory partition: {e}")
-        return "N/A"
+    memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(device)
+    console_debug(f"GPU Memory Partition: {memory_partition}")
+    return memory_partition
+
+
+@functools.partial(
+    _per_device_query,
+    default_return="N/A",
+    warning_label="AMDGPU driver version",
+)
+def get_amdgpu_driver_version(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
+    """Get the AMDGPU driver version."""
+    driver_version = amdsmi.amdsmi_get_gpu_driver_info(device)["driver_version"]
+    console_debug(f"AMDGPU Driver Version: {driver_version}")
+    return driver_version
+
+
+@functools.partial(_per_device_query, default_return="0", warning_label="GPU VRAM size")
+def get_gpu_vram_size(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
+    """Get the GPU VRAM size in KB."""
+    vram_info = amdsmi.amdsmi_get_gpu_vram_info(device)
+    vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
+    console_debug(f"GPU VRAM Size: {vram_size} KB")
+    return vram_size
+
+
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU VRAM bit width"
+)
+def get_gpu_vram_bit_width(device: Any, amdsmi: Any) -> Optional[int]:  # noqa: ANN401
+    """Get the GPU memory bus width in bits."""
+    bit_width = amdsmi.amdsmi_get_gpu_vram_info(device).get("vram_bit_width")
+    console_debug(f"GPU VRAM bit width: {bit_width}")
+    return bit_width
+
+
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU cache info"
+)
+def get_gpu_cache_info(device: Any, amdsmi: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Get the GPU cache level information."""
+    cache_info = amdsmi.amdsmi_get_gpu_cache_info(device)
+    console_debug(f"GPU Cache Info: {cache_info}")
+    return cache_info
+
+
+@functools.partial(
+    _per_device_query,
+    default_return=0,
+    warning_label="GPU compute unit count",
+)
+def get_gpu_num_compute_units(device: Any, amdsmi: Any) -> int:  # noqa: ANN401
+    """Get the GPU's number of compute units."""
+    cu_count = int(amdsmi.amdsmi_get_gpu_asic_info(device)["num_compute_units"])
+    console_debug(f"GPU compute units count: {cu_count}")
+    return cu_count

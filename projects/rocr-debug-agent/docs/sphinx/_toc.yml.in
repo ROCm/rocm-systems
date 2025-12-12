@@ -1,0 +1,17 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - caption: Install
+    entries:
+    - file: install/installation
+      title: Install ROCr Debug Agent
+    - url: https://github.com/ROCm/rocm-systems/blob/develop/projects/rocr-debug-agent/README.md
+      title: Build from source
+  - caption: How to
+    entries:
+    - file: how-to/user-guide
+      title: User guide
+  - caption: About
+    entries:
+    - file: license

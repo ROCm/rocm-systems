@@ -54,10 +54,10 @@ function( get_path LIB CACHED_PATH HELP )
         find_file( FULLPATH NAMES ${ARGS_NAMES} HINTS ${${CACHED_PATH}} ${ARGS_HINTS} )
     endif()
     set( RESULT (NOT ${FULLPATH} MATCHES NOTFOUND) )
-    
+
     # Extract path
     get_filename_component ( DIRPATH ${FULLPATH} DIRECTORY )
-    
+
     # Check path against cache
     if( NOT "${${CACHED_PATH}}" STREQUAL "" )
         if ( NOT "${${CACHED_PATH}}" STREQUAL "${DIRPATH}" )
@@ -246,7 +246,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
         # Configure the copyright file
         configure_file(
-            "${CMAKE_SOURCE_DIR}/DEBIAN/copyright.in"
+            "${CMAKE_SOURCE_DIR}/DEB/copyright.in"
             "${CMAKE_BINARY_DIR}/DEBIAN/copyright"
             @ONLY
         )
@@ -258,7 +258,7 @@ function( configure_pkg PACKAGE_NAME_T COMPONENT_NAME_T PACKAGE_VERSION_T MAINTA
 
         # Configure the changelog file
         configure_file(
-            "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
+            "${CMAKE_SOURCE_DIR}/DEB/changelog.in"
             "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
             @ONLY
         )

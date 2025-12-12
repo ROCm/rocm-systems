@@ -1,138 +1,27 @@
-// MIT License
-//
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "cache_manager.hpp"
-#include "agent_manager.hpp"
+#include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/trace_cache/storage_parser.hpp"
-#include "debug.hpp"
+#include "core/output_file_registry.hpp"
+#include "core/perfetto/cached_perfetto_session.hpp"
+#include "core/timemory.hpp"
+#include "core/trace_cache/data_types.hpp"
+#include "core/trace_cache/discovery.hpp"
+#include "core/trace_cache/post_processor.hpp"
 #include "library/runtime.hpp"
-#include "trace_cache/cache_utility.hpp"
-#include "trace_cache/metadata_registry.hpp"
-#include "trace_cache/rocpd_post_processing.hpp"
-#include <algorithm>
+#include "logger/debug.hpp"
+
+#include <exception>
 #include <memory>
+#include <unistd.h>
 #include <vector>
 
 namespace rocprofsys
 {
 namespace trace_cache
 {
-namespace
-{
-void
-remove_if_exists(const std::string& fname)
-{
-    if(fname.empty()) return;
-    std::ifstream file(fname);
-    if(file.is_open())
-    {
-        file.close();
-        auto result = std::remove(fname.c_str());
-        if(result == 0)
-        {
-            ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
-        }
-        else if(errno == ENOENT)
-        {
-            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
-        }
-        else
-        {
-            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
-                               fname.c_str(), errno, std::strerror(errno));
-        }
-    }
-}
-
-std::vector<std::string>
-list_dir_files(const std::string& path)
-{
-    DIR* dir = opendir(path.c_str());
-    if(dir == nullptr)
-    {
-        ROCPROFSYS_THROW("Error opening directory: %s", path.c_str());
-    }
-
-    std::vector<std::string> result{};
-    dirent*                  entry;
-
-    while((entry = readdir(dir)) != nullptr)
-    {
-        if(std::string(entry->d_name) != "." && std::string(entry->d_name) != "..")
-        {
-            result.emplace_back(entry->d_name);
-        }
-    }
-
-    closedir(dir);
-    return result;
-}
-
-struct cache_files
-{
-    std::string buff_storage;
-    std::string metadata;
-};
-
-std::map<pid_t, cache_files>
-get_cache_files()
-{
-    const auto root_pid  = get_root_process_id();
-    const auto tmp_files = list_dir_files("/tmp/");
-
-    std::map<int, cache_files> cache_map{};
-
-    auto parse_and_fill_cache = [&](const std::string& filename) {
-        const std::regex buff_regex(R"(buffered_storage_(\d+)_(\d+)\.bin)");
-        const std::regex meta_regex(R"(metadata_(\d+)_(\d+)\.json)");
-        std::smatch      match;
-
-        if(std::regex_match(filename, match, buff_regex))
-        {
-            int parent_pid = std::stoi(match[1]);
-            int pid        = std::stoi(match[2]);
-            if(parent_pid == root_pid)
-            {
-                cache_map[pid].buff_storage = "/tmp/" + filename;
-            }
-        }
-        else if(std::regex_match(filename, match, meta_regex))
-        {
-            int parent_pid = std::stoi(match[1]);
-            int pid        = std::stoi(match[2]);
-            if(parent_pid == root_pid)
-            {
-                cache_map[pid].metadata = "/tmp/" + filename;
-            }
-        }
-    };
-
-    std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
-    return cache_map;
-}
-
-}  // namespace
-
 cache_manager&
 cache_manager::get_instance()
 {
@@ -141,98 +30,91 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk()
+cache_manager::post_process_bulk(output_file_registry& _output_registry,
+                                 progress::tracker&    _tracker)
 {
-    if(is_root_process())
+    LOG_TRACE("Starting trace cache bulk post-processing");
+
+    if(!is_root_process())
     {
-        if(m_storage.is_running())
-        {
-            ROCPROFSYS_WARNING(2,
-                               "Postprocessing called without previously shutting down "
-                               "cache storage. Calling shutdown explicitly..\n");
-            shutdown();
-        }
-
-        auto _cache_files = get_cache_files();
-
-        if(get_use_rocpd())
-        {
-            ROCPROFSYS_PRINT(
-                "Generating rocpd with collected data. This may take a while..\n");
-
-            std::vector<std::thread> rocpd_threads;
-            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-
-            rocpd_threads.emplace_back([this]() {
-                auto                  pid  = getpid();
-                auto                  ppid = get_root_process_id();
-                rocpd_post_processing _post_processing(
-                    m_metadata, get_agent_manager_instance(), pid, ppid);
-                storage_parser _parser(
-                    get_buffered_storage_filename(get_root_process_id(), getpid()));
-                _post_processing.register_parser_callback(_parser);
-                _post_processing.post_process_metadata();
-                _parser.consume_storage();
-            });
-
-            for(const auto& [pid, files] : _cache_files)
-            {
-                if(!files.buff_storage.empty() && !files.metadata.empty())
-                {
-                    rocpd_threads.emplace_back([pid = pid, files = files]() {
-                        ROCPROFSYS_DEBUG(
-                            "Creating database for [%d] from buffered storage "
-                            "file: %s and from metadata file: %s\n",
-                            pid, files.buff_storage.c_str(), files.metadata.c_str());
-
-                        std::vector<std::shared_ptr<agent>> _agents;
-                        metadata_registry                   _metadata;
-
-                        auto res = _metadata.load_from_file(files.metadata, _agents);
-                        if(!res)
-                        {
-                            ROCPROFSYS_WARNING(0,
-                                               "Load from file for metadata failed: %s\n",
-                                               files.metadata.c_str());
-                            return;
-                        }
-
-                        agent_manager         _agent_manager{ _agents };
-                        auto                  ppid = get_root_process_id();
-                        rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                               pid, ppid);
-                        storage_parser        _parser(files.buff_storage);
-                        _post_processing.register_parser_callback(_parser);
-                        _post_processing.post_process_metadata();
-                        _parser.consume_storage();
-                    });
-                }
-            }
-
-            for(auto& thread : rocpd_threads)
-            {
-                thread.join();
-            }
-        }
-
-        ROCPROFSYS_PRINT("Removing cached temporary files...\n");
-
-        for(const auto& [pid, files] : _cache_files)
-        {
-            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n",
-                             files.buff_storage.c_str());
-            ROCPROFSYS_PRINT("Removing cached temporary file: %s\n",
-                             files.metadata.c_str());
-            remove_if_exists(files.buff_storage.c_str());
-            remove_if_exists(files.metadata.c_str());
-        }
+        LOG_DEBUG("Not root process, skipping bulk post-processing");
+        return;
     }
+
+    if(m_storage.is_running())
+    {
+        LOG_WARNING("Post-processing called without previously shutting down cache "
+                    "storage. Calling shutdown explicitly..");
+        shutdown();
+    }
+
+    const auto root_pid = get_root_process_id();
+    LOG_DEBUG("Root process ID: {}", root_pid);
+
+    const auto temp_directory_content =
+        discovery::list_dir_files(trace_cache::tmp_directory);
+    LOG_TRACE("Found {} files in temp directory", temp_directory_content.size());
+
+    const auto cache_files =
+        discovery::find_cache_files(root_pid, temp_directory_content);
+    LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
+
+    if(config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+    {
+        const data::enabled_formats_t enabled_formats;
+        enabled_formats.print();
+
+        auto processor_configs = post_processor::make_configs(cache_files, root_pid);
+
+        processor_configs.push_back(std::make_shared<data::processor_config_t>(
+            getpid(), root_pid, m_metadata,
+            std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
+
+        LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
+        post_processor processor{ _tracker, _output_registry };
+
+        const auto combine_traces = config::get_perfetto_combined_traces();
+
+        std::unique_ptr<core::cached_perfetto_session> session;
+        if(enabled_formats.is_perfetto_enabled())
+        {
+            std::vector<int> source_pids;
+            source_pids.reserve(processor_configs.size());
+            for(const auto& cfg : processor_configs)
+                source_pids.push_back(static_cast<int>(cfg->_pid));
+
+            try
+            {
+                session = std::make_unique<core::cached_perfetto_session>(
+                    _output_registry, static_cast<pid_t>(root_pid), combine_traces,
+                    source_pids, processor);
+            } catch(const std::exception& exp)
+            {
+                LOG_ERROR("Perfetto engine initialization failed: {}. Skipping "
+                          "perfetto output; RocPD output unaffected.",
+                          exp.what());
+            }
+        }
+
+        processor.process(processor_configs, enabled_formats);
+
+        // Session destruction drives engine.stop() which drains into the
+        // sink (per_pid_file_sink writes per-pid files; single_file_sink
+        // finalizes the cross-process append + flock for merged output).
+        session.reset();
+    }
+
+    discovery::clear(cache_files);
+
+    LOG_TRACE("Trace cache bulk post-processing completed");
 }
 
 void
 cache_manager::shutdown()
 {
+    LOG_DEBUG("Shutting down cache manager storage");
     m_storage.shutdown();
+    LOG_TRACE("Cache manager storage shutdown complete");
 }
 
 }  // namespace trace_cache

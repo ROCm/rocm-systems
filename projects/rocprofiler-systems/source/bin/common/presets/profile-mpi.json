@@ -1,0 +1,31 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": false
+        },
+        "parallel": {
+            "enabled": true,
+            "runtimes": {
+                "mpi": {
+                    "enabled": true
+                }
+            }
+        }
+    },
+    "metadata": {
+        "category": "hpc",
+        "cli_flag": "--profile-mpi",
+        "description": "MPI communication latency profiling: flat profiling with wall-clock per rank",
+        "name": "profile-mpi",
+        "use_case": "Analyzing MPI communication patterns and latency across ranks"
+    },
+    "profiling": {
+        "enabled": true,
+        "flat_profile": {
+            "enabled": true
+        }
+    },
+    "tracing": {
+        "enabled": false
+    }
+}

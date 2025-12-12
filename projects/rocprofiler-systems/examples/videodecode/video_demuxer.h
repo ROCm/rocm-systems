@@ -32,6 +32,8 @@ extern "C"
 #endif
 }
 
+#include <cstdint>
+#include <cstring>
 #include <rocdecode/rocdecode.h>
 
 /*!
@@ -246,8 +248,15 @@ public:
                     av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata_size;
                 if(ext_data_size > 0)
                 {
-                    data_with_header_ = (uint8_t*) av_malloc(
-                        ext_data_size + packet_->size - 3 * sizeof(uint8_t));
+                    if(packet_->size < 3 ||
+                       (size_t) ext_data_size > SIZE_MAX - (size_t) (packet_->size - 3))
+                    {
+                        std::cerr << "ERROR: malformed first MPEG-4 packet!" << std::endl;
+                        return false;
+                    }
+                    size_t payload    = (size_t) packet_->size - 3;
+                    size_t total      = (size_t) ext_data_size + payload;
+                    data_with_header_ = (uint8_t*) av_malloc(total);
                     if(!data_with_header_)
                     {
                         std::cerr << "ERROR: av_malloc failed!" << std::endl;
@@ -256,10 +265,9 @@ public:
                     memcpy(data_with_header_,
                            av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata,
                            ext_data_size);
-                    memcpy(data_with_header_ + ext_data_size, packet_->data + 3,
-                           packet_->size - 3 * sizeof(uint8_t));
+                    memcpy(data_with_header_ + ext_data_size, packet_->data + 3, payload);
                     *video      = data_with_header_;
-                    *video_size = ext_data_size + packet_->size - 3 * sizeof(uint8_t);
+                    *video_size = total;
                 }
             }
             else
@@ -570,9 +578,17 @@ private:
              !strcmp(av_fmt_input_ctx_->iformat->long_name, "FLV (Flash Video)") ||
              !strcmp(av_fmt_input_ctx_->iformat->long_name, "Matroska / WebM"));
 
+        // For latest version of FFMPeg, read_seek and read_seek2 are not exposed in
+        // AVInputFormat
+#if USE_AVCODEC_GREATER_THAN_58_134
+        // Check if the input stream is seekable for FFmpeg >= 58.134
+        is_seekable_ = (av_fmt_input_ctx_->iformat->flags & AVFMT_NO_BYTE_SEEK) == 0 &&
+                       av_fmt_input_ctx_->pb && av_fmt_input_ctx_->pb->seekable;
+#else
         // Check if the input file allow seek functionality.
         is_seekable_ = av_fmt_input_ctx_->iformat->read_seek ||
                        av_fmt_input_ctx_->iformat->read_seek2;
+#endif
 
         if(is_h264_)
         {

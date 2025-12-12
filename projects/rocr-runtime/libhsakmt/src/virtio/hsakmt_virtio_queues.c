@@ -109,10 +109,11 @@ static int vhsakmt_create_queue_blob_bo(vhsakmt_device_handle dev, size_t size, 
   return r;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueV2(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                                               HSAuint32 QueuePercentage,
                                               HSA_QUEUE_PRIORITY Priority, HSAuint32 SdmaEngineId,
                                               void* QueueAddress, HSAuint64 QueueSizeInBytes,
+                                              HSAuint64 MetaDataQueueSizeInBytes,
                                               HsaEvent* Event, HsaQueueResource* QueueResource) {
   CHECK_VIRTIO_KFD_OPEN();
 
@@ -225,6 +226,18 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE T
   return rsp->ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
+                                             HSAuint32 QueuePercentage,
+                                             HSA_QUEUE_PRIORITY Priority,
+                                             HSAuint32 SdmaEngineId,
+                                             void* QueueAddress,
+                                             HSAuint64 QueueSizeInBytes,
+                                             HsaEvent* Event,
+                                             HsaQueueResource* QueueResource) {
+  return vhsaKmtCreateQueueV2(NodeId, Type, QueuePercentage, Priority, SdmaEngineId,
+                              QueueAddress, QueueSizeInBytes, 0, Event, QueueResource);
+}
+
 HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                                            HSAuint32 QueuePercentage, HSA_QUEUE_PRIORITY Priority,
                                            void* QueueAddress, HSAuint64 QueueSizeInBytes,
@@ -250,4 +263,116 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
              bo->real.res_id, bo->queue_id, r);
 
   return r;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUpdateQueue(HSA_QUEUEID QueueId, HSAuint32 QueuePercentage,
+                                           HSA_QUEUE_PRIORITY Priority, void* QueueAddress,
+                                           HSAuint64 QueueSize, HsaEvent* Event) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
+  vhsakmt_bo_handle queue_mem_bo;
+  struct vhsakmt_ccmd_queue_rsp* rsp;
+  struct vhsakmt_ccmd_queue_req req = {
+      .hdr = VHSAKMT_CCMD(QUEUE, sizeof(struct vhsakmt_ccmd_queue_req)),
+      .type = VHSAKMT_CCMD_QUEUE_UPDATE,
+      .res_id = bo->real.res_id,
+      .update_queue_args =
+          {
+              .QueueId = QueueId,
+              .QueuePercentage = QueuePercentage,
+              .Priority = Priority,
+              .QueueAddress = (uint64_t)QueueAddress,
+              .QueueSizeInBytes = QueueSize,
+          },
+  };
+
+  queue_mem_bo = vhsakmt_find_bo_by_addr(dev, (void*)QueueAddress);
+  if (!queue_mem_bo) return -EINVAL;
+
+  req.queue_mem_res_id = queue_mem_bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtGetQueueInfo(HSA_QUEUEID QueueId, HsaQueueInfo* QueueInfo) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
+  struct vhsakmt_ccmd_queue_rsp* rsp;
+  struct vhsakmt_ccmd_queue_req req = {
+      .hdr = VHSAKMT_CCMD(QUEUE, sizeof(struct vhsakmt_ccmd_queue_req)),
+      .type = VHSAKMT_CCMD_QUEUE_GET_INFO,
+      .res_id = bo->real.res_id,
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  *QueueInfo = rsp->queue_info;
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUMaskCount,
+                                              HSAuint32* QueueCUMask) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (CUMaskCount > VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
+  struct vhsakmt_ccmd_queue_rsp* rsp;
+  struct vhsakmt_ccmd_queue_req req = {
+      .hdr = VHSAKMT_CCMD(QUEUE,
+                          sizeof(struct vhsakmt_ccmd_queue_req) + CUMaskCount * sizeof(HSAuint32)),
+      .type = VHSAKMT_CCMD_QUEUE_SET_CU_MASK,
+      .res_id = bo->real.res_id,
+      .CUMaskCount = CUMaskCount,
+  };
+
+  memcpy(req.payload, QueueCUMask, CUMaskCount * sizeof(HSAuint32));
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(QueueCUMask, rsp->payload, CUMaskCount * sizeof(HSAuint32));
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
+                                             HSAuint32* firstGWS) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (nGWS > VHSAKMT_CCMD_QUEUE_MAX_GWS_SIZE) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
+  struct vhsakmt_ccmd_queue_rsp* rsp;
+  struct vhsakmt_ccmd_queue_req req = {
+      .hdr = VHSAKMT_CCMD(QUEUE, sizeof(struct vhsakmt_ccmd_queue_req) + nGWS * sizeof(HSAuint32)),
+      .type = VHSAKMT_CCMD_QUEUE_ALLOC_GWS,
+      .res_id = bo->real.res_id,
+      .nGWS = nGWS,
+  };
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(firstGWS, rsp->payload, nGWS * sizeof(HSAuint32));
+
+  return rsp->ret;
 }

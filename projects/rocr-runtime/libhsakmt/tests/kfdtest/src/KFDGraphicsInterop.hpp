@@ -32,6 +32,8 @@ class KFDGraphicsInterop :  public KFDMemoryTest {
  public:
     KFDGraphicsInterop(void) {}
     ~KFDGraphicsInterop(void) {}
+
+    void RegisterGraphicsHandle(int gpuNode);
 };
 
 #endif

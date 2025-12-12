@@ -1,22 +1,8 @@
-/* Copyright (c) 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_mempool_impl.hpp"
 
@@ -32,7 +18,8 @@ namespace {
 inline bool IsMemPoolValid(MemoryPool* mem_pool) {
   bool result = false;
   for (auto it : g_devices) {
-    if (result = it->IsMemoryPoolValid(mem_pool) == true) {
+    result = it->IsMemoryPoolValid(mem_pool);
+    if (result) {
       break;
     }
   }
@@ -88,6 +75,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);
@@ -101,7 +89,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -129,7 +117,9 @@ class FreeAsyncCommand : public amd::Command {
 
   virtual void submit(device::VirtualDevice& device) final {
     size_t offset = 0;
-    auto memory = getMemoryObject(ptr_, offset);
+    // Worker-thread submit body: do NOT hoist hip::getCurrentDevice(); use the convenience
+    // wrapper that re-fetches TLS each call.
+    auto memory = getMemoryObjectForCurrentDevice(ptr_, offset);
     if (memory != nullptr) {
       auto id = memory->getUserData().deviceId;
       if (!g_devices[id]->FreeMemory(memory, static_cast<hip::Stream*>(queue()), event_)) {
@@ -148,6 +138,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   HIP_INIT_API(hipFreeAsync, dev_ptr, stream);
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   auto hip_stream =
@@ -157,7 +148,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -180,7 +171,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
 
   if (!graph_in_use) {
     size_t offset = 0;
-    auto memory = getMemoryObject(dev_ptr, offset);
+    auto memory = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
     if (memory != nullptr) {
       auto id = memory->getUserData().deviceId;
       if (!g_devices[id]->FreeMemory(memory, hip_stream, event)) {
@@ -198,21 +189,16 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
       // so the queue thread could process it, because creating a command from the queue thread
       // may block the execution
       event = new hip::Event(0);
-      if (event != nullptr) {
-        if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
-          delete event;
-          event = nullptr;
-        } else {
-          // Make sure runtime sends a notification to the worker thread
-          auto result = event->ready();
-        }
+      if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
+        delete event;
+        event = nullptr;
+      } else {
+        // Make sure runtime sends a notification to the worker thread
+        auto result = event->ready();
       }
     }
 
     auto cmd = new FreeAsyncCommand(*hip_stream, dev_ptr, event);
-    if (cmd == nullptr) {
-      HIP_RETURN(hipErrorUnknown);
-    }
     cmd->enqueue();
     cmd->release();
   }
@@ -309,7 +295,8 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
     HIP_RETURN(hipErrorInvalidValue);
   }
   // validate hipMemAllocationType value
-  if (pool_props->allocType != hipMemAllocationTypePinned) {
+  if (pool_props->allocType != hipMemAllocationTypePinned &&
+      pool_props->allocType != hipMemAllocationTypeManaged) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Make sure the pool creation occurs on a valid device
@@ -326,9 +313,6 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
   }
   auto device = g_devices[pool_props->location.id];
   auto pool = new hip::MemoryPool(device, pool_props);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   *mem_pool = reinterpret_cast<hipMemPool_t>(pool);
   HIP_RETURN(hipSuccess);
 }
@@ -359,6 +343,11 @@ hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool) {
     device->SetCurrentMemoryPool(device->GetDefaultMemoryPool());
   }
 
+  // Same for managed pool
+  if (hip_mem_pool == device->GetCurrentManagedMemoryPool()) {
+    device->SetCurrentManagedMemoryPool(device->GetDefaultManagedMemoryPool());
+  }
+
   hip_mem_pool->release();
 
   HIP_RETURN(hipSuccess);
@@ -372,6 +361,7 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);
@@ -424,11 +414,8 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  auto device = g_devices[0];
+  auto device = hip::getCurrentDevice();
   auto pool = new hip::MemoryPool(device, nullptr, true);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorOutOfMemory);
-  }
   // Note: The interface casts the integer value of file handle under Linux into void*,
   // but compiler may not allow to cast it back. Hence, make a cast with a union...
   union {
@@ -453,7 +440,7 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* p
   }
 
   size_t offset = 0;
-  auto memory = getMemoryObject(ptr, offset);
+  auto memory = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (memory != nullptr) {
     auto id = memory->getUserData().deviceId;
     // Note: export_data must point to 64 bytes of shared memory
@@ -483,9 +470,85 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
     HIP_RETURN(hipErrorOutOfMemory);
   }
   size_t offset = 0;
-  auto memory = getMemoryObject(*ptr, offset);
+  auto memory = getMemoryObject(hip::getCurrentDevice(), *ptr, offset);
   mpool->AddBusyMemory(memory);
   mpool->retain();
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  HIP_INIT_API(hipMemSetMemPool, location, type, pool);
+
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (location == nullptr || pool == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Only device pools can be created
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned && type != hipMemAllocationTypeManaged) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto mem_pool = reinterpret_cast<hip::MemoryPool*>(pool);
+
+  if (!IsMemPoolValid(mem_pool)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Location and type must match pool's location and allocation type
+  if ((location->id != mem_pool->Device()->deviceId()) ||
+      (type != mem_pool->Properties().allocType)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    g_devices[location->id]->SetCurrentMemoryPool(mem_pool);
+  } else {
+    // Pool set for managed allocation type can't be implicitly used for allocation, but it can be
+    // retrieved with hipMemGetMemPool
+    g_devices[location->id]->SetCurrentManagedMemoryPool(mem_pool);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  HIP_INIT_API(hipMemGetMemPool, pool, location, type);
+  if ((pool == nullptr) || (location == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned && type != hipMemAllocationTypeManaged) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    *pool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetCurrentMemoryPool());
+  } else {
+    *pool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetCurrentManagedMemoryPool());
+  }
+
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

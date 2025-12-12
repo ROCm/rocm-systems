@@ -43,25 +43,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/version_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/version_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("RSMI Version Read Test");
-  set_description("The Version Read tests verifies that the RSMI library "
-                                             "version can be read properly.");
+  set_description(
+      "The Version Read tests verifies that the RSMI library "
+      "version can be read properly.");
 }
 
-TestVersionRead::~TestVersionRead(void) {
-}
+TestVersionRead::~TestVersionRead(void) {}
 
 void TestVersionRead::SetUp(void) {
   TestBase::SetUp();
@@ -69,9 +70,7 @@ void TestVersionRead::SetUp(void) {
   return;
 }
 
-void TestVersionRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestVersionRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestVersionRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -86,9 +85,8 @@ void TestVersionRead::Close() {
 
 static const uint32_t kVerMaxStrLen = 80;
 
-static const std::map<uint32_t, const char *>
-  kComponentNameMap = {
-      {RSMI_SW_COMP_DRIVER, "Driver Version"},
+static const std::map<uint32_t, const char*> kComponentNameMap = {
+    {RSMI_SW_COMP_DRIVER, "Driver Version"},
 };
 
 void TestVersionRead::Run(void) {
@@ -104,23 +102,21 @@ void TestVersionRead::Run(void) {
   err = rsmi_version_get(&ver);
   CHK_ERR_ASRT(err)
 
-  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&
-                             ver.patch != 0xFFFFFFFF && ver.build != nullptr);
+  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF && ver.patch != 0xFFFFFFFF &&
+              ver.build != nullptr);
   IF_VERB(STANDARD) {
-    std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
-       ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+    std::cout << "\t**RocM SMI Library version: " << ver.major << "." << ver.minor << "."
+              << ver.patch << " (" << ver.build << ")" << std::endl;
   }
 
   char ver_str[kVerMaxStrLen];
 
   for (uint32_t cmp = RSMI_SW_COMP_FIRST; cmp <= RSMI_SW_COMP_LAST; ++cmp) {
-    err = rsmi_version_str_get(static_cast<rsmi_sw_component_t>(cmp),
-                                                      ver_str, kVerMaxStrLen);
+    err = rsmi_version_str_get(static_cast<rsmi_sw_component_t>(cmp), ver_str, kVerMaxStrLen);
     CHK_ERR_ASRT(err)
 
     IF_VERB(STANDARD) {
-      std::cout << "\t**" << kComponentNameMap.at(cmp) << ": " <<
-                                                         ver_str << std::endl;
+      std::cout << "\t**" << kComponentNameMap.at(cmp) << ": " << ver_str << std::endl;
     }
   }
 }

@@ -16,16 +16,11 @@ subtrees:
     title: Installing HIP
   - file: install/build
     title: Building HIP from source
-  - url: https://rocm.docs.amd.com/projects/install-on-linux/en/${branch}/reference/system-requirements.html
-    title: Linux supported AMD GPUs
-  - url: https://rocm.docs.amd.com/projects/install-on-windows/en/${branch}/reference/system-requirements.html
-    title: Windows supported AMD GPUs
-  - url: https://developer.nvidia.com/cuda-gpus
-    title: NVIDIA supported GPUs
 
 - caption: Programming guide
   entries:
   - file: understand/programming_model
+  - file: understand/performance_optimization
   - file: understand/hardware_implementation
   - file: understand/compilers
   - file: how-to/performance_guidelines
@@ -60,6 +55,7 @@ subtrees:
   - file: how-to/hip_porting_guide
   - file: how-to/hip_rtc
   - file: understand/amd_clr
+  - file: how-to/hipDeviceProperties
 
 - caption: Reference
   entries:
@@ -88,6 +84,7 @@ subtrees:
               - file: reference/hip_runtime_api/modules/memory_management/texture_management_deprecated
               - file: reference/hip_runtime_api/modules/memory_management/surface_object
           - file: reference/hip_runtime_api/modules/peer_to_peer_device_memory_access
+          - file: reference/hip_runtime_api/modules/execution_context_management          
           - file: reference/hip_runtime_api/modules/context_management
           - file: reference/hip_runtime_api/modules/module_management
           - file: reference/hip_runtime_api/modules/occupancy
@@ -102,8 +99,8 @@ subtrees:
       - file: reference/hip_runtime_api/global_defines_enums_structs_files
         subtrees:
         - entries:
-          - file: reference/hip_runtime_api/global_defines_enums_structs_files/global_enum_and_defines
-          - file: reference/hip_runtime_api/global_defines_enums_structs_files/driver_types
+          - file: doxygen/html/group___global_defs
+          - file: doxygen/html/group___driver_types
           - file: doxygen/html/annotated
           - file: doxygen/html/files
   - file: reference/math_api

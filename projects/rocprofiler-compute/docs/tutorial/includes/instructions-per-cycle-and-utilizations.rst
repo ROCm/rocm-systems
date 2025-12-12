@@ -223,7 +223,7 @@ quad-cycles, or :math:`1/16 = 0.0625`, which is almost identical to our IPC
 metric (**11.2.0**). Why then is the Issued IPC metric (**11.2.1**) equal to 1.0?
 
 Instead of simply counting the number of instructions issued and
-dividing by the number of cycles the :doc:`CUs </conceptual/compute-unit>` on
+dividing by the number of cycles the :doc:`CUs </conceptual/cdna/compute-unit>` on
 the accelerator were active (as is done for **11.2.0**), this metric is formulated
 differently, and instead counts the number of
 (non-:ref:`internal <ipc-internal-instructions>`) instructions issued divided

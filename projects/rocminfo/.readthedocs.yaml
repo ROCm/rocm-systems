@@ -4,13 +4,13 @@
 version: 2
 
 sphinx:
-  configuration: docs/conf.py
+  configuration: projects/rocminfo/docs/conf.py
 
 formats: [htmlzip, pdf, epub]
 
 python:
   install:
-  - requirements: docs/sphinx/requirements.txt
+  - requirements: projects/rocminfo/docs/sphinx/requirements.txt
 
 build:
   os: ubuntu-22.04

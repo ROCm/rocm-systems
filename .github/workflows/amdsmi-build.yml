@@ -1,0 +1,259 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI CI.
+#
+# Builds, installs, and tests AMD-SMI against AMD GPUs on self-hosted
+# runners BM/VM, using per-distro containers to cover a matrix of
+# Debian/RPM distros. TheRock CI only runs in containers so it doesn't cover
+# every scenario
+#
+# Aims to follow TheRock CI conventions as closely as possible.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-build.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Single job covering every distro + package format. The build-time logic
+  # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
+  # from /etc/os-release, so the matrix only needs the OS label plus the
+  # artifact format used for upload.
+  build-and-test:
+    name: ${{ matrix.os }}
+    # Privileged self-hosted runner (SYS_MODULE + host /lib/modules): never
+    # auto-run untrusted fork-PR code on it. Mirrors the guard other CI jobs use.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      max-parallel: 10
+      fail-fast: false
+      matrix:
+        include:
+          - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
+          - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
+          - { os: Debian10,    package_format: deb, arch_suffix: _amd64.deb }
+          - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
+          - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
+          - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
+          - { os: RHEL10,      package_format: rpm, arch_suffix: .rpm }
+          - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
+          - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
+    container:
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
+
+      - name: Set Project Directory
+        run: |
+          set -euo pipefail
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Run AMDSMI Build and Install
+        run: |
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: run_amdsmi_build.py not found"
+            exit 1
+          fi
+          echo "Using runner script: $SCRIPT"
+
+          # The script autodetects package manager, format, and distro
+          # quirks (Debian10 archived repos, RHEL10/AlmaLinux8 QA_RPATHS,
+          # AzureLinux3 more_itertools, etc.) from /etc/os-release.
+          python3 "$SCRIPT" \
+            --project-dir "${{ env.PROJECT_DIR }}" \
+            --os-label "${{ matrix.os }}" \
+            --test-results-dir "/tmp/test-results-${{ matrix.os }}"
+
+      # The previous step exits non-zero if any build/install/wheel-verify
+      # stage failed; on failure we dump the per-stage result files for
+      # quick triage in the GitHub Actions log. Full logs are still
+      # uploaded via the test-results artifact below.
+      - name: Dump build/install/wheel result files on failure
+        if: failure()
+        run: |
+          set +e
+          for f in build_result.txt install_result.txt verify_wheel_result.txt; do
+            path="/tmp/test-results-${{ matrix.os }}/$f"
+            if [ -f "$path" ]; then
+              echo "===== $f ====="
+              cat "$path"
+            fi
+          done
+
+      - name: Upload Package Artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amd-smi-lib-${{ matrix.package_format }}-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: |
+            ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local${{ matrix.arch_suffix }}
+            ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: AMDSMI Command Tests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/test-results-${{ matrix.os }}
+          commands=(
+            "amd-smi version"
+            "amd-smi list"
+            "amd-smi static"
+            "amd-smi firmware"
+            "amd-smi ucode"
+            "amd-smi bad-pages"
+            "amd-smi metric"
+            "amd-smi process"
+            "amd-smi topology"
+            "amd-smi monitor"
+            "amd-smi dmon"
+            "amd-smi xgmi"
+            "amd-smi partition"
+          )
+          # Command failures are not hard fails here; the AMDSMI CI
+          # Summary step scans amd-smi_*.log for 'Error code:' / 'Traceback'
+          # / 'AmdSmiException' and surfaces any failures in the summary.
+          for cmd in "${commands[@]}"; do
+            debug_cmd="$cmd --loglevel debug"
+            echo "Running: $debug_cmd"
+            log="/tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log"
+            rc=0
+            eval "$debug_cmd" > "$log" 2>&1 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "Command '$debug_cmd' failed (exit $rc)."
+              cat "$log"
+              echo "Error code: $rc" >> "$log"
+            fi
+          done
+
+      - name: Upload AMDSMI Command Test Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amdsmi-command-tests-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}
+
+      - name: Run AMDSMI, Python, and Example Tests
+        run: |
+          set -euo pipefail
+          RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
+
+          cd /opt/rocm/share/amd_smi/tests
+          source amdsmitst.exclude
+          source detect_asic_filter.sh
+          echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
+          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
+
+          cd /opt/rocm/share/amd_smi/tests/python_unittest
+          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
+          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          if [ -f ./perf_tests.py ]; then
+            ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
+          else
+            echo "perf_tests.py not present; skipping" > "$RESULTS_DIR/perf_test_output.txt"
+          fi
+
+          cd ${{ env.PROJECT_DIR }}/example
+          rm -rf build
+          cmake -B build -DENABLE_ESMI_LIB=OFF
+          make -C build -j $(nproc)
+          cd build
+          ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
+          ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
+
+      - name: AMDSMI Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
+
+      - name: Integration Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results"
+
+      - name: Unit Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Perf Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
+
+      - name: Example DRM Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No DRM example results"
+
+      - name: Example NoDRM Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
+
+      - name: AMDSMI CI Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          SCRIPT=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+          python3 "$SCRIPT" summarize \
+            --results-dir "/tmp/test-results-${{ matrix.os }}" \
+            --os-label "${{ matrix.os }}" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+
+      - name: Uninstall
+        if: always()
+        run: |
+          set -euo pipefail
+          case "${{ matrix.package_format }}" in
+            deb) apt remove -y amd-smi-lib || true ;;
+            rpm)
+              case "${{ matrix.os }}" in
+                SLES) zypper remove -y amd-smi-lib || true ;;
+                *) dnf remove -y amd-smi-lib || true ;;
+              esac
+              ;;
+          esac
+          rm -f /usr/local/bin/amd-smi
+          if [ -d /opt/rocm/share/amd_smi ]; then
+            rm -rf /opt/rocm/share/amd_smi
+          fi

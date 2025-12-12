@@ -162,6 +162,33 @@ class BaseRocR {
     return aql_;
   }
 
+  hsa_amd_metadata_kernel_dispatch_packet_t& metadata_prefetch(void) {
+    return metadata_prefetch_;
+  }
+
+  void set_metadata_prefetch_queue_base(void* base) {
+    metadata_prefetch_queue_base_ = base;
+  }
+
+  void* metadata_prefetch_queue_base() const {
+    return metadata_prefetch_queue_base_;
+  }
+
+  void set_metadata_prefetch_dispatch_ver(uint8_t major, uint8_t minor) {
+    /* major is 3-bits, minor is 5 bits */
+    assert(major <= 7 && minor <= 31);
+    metadata_prefetch_dispatch_version_major_ = major;
+    metadata_prefetch_dispatch_version_minor_ = minor;
+  }
+
+  uint8_t metadata_prefetch_dispatch_version_major() const {
+    return metadata_prefetch_dispatch_version_major_;
+  }
+
+  uint8_t metadata_prefetch_dispatch_version_minor() const {
+    return metadata_prefetch_dispatch_version_minor_;
+  }
+
   void set_num_iteration(int num) {
     num_iteration_ = num;
   }
@@ -200,6 +227,24 @@ class BaseRocR {
   }
   void set_kernarg_buffer(void* buffer) {
     kernarg_buffer_ = buffer;
+  }
+
+  void set_kernarg_preload(uint16_t length, uint16_t offset) {
+    /* https://llvm.org/docs/AMDGPUUsage.html#code-object-v3-kernel-descriptor */
+     // KERNARG_PRELOAD_SPEC_LENGTH is 7-bits
+     // KERNARG_PRELOAD_SPEC_OFFSET is 9-bits
+    assert(length < 128);
+    assert(offset < 512);
+    kernarg_preload_length_ = length;
+    kernarg_preload_offset_ = offset;
+  }
+
+  uint16_t kernarg_preload_length(void) const {
+    return kernarg_preload_length_;
+  }
+
+  uint16_t kernarg_preload_offset(void) const {
+    return kernarg_preload_offset_;
   }
 
   int32_t requires_profile(void) const {
@@ -275,6 +320,9 @@ class BaseRocR {
 
   hsa_kernel_dispatch_packet_t aql_;   ///< Kernel dispatch packet
 
+  ///< Kernel Metadata Prefetch packet
+  hsa_amd_metadata_kernel_dispatch_packet_t metadata_prefetch_;
+
   uint32_t group_segment_size_;   ///< Kernel group seg size
 
   uint32_t kernarg_size_;   ///< Kernarg memory size
@@ -282,6 +330,14 @@ class BaseRocR {
   uint32_t kernarg_align_;   ///< Alignment for kern argument memory
 
   void* kernarg_buffer_;    ///< Unaligned allocated kernel arg. buffer
+
+  ///< The number of dwords from the kernargs segments to preload into user SGPRs
+  /// before kernel execution
+  uint16_t kernarg_preload_length_;
+
+  ///< An offset in dwords into the kernarg segment to begin preloading data into
+  /// user SGPRs
+  uint16_t kernarg_preload_offset_;
 
   hsa_profile_t profile_;   ///< Device profile.
 
@@ -302,6 +358,11 @@ class BaseRocR {
   uint32_t monitor_verbosity_;   ///< How much additional output to produce
 
   PerfTimer hsa_timer_;   ///< Timer to be used for timing parts of test
+
+  void* metadata_prefetch_queue_base_;
+
+  uint8_t metadata_prefetch_dispatch_version_major_; ///< major version: 3 bits
+  uint8_t metadata_prefetch_dispatch_version_minor_; ///< minor version: 5 bits
 };
 
 }  // namespace rocrtst

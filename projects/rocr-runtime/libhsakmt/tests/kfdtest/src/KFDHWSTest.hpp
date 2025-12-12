@@ -34,8 +34,8 @@ class KFDHWSTest : public KFDMultiProcessTest {
  public:
     KFDHWSTest() {}
     ~KFDHWSTest() {}
+    void RunTest(int gpuNode);
 
-    friend void RunTest(KFDTEST_PARAMETERS* pTestParamters);
  protected:
     virtual void SetUp();
     virtual void TearDown();
