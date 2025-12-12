@@ -6,6 +6,7 @@
 # #################################################
 ROCM_PATH=${ROCM_PATH:="/opt/rocm"}
 # Hello
+# Hello again
 # Default values
 build_address_sanitizer=false
 build_bfd=false
