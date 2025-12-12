@@ -111,7 +111,6 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel", "", int, unsigned int
   }
 }
 
-
 /**
  * Test Description
  * ------------------------

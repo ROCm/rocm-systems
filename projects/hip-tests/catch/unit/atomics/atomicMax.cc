@@ -71,7 +71,6 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive", "", int, unsigned int, unsigned lo
   }
 }
 
-
 /**
  * Test Description
  * ------------------------
