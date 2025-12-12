@@ -188,6 +188,21 @@ typedef enum {
 #define MAX_NUMBER_OF_AFIDS_PER_RECORD 12 //!< Maximum AFIDs per CPER record
 
 /**
+ * @brief Maximum size definitions AMDSMI
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#define AMDSMI_MAX_VF_COUNT               32  //!< Maximum number of virtual functions supported
+#define AMDSMI_MAX_DRIVER_NUM              2  //!< Maximum number of drivers supported
+#define AMDSMI_DFC_FW_NUMBER_OF_ENTRIES    9  //!< Number of DFC firmware entries supported
+#define AMDSMI_MAX_WHITE_LIST_ELEMENTS    16  //!< Maximum number of white list elements for device access control
+#define AMDSMI_MAX_BLACK_LIST_ELEMENTS    64  //!< Maximum number of black list elements for device access control
+#define AMDSMI_MAX_UUID_ELEMENTS          16  //!< Maximum number of UUID elements supported
+#define AMDSMI_MAX_TA_WHITE_LIST_ELEMENTS  8  //!< Maximum number of TA (Trusted Application) white list elements
+#define AMDSMI_MAX_ERR_RECORDS            10  //!< Maximum number of error records that can be stored
+#define AMDSMI_MAX_PROFILE_COUNT          16  //!< Maximum number of profiles supported
+
+/**
  * @brief String format
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
@@ -214,6 +229,14 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
 #define AMDSMI_LIB_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
 #define AMDSMI_LIB_VERSION_STRING AMDSMI_LIB_VERSION_EXPAND_PARTS(AMDSMI_LIB_VERSION_MAJOR, AMDSMI_LIB_VERSION_MINOR, AMDSMI_LIB_VERSION_RELEASE)
+
+/**
+ * @brief Maximum size definitions AMDSMI
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+#define AMDSMI_PF_INDEX              (AMDSMI_MAX_VF_COUNT - 1)
+#define AMDSMI_MAX_DRIVER_INFO_RSVD  64
 
 /**
  * @brief GPU Capability info
@@ -899,7 +922,7 @@ typedef struct {
  */
 typedef struct {
     uint8_t num_fw_info;
-    struct fw_info_list_ {
+    struct {
         amdsmi_fw_block_t fw_id;
         uint64_t fw_version;
         uint64_t reserved[2];
@@ -914,17 +937,17 @@ typedef struct {
  */
 typedef struct {
     char  market_name[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t vendor_id;    //!< Use 32 bit to be compatible with other platform.
+    uint32_t vendor_id;                //!< Use 32 bit to be compatible with other platform.
     char vendor_name[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t subvendor_id; //!< The subsystem vendor ID
-    uint64_t device_id;    //!< The device ID of a GPU
-    uint32_t rev_id;       //!< The revision ID of a GPU
+    uint32_t subvendor_id;             //!< The subsystem vendor ID
+    uint64_t device_id;                //!< The device ID of a GPU
+    uint32_t rev_id;                   //!< The revision ID of a GPU
     char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t oam_id;       //!< 0xFFFFFFFF if not supported
+    uint32_t oam_id;                   //!< 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
-    uint32_t subsystem_id; //!> The subsystem ID
-    uint64_t flags;        //!< Chip flags
+    uint32_t subsystem_id;             //!> The subsystem ID
+    uint64_t flags;                    //!< Chip flags
     uint32_t reserved[19];
 } amdsmi_asic_info_t;
 
@@ -1044,19 +1067,32 @@ typedef struct {
 } amdsmi_cpu_util_t;
 
 /**
+ * @brief Link Status
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+    AMDSMI_LINK_STATUS_ENABLED  = 0,
+    AMDSMI_LINK_STATUS_DISABLED = 1,
+    AMDSMI_LINK_STATUS_INACTIVE = 2,
+    AMDSMI_LINK_STATUS_ERROR    = 3
+} amdsmi_link_status_t;
+
+/**
  * @brief Link Metrics
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-    uint32_t num_links;     //!< number of links
+    uint32_t num_links;                   //!< number of links
     struct _links {
-        amdsmi_bdf_t bdf;               //!< bdf of the destination gpu
-        uint32_t bit_rate;              //!< current link speed in Gb/s
-        uint32_t max_bandwidth;         //!< max bandwidth of the link in Gb/s
-        amdsmi_link_type_t link_type;   //!< type of the link
-        uint64_t read;                  //!< total data received for each link in KB
-        uint64_t write;                 //!< total data transfered for each link in KB
+        amdsmi_bdf_t bdf;                 //!< bdf of the destination gpu
+        uint32_t bit_rate;                //!< current link speed in Gb/s
+        uint32_t max_bandwidth;           //!< max bandwidth of the link in Gb/s
+        amdsmi_link_type_t link_type;     //!< type of the link
+        uint64_t read;                    //!< total data received for each link in KB
+        uint64_t write;                   //!< total data transfered for each link in KB
+        amdsmi_link_status_t link_status; //!< HW status of the link
         uint64_t reserved[1];
     } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
     uint64_t reserved[7];
@@ -1104,7 +1140,7 @@ typedef struct {
 /**
  * @brief Power Information
  *
- * Unsupported struct members are set to UINT32_MAX
+ * @note Unsupported struct members are set to UINT32_MAX
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
@@ -1165,12 +1201,12 @@ typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     amdsmi_process_handle_t pid;
     uint64_t mem;  //!< In Bytes
-    struct engine_usage_ {
+    struct {
         uint64_t gfx;  //!< In nano-secs
         uint64_t enc;  //!< In nano-secs
         uint32_t reserved[12];
     } engine_usage; //!< time the process spends using these engines in ns
-    struct memory_usage_ {
+    struct {
         uint64_t gtt_mem;   //!< In Bytes
         uint64_t cpu_mem;   //!< In Bytes
         uint64_t vram_mem;  //!< In Bytes
@@ -1537,6 +1573,42 @@ typedef enum {
     AMDSMI_CPER_NOTIFY_TYPE_PEI  = 0x4214520409A9D5AC,  //!< Platform Error Interface
     AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT = 0x49A341DF69293BC9  //!< Compute Express Link Component Error
 } amdsmi_cper_notify_type_t;
+
+/**
+ * @brief Ras policy v4.0
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint16_t dram_non_critical_region_threshold;    //!< Non-critical region UCE threshold
+    uint16_t dram_critical_region_threshold;        //!< Critical region UCE threshold
+} amdsmi_gpu_ras_policy_v4_0_t;
+
+/**
+ * @brief Ras policy info structure for storing version and different ras
+ *        policy version structures
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#if 1 // jcnii
+typedef struct {
+    uint8_t major_version;
+    uint8_t minor_version;
+    union {
+        amdsmi_gpu_ras_policy_v4_0_t v4_0;
+        uint64_t info[5]; //!< total size of the EEPROM that can be used by the policy is 40bytes
+    } policy_data;
+} amdsmi_gpu_ras_policy_info_t;
+#else
+typedef struct {
+    uint8_t major_version;
+    uint8_t minor_version;
+    union policy_data_ {
+        amdsmi_gpu_ras_policy_v4_0_t v4_0;
+        uint64_t info[5]; //!< total size of the EEPROM that can be used by the policy is 40bytes
+    } policy_data;
+} amdsmi_gpu_ras_policy_info_t;
+#endif
 
 /**
  * @brief The current ECC state
@@ -2076,19 +2148,18 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @platform{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-    struct ras_info_ {
-        uint32_t dram_ecc : 1;
-        uint32_t sram_ecc : 1;
-        uint32_t poisoning : 1;
-        uint32_t rsvd : 29;
-    } ras_info;
-    bool needs_reboot;
     uint32_t ras_eeprom_version;          /**< PARITY error(bit 0), Single Bit correctable (bit1),
                                                Double bit error detection (bit2), Poison (bit 3). */
     uint32_t ecc_correction_schema_flag;  /**< ecc_correction_schema mask.
                                                PARITY error(bit 0), Single Bit correctable (bit1),
                                                Double bit error detection (bit2), Poison (bit 3) */
-    uint32_t reserved[4];
+    struct {
+        uint32_t dram_ecc  : 1;
+        uint32_t sram_ecc  : 1;
+        uint32_t poisoning : 1;
+        uint32_t rsvd     : 29;
+    } ras_info;
+    bool needs_reboot;
 } amdsmi_ras_feature_t;
 
 /**
@@ -2502,6 +2573,23 @@ amdsmi_status_t amdsmi_shut_down(void);
  */
 amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count, amdsmi_socket_handle* socket_handles);
 
+/**
+ *  @brief Returns the index of the given processor handle
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
+ *  @platform{guest_mvf} @platform{guest_windows}
+ *
+ *  @param[in] processor_handle Processor handle for which to query
+ *
+ *  @param[out] processor_index Pointer to integer to store the processor index. Must be
+ *  allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_index_from_processor_handle(amdsmi_processor_handle processor_handle, uint32_t *processor_index);
+
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -2577,6 +2665,37 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len, char *name);
+
+/**
+ *  @brief Get the list of cpu socket handles in the system.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
+ *  The socket handles can be used to query the processor handles in that socket, which
+ *  will be used in other APIs to get processor detail information.
+ *
+ *  @param[in,out] socket_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_cpusocket_handle that
+ *  may be safely written to the memory pointed to by @p socket_handles. This is the
+ *  limit on how many socket handles will be written to @p socket_handles. On return, @p
+ *  socket_count will contain the number of socket handles written to @p socket_handles,
+ *  or the number of socket handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p socket_handles is NULL, as output, @p socket_count will contain
+ *  how many sockets are available to read in the system.
+ *
+ *  @param[in,out] socket_handles A pointer to a block of memory to which the
+ *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many sockets are
+ *  available to read in the system.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
+                amdsmi_cpusocket_handle* socket_handles);
 
 /**
  *  @brief Get respective processor counts from the processor handles
@@ -2761,6 +2880,25 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, processor_type_t* processor_type);
 
 /**
+ *  @brief Returns the processor handle from the given processor index
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
+ *  @platform{guest_mvf} @platform{guest_windows}
+ *
+ *  @param[in] processor_index Function processor_index to query
+ *
+ *  @note On the @platform{host} this function currently supports only AMD GPU indexes.
+ *
+ *  @param[out] processor_handle Reference to the processor handle.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_handle_from_index(uint32_t processor_index, amdsmi_processor_handle *processor_handle);
+
+/**
  *  @brief Get processor handle with the matching bdf.
  *
  *  @ingroup tagProcDiscovery
@@ -2795,6 +2933,38 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf, amdsmi_pr
  */
 amdsmi_status_t
 amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
+
+/**
+ *  @brief Returns BDF of the given device
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] bdf Reference to BDF. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
+
+/**
+ *  @brief Returns the processor handle from the given UUID
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
+ *
+ *  @param[in] uuid Function UUID to query.
+ *
+ *  @param[out] processor_handle Reference to the processor handle.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_processor_handle_from_uuid(const char *uuid, amdsmi_processor_handle *processor_handle);
 
 /**
  *  @brief Returns the UUID of the device
@@ -4969,6 +5139,52 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
 amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processor_handle, amdsmi_ras_feature_t *ras_feature);
 
 /**
+ * @brief Get the RAS policy info for a device
+ *
+ * @ingroup tagRasInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Given a processor handle @p processor_handle, this function will retrieve
+ * the RAS policy information for the device.
+ *
+ * @param[in] processor_handle PF of a processor for which to query
+ *
+ * @param[out] info RAS policy info for the device. Must be allocated by user.
+ *
+ * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_ras_policy_info(amdsmi_processor_handle processor_handle,
+                                               amdsmi_gpu_ras_policy_info_t *info);
+
+/**
+ * @brief Get the bad page threshold for a device
+ *
+ *  @ingroup tagRasInfo
+ *
+ * @platform{gpu_bm_linux}  @platform{host}
+ *
+ * @details Given a processor handle @p processor_handle and a pointer to a uint32_t @p threshold,
+ * this function will retrieve the  bad page threshold value associated
+ * with device @p processor_handle and store the value at location pointed to by
+ * @p threshold.
+ *
+ * @note This function requires the admin/sudo privileges on @platform{gpu_bm_linux}
+ *
+ * @param[in] processor_handle a processor handle
+ *
+ * @param[in,out] threshold pointer to location where  bad page threshold value will
+ * be written.
+ * If this parameter is nullptr, this function will return
+ * ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
+ * arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ * provided arguments.
+ *
+ * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
+
+/**
  * @brief Retrieve CPER entries cached in the driver.
  *
  * The user will pass buffers to hold the CPER data and CPER headers. The library will
@@ -5814,6 +6030,27 @@ amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                  amdsmi_compute_partition_type_t compute_partition);
 
+/**
+ *  @brief Reverts a selected device's compute partition setting back to its
+ *  boot state.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function will attempt to
+ *  revert its compute partition setting back to its boot state.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle processor_handle);
+
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
@@ -5890,6 +6127,30 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
 amdsmi_status_t
 amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
+
+/**
+ *  @brief Reverts a selected device's memory partition setting back to its
+ *  boot state.
+ *
+ *  @ingroup tagMemoryPartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function will attempt to
+ *  revert its current memory partition setting back to its boot state.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_reset_gpu_memory_partition(amdsmi_processor_handle processor_handle);
+
 /**
  *  @brief Returns current gpu memory partition capabilities
  *
@@ -6706,7 +6967,7 @@ amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handl
  *  than a specified TOPS/second.
  *
  *  @param[in] processor_handle Device which to query
-*
+ *
  *  @param[out] data_format1 Pointer to first preferred data format that receives peak performance
  *
  *  @param[out] data_format2 Pointer to second preferred data format that receives peak performance
@@ -6743,7 +7004,7 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
- **/
+ */
 amdsmi_status_t
 amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
                           amdsmi_ptl_data_format_t data_format1,
