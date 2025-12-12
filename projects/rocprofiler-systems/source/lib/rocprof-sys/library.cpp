@@ -540,6 +540,11 @@ rocprofsys_init_tooling_hidden(void)
 
     rocprofsys_init_library_hidden();
 
+    // HOT_FIX: Force early instantiation of instrumentation_bundles to ensure
+    // its grow functor is registered before any threads can be created via
+    // pthread_create gotcha.
+    (void) instrumentation_bundles::get();
+
     ROCPROFSYS_DEBUG_F("\n");
 
     auto _dtor = scope::destructor{ []() {
@@ -899,11 +904,12 @@ rocprofsys_finalize_hidden(void)
 #endif
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
-    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    auto* _bundles = instrumentation_bundles::get();
+    for(size_t i = 0; _bundles && i < thread_info::get_peak_num_threads(); ++i)
     {
-        if(!instrumentation_bundles::get()) continue;
+        if(i >= _bundles->size()) continue;
         const auto& _info = thread_info::get(i, SequentTID);
-        auto&       itr   = instrumentation_bundles::get()->at(i);
+        auto&       itr   = _bundles->at(i);
         while(itr != nullptr && !itr->empty())
         {
             int _lvl = 1;
