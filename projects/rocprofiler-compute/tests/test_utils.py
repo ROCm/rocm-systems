@@ -7968,9 +7968,11 @@ def test_merge_counters_iteration_multiplex():
     assert "Median_Time" in column_headers
     assert len(result) == 3
 
+
 # =============================================================================
 # validate_roofline_csv TESTS
 # =============================================================================
+
 
 def test_validate_roofline_csv_valid():
     """
@@ -8002,8 +8004,7 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = Path(tmpdir) / "roofline.csv"
         csv_path.write_text(
-            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n"
-            "0,1000.0,2000.0,3000.0\n"
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n0,1000.0,2000.0,3000.0\n"
         )
 
         is_valid, error_msg = validate_roofline_csv(tmpdir)
