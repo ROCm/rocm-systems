@@ -173,7 +173,7 @@ __device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr
   switch (gda_provider_) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma(size, laddr, raddr, opcode);
+    mlx5_post_wqe_rma(pe, size, laddr, raddr, opcode);
     return;
 #endif
   default:
@@ -202,7 +202,7 @@ __device__ uint64_t QueuePair::post_wqe_amo(int pe, int32_t size, uintptr_t radd
   switch (gda_provider_) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo(size, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return mlx5_post_wqe_amo(pe, size, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:

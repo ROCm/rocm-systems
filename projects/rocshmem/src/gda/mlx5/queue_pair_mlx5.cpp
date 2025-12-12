@@ -30,307 +30,368 @@
 
 namespace rocshmem {
 
-__device__ void QueuePair::mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter) {
-  *dbrec = byteswap<uint32_t>(my_sq_counter);
-  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+__device__ static inline void amdgcn_s_wakeup() {
+  /* why doesn't __builtin_amdgcn_s_wakeup() exist?
+   * signals other wavefronts in the same workgroup to exit early from s_sleep */
+  asm volatile("s_wakeup");
+}
 
-  __hip_atomic_store(db.ptr, db_val, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
-  uint64_t db_uint = __hip_atomic_load(&db.uint, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  db_uint ^= 0x100;
-  __hip_atomic_store(&db.uint, db_uint, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+__device__ static inline void acquire_lock(uint32_t *lock) {
+  /* acquire lock when 1 (locked) is exchanged with 0 (unlocked)
+   *
+   * the __ATOMIC_ACQUIRE load synchronizes with the __ATOMIC_RELEASE store in release_lock(),
+   * but not with the (implicit) __ATOMIC_RELAXED store part of the exchange
+   * this is fine, since we only need to ensure happens-before between the threads
+   * that released and acquired the lock, not between the different threads contending on the lock
+   * when they (eventually) acquire the lock, *then* they will synchronize */
+  while (__hip_atomic_exchange(lock, 1, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)) {
+    // sleep for 65-128 cycles so we don't hammer the memory
+    __builtin_amdgcn_s_sleep(2);
+  }
+}
+
+__device__ static inline void release_lock(uint32_t *lock) {
+  // release lock by storing 0 (unlocked)
+  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+#if 0
+  // wake up any other sleeping waves (in the same workgroup)
+  amdgcn_s_wakeup();
+#endif
+}
+
+__device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uint8_t lane_id) {
+  return sq.tail + lane_id;
+}
+
+__device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe) {
+#if 0
+  /* yes, the HCA is big-endian, so this looks wrong
+   * however, these are technically two 32-bit fields and they are already stored as BE
+   * so storing db_val from as LE will store the (BE swapped) opmod_idx_opcode field first
+   * and then the (BE swapped) qpn_ds field second, which is what we want */
+  uint64_t db_val = (static_cast<uint64_t>(wqe.ctrl.qpn_ds) << 32) |
+                     static_cast<uint64_t>(wqe.ctrl.opmod_idx_opcode);
+#endif
+  //gda_mlx5_db_register db_val{wqe.ctrl.opmod_idx_opcode, wqe.ctrl.qpn_ds};
+  gda_mlx5_db_register db_val{wqe};
+  __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
+
+#if 0
+  // get pointer to doorbell register in current BlueFlame buffer
+  uint64_t* db = __hip_atomic_load(&mlx5_sq.db, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+  do {
+    // swap BlueFlame buffers: each buffer is 256B, so the pointers are offset by 0x100
+    uintptr_t db_uintptr = reinterpret_cast<uintptr_t>(db);
+    db_uintptr ^= 0x100UL;
+    uint64_t* db_next = reinterpret_cast<uint64_t*>(db_uintptr);
+    // I don't think this cmpxch can ever fail since we hold the SQ lock, but let's be safe
+  } while (!__hip_atomic_compare_exchange_weak(&mlx5_db, &mlx5_sq.db, db_next,
+                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
+                                               __HIP_MEMORY_SCOPE_AGENT));
+#endif
+#if 0
+  // get pointer to doorbell register in current BlueFlame buffer
+  uint64_t* db = mlx5_sq.db;
+  // swap BlueFlame buffers: each buffer is 256B, so the pointers are offset by 0x100
+  mlx5_sq.db = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(db) ^ 0x100UL);
+#endif
+  gda_mlx5_bf_buffer* bf = mlx5_sq.swap_bf_buffer();
+
+  // store sq_wqebb_counter to doorbell record
+  __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  // ring doorbell by storing first 8B of WQE to the doorbell register
+#if 0
+  __hip_atomic_store(db, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#endif
+  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
+__device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
+  const mlx5_err_cqe* err_cqe = reinterpret_cast<const mlx5_err_cqe*>(cqe);
+  const char* cqe_syndrome_string = "";
+  uint8_t syndrome = 0x0;
+
+  uint8_t op_own = __hip_atomic_load(&cqe->op_own, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+  uint8_t owner = op_own & MLX5_CQE_OWNER_MASK;
+  uint8_t opcode = op_own >> 4;
+
+  switch (opcode) {
+  case MLX5_CQE_REQ:
+    // everything okay
+    return;
+  case MLX5_CQE_RESP_WR_IMM:
+  case MLX5_CQE_RESP_SEND:
+  case MLX5_CQE_RESP_SEND_IMM:
+  case MLX5_CQE_RESP_SEND_INV:
+    // (valid) responder completion?!
+    printf("CQ: unexpected responder completion (%x)\n", opcode);
+    break;
+  case MLX5_CQE_RESIZE_CQ:
+  case MLX5_CQE_NO_PACKET:
+    printf("CQ: unexpected completion type (%x)\n", opcode);
+    break;
+  case MLX5_CQE_SIG_ERR:
+    printf("CQ: unexpected signature error (%x)\n", opcode);
+    break;
+  case MLX5_CQE_REQ_ERR:
+    syndrome = __hip_atomic_load(&err_cqe->syndrome, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    switch (syndrome) {
+    case MLX5_CQE_SYNDROME_LOCAL_LENGTH_ERR:
+      cqe_syndrome_string = "LOCAL_LENGTH_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_LOCAL_QP_OP_ERR:
+      cqe_syndrome_string = "LOCAL_QP_OP_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_LOCAL_PROT_ERR:
+      cqe_syndrome_string = "LOCAL_PROT_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_WR_FLUSH_ERR:
+      cqe_syndrome_string = "WR_FLUSH_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_MW_BIND_ERR:
+      cqe_syndrome_string = "MW_BIND_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_BAD_RESP_ERR:
+      cqe_syndrome_string = "BAD_RESP_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_LOCAL_ACCESS_ERR:
+      cqe_syndrome_string = "LOCAL_ACCESS_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_REMOTE_INVAL_REQ_ERR:
+      cqe_syndrome_string = "REMOTE_INVAL_REQ_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_REMOTE_ACCESS_ERR:
+      cqe_syndrome_string = "REMOTE_ACCESS_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_REMOTE_OP_ERR:
+      cqe_syndrome_string = "REMOTE_OP_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR:
+      cqe_syndrome_string = "TRANSPORT_RETRY_EXC_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_RNR_RETRY_EXC_ERR:
+      cqe_syndrome_string = "RNR_RETRY_EXC_ERR";
+      break;
+    case MLX5_CQE_SYNDROME_REMOTE_ABORTED_ERR:
+      cqe_syndrome_string = "REMOTE_ABORTED_ERR";
+      break;
+    default:
+      cqe_syndrome_string = "unknown syndrome type";
+      break;
+    }
+    printf("CQ requester error: %s (%x)\n", cqe_syndrome_string, syndrome);
+    break;
+  case MLX5_CQE_RESP_ERR:
+    printf("CQ: unexpected responder error (%x)\n", opcode);
+    break;
+  case MLX5_CQE_INVALID:
+    printf("CQ: invalid completion (%x), check owner bit = %u?\n", opcode, owner);
+    break;
+  default:
+    printf("CQ: unknown completion type (%x)\n", opcode);
+    break;
+  }
+  abort();
+}
+
+__device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots) {
+  uint16_t consumed_slots;
+  uint16_t available_slots;
+
+  uint16_t sq_depth = mlx5_sq.depth;
+
+  // CQ lock (possibly) not needed with CQ collapsing
+  //acquire_lock(&mlx5_cq.lock);
+
+  do {
+    struct mlx5_cqe64* cqe = mlx5_cq.buf;
+
+#ifdef DEBUG
+    mlx5_check_cqe_error(cqe);
+#endif
+
+    /* Update the SQ head
+     * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
+    __be16 be_wqe_counter = __hip_atomic_load(&cqe->wqe_counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    uint16_t sq_head = endian::from_be(be_wqe_counter);
+    mlx5_sq.head = sq_head;
+
+    /* do we not need to hold the SQ lock here?
+     * what happens if one wavefront is in quiet() and another is is post_wqe_rma()?
+     * sq.tail can only get updated by another wavefront while this one is holding cq.lock if:
+     *   1. other thread was already holding sq.lock, and
+     *   2. other thread had already drained CQ until it had enough WQEs for the active lanes, and
+     *   3. other thread had not yet finished writing to the SQ and ringing the doorbell
+     * I think this is fine as long as post_wqe_rma stores to sq.tail before the doorbell ring
+     * maybe needs SEQ_CST?
+     *
+     * wavefront0       | wavefront1                   | HCA
+     * -----------------|------------------------------|-----------------------------
+     * store(sq.tail)   |                              |
+     * atomic_store(db) |                              |
+     *                  |                              | atomic_load(db)
+     *                  |                              | process WQ
+     *                  |                              | atomic_store(cqe.wqe_counter)
+     *                  | atomic_load(cqe.wqe_counter) |
+     *                  | load(sq.tail) [atomic?]      |
+     */
+    uint16_t sq_tail = __hip_atomic_load(&mlx5_sq.tail, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+
+    /* sq_tail > sq_head, except when sq_tail has wrapped around 0xFFFF and sq_head hasn't
+     * but sq_tail - sq_head is correct even when it wraps around
+     * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
+     * but in that case available_slots will be very large, > requested_available_slots,
+     * and the loop will continue for another iteration */
+    consumed_slots  = sq_tail - sq_head;
+    available_slots = sq_depth - consumed_slots;
+    // can put in __builtin_amdgcn_s_sleep(1) when fail?
+  } while (available_slots < requested_available_slots);
+
+  //release_lock(&mlx5_cq.lock);
 }
 
 __device__ void QueuePair::mlx5_quiet() {
-  constexpr size_t BROADCAST_SIZE = 1024 / WF_SIZE;
-  __shared__ uint64_t wqe_broadcast[BROADCAST_SIZE];
-  uint8_t wavefront_id = get_flat_block_id() / WF_SIZE;
-  wqe_broadcast[wavefront_id] = 0;
-
-  uint64_t activemask = get_active_lane_mask();
-  uint8_t num_active_lanes = get_active_lane_count(activemask);
-  uint8_t my_logical_lane_id = get_active_lane_num(activemask);
-  bool is_leader{my_logical_lane_id == 0};
-  const uint64_t leader_phys_lane_id = get_first_active_lane_id(activemask);
-
-  while (true) {
-    bool done{false};
-    uint64_t quiet_amount{0};
-    uint64_t wave_cq_consumer{0};
-    while (!done) {
-      uint64_t active = __hip_atomic_load(&quiet_active, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      uint64_t posted = __hip_atomic_load(&quiet_posted, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      uint64_t completed = __hip_atomic_load(&quiet_completed, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      if (!(posted - completed)) {
-        return;
-      }
-      int64_t quiet_val = posted - active;
-      if (quiet_val <= 0) {
-        continue;
-      }
-      quiet_amount = min(num_active_lanes, quiet_val);
-      if (is_leader) {
-        done = __hip_atomic_compare_exchange_strong(&quiet_active, &active, active + quiet_amount, __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        if (done) {
-          wave_cq_consumer = __hip_atomic_fetch_add(&cq_consumer, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-        }
-      }
-      done = __shfl(done, leader_phys_lane_id);
-    }
-    wave_cq_consumer = __shfl(wave_cq_consumer, leader_phys_lane_id);
-    uint64_t my_cq_consumer = wave_cq_consumer + my_logical_lane_id;
-    uint64_t my_cq_index = my_cq_consumer % cq_cnt;
-
-    if (my_logical_lane_id < quiet_amount) {
-      volatile mlx5_cqe64 *cqe_entry = &cq_buf[my_cq_index];
-      uint16_t be_wqe_counter{0};
-      uint8_t op_own{0};
-      uint8_t owner_bit = (my_cq_consumer >> cq_log_cnt) & 1;
-      bool vote_failed{true};
-
-      while (vote_failed) {
-        op_own = *((volatile uint8_t*)&cqe_entry->op_own);
-        bool my_ownership_vote = (op_own & 1) == owner_bit;
-        bool my_opcode_vote = (op_own >> 4) != MLX5_CQE_INVALID;
-        uint64_t votes = __ballot(my_ownership_vote && my_opcode_vote);
-        vote_failed = __popcll(votes) < quiet_amount;
-        if (!vote_failed) {
-          be_wqe_counter = *((volatile uint16_t*)&cqe_entry->wqe_counter);
-        }
-      }
-
-      uint16_t wqe_counter = byteswap<uint16_t>(be_wqe_counter);
-      uint64_t wqe_id =  outstanding_wqes[wqe_counter];
-      __hip_atomic_fetch_max(&wqe_broadcast[wavefront_id], wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP);
-      uint8_t mlx5_invld_bits = MLX5_CQE_INVALID << 4 | owner_bit;
-      *((volatile uint8_t*)&cqe_entry->op_own) = mlx5_invld_bits;
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    }
-    if (is_leader) {
-      uint64_t completed {0};
-      do {
-        completed = __hip_atomic_load(&quiet_completed, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      } while (completed != wave_cq_consumer);
-
-      *cq_dbrec = byteswap<uint32_t>(wave_cq_consumer + quiet_amount);
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-      uint64_t sunk_wqe_id = wqe_broadcast[wavefront_id];
-      __hip_atomic_fetch_max(&sq_sunk, sunk_wqe_id, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __hip_atomic_fetch_add(&quiet_completed, quiet_amount, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-    }
+  if (is_first_active_lane()) {
+    mlx5_poll_cq_until(mlx5_sq.depth);
   }
 }
 
-__device__ __forceinline__ void QueuePair::mlx5_wait_for_free_sq_slots(
-    uint64_t wave_sq_counter, uint8_t num_active_lanes) {
-  while (true) {
-    uint64_t db_touched = __hip_atomic_load(&sq_db_touched,
-                          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-    uint64_t sunk       = __hip_atomic_load(&sq_sunk,
-                          __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-    int64_t num_active_sq_entries =
-        static_cast<int64_t>(db_touched) -
-        static_cast<int64_t>(sunk);
-
-    if (num_active_sq_entries < 0) {
-      continue;
-    }
-
-    uint64_t num_free_entries =
-        min(sq_wqe_cnt, cq_cnt) -
-        static_cast<uint64_t>(num_active_sq_entries);
-
-    uint64_t num_entries_until_wave_last_entry =
-        wave_sq_counter + num_active_lanes - db_touched;
-
-    if (num_free_entries > num_entries_until_wave_last_entry) {
-      break;
-    }
-
-    mlx5_quiet();
-  }
+__device__ void QueuePair::mlx5_quiet_single() {
+  mlx5_poll_cq_until(mlx5_sq.depth);
 }
 
-__device__ __forceinline__ void QueuePair::mlx5_build_rma_wqe(
-    uint64_t my_sq_counter, uint64_t my_sq_index, uintptr_t laddr,
-    uintptr_t raddr, int32_t size, uint8_t opcode) {
-  outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
+// called with all active lanes communicating with the same PE, i.e. using the same SQ
+__device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+  uint64_t active_lane_mask;
+  uint8_t active_lane_count;
+  uint8_t active_lane_id;
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
+  active_lane_mask  = get_active_lane_mask();
+  active_lane_count = get_active_lane_count(active_lane_mask);
+  active_lane_id    = get_active_lane_num(active_lane_mask);
 
-  seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
-                            MLX5_WQE_CTRL_CQ_UPDATE, 3, 0, 0);
-  seg_build.update_raddr_seg(raddr, rkey);
+  /* since the leader needs to write the first 8 bytes of the LAST WQE to the doorbell register,
+   * it's easier if the LAST thread is the leader; does this have any performance implications? */
+  bool is_leader = (active_lane_id == active_lane_count - 1);
 
-  if (size <= inline_threshold && opcode == gda_op_rdma_write) {
-    seg_build.update_inl_data_seg(reinterpret_cast<const void*>(laddr), size);
-  } else {
-    seg_build.update_data_seg(laddr, size, lkey);
-  }
-}
-
-__device__ __forceinline__ void QueuePair::mlx5_wait_for_db_touched_eq(
-    uint64_t target_sq_counter) {
-  uint64_t db_touched {0};
-  do {
-    db_touched = __hip_atomic_load(&sq_db_touched,
-                 __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  } while (db_touched != target_sq_counter);
-}
-
-__device__ __forceinline__ void QueuePair::mlx5_ring_doorbell(
-    uint64_t wave_sq_counter, uint8_t num_wqes) {
-  mlx5_wait_for_db_touched_eq(wave_sq_counter);
-
-  uint8_t *base_ptr = reinterpret_cast<uint8_t*>(sq_buf);
-  uint64_t* ctrl_wqe_8B_for_db =
-      reinterpret_cast<uint64_t*>(&base_ptr[64 *
-        ((wave_sq_counter + num_wqes - 1) % sq_wqe_cnt)]);
-
-  mlx5_ring_doorbell(*ctrl_wqe_8B_for_db, wave_sq_counter + num_wqes);
-
-  __hip_atomic_fetch_add(&quiet_posted, num_wqes,
-    __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-  __hip_atomic_store(&sq_db_touched, wave_sq_counter + num_wqes,
-    __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-}
-
-__device__ void QueuePair::mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode) {
-  uint64_t activemask          = get_active_lane_mask();
-  uint8_t  num_active_lanes    = get_active_lane_count(activemask);
-  uint8_t  my_logical_lane_id  = get_active_lane_num(activemask);
-  bool     is_leader           = {my_logical_lane_id == 0};
-  uint64_t leader_phys_lane_id = get_first_active_lane_id(activemask);
-
-  uint8_t  num_wqes        = num_active_lanes;
-  uint64_t wave_sq_counter = 0;
-  uint64_t my_sq_counter   = 0;
-  uint64_t my_sq_index     = 0;
-
-  // 1. Leader allocates SQ entries for the whole wave
   if (is_leader) {
-    wave_sq_counter = __hip_atomic_fetch_add(&sq_posted, num_wqes,
-                      __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
+    // get SQ lock
+    acquire_lock(&mlx5_sq.lock);
+    // poll until we have enough WQEBB for all active lanes
+    mlx5_poll_cq_until(active_lane_count);
   }
-  wave_sq_counter = __shfl(wave_sq_counter, leader_phys_lane_id);
-  my_sq_counter   = wave_sq_counter + my_logical_lane_id;
-  my_sq_index     = my_sq_counter % sq_wqe_cnt;
 
-  // 2. Wait for SQ space for the whole wave
-  mlx5_wait_for_free_sq_slots(wave_sq_counter, num_active_lanes);
+  // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
+  uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, active_lane_id);
+  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
-  // 3. Build the WQE for this lane
-  mlx5_build_rma_wqe(my_sq_counter, my_sq_index, laddr, raddr, size, opcode);
+  // construct the WQE on the stack
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
 
-  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
 
-  // 4. Leader rings doorbell for the wave
+  // copy to SQ
+  mlx5_sq.buf[sq_idx] = wqe;
+
   if (is_leader) {
-    mlx5_ring_doorbell(wave_sq_counter, num_wqes);
+    // increment tail counter
+    mlx5_sq.tail += active_lane_count;
+    // we are the last thread in the wavefront, so we have the last WQE posted
+    mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+    // release SQ lock
+    release_lock(&mlx5_sq.lock);
   }
 }
 
-__device__ __forceinline__ uint64_t*
-QueuePair::mlx5_allocate_wave_fetching_atomic_buffer(
-    uint64_t wave_sq_counter, bool is_leader,
-    uint64_t leader_phys_lane_id) {
-  uint64_t* wave_fetch_atomic{nullptr};
-  if (is_leader) {
-    mlx5_wait_for_db_touched_eq(wave_sq_counter);
+// called with all active lanes communicating with different PEs, i.e. using different SQs
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uintptr_t laddr,
+                                                    uintptr_t raddr, uint8_t opcode) {
+  // get SQ lock
+  acquire_lock(&mlx5_sq.lock);
+  // poll until we have enough space for at least one WQE
+  mlx5_poll_cq_until(1);
 
-    auto res = fetching_atomic_freelist->pop_front();
-    while (!res.success) {
-      res = fetching_atomic_freelist->pop_front();
-    }
-    wave_fetch_atomic = res.value;
-  }
-  wave_fetch_atomic = (uint64_t*)__shfl((uint64_t)wave_fetch_atomic,
-                        leader_phys_lane_id);
-  return wave_fetch_atomic;
+  // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
+  uint16_t wqe_idx = mlx5_sq.tail;
+  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
+
+  // construct the WQE on the stack
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+                   raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
+
+  // copy to SQ
+  mlx5_sq.buf[sq_idx] = wqe;
+
+  // increment tail counter
+  mlx5_sq.tail += 1;
+  // ring doorbell for this WQE (note: need to check this for correctness)
+  mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+  // release SQ lock
+  release_lock(&mlx5_sq.lock);
 }
 
-__device__ __forceinline__ void QueuePair::mlx5_build_amo_wqe(
-    uint64_t my_sq_counter, uint64_t my_sq_index, uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
-    uint64_t *wave_fetch_atomic) {
-  outstanding_wqes[my_sq_counter % OUTSTANDING_TABLE_SIZE] = my_sq_counter;
+// called with all active lanes communicating with the same PE, i.e. using the same SQ
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr_t raddr, uint8_t opcode,
+                                                 int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+  uint64_t active_lane_mask;
+  uint8_t active_lane_count;
+  uint8_t active_lane_id;
 
-  SegmentBuilder seg_build(my_sq_index, sq_buf);
-  seg_build.update_ctrl_seg(my_sq_counter, opcode, 0, qp_num,
-                            MLX5_WQE_CTRL_CQ_UPDATE, 4, 0, 0);
-  seg_build.update_raddr_seg(raddr, rkey);
-  seg_build.update_atomic_seg(atomic_data, atomic_cmp);
+  active_lane_mask  = get_active_lane_mask();
+  active_lane_count = get_active_lane_count(active_lane_mask);
+  active_lane_id    = get_active_lane_num(active_lane_mask);
 
+  /* since the leader needs to write the first 8 bytes of the LAST WQE to the doorbell register,
+   * it's easier if the LAST thread is the leader; does this have any performance implications? */
+  bool is_leader = (active_lane_id == active_lane_count - 1);
+
+  if (is_leader) {
+    // get SQ lock
+    acquire_lock(&mlx5_sq.lock);
+    // poll until we have enough WQEBB for all active lanes
+    mlx5_poll_cq_until(active_lane_count);
+  }
+
+  uint64_t* atomic_laddr = nonfetching_atomic;
+  uint32_t atomic_lkey = nonfetching_atomic_lkey;
   if (fetching) {
-    seg_build.update_data_seg(reinterpret_cast<uintptr_t>(wave_fetch_atomic), 8, fetching_atomic_lkey);
-  } else {
-    seg_build.update_data_seg(reinterpret_cast<uintptr_t>(nonfetching_atomic), 8, nonfetching_atomic_lkey);
+    uint32_t atomic_idx = (fetching_atomic_idx + active_lane_id) % FETCHING_ATOMIC_CNT;
+    atomic_laddr = &fetching_atomic[atomic_idx];
+    atomic_lkey = fetching_atomic_lkey;
   }
-}
 
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo(int32_t size,
-    uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
-    int64_t atomic_cmp, bool fetching) {
-  uint64_t activemask          = get_active_lane_mask();
-  uint8_t  num_active_lanes    = get_active_lane_count(activemask);
-  uint8_t  my_logical_lane_id  = get_active_lane_num(activemask);
-  bool     is_leader           = {my_logical_lane_id == 0};
-  uint64_t leader_phys_lane_id = get_first_active_lane_id(activemask);
+  // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
+  uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, active_lane_id);
+  uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
-  uint8_t  num_wqes        = num_active_lanes;
-  uint64_t wave_sq_counter = 0;
-  uint64_t my_sq_counter   = 0;
-  uint64_t my_sq_index     = 0;
+  // construct the WQE on the stack
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+                   raddr, rkey,
+                   static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
+                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
-  // 1. Leader allocates SQ entries for the whole wave
+  // copy to SQ
+  mlx5_sq.buf[sq_idx] = wqe;
+
   if (is_leader) {
-    wave_sq_counter = __hip_atomic_fetch_add(&sq_posted, num_wqes,
-                      __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  }
-  wave_sq_counter = __shfl(wave_sq_counter, leader_phys_lane_id);
-  my_sq_counter   = wave_sq_counter + my_logical_lane_id;
-  my_sq_index     = my_sq_counter % sq_wqe_cnt;
-
-  // 2. Wait for SQ space for the whole wave
-  mlx5_wait_for_free_sq_slots(wave_sq_counter, num_active_lanes);
-
-  uint64_t* wave_fetch_atomic{nullptr};
-  if (fetching) {
-    wave_fetch_atomic = mlx5_allocate_wave_fetching_atomic_buffer(
-        wave_sq_counter,
-        is_leader,
-        leader_phys_lane_id);
+    // increment tail and fetching atomic counters
+    mlx5_sq.tail += active_lane_count;
+    if (fetching) {
+      fetching_atomic_idx += active_lane_count;
+    }
+    // we are the last thread in the wavefront, so we have the last WQE posted
+    mlx5_ring_doorbell(mlx5_sq.tail, wqe);
+    // release SQ lock
+    release_lock(&mlx5_sq.lock);
   }
 
-  // 3. Build the WQE for this lane
-  mlx5_build_amo_wqe(my_sq_counter, my_sq_index, raddr, opcode,
-                     atomic_data, atomic_cmp, fetching,
-                     wave_fetch_atomic + my_logical_lane_id);
-
-  __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-  // 4. Leader rings doorbell for the wave
-  if (is_leader) {
-    mlx5_ring_doorbell(wave_sq_counter, num_wqes);
-  }
-
-  // 5. Fetch result if requested
-  uint64_t ret{0};
   if (fetching) {
     mlx5_quiet();
-    ret = wave_fetch_atomic[my_logical_lane_id];
-
-    __atomic_signal_fence(__ATOMIC_SEQ_CST);
-
-    if (is_leader) {
-      fetching_atomic_freelist->push_back(wave_fetch_atomic);
-    }
   }
-  return ret;
+
+  return fetching ? *atomic_laddr : 0;
 }
 
 }  // namespace rocshmem
