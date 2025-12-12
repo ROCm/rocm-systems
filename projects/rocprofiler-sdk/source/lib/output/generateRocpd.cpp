@@ -549,6 +549,89 @@ GENERATE_FIELD_ACCESSOR(extract_allocation_size_field, allocation_size, uint64_t
 GENERATE_FIELD_ACCESSOR(extract_address_field, address, rocprofiler_address_t, 0)
 }  // namespace
 
+namespace
+{
+using kfd_pmc_event_data_t = struct kfd_pmc_event_data
+{
+    rocprofiler_buffer_tracing_kind_t kind;
+    std::string_view                  name;
+    uint32_t                          tid;
+    rocprofiler_timestamp_t           start;
+    rocprofiler_timestamp_t           end;
+    uint64_t                          value;
+    std::string                       json_data = {};
+};
+
+// trait mapping from KFD record type to its corresponding rocpd type
+template <typename T>
+struct json_wrapper_for;
+
+#define GENERATE_KFD_TRAIT_MAPPING(KFD_TYPE)                                                       \
+    template <>                                                                                    \
+    struct json_wrapper_for<rocprofiler_buffer_tracing_##KFD_TYPE>                                 \
+    {                                                                                              \
+        using type = rocpd_##KFD_TYPE;                                                             \
+    };
+
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_page_migrate_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_page_fault_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_queue_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_unmap_from_gpu_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_dropped_events_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_page_migrate_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_page_fault_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_queue_record_t)
+
+template <typename T>
+using json_wrapper_t = typename json_wrapper_for<T>::type;
+
+template <typename RecordT>
+static void
+fill_kfd_common(kfd_pmc_event_data_t& data, const metadata& tool_metadata, const RecordT& record)
+{
+    data.kind = record.kind;
+    data.name = tool_metadata.buffer_names.at(data.kind, record.operation);
+    data.tid  = record.pid;  // KFD attributes all events to the lead thread
+
+    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
+        cereal::save(ar, json_wrapper_t<RecordT>(record, tool_metadata));
+    });
+}
+
+// instantaneous events have single timestamp
+template <typename RecordT>
+void
+fill_kfd_common_event(kfd_pmc_event_data_t& data,
+                      const metadata&       tool_metadata,
+                      const RecordT&        record)
+{
+    fill_kfd_common(data, tool_metadata, record);
+    data.start = record.timestamp;
+    data.end   = record.timestamp;
+}
+
+// paired events have start and end timestamps
+template <typename RecordT>
+void
+fill_kfd_common_paired(kfd_pmc_event_data_t& data,
+                       const metadata&       tool_metadata,
+                       const RecordT&        record)
+{
+    fill_kfd_common(data, tool_metadata, record);
+    data.start = record.start_timestamp;
+    data.end   = record.end_timestamp;
+}
+
+// helper to build an overload set of lambdas
+template <typename... Ts>
+struct overloaded : Ts...
+{
+    using Ts::operator()...;
+};
+template <typename... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
+}  // namespace
 void
 write_rocpd(
     const output_config&                                                    cfg,
@@ -728,27 +811,28 @@ write_rocpd(
             return val.handle;
         };
 
-    static auto get_thread_id =
-        [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val) {
-            if(thread_ids.count(val) == 0)
-            {
-                thread_ids.emplace(val);
+    static auto get_thread_id = [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](
+                                    rocprofiler_thread_id_t val, std::string track_name = {}) {
+        if(thread_ids.count(val) == 0)
+        {
+            thread_ids.emplace(val);
 
-                auto stmt =
-                    get_insert_statement("rocpd_info_thread{{uuid}}",
-                                         {
-                                             insert_value("id", val),
-                                             insert_value("nid", node_id),
-                                             insert_value("ppid", tool_metadata.parent_process_id),
-                                             insert_value("pid", this_pid),
-                                             insert_value("tid", val),
-                                         });
+            auto stmt =
+                get_insert_statement("rocpd_info_thread{{uuid}}",
+                                     {
+                                         insert_value("id", val),
+                                         insert_value("nid", node_id),
+                                         insert_value("ppid", tool_metadata.parent_process_id),
+                                         insert_value("pid", this_pid),
+                                         insert_value("tid", val),
+                                         insert_value("name", track_name),
+                                     });
 
-                execute_raw_sql_statements(conn, stmt);
-            }
+            execute_raw_sql_statements(conn, stmt);
+        }
 
-            return val;
-        };
+        return val;
+    };
 
     // use this to lookup indexes of strings
     auto string_entries = _metadata.get_string_entries();
@@ -1493,171 +1577,55 @@ write_rocpd(
             auto _deferred = sql::deferred_transaction{conn};
             for(const auto& itr : _gen.get(pitr))
             {
-                using kfd_pmc_event_data_t = struct kfd_pmc_event_data
-                {
-                    rocprofiler_buffer_tracing_kind_t kind;
-                    std::string_view                  name;
-                    uint32_t                          tid;
-                    rocprofiler_timestamp_t           start;
-                    rocprofiler_timestamp_t           end;
-                    uint64_t                          value;
-                    std::string                       json_data = {};
-                };
+                auto data = kfd_pmc_event_data_t{};
 
-                auto data  = kfd_pmc_event_data_t{};
-                data.value = 1;  // default value
-
-                if(std::holds_alternative<
-                       rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>(itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>(
-                            itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.timestamp;
-                    data.end   = record.timestamp;
-                    data.value = record.end_address.value - record.start_address.value;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar,
-                                     rocpd_kfd_event_page_migrate_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<
-                            rocprofiler_buffer_tracing_kfd_event_page_fault_record_t>(itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_event_page_fault_record_t>(
-                            itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.timestamp;
-                    data.end   = record.timestamp;
-                    data.value = record.address.value;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar,
-                                     rocpd_kfd_event_page_fault_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_event_queue_record_t>(
-                            itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_event_queue_record_t>(itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.timestamp;
-                    data.end   = record.timestamp;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_event_queue_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<
-                            rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t>(
-                            itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t>(
-                            itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.timestamp;
-                    data.end   = record.timestamp;
-                    data.value = record.end_address.value - record.start_address.value;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(
-                            ar, rocpd_kfd_event_unmap_from_gpu_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<
-                            rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t>(
-                            itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t>(
-                            itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.timestamp;
-                    data.end   = record.timestamp;
-                    data.value = record.count;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(
-                            ar, rocpd_kfd_event_dropped_events_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<
-                            rocprofiler_buffer_tracing_kfd_page_migrate_record_t>(itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_page_migrate_record_t>(itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.start_timestamp;
-                    data.end   = record.end_timestamp;
-                    data.value = record.end_address.value - record.start_address.value;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_page_migrate_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_page_fault_record_t>(
-                            itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_page_fault_record_t>(itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.start_timestamp;
-                    data.end   = record.end_timestamp;
-                    data.value = record.address.value;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_page_fault_record_t(record, tool_metadata));
-                    });
-                }
-                else if(std::holds_alternative<rocprofiler_buffer_tracing_kfd_queue_record_t>(
-                            itr.record))
-                {
-                    const auto& record =
-                        std::get<rocprofiler_buffer_tracing_kfd_queue_record_t>(itr.record);
-
-                    data.kind  = record.kind;
-                    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
-                    data.tid   = record.pid;  // KFD attributes all events to the lead thread
-                    data.start = record.start_timestamp;
-                    data.end   = record.end_timestamp;
-
-                    data.json_data = get_json_string([&record, &tool_metadata](auto& ar) {
-                        cereal::save(ar, rocpd_kfd_queue_record_t(record, tool_metadata));
-                    });
-                }
-                else
-                {
-                    ROCP_FATAL << "unknown variant in tool_buffer_tracing_kfd_record_t";
-                }
+                std::visit(
+                    overloaded{
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t record) {
+                            fill_kfd_common_event(data, tool_metadata, record);
+                            data.value = record.end_address.value - record.start_address.value;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_event_page_fault_record_t record) {
+                            fill_kfd_common_event(data, tool_metadata, record);
+                            data.value = record.address.value;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_event_queue_record_t record) {
+                            fill_kfd_common_event(data, tool_metadata, record);
+                            data.value = 1;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t record) {
+                            fill_kfd_common_event(data, tool_metadata, record);
+                            data.value = record.end_address.value - record.start_address.value;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t record) {
+                            fill_kfd_common_event(data, tool_metadata, record);
+                            data.value = record.count;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_page_migrate_record_t record) {
+                            fill_kfd_common_paired(data, tool_metadata, record);
+                            data.value = record.end_address.value - record.start_address.value;
+                        },
+                        [&data, &tool_metadata](
+                            rocprofiler_buffer_tracing_kfd_page_fault_record_t record) {
+                            fill_kfd_common_paired(data, tool_metadata, record);
+                            data.value = record.address.value;
+                        },
+                        [&data,
+                         &tool_metadata](rocprofiler_buffer_tracing_kfd_queue_record_t record) {
+                            fill_kfd_common_paired(data, tool_metadata, record);
+                            data.value = 1;
+                        },
+                    },
+                    itr.record);
 
                 // insert thread info if it doesn't already exist
-                get_thread_id(data.tid);
+                get_thread_id(data.tid, "KFD EVENTS");
 
                 // get KFD category and create event entry
                 auto category = tool_metadata.buffer_names.at(data.kind);
