@@ -1,3 +1,13 @@
+[submodule "projects/rccl/ext-src/mscclpp"]
+	path = projects/rccl/ext-src/mscclpp
+	url = https://github.com/microsoft/mscclpp.git
+	ignore = dirty
+	shallow = true
+[submodule "projects/rccl/ext-src/json"]
+	path = projects/rccl/ext-src/json
+	url = https://github.com/nlohmann/json.git
+	ignore = dirty
+	shallow = true
 [submodule "projects/rocprofiler/perfetto"]
 	path = projects/rocprofiler/plugin/perfetto/perfetto
 	url = https://github.com/google/perfetto.git
