@@ -10,17 +10,64 @@ ENV DEBIAN_FRONTEND noninteractive
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
-ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
-ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
+######## Yum Packages #######
+ARG GCC_TOOLSET_VERSION="12"
 
 RUN yum groupinstall -y "Development Tools" && \
-    yum install -y epel-release && crb enable && \
-    yum install -y --allowerasing chrpath cmake curl dpkg-devel gmock-devel gtest-devel \
-        iproute json-devel libdrm-devel ninja-build numactl-devel openmpi-devel \
-        papi-devel python3-pip sqlite-devel texinfo wget which zlib-devel && \
-    yum clean all && \
-    python3 -m pip install 'cmake==3.21' && \
-    python3 -m pip install 'perfetto'
+    yum install -y epel-release && \
+    crb enable && \
+    yum remove -y gcc-toolset* && \
+    yum install -y --allowerasing \
+    chrpath \
+    dpkg-devel \
+    flex \
+    git-lfs \
+    gmock-devel \
+    gtest-devel \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-binutils \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-gcc \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-gcc-c++ \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-gcc-gfortran \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-libatomic-devel \
+    gcc-toolset-${GCC_TOOLSET_VERSION}-libstdc++-devel \
+    openmpi-devel \
+    json-devel \
+    ninja-build \
+    python3-devel \
+    python3-pip \
+    sqlite-devel \
+    patchelf \
+    texinfo \
+    wget \
+    which \
+    vim-common \
+    zlib-devel \
+&& yum clean all && \
+    rm -rf /var/cache/yum
+
+######## PIP Packages ########
+RUN python3 -m pip install 'cmake==3.21' perfetto
+
+######## Environment Variables ########
+ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
+
+# -- Predefine variables to avoid Dockerfile linting warnings --
+# Docker requires environment variables to be defined before reuse.
+ENV LIBRARY_PATH=""
+ENV LD_LIBRARY_PATH=""
+
+######## Enable GCC Toolset and verify ########
+# This is a subset of what is typically sourced in the gcc-toolset enable
+# script.
+ENV DEVTOOLSET_ROOTPATH="/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root"
+ENV PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/bin:${PATH}"
+ENV LIBRARY_PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/lib:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCC_TOOLSET_VERSION}/root/usr/lib:${LD_LIBRARY_PATH}"
+
+######## Enable GCC Toolset and verify ########
+RUN which gcc && gcc --version && \
+    which g++ && g++ --version && \
+    which clang++ || true
 
 ARG ROCM_VERSION=0.0
 ARG ROCM_MAJOR=0
