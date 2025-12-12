@@ -119,6 +119,7 @@ else()
         URL_HASH SHA256=18b3f70ac80fccc340d8c6ff0f339b2ae64944782f8d2fca2bd705cf47cadb79
     )
     FetchContent_MakeAvailable(Catch2)
+    message(STATUS "Building Catch2 v3.8.1 from src: ${Catch2_SOURCE_DIR}")
     # for packaging
     set(CATCH_ADD_TESTS_SCRIPT ${Catch2_SOURCE_DIR}/extras/CatchAddTests.cmake)
     set(CATCH_LIBS $<TARGET_FILE:Catch2>)
@@ -305,13 +306,12 @@ endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_custom_target(build_tests ALL)
-
+add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
+add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
 # Tests folder
 if(BUILD_UNIT_TESTS)
     add_subdirectory(unit ${CATCH_BUILD_DIR}/unit)
     add_subdirectory(ABM ${CATCH_BUILD_DIR}/ABM)
-    add_subdirectory(kernels ${CATCH_BUILD_DIR}/kernels)
-    add_subdirectory(hipTestMain ${CATCH_BUILD_DIR}/hipTestMain)
     add_subdirectory(TypeQualifiers ${CATCH_BUILD_DIR}/TypeQualifiers)
     if(UNIX)
       add_subdirectory(multiproc ${CATCH_BUILD_DIR}/multiproc)

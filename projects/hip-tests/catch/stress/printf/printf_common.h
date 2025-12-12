@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <assert.h>
 
 struct CaptureStream {
   int saved_fd;
