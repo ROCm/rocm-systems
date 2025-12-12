@@ -821,27 +821,27 @@ write_rocpd(
             return val.handle;
         };
 
-    static auto get_thread_id = [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](
-                                    rocprofiler_thread_id_t val) {
-        if(thread_ids.count(val) == 0)
-        {
-            thread_ids.emplace(val);
+    static auto get_thread_id =
+        [&conn, &tool_metadata, &thread_ids, &node_id, &this_pid](rocprofiler_thread_id_t val) {
+            if(thread_ids.count(val) == 0)
+            {
+                thread_ids.emplace(val);
 
-            auto stmt =
-                get_insert_statement("rocpd_info_thread{{uuid}}",
-                                     {
-                                         insert_value("id", val),
-                                         insert_value("nid", node_id),
-                                         insert_value("ppid", tool_metadata.parent_process_id),
-                                         insert_value("pid", this_pid),
-                                         insert_value("tid", val),
-                                     });
+                auto stmt =
+                    get_insert_statement("rocpd_info_thread{{uuid}}",
+                                         {
+                                             insert_value("id", val),
+                                             insert_value("nid", node_id),
+                                             insert_value("ppid", tool_metadata.parent_process_id),
+                                             insert_value("pid", this_pid),
+                                             insert_value("tid", val),
+                                         });
 
-            execute_raw_sql_statements(conn, stmt);
-        }
+                execute_raw_sql_statements(conn, stmt);
+            }
 
-        return val;
-    };
+            return val;
+        };
 
     // use this to lookup indexes of strings
     auto string_entries = _metadata.get_string_entries();
