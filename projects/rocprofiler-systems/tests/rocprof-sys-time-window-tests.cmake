@@ -27,7 +27,7 @@
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_SAMPLING ${_TRACE_WINDOW_SKIP}
+    SKIP_BASELINE SKIP_SAMPLING
     NAME trace-time-window
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
@@ -89,7 +89,7 @@ rocprofiler_systems_add_validation_test(
 )
 
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_SAMPLING ${_TRACE_WINDOW_SKIP}
+    SKIP_BASELINE SKIP_SAMPLING
     NAME trace-time-window-delay
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
