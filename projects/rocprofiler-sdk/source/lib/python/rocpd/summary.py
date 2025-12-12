@@ -363,12 +363,32 @@ def create_summary_region_queries(
     query = "SELECT DISTINCT(category) FROM regions_and_samples"
     categories = execute_statement(connection, query).fetchall()
 
-    if region_categories is None:
+    category_prefixes = ["rocm_"]
+
+    # Convert all categories and prefixes to lowercase for correct comparison
+    categories = [(cat[0].lower(),) for cat in categories]
+    category_prefixes = [prefix.lower() for prefix in category_prefixes]
+
+    if region_categories is not None:
+        region_categories = [cat.lower() for cat in region_categories]
+    else:
         # Automatically retrieve region categories from the database
-        region_categories = set([cat[0].split("_")[0] for cat in categories])
+        region_categories = set()
+        for cat in categories:
+            category_name = cat[0]
+            matching_prefix = next(
+                (
+                    prefix
+                    for prefix in category_prefixes
+                    if category_name.startswith(prefix)
+                ),
+                "",
+            )
+            first_part = category_name[len(matching_prefix) :].split("_")[0]
+            region_categories.add(f"{matching_prefix}{first_part}")
 
     category_map = {
-        cat.lower(): [c[0] for c in categories if c[0].startswith(cat + "_")]
+        cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
         for cat in region_categories
         if "MARKER" not in cat.upper()
     }
