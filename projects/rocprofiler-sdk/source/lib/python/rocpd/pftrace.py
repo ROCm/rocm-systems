@@ -23,7 +23,6 @@
 # THE SOFTWARE.
 ###############################################################################
 
-import argparse
 from .importer import RocpdImportData
 from . import output_config
 from . import libpyrocpd
@@ -88,23 +87,24 @@ def add_args(parser):
 
     pftrace_options.add_argument(
         "--annotate-args",
-        help="Add/omit the function arguments (when available) to the Perfetto debug annotations (default: no)",
-        action=argparse.BooleanOptionalAction,
+        help="Add the function arguments (when available) to the Perfetto debug annotations",
+        action="store_true",
         default=False,
-    )
-
-    pftrace_options.add_argument(
-        "--annotate-kfd",
-        help="Add/omit KFD data (when available) to the Perfetto debug annotations (default: yes)",
-        action=argparse.BooleanOptionalAction,
-        default=True,
     )
 
     pftrace_options.add_argument(
         "--annotate-pmc",
-        help="Add/omit the function PMC values (when available) to the Perfetto debug annotations (default: no)",
-        action=argparse.BooleanOptionalAction,
+        help="Add the function PMC values (when available) to the Perfetto debug annotations",
+        action="store_true",
         default=False,
+    )
+
+    pftrace_options.add_argument(
+        "--no-annotate-kfd",
+        help="Omit the KFD data (when available) from the Perfetto debug annotations",
+        action="store_false",
+        default=True,
+        dest="annotate_kfd",
     )
 
     def process_args(input, args):
@@ -130,6 +130,7 @@ def add_args(parser):
 
 
 def main(argv=None):
+    import argparse
     from .time_window import add_args as add_args_time_window
     from .output_config import add_args as add_args_output_config
     from .output_config import add_generic_args
