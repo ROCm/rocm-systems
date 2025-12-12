@@ -530,6 +530,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
   return HSAKMT_STATUS_ERROR;
 }
 
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetMemoryHandle(void *MemoryAddress, HSAuint64 SizeInBytes,
+                      uint64_t *SharedMemoryHandle) {
+	CHECK_DXG_OPEN();
+
+	return HSAKMT_STATUS_NOT_SUPPORTED;
+}
 
 HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
                                        uint32_t NodeId,

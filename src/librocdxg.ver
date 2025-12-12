@@ -80,6 +80,7 @@ hsaKmtSetXNACKMode;
 hsaKmtGetXNACKMode;
 hsaKmtOpenSMI;
 hsaKmtExportDMABufHandle;
+hsaKmtGetMemoryHandle;
 hsaKmtWaitOnEvent_Ext;
 hsaKmtWaitOnMultipleEvents_Ext;
 hsaKmtReplaceAsanHeaderPage;
