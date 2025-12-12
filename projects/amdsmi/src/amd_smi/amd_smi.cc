@@ -735,7 +735,7 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
         return AMDSMI_STATUS_INVAL;
     }
 
-    uint64_t device_uuid = 0;
+    uint64_t device_uuid = std::numeric_limits<uint64_t>::max();
     uint16_t device_id = std::numeric_limits<uint16_t>::max();
     amdsmi_status_t status;
     std::ostringstream ss;
@@ -754,15 +754,29 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
        << "; rsmi_dev_id_get() status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
 
-    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                            &device_uuid);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        LOG_INFO(ss);
-        return status;
+    // First try KFD for unique_id (works for partitioned GPUs)
+    amdsmi_kfd_info_t kfd_info;
+    amdsmi_status_t kfd_status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+    if (kfd_status == AMDSMI_STATUS_SUCCESS) {
+        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
+        if (kfd_ret == 0) {
+            status = AMDSMI_STATUS_SUCCESS;
+        }
     }
+
+    // If KFD fails, fall back to sysfs
+    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
+        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
+                                &device_uuid);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            LOG_INFO(ss);
+            return status;
+        }
+    }
+
     ss << "; device_uuid (dec): " << device_uuid << "\n"
        << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
-       << "; rsmi_dev_unique_id_get() status: "
+       << "; unique_id status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
 
     const uint8_t fcn = 0xff;
@@ -1855,10 +1869,25 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     // Ensure asic_serial defaults to an unsupported value
     std::string max_uint64_str = "ffffffffffffffff";
     smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
-    uint64_t device_uuid = 0;
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                                          &device_uuid);
+    uint64_t device_uuid = std::numeric_limits<uint64_t>::max();
+
+    // First try KFD for unique_id (works for partitioned GPUs)
+    amdsmi_kfd_info_t kfd_info;
+    amdsmi_status_t status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
     if (status == AMDSMI_STATUS_SUCCESS) {
+        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
+        if (kfd_ret == 0) {
+            status = AMDSMI_STATUS_SUCCESS;
+        }
+    }
+
+    // If KFD fails, fall back to sysfs
+    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
+        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
+                              &device_uuid);
+    }
+
+    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != std::numeric_limits<uint64_t>::max()) {
         ss.clear();
         ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
         std::string asic_serial_str = ss.str();
@@ -1866,8 +1895,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
                                         asic_serial_str);
         ss << __PRETTY_FUNCTION__
-           << " | Retrieved unique_id from rsmi: " << processor_handle << "\n"
-           << " ; Successfully fell back to KFD's unique_id... \n"
+           << " | Retrieved unique_id: " << processor_handle << "\n"
            << " ; info->asic_serial (hex): " << info->asic_serial << "\n"
            << " ; info->asic_serial (dec): " << std::dec
            << static_cast<uint64_t>(std::stoull(asic_serial_str, nullptr, 16));
