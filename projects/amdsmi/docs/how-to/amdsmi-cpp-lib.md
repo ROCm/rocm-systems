@@ -231,3 +231,53 @@ driver and make sure that any resources held by AMD SMI are released.
        return 0;
    }
    ```
+
+(multiple_init_perf_opt)=
+## Multiple initialization performance optimization
+
+To optimize performance when initializing multiple amd-smi instances, AMD SMI implements a static metrics cache stored
+in a Singleton object. This design allows metrics data to persist across multiple instances of amd-smi, whether the
+tool is invoked repeatedly or used within a multithreaded C/C++ application. 
+
+Upon creation of the first amd-smi
+instance, a Singleton object that contains the metrics cache is instantiated. Any amd-smi instances created thereafter
+will inherit the Singleton object metrics cache data. Each amd-smi creation increases the usage counter in the
+Singleton object. And each amd-smi destruction decreases the usage counter. When the Singleton counter reaches zero,
+the metrics cache is destroyed along with the Singleton object. This principle follows the Singleton Design Principal
+of sharing cached data across multiple objects.
+
+```mermaid
+graph LR
+    subgraph "Singleton Object"
+    data_cache["Metrics data cache<br>instances 3"]
+    end
+    subgraph "amd-smi 1"
+    data1[data] ----> data_cache
+    end
+    subgraph "amd-smi 2"
+    data2[data] ----> data_cache
+    end
+    subgraph "amd-smi 3"
+    data3[data] ----> data_cache
+    end
+```
+
+The data caching can be controlled through two environment variables:
+```
+AMD_GPU_METRICS_CACHE_MS = 1 ms
+AMD_ASIC_INFO_CACHE_MS = 10000 ms
+```
+These environment variables control how long information is stored in the data cache before it is refreshed.
+Therefore calls for the system information will not trigger a system retrieval until the cache goes invalid
+and needs refreshing.
+
+(best_practice)=
+### Best practice
+You should tune the cache refresh interval based on how frequently your application accesses data. If a multi-threaded
+application or multiple amd-smi instances are only going to need information every 5 seconds, then set
+the `AMD_GPU_METRICS_CACHE_MS` environment variable to something slightly less than 5 seconds.
+```
+AMD_GPU_METRICS_CACHE_MS = 4900 ms
+```
+In that way, the system is not constantly updating the cache from requests by each of the instances in the threads.
+
