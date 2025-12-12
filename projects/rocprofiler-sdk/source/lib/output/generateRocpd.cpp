@@ -635,9 +635,9 @@ fill_kfd_data(kfd_pmc_event_data_t& data, const metadata& tool_metadata, const R
     data.start = get_start(record);
     data.end   = get_end(record);
 
-    rocpd_wrapper_t<RecordT> wrapper = rocpd_wrapper_t<RecordT>(record, tool_metadata);
-    data.value                       = wrapper.value();
-    data.json_data                   = get_json_string(
+    auto wrapper   = rocpd_wrapper_t<RecordT>(record, tool_metadata);
+    data.value     = wrapper.value();
+    data.json_data = get_json_string(
         [&record, &tool_metadata, &wrapper](auto& ar) { cereal::save(ar, wrapper); });
 }
 }  // namespace
