@@ -31,21 +31,8 @@ add_library(
 
 target_link_libraries(
     lib-common-tests
-    PUBLIC rocprofiler-systems-common-library rocprofiler-systems-googletest-library
+    PUBLIC
+        rocprofiler-systems-common-library
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-ghc-filesystem
 )
-
-if(EXISTS "${PROJECT_SOURCE_DIR}/external/filesystem/include/ghc/filesystem.hpp")
-    target_include_directories(
-        lib-common-tests
-        SYSTEM
-        PRIVATE "${PROJECT_SOURCE_DIR}/external/filesystem/include"
-    )
-    target_compile_definitions(
-        lib-common-tests
-        PRIVATE ROCPROFSYS_TESTS_HAS_GHC_LIB_FILESYSTEM=1
-    )
-else()
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
-        target_link_libraries(lib-common-tests PRIVATE stdc++fs)
-    endif()
-endif()
