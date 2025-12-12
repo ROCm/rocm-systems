@@ -41,6 +41,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+* Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
+  * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
@@ -90,6 +93,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed sL1D metric values showing up as N/A in memory chart diagram
 
 ### Known issues
+
+#### Negative Values in Analyze Mode
+
+Negative counter values occur due to timing mismatches in asynchronous hardware performance counters during multi-pass profiling, which is required due to hardware limitations (e.g., perfmon_config constraints).
+
+An initial fix was implemented to clamp all negative values to zero using MAX(difference, 0), eliminating invalid results but potentially masking significant anomalies.
+
+Negative values, when clamped, typically align with expected results and do not interfere with the overall accuracy or general average output in hardware counter profiling. This is because the variance caused by timing mismatches is typically minimal and does not significantly impact the profiling data.
+
+A proposed long-term solution uses threshold-based clamping, distinguishing between minor noise and significant deviations, with warnings for larger issues.
 
 ### Upcoming changes
 
