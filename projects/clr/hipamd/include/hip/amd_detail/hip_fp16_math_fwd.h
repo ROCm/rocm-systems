@@ -55,10 +55,7 @@ __device__ __attribute__((const)) _Float16 __ocml_fmin_f16(_Float16, _Float16);
 typedef _Float16 __2f16 __attribute__((ext_vector_type(2)));
 typedef short __2i16 __attribute__((ext_vector_type(2)));
 
-#if defined(__clang__) && defined(__HIP__)
 __device__ __attribute__((const)) float __ockl_fdot2(__2f16 a, __2f16 b, float c, bool s);
-#endif
-
 __device__ __attribute__((const)) __2f16 __ocml_ceil_2f16(__2f16);
 __device__ __attribute__((const)) __2f16 __ocml_fabs_2f16(__2f16);
 __device__ __2f16 __ocml_cos_2f16(__2f16);

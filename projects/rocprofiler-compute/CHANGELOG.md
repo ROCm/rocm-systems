@@ -91,6 +91,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
+#### Negative Values in Analyze Mode
+
+Negative counter values occur due to timing mismatches in asynchronous hardware performance counters during multi-pass profiling, which is required due to hardware limitations (e.g., perfmon_config constraints).
+
+An initial fix was implemented to clamp all negative values to zero using MAX(difference, 0), eliminating invalid results but potentially masking significant anomalies.
+
+Negative values, when clamped, typically align with expected results and do not interfere with the overall accuracy or general average output in hardware counter profiling. This is because the variance caused by timing mismatches is typically minimal and does not significantly impact the profiling data.
+
+A proposed long-term solution uses threshold-based clamping, distinguishing between minor noise and significant deviations, with warnings for larger issues.
+
 ### Upcoming changes
 
 ## ROCm Compute Profiler 3.3.1 for ROCm 7.1.1

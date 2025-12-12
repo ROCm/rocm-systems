@@ -1,0 +1,44 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger: none
+pr: none
+schedules:
+  - cron: "0 5 * 11-3 *"  # 11 PM CST (November - March)
+    displayName: "Nightly Build (CST)"
+    branches:
+      include:
+        - develop
+    always: false
+
+  - cron: "0 4 * 4-10 *"  # 11 PM CDT (April - October)
+    displayName: "Nightly Build (CDT)"
+    branches:
+      include:
+        - develop
+    always: false
+
+jobs:
+- job: rccl
+  timeoutInMinutes: 240
+  pool: rocm-ci_rccl_slurm_pool
+  workspace:
+    clean: all
+  steps:
+  - task: DeleteFiles@1
+    inputs:
+      Contents: '**/*'
+  - template: ${{ variables.CI_TEMPLATE_PATH }}/steps/checkout.yml@pipelines_repo
+    parameters:
+      submoduleBehaviour: recursive
+  - template: templates/build.yml
+  - template: templates/test_rccl-UnitTests.yml
+  - template: templates/test_rccl-tests.yml
