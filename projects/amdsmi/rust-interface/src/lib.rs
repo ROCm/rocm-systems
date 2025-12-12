@@ -19,6 +19,11 @@
 //
 
 #![allow(dead_code)]
+// FFI bindings use opaque pointer handles (AmdsmiProcessorHandle, AmdsmiSocketHandle)
+// which are passed through to C functions. Clippy's not_unsafe_ptr_arg_deref warning
+// is a false positive for this common FFI pattern where the pointers are never
+// dereferenced in Rust code - they're opaque handles managed by the C library.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 mod amdsmi_wrapper;
 
 #[macro_use]

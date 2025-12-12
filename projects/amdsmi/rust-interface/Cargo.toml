@@ -1,12 +1,30 @@
 [package]
 name = "amdsmi"
-version = "0.1.2"
+version = "26.1.0"
 edition = "2021"
-description = "A rust binding for the AMD System Management Interface (AMD-SMI) library"
-repository = "https://github.com/ROCm/amdsmi/rust-interface"
+rust-version = "1.70"
+description = "Rust bindings for AMD System Management Interface (AMD-SMI) library"
+documentation = "https://docs.rs/amdsmi"
+repository = "https://github.com/ROCm/amdsmi"
+homepage = "https://rocm.docs.amd.com/projects/amdsmi/en/latest/"
 readme = "README.md"
-keywords = ["amdsmi", "rust binding"]
-license = "Copyright (c) 2019-2024 Advanced Micro Devices, Inc"
+license = "MIT"
+keywords = ["amd", "gpu", "rocm", "monitoring", "smi"]
+categories = ["hardware-support", "os::linux-apis", "api-bindings"]
+
+# Prevent multiple versions of this crate from linking to the same native library
+links = "amd_smi"
+
+# Include only necessary files in the published crate
+include = [
+    "src/**/*",
+    "examples/**/*",
+    "build.rs",
+    "callbacks.rs",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+]
 
 [dependencies]
 libc = "0.2"

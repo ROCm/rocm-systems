@@ -2,8 +2,54 @@
 
 This rust crate provides Rust bindings for the AMD System Management Interface (AMD-SMI) library. It allows you to interact with AMD GPUs and retrieve various information using Rust.
 
+## Prerequisites
+
+This crate requires the AMD-SMI native library (`libamd_smi.so`) to be installed on your system.
+
+### Installing AMD-SMI
+
+**Option 1: Install ROCm (Recommended)**
+
+The AMD-SMI library is included with ROCm. Follow the [ROCm installation guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/) for your distribution.
+
+**Option 2: Build from Source**
+
+```sh
+git clone https://github.com/ROCm/amdsmi.git
+cd amdsmi
+mkdir build && cd build
+cmake ..
+make
+sudo make install
+```
+
+### Library Discovery
+
+The build script searches for `libamd_smi.so` in the following locations (in order):
+
+1. `$AMDSMI_LIB_DIR` environment variable (if set)
+2. `./lib/` subdirectory of the current directory
+3. `pkg-config` query for `amd_smi` package
+4. Latest `/opt/rocm*/lib/` installation
+
+If the library is installed in a non-standard location, set the `AMDSMI_LIB_DIR` environment variable:
+
+```sh
+export AMDSMI_LIB_DIR=/path/to/lib
+cargo build
+```
+
+### Runtime Configuration
+
+Ensure the library is in your library path at runtime:
+
+```sh
+export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+```
+
 ## Table of Contents
 
+- [Prerequisites](#prerequisites)
 - [Overview](#overview)
 - [Hello World Example](#hello-world-example)
 - [Directory Structure](#directory-structure)

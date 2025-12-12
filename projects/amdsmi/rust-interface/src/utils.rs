@@ -20,7 +20,9 @@
 use std::fmt;
 
 // Re-export all the alias type
-pub use crate::amdsmi_wrapper::{AmdsmiEventHandleT, AmdsmiProcessorHandle, AmdsmiSocketHandle};
+pub use crate::amdsmi_wrapper::{
+    AmdsmiEventHandleT, AmdsmiNodeHandle, AmdsmiProcessorHandle, AmdsmiSocketHandle,
+};
 
 // Re-export all the enums type
 pub use crate::amdsmi_wrapper::{

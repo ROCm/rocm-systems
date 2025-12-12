@@ -23,7 +23,34 @@ use std::env;
 use std::fs;
 use std::io::Result;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 mod callbacks;
+
+/// Attempts to find libamd_smi using pkg-config
+fn try_pkg_config() -> Option<String> {
+    // Try to run pkg-config to find amd_smi
+    let output = Command::new("pkg-config")
+        .args(["--libs-only-L", "amd_smi"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse -L/path/to/lib format
+    for part in stdout.split_whitespace() {
+        if let Some(path) = part.strip_prefix("-L") {
+            let lib_path = PathBuf::from(path);
+            if lib_path.join("libamd_smi.so").exists() {
+                println!("cargo:warning=Found libamd_smi via pkg-config at: {}", path);
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
+}
 
 fn get_rocm_dir() -> Option<PathBuf> {
     // Look for the latest folder in /opt that begins with "rocm"
@@ -56,41 +83,74 @@ fn get_amdsmi_lib_dir() -> Result<String> {
 
     // Check the environment variable AMDSMI_LIB_DIR to get the library directory
     if let Ok(lib_dir) = env::var("AMDSMI_LIB_DIR") {
-        if PathBuf::from(lib_dir.clone()).join(amdsmi_file).exists() {
+        if PathBuf::from(&lib_dir).join(amdsmi_file).exists() {
+            println!("cargo:warning=Using libamd_smi from AMDSMI_LIB_DIR: {}", lib_dir);
             return Ok(lib_dir);
         }
     }
 
-    // Check the current directory
+    // Check the current directory's lib subdirectory
     if let Ok(current_dir) = env::current_dir() {
         let current_lib_dir = current_dir.join("lib");
         if current_lib_dir.join(amdsmi_file).exists() {
-            return Ok(current_lib_dir.to_string_lossy().into_owned());
+            let path = current_lib_dir.to_string_lossy().into_owned();
+            println!("cargo:warning=Using libamd_smi from local lib/: {}", path);
+            return Ok(path);
         }
     }
 
+    // Try pkg-config
+    if let Some(lib_dir) = try_pkg_config() {
+        return Ok(lib_dir);
+    }
+
     // Check the ROCm directory
-    if let Some(lib_dir) = get_rocm_dir() {
-        if lib_dir.join("lib").join(amdsmi_file).exists() {
-            return Ok(lib_dir.join("lib").to_string_lossy().into_owned());
+    if let Some(rocm_dir) = get_rocm_dir() {
+        let lib_path = rocm_dir.join("lib");
+        if lib_path.join(amdsmi_file).exists() {
+            let path = lib_path.to_string_lossy().into_owned();
+            println!("cargo:warning=Using libamd_smi from ROCm: {}", path);
+            return Ok(path);
         }
     }
 
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        "The libamd_smi.so library was not found. Please set the AMDSMI_LIB_DIR environment variable to the directory containing the library.",
+        format!(
+            "Could not find libamd_smi.so. Please ensure AMD-SMI is installed.\n\
+             \n\
+             Search locations tried:\n\
+             1. AMDSMI_LIB_DIR environment variable (not set or invalid)\n\
+             2. ./lib/ subdirectory (not found)\n\
+             3. pkg-config amd_smi (not found or not configured)\n\
+             4. /opt/rocm*/lib/ (not found)\n\
+             \n\
+             To fix this, either:\n\
+             - Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/\n\
+             - Set AMDSMI_LIB_DIR to point to the directory containing libamd_smi.so\n\
+             - Build AMD-SMI from source and install it"
+        ),
     ))
 }
 
 fn get_amdsmi_header_file() -> Result<String> {
     let amdsmi_header_path = "include/amd_smi/amdsmi.h";
-    // Use the project's header as the first priority
+
+    // Check environment variable first
+    if let Ok(include_dir) = env::var("AMDSMI_INCLUDE_DIR") {
+        let header_path = PathBuf::from(&include_dir).join("amd_smi/amdsmi.h");
+        if header_path.exists() {
+            return Ok(header_path.to_string_lossy().into_owned());
+        }
+    }
+
+    // Use the project's header as the first priority (for development builds)
     let default_path = PathBuf::from("../").join(amdsmi_header_path);
     if default_path.exists() {
         return Ok(default_path.to_string_lossy().into_owned());
     }
 
-    // Check the current directory
+    // Check the current directory (for source tarball builds)
     if let Ok(current_dir) = env::current_dir() {
         let fallback_path = current_dir.join(amdsmi_header_path);
         if fallback_path.exists() {
@@ -108,7 +168,8 @@ fn get_amdsmi_header_file() -> Result<String> {
 
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        "The amdsmi.h header file was not found",
+        "The amdsmi.h header file was not found. This is required for regenerating FFI bindings.\n\
+         Set AMDSMI_INCLUDE_DIR to point to the include directory containing amd_smi/amdsmi.h",
     ))
 }
 
@@ -158,29 +219,41 @@ fn generate_amdsmi_wrapper(amdsmi_header_file: &str) {
         .raw_line("// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.")
         .raw_line("")
         .raw_line("#![allow(non_upper_case_globals)]")
+        .raw_line("#![allow(non_camel_case_types)]")
         .generate()
-        .expect("Unable to binding wrapper for amdsmi C interface!");
+        .expect("Unable to generate binding wrapper for amdsmi C interface!");
 
-    let bindings_path = PathBuf::from("./src/amdsmi_wrapper.rs");
+    // Use CARGO_MANIFEST_DIR to ensure we write to the source directory
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let bindings_path = PathBuf::from(&manifest_dir).join("src/amdsmi_wrapper.rs");
     bindings
         .write_to_file(&bindings_path)
         .expect("Couldn't write binding wrapper for amdsmi C interface!");
-    println!("Wrapper generated at: {:?}", bindings_path);
-
+    println!("cargo:warning=Wrapper generated at: {:?}", bindings_path);
 }
 
 fn main() {
+    // Rebuild if these environment variables change
+    println!("cargo:rerun-if-env-changed=AMDSMI_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=AMDSMI_INCLUDE_DIR");
+    println!("cargo:rerun-if-env-changed=AMDSMI_GENERATE_RUST_WRAPPER");
+
     // Get the amd_smi library directory
-    let amdsmi_lib_dir = get_amdsmi_lib_dir().expect("Failed to get the amd_smi library path");
+    let amdsmi_lib_dir = get_amdsmi_lib_dir().expect("Failed to find AMD-SMI library");
 
     // Tell cargo to tell rustc to link the AMD-SMI library
     println!("cargo:rustc-link-lib=amd_smi");
     println!("cargo:rustc-link-search=native={}", amdsmi_lib_dir);
 
+    // Only regenerate bindings if explicitly requested
     let generate_wrapper = env::var("AMDSMI_GENERATE_RUST_WRAPPER").is_ok();
     if generate_wrapper {
         // Get the amdsmi.h header file path
-        let amdsmi_header_file = get_amdsmi_header_file().expect("Failed to get the amd_smi header file");
+        let amdsmi_header_file =
+            get_amdsmi_header_file().expect("Failed to get the amd_smi header file");
+
+        // Rebuild if header changes (only relevant when regenerating)
+        println!("cargo:rerun-if-changed={}", amdsmi_header_file);
 
         // Generate the amdsmi wrapper
         generate_amdsmi_wrapper(&amdsmi_header_file);
