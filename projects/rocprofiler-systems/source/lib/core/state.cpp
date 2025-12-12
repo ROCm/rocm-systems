@@ -51,14 +51,14 @@ get_thread_state_value()
 auto&
 get_thread_state_history(int64_t _idx = utility::get_thread_index())
 {
-    if(_idx < 0 || _idx >= ROCPROFSYS_MAX_THREADS)
+    static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
+        []() { return utility::get_reserved_vector<ThreadState>(32); });
+
+    if(_idx >= ROCPROFSYS_MAX_THREADS)
     {
         static thread_local auto _tl_v = utility::get_reserved_vector<ThreadState>(32);
         return _tl_v;
     }
-
-    static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
-        []() { return utility::get_reserved_vector<ThreadState>(32); });
 
     return _v.at(_idx);
 }

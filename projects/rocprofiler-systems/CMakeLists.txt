@@ -304,7 +304,6 @@ elseif(NOT ROCPROFSYS_MAX_THREADS EQUAL _MAX_THREADS)
         "ROCPROFSYS_MAX_THREADS (=${ROCPROFSYS_MAX_THREADS}) must be a power of 2. We were unable to verify it so we are emitting this warning instead. Estimate resulted in: ${_MAX_THREADS}"
     )
 endif()
-
 if(ROCPROFSYS_MAX_THREADS LESS 128)
     rocprofiler_systems_message(
         AUTHOR_WARNING
@@ -312,7 +311,6 @@ if(ROCPROFSYS_MAX_THREADS LESS 128)
     )
     set(ROCPROFSYS_MAX_THREADS 128)
 endif()
-
 set(ROCPROFSYS_MAX_UNWIND_DEPTH
     "64"
     CACHE STRING

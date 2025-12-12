@@ -62,15 +62,14 @@ auto root_process_id =
 auto&
 get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
 {
-    // Check bounds FIRST to prevent out_of_range access
-    if(_idx < 0 || _idx >= ROCPROFSYS_MAX_THREADS)
+    static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
+        []() { return utility::get_reserved_vector<bool>(64); });
+
+    if(_idx >= ROCPROFSYS_MAX_THREADS)
     {
         static thread_local auto _tl_v = utility::get_reserved_vector<bool>(128);
         return _tl_v;
     }
-
-    static auto _v = utility::get_filled_array<ROCPROFSYS_MAX_THREADS>(
-        []() { return utility::get_reserved_vector<bool>(64); });
 
     return _v.at(_idx);
 }

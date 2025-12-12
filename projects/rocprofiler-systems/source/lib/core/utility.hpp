@@ -24,7 +24,6 @@
 
 #include "concepts.hpp"
 
-#include <timemory/backends/threading.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/join.hpp>
@@ -48,9 +47,6 @@ namespace utility
 inline auto
 get_thread_index()
 {
-    // Internal/offset threads should not consume TID counter slots
-    if(tim::threading::offset_this_id()) return static_cast<int64_t>(-1);
-
     static std::atomic<int64_t> _c{ 0 };
     static thread_local int64_t _v = _c++;
     return _v;

@@ -70,9 +70,9 @@ foreach(THREADS IN LISTS THREAD_VALUES)
         REWRITE_ARGS -e -v 2 -i 1024 --label return args
         RUNTIME_ARGS -e -v 1 -i 1024 --label return args
         RUN_ARGS 35 2 ${THREADS}
-        SAMPLING_TIMEOUT 180
-        REWRITE_TIMEOUT 180
-        RUNTIME_TIMEOUT 360
+        SAMPLING_TIMEOUT 480
+        REWRITE_TIMEOUT 480
+        RUNTIME_TIMEOUT 480
         RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
         SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"
         REWRITE_RUN_PASS_REGEX "${_thread_limit_pass_regex}"

@@ -61,24 +61,12 @@ get_index_data()
 auto&
 get_info_data(int64_t _tid)
 {
-    // Bounds check to prevent out_of_range when _tid >= MAX_THREADS
-    if(_tid < 0 || _tid >= ROCPROFSYS_MAX_THREADS)
-    {
-        static thread_local auto _tl_v = std::optional<thread_info>{};
-        return _tl_v;
-    }
     return get_info_data()->at(_tid);
 }
 
 auto&
 get_index_data(int64_t _tid)
 {
-    // Bounds check to prevent out_of_range when _tid >= MAX_THREADS
-    if(_tid < 0 || _tid >= ROCPROFSYS_MAX_THREADS)
-    {
-        static thread_local auto _tl_v = std::optional<thread_index_data>{};
-        return _tl_v;
-    }
     return get_index_data()->at(_tid);
 }
 
@@ -187,56 +175,12 @@ thread_info::init(bool _offset)
 {
     static thread_local bool _once      = false;
     auto&                    _info_data = get_info_data();
+    auto                     _tid       = utility::get_thread_index();
 
     if(!_info_data)
     {
         static auto _dummy = std::optional<thread_info>{};
         return (_dummy.reset(), _dummy);  // always reset for safety
-    }
-
-    // Internal threads (_offset=true) use thread-local storage to not consume user TID
-    // slots Check this before calling get_thread_index() to avoid incrementing the global
-    // counter
-    if(_offset)
-    {
-        static thread_local auto _tl_internal = std::optional<thread_info>{};
-        if(!_once && (_once = true))
-        {
-            threading::offset_this_id(_offset);
-            _tl_internal            = thread_info{};
-            _tl_internal->is_offset = true;
-            // For internal threads, use a pseudo index_data without consuming TID pool
-            _tl_internal->index_data     = thread_index_data(true);
-            _tl_internal->lifetime.first = tim::get_clock_real_now<uint64_t, std::nano>();
-            _tl_internal->causal_count   = &offset_causal_count;
-            set_thread_state(ThreadState::Disabled);
-
-            ROCPROFSYS_BASIC_VERBOSE_F(
-                2,
-                "Internal thread %li on PID %i (rank: %i) using thread-local storage "
-                "(not consuming user TID slot)\n",
-                _tl_internal->index_data->system_value, process::get_id(), dmp::rank());
-        }
-        return _tl_internal;
-    }
-
-    // Only allocate TID for non-offset (user) threads
-    auto _tid = utility::get_thread_index();
-
-    // Prevent access beyond MAX_THREADS
-    if(_tid < 0 || _tid >= ROCPROFSYS_MAX_THREADS)
-    {
-        static std::once_flag thread_limit_warning_flag;
-        std::call_once(thread_limit_warning_flag, []() {
-            ROCPROFSYS_WARNING_F(
-                1,
-                "[rocprof-sys][WARNING] Maximum allowed thread limit (%d) "
-                "reached. Further thread creation and profiling will be "
-                "disabled to prevent resource exhaustion.\n",
-                ROCPROFSYS_MAX_THREADS);
-        });
-        static thread_local auto _tl_dummy = std::optional<thread_info>{};
-        return (_tl_dummy.reset(), _tl_dummy);
     }
 
     if(!_once && (_once = true))

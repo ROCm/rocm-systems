@@ -796,108 +796,77 @@ configure(bool _setup, int64_t _tid)
 
         if(_signal_types->count(get_sampling_realtime_signal()) > 0)
         {
-            try
-            {
-                _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
-                                           SIGEV_THREAD_ID, get_sampling_realtime_freq(),
-                                           get_sampling_realtime_delay(), _tid,
-                                           threading::get_sys_tid() });
-            } catch(const std::exception& e)
-            {
-                ROCPROFSYS_VERBOSE(
-                    1, "Failed to configure realtime sampling timer for thread %ld: %s\n",
-                    _tid, e.what());
-                _signal_types->erase(get_sampling_realtime_signal());
-            }
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+                                       SIGEV_THREAD_ID, get_sampling_realtime_freq(),
+                                       get_sampling_realtime_delay(), _tid,
+                                       threading::get_sys_tid() });
         }
 
         if(_signal_types->count(get_sampling_cputime_signal()) > 0)
         {
-            try
-            {
-                _sampler->configure(timer{
-                    get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
-                    SIGEV_THREAD_ID, get_sampling_cputime_freq(),
-                    get_sampling_cputime_delay(), _tid, threading::get_sys_tid() });
-            } catch(const std::exception& e)
-            {
-                ROCPROFSYS_VERBOSE(
-                    1, "Failed to configure cputime sampling timer for thread %ld: %s\n",
-                    _tid, e.what());
-                _signal_types->erase(get_sampling_cputime_signal());
-            }
+            _sampler->configure(
+                timer{ get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
+                       SIGEV_THREAD_ID, get_sampling_cputime_freq(),
+                       get_sampling_cputime_delay(), _tid, threading::get_sys_tid() });
         }
 
         if(_signal_types->count(get_sampling_overflow_signal()) > 0)
         {
-            try
+            if(_signal_types->size() == 1)
+                trait::runtime_enabled<backtrace_metrics>::set(false);
+
+            _perf_sampler = std::make_unique<perf::perf_event>();
+
+            struct perf_event_attr _pe;
+            memset(&_pe, 0, sizeof(_pe));
+
+            auto _freq = get_sampling_overflow_freq();
+            auto _overflow_event =
+                get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
+                    .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
+
+            perf::config_overflow_sampling(_pe, _overflow_event, _freq);
+
+            _pe.sample_type = PERF_SAMPLE_TIME | PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
+
+            _pe.wakeup_events            = 10;
+            _pe.exclude_idle             = 1;
+            _pe.exclude_kernel           = 1;
+            _pe.exclude_hv               = 1;
+            _pe.exclude_callchain_kernel = 1;
+            _pe.disabled                 = 1;
+            _pe.inherit                  = 0;
+
+            if(_pe.type == PERF_TYPE_SOFTWARE)
             {
-                if(_signal_types->size() == 1)
-                    trait::runtime_enabled<backtrace_metrics>::set(false);
-
-                _perf_sampler = std::make_unique<perf::perf_event>();
-
-                struct perf_event_attr _pe;
-                memset(&_pe, 0, sizeof(_pe));
-
-                auto _freq = get_sampling_overflow_freq();
-                auto _overflow_event =
-                    get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
-                        .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
-
-                perf::config_overflow_sampling(_pe, _overflow_event, _freq);
-
-                _pe.sample_type =
-                    PERF_SAMPLE_TIME | PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
-
-                _pe.wakeup_events            = 10;
-                _pe.exclude_idle             = 1;
-                _pe.exclude_kernel           = 1;
-                _pe.exclude_hv               = 1;
-                _pe.exclude_callchain_kernel = 1;
-                _pe.disabled                 = 1;
-                _pe.inherit                  = 0;
-
-                if(_pe.type == PERF_TYPE_SOFTWARE)
-                {
-                    _pe.use_clockid = 1;
-                    _pe.clockid     = CLOCK_REALTIME;
-                }
-
-                auto _perf_open_error =
-                    _perf_sampler->open(_pe, _info->index_data->system_value);
-
-                ROCPROFSYS_REQUIRE(!_perf_open_error)
-                    << "perf backend for overflow failed to activate: "
-                    << *_perf_open_error;
-
-                _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
-                _sampler->configure(
-                    overflow{ get_sampling_overflow_signal(),
-                              [](int _sig, pid_t, long, int64_t _idx) {
-                                  perf::get_instance(_idx)->set_ready_signal(_sig);
-                                  return true;
-                              },
-                              [](int, pid_t, long, int64_t _idx) {
-                                  return perf::get_instance(_idx)->start();
-                              },
-                              [](int, pid_t, long, int64_t _idx) {
-                                  if(!perf::get_instance(_idx) ||
-                                     !perf::get_instance(_idx)->is_open())
-                                      return true;
-                                  auto _stopped = perf::get_instance(_idx)->stop();
-                                  if(_stopped) perf::get_instance(_idx)->close();
-                                  return _stopped;
-                              },
-                              _tid, threading::get_sys_tid() });
-            } catch(const std::exception& exc)
-            {
-                ROCPROFSYS_VERBOSE(1,
-                                   "Overflow sampling setup failed for thread %ld: %s\n",
-                                   _tid, exc.what());
-                _signal_types->erase(get_sampling_overflow_signal());
-                if(_perf_sampler) _perf_sampler.reset();
+                _pe.use_clockid = 1;
+                _pe.clockid     = CLOCK_REALTIME;
             }
+
+            auto _perf_open_error =
+                _perf_sampler->open(_pe, _info->index_data->system_value);
+
+            ROCPROFSYS_REQUIRE(!_perf_open_error)
+                << "perf backend for overflow failed to activate: " << *_perf_open_error;
+
+            _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
+            _sampler->configure(overflow{
+                get_sampling_overflow_signal(),
+                [](int _sig, pid_t, long, int64_t _idx) {
+                    perf::get_instance(_idx)->set_ready_signal(_sig);
+                    return true;
+                },
+                [](int, pid_t, long, int64_t _idx) {
+                    return perf::get_instance(_idx)->start();
+                },
+                [](int, pid_t, long, int64_t _idx) {
+                    if(!perf::get_instance(_idx) || !perf::get_instance(_idx)->is_open())
+                        return true;
+                    auto _stopped = perf::get_instance(_idx)->stop();
+                    if(_stopped) perf::get_instance(_idx)->close();
+                    return _stopped;
+                },
+                _tid, threading::get_sys_tid() });
         }
 
         if(get_use_tmp_files())
