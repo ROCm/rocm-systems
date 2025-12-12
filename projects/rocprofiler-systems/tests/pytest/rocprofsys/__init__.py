@@ -48,7 +48,6 @@ from .validators import (
     validate_timemory_json,
     validate_causal_json,
     validate_file_exists,
-    validate_regex_patterns,
 )
 from .gpu import GPUInfo, detect_gpu, is_navi_architecture
 
@@ -71,7 +70,6 @@ __all__ = [
     "validate_timemory_json",
     "validate_causal_json",
     "validate_file_exists",
-    "validate_regex_patterns",
     # GPU
     "GPUInfo",
     "detect_gpu",

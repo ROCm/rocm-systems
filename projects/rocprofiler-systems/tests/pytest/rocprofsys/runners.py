@@ -35,10 +35,22 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
+
+# Matches CMake's ROCPROFSYS_ABORT_FAIL_REGEX from rocprof-sys-testing.cmake
+DEFAULT_FAIL_REGEX = [
+    r"### ERROR ###",
+    r"unknown-hash=",
+    r"address of faulting memory reference",
+    r"exiting with non-zero exit code",
+    r"terminate called after throwing an instance",
+    r"calling abort\.\. in ",
+    r"Exit code: [1-9]",
+]
 
 def _safe_remove_file(filepath: Path) -> None:
     """Safely remove a file, ignoring errors."""
@@ -68,6 +80,8 @@ class TestResult:
         command: The command that was executed
         env: Environment variables used
         duration: Execution time in seconds (if measured)
+        pass_regex: Optional regex pattern(s) that must be found for success
+        fail_regex: Regex pattern(s) that must NOT be found (defaults to DEFAULT_FAIL_REGEX)
         _instrumented_files: List of instrumented binary files created
     """
 
@@ -78,11 +92,82 @@ class TestResult:
     command: list[str]
     environment: dict[str, str]
     duration: Optional[float] = None
+    pass_regex: Optional[list[str]] = None
+    fail_regex: list[str] = field(default_factory=lambda: DEFAULT_FAIL_REGEX.copy())
     _instrumented_files: list[Path] = field(default_factory=list)
+
+    def _check_patterns(self) -> tuple[bool, Optional[str]]:
+        """Check all fail/pass patterns in a single scan.
+
+        Returns:
+            Tuple of (success, failure_reason)
+        """
+        if self.returncode != 0:
+            return False, f"Non-zero return code: {self.returncode}"
+
+        combined_output = self.stdout + self.stderr
+
+        # Build combined regex for single-pass scanning
+        all_patterns = []
+        fail_indices = set()
+        pass_indices = set()
+
+        for i, pattern in enumerate(self.fail_regex):
+            all_patterns.append(f"(?P<f{i}>{pattern})")
+            fail_indices.add(f"f{i}")
+
+        if self.pass_regex:
+            for i, pattern in enumerate(self.pass_regex):
+                all_patterns.append(f"(?P<p{i}>{pattern})")
+                pass_indices.add(f"p{i}")
+
+        if not all_patterns:
+            return True, None
+
+        # Single scan with combined regex
+        combined_regex = re.compile("|".join(all_patterns))
+        found_pass = set()
+
+        for match in combined_regex.finditer(combined_output):
+            matched_group = match.lastgroup
+
+            # Fail pattern found - immediate failure
+            if matched_group in fail_indices:
+                original_idx = int(matched_group[1:])
+                return False, f"Fail pattern matched: {self.fail_regex[original_idx]}"
+
+            # Track found pass patterns
+            if matched_group in pass_indices:
+                found_pass.add(matched_group)
+
+        # Check if all pass patterns were found
+        if self.pass_regex:
+            missing = pass_indices - found_pass
+            if missing:
+                missing_idx = int(next(iter(missing))[1:])
+                return False, f"Pass pattern not found: {self.pass_regex[missing_idx]}"
+
+        return True, None
 
     @property
     def success(self) -> bool:
-        return self.returncode == 0
+        """Check if test execution succeeded.
+
+        Returns True only if:
+        - Return code is 0
+        - No fail_regex patterns found in stdout or stderr
+        - All pass_regex patterns found (if specified)
+
+        Uses single-pass scanning for efficiency on large outputs.
+        """
+        success, _ = self._check_patterns()
+        return success
+
+    @property
+    def failure_reason(self) -> Optional[str]:
+        """Get a description of why the test failed, or None if successful."""
+        _, reason = self._check_patterns()
+        return reason
 
     @property
     def perfetto_file(self) -> Optional[Path]:
@@ -185,6 +270,8 @@ class BaseRunner(ABC):
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
         mpi_ranks: int = 0,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
     ):
 
         self.config = config
@@ -194,6 +281,8 @@ class BaseRunner(ABC):
         self.run_args = run_args or []
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
+        self.pass_regex = pass_regex
+        self.fail_regex = fail_regex if fail_regex is not None else DEFAULT_FAIL_REGEX.copy()
 
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
@@ -277,6 +366,8 @@ class BaseRunner(ABC):
                 command=command,
                 environment=self.env,
                 duration=duration,
+                pass_regex=self.pass_regex,
+                fail_regex=self.fail_regex,
             )
 
         except subprocess.TimeoutExpired as e:
@@ -289,6 +380,8 @@ class BaseRunner(ABC):
                 command=command,
                 environment=self.env,
                 duration=duration,
+                pass_regex=self.pass_regex,
+                fail_regex=self.fail_regex,
             )
 
 class BaselineRunner(BaseRunner):

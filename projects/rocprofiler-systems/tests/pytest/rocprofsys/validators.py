@@ -31,7 +31,6 @@ This module wraps the existing validation scripts from the tests/ directory:
 
 We also provide the following validators:
 - validate_file_exists
-- validate_regex_patterns (Stricter than CMake's regex pattern validator)
 
 This ensures consistency between pytest and CMake/CTest validation.
 """
@@ -126,9 +125,14 @@ def _run_validation_script(
             timeout=timeout,
         )
 
+        if result.returncode == 0:
+            message = result.stdout.strip()
+        else:
+            message = result.stderr.strip() or result.stdout.strip() or f"Exit code: {result.returncode}"
+
         return ValidationResult(
             is_valid=(result.returncode == 0),
-            message=result.stdout.strip() if result.returncode == 0 else result.stderr.strip(),
+            message=message,
             stdout=result.stdout,
             stderr=result.stderr,
         )
@@ -339,42 +343,3 @@ def validate_causal_json(
         args.extend(additional_args)
 
     return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
-
-
-# ============================================================================
-# Regex Pattern Validation
-# ============================================================================
-
-
-def validate_regex_patterns(
-    content: str,
-    patterns: list[str],
-) -> ValidationResult:
-    """Check if all regex patterns are found in the content.
-
-    Args:
-        content: String content to search (e.g., file contents, stdout, stderr)
-        patterns: List of regex patterns that must all be found
-
-    Returns:
-        ValidationResult indicating whether all patterns were found
-
-    """
-    if not patterns:
-        return ValidationResult(True, "No patterns to validate")
-
-    missing_patterns = []
-    for pattern in patterns:
-        if not re.search(pattern, content):
-            missing_patterns.append(pattern)
-
-    if missing_patterns:
-        return ValidationResult(
-            is_valid=False,
-            message=f"Missing {len(missing_patterns)} pattern(s): {', '.join(missing_patterns)}",
-        )
-
-    return ValidationResult(
-        is_valid=True,
-        message=f"All {len(patterns)} pattern(s) found",
-    )

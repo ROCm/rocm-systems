@@ -50,7 +50,6 @@ from rocprofsys import (
     SysRunRunner,
     validate_perfetto_trace,
     validate_rocpd_database,
-    validate_regex_patterns,
 )
 
 
@@ -385,6 +384,7 @@ class TestOpenMPVVHost:
                 rewrite_args=["-e", "-v", "2", "--instrument-loops"],
                 env=env,
                 timeout=180,
+                pass_regex=[r"omp_parallel"],
             )
         except FileNotFoundError:
             pytest.skip(f"{target_name} not built")
@@ -398,13 +398,6 @@ class TestOpenMPVVHost:
         result = runner.run()
 
         assert result.success, f"OMPVV host binary rewrite {target_name} failed: {result.stderr}"
-
-        # Validate timemory output contains OpenMP functions
-        pattern_validation = validate_regex_patterns(
-            content=result.stdout,
-            patterns=[r"omp_parallel"],
-        )
-        assert pattern_validation.is_valid, f"OpenMP pattern validation failed for {target_name}: {pattern_validation.message}"
 
     def test_ompvv_host_runtime_instrument(
         self,
@@ -426,19 +419,14 @@ class TestOpenMPVVHost:
                 instrument_args=["-e", "-v", "1", "--label", "return", "args"],
                 env=env,
                 timeout=180,
+                pass_regex=[r"omp_parallel"],
             )
         except FileNotFoundError:
             pytest.skip(f"{target_name} not built")
-        
+
         result = runner.run()
 
         assert result.success, f"Runtime instrumentation failed for {target_name}: {result.stderr}"
-
-        pattern_validation = validate_regex_patterns(
-            content=result.stdout,
-            patterns=[r"omp_parallel"],
-        )
-        assert pattern_validation.is_valid, f"OpenMP pattern validation failed for {target_name}: {pattern_validation.message}"
 
     def test_ompvv_host_run(
         self,
@@ -549,6 +537,7 @@ class TestOpenMPVVOffload:
                 rewrite_args=["-e", "-v", "2"],
                 env=env,
                 timeout=300,
+                pass_regex=[r"omp_offloading"],
             )
         except FileNotFoundError:
             pytest.skip(f"{target_name} not built")
@@ -562,13 +551,6 @@ class TestOpenMPVVOffload:
         result = runner.run()
 
         assert result.success, f"OMPVV offload binary rewrite {target_name} failed: {result.stderr}"
-        print(result.stdout)
-        # Validate timemory output contains OpenMP offloading functions
-        pattern_validation = validate_regex_patterns(
-            content=result.stdout,
-            patterns=[r"omp_offloading"],
-        )
-        assert pattern_validation.is_valid, f"Offloading pattern validation failed for {target_name}: {pattern_validation.message}"
 
     def test_ompvv_offload_run(
         self,
