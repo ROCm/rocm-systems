@@ -1589,11 +1589,9 @@ write_rocpd(
             {
                 auto data = kfd_pmc_event_data_t{};
 
-                std::visit(
-                    [&data, &tool_metadata](const auto& record) {
-                        fill_kfd_data(data, tool_metadata, record);
-                    },
-                    itr.record);
+                std::visit([&data, &tool_metadata](
+                               const auto& record) { fill_kfd_data(data, tool_metadata, record); },
+                           itr.record);
 
                 // insert thread info if it doesn't already exist
                 get_thread_id(data.tid, "KFD EVENTS");
