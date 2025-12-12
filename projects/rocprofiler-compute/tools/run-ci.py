@@ -176,7 +176,11 @@ def parse_cdash_args(args):
         "-n", "--name", help="Job name", default=None, type=str, required=True
     )
     parser.add_argument(
-        "-a", "--actor", help="GitHub actor/username (included in Continuous builds)", default=None, type=str
+        "-a",
+        "--actor",
+        help="GitHub actor/username (included in Continuous builds)",
+        default=None,
+        type=str,
     )
     parser.add_argument("-s", "--site", help="Site name", default=SITE, type=str)
     parser.add_argument(
