@@ -310,13 +310,17 @@ write_perfetto(
             thread_indexes.emplace(itr.tid, _idx);
             auto _track = ::perfetto::Track{static_cast<uint64_t>(itr.tid), this_pid_track};
             auto _desc  = _track.Serialize();
-            if(is_main_thread)
+            if(!itr.name.empty())
+                _desc.set_name(itr.name);
+            else if(is_main_thread)
                 _desc.set_name(fmt::format("{}", ::basename(command_line.front().c_str())));
             else
                 _desc.set_name(fmt::format("THREAD {}", _idx));
             _desc.mutable_thread()->set_pid(this_pid);
             _desc.mutable_thread()->set_tid(itr.tid);
-            if(is_main_thread)
+            if(!itr.name.empty())
+                _desc.mutable_thread()->set_thread_name(itr.name);
+            else if(is_main_thread)
                 _desc.mutable_thread()->set_thread_name(
                     fmt::format("{}", ::basename(command_line.front().c_str())));
             else
