@@ -73,7 +73,7 @@ PMC_KERNEL_TOP_TABLE_ID: int = 1
 #       }
 SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
-    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
+    "per_cycle": "GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
     "per_kernel": "1",
 }
@@ -375,11 +375,10 @@ class MetricEvaluator:
                 {},
                 local_expr_context,
             )
-            console_warning(f"Evaluated expression '{expr}' with result: {eval_result}")
+            if 'denom' in expr:
+                console_warning(f"Evaluated expression '{expr}' with result: {eval_result}")
             
             if eval_result is None:
-                return "N/A"
-            if isinstance(eval_result, str) and eval_result == "N/A":
                 return "N/A"
             # Only check for NaN if eval_result is numeric (not string)
             if isinstance(eval_result, (int, float, np.number, pd.Series, np.ndarray)):
@@ -397,22 +396,22 @@ class MetricEvaluator:
                 console_warning(f"Missing empirical peak data: {exception}.")
                 return "N/A"
             else:
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                # console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
                 return "N/A"
 
         except AttributeError as attribute_error:
 
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(
-                    f"Failed to evaluate expression '{expr}': {attribute_error}."
-                )
+                # console_warning(
+                #     f"Failed to evaluate expression '{expr}': {attribute_error}."
+                # )
                 return "N/A"
             else:
                 console_error("analysis", str(attribute_error))
                 return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Missing data: {exception}. Using empty value.")
+            # console_warning(f"Missing data: {exception}. Using empty value.")
             return ""
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -525,13 +524,19 @@ def update_denominator_string(equation: str, normal_unit: str) -> str:
     """
     if not equation:
         return ""
-
+    # console_warning(f"normal_unit in build_metric_value_string: {normal_unit}")
     equation_string = str(equation)
     if normal_unit in SUPPORTED_DENOM.keys():
         equation_string = re.sub(
             r"\$denom", SUPPORTED_DENOM[normal_unit], equation_string
         )
-
+    else:
+        console_error(
+            f"Normalization unit '{normal_unit}' is not supported. "
+            "Skiped updating $denom."
+        )
+    if 'denom' in equation_string:
+        console_error(f"Updated equation with denom:{equation} --> {equation_string}")
     return equation_string
 
 
