@@ -26,6 +26,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rccl/**/*'
 
+"project: rccl-tests":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rccl-tests/**/*'
+
 "project: rdc":
 - changed-files:
   - any-glob-to-any-file: 'projects/rdc/**/*'
