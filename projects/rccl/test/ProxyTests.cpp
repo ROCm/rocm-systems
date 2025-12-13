@@ -26,7 +26,6 @@
 #include "timer.h"
 #include "transport.h"
 
-#define NCCL_MAX_OPS (2048)
 #define OP_INDEX(op) ((op) ? (op) - state->pools->elems : -1)
 #define OP_SEEN 0x100000
 
