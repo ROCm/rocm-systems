@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "comm.h"
+#include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
@@ -384,7 +385,6 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_UserEnvSet)
             if(!value)
             {
                 TEST_INFO(
-                    NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment variable "
                     "NCCL_THREAD_THRESHOLD"
                 );
@@ -423,7 +423,6 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MinNChannelsSet)
             if(!value)
             {
                 TEST_INFO(
-                    NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MIN_NCHANNELS"
                 );
@@ -461,7 +460,6 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MaxChannelsSet)
             if(!value)
             {
                 TEST_INFO(
-                    NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MAX_NCHANNELS"
                 );
@@ -1077,7 +1075,6 @@ TEST(Rcclwrap, RcclOverrideAlgorithm_InvalidOverridePersists)
 TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
 {
     TEST_INFO(
-        NCCL_LOG_INFO,
         "=== Starting Process-Isolated rcclSetP2pNetChunkSize "
         "Tests Execution ==="
     );
@@ -1190,7 +1187,6 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
     EXPECT_TRUE(allTestsPassed) << "One or more process-isolated GFX tests failed";
 
     TEST_INFO(
-        NCCL_LOG_INFO,
         "=== Process-Isolated rcclSetP2pNetChunkSize Tests "
         "Execution Completed ==="
     );
@@ -1257,7 +1253,6 @@ TEST(Rcclwrap, AllPxnTests)
                     }
 
                     TEST_INFO(
-                        NCCL_LOG_INFO,
                         "Testing rcclSetPxn for %s with %d ranks",
                         tc.arch.c_str(),
                         tc.ranks
@@ -1275,7 +1270,6 @@ TEST(Rcclwrap, AllPxnTests)
                         << "Failed for " << tc.arch << " with " << tc.ranks << " ranks";
 
                     TEST_INFO(
-                        NCCL_LOG_INFO,
                         "%s test completed - pxnDisable: %d",
                         tc.name.c_str(),
                         pxnDisable
