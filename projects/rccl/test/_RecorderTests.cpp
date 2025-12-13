@@ -31,7 +31,7 @@ namespace RcclUnitTesting
 
     int pid = getpid();
     hipStream_t stream;
-    hipStreamCreate(&stream);
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
 
     int array[] = {2, 3, 5};
     ncclComm comm{.nRanks = 1, .localRank = 1, .localRankToRank = array, .opCount = 8, .planner = {.nTasksColl = 13, .nTasksP2p = 21}};
