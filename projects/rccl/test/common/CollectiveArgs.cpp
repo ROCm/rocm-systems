@@ -29,7 +29,7 @@ namespace RcclUnitTesting
         {
           if (hipHostFree(this->localScalar.ptr) != hipSuccess)
           {
-            ERROR("Unable to free host memory\n");
+            TEST_ERROR("Unable to free host memory\n");
             return TEST_FAIL;
           }
         }
@@ -78,7 +78,7 @@ namespace RcclUnitTesting
 
     if (hipSetDevice(this->deviceId) != hipSuccess)
     {
-      ERROR("Unable to call hipSetDevice to set to GPU %d\n", this->deviceId);
+      TEST_ERROR("Unable to call hipSetDevice to set to GPU %d\n", this->deviceId);
       return TEST_FAIL;
     }
 
@@ -144,7 +144,7 @@ namespace RcclUnitTesting
                                        this->expected,
                                        true,
                                        isMatch));
-    if (!isMatch) ERROR("Mismatch for %s\n", this->GetDescription().c_str());
+    if (!isMatch) TEST_ERROR("Mismatch for %s\n", this->GetDescription().c_str());
     return isMatch ? TEST_SUCCESS : TEST_FAIL;
   }
 

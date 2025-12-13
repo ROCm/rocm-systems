@@ -27,7 +27,7 @@ static int getThreadId()
     ncclResult_t status = cmd;                                          \
     if (status != ncclSuccess)                                          \
     {                                                                   \
-      ERROR("Child process %d fails NCCL call %s with code %d\n", this->childId, msg, status); \
+      TEST_ERROR("Child process %d fails NCCL call %s with code %d\n", this->childId, msg, status); \
       RESULT(TEST_FAIL, ##RESULT_ARGS);                                 \
     }                                                                   \
   } while (false)
@@ -46,7 +46,7 @@ static int getThreadId()
     } while(ncclAsyncErr == ncclInProgress);                          \
     if (ncclAsyncErr != ncclSuccess)                                  \
     {                                                                 \
-      ERROR("Child process %d fails NCCL call %s with code %d\n", this->childId, msg, ncclAsyncErr);  \
+      TEST_ERROR("Child process %d fails NCCL call %s with code %d\n", this->childId, msg, ncclAsyncErr);  \
       RESULT(TEST_FAIL, ##RESULT_ARGS);                               \
     }                                                                 \
   } while (false)
@@ -79,7 +79,7 @@ namespace RcclUnitTesting
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      ERROR("Unable to create parent->child pipe for child %d\n", this->childId);
+      TEST_ERROR("Unable to create parent->child pipe for child %d\n", this->childId);
       return TEST_FAIL;
     }
     this->childReadFd   = pipefd[0];
@@ -89,7 +89,7 @@ namespace RcclUnitTesting
     this->parentReadFd = -1;
     if (pipe(pipefd) == -1)
     {
-      ERROR("Unable to create parent->child pipe for child %d\n", this->childId);
+      TEST_ERROR("Unable to create parent->child pipe for child %d\n", this->childId);
       return TEST_FAIL;
     }
     this->parentReadFd = pipefd[0];
@@ -134,14 +134,14 @@ namespace RcclUnitTesting
 
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
-        ERROR("Child %d failed on command [%s]:\n", this->childId, ChildCommandNames[command]);
+        TEST_ERROR("Child %d failed on command [%s]:\n", this->childId, ChildCommandNames[command]);
       if (write(childWriteFd, &status, sizeof(status)) < 0)
       {
-        ERROR("Child %d write to parent failed: %s\n", this->childId, strerror(errno));
+        TEST_ERROR("Child %d write to parent failed: %s\n", this->childId, strerror(errno));
         break;
       }
       if (retValBuf.size() > 0 && write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
-        ERROR("Child %d write return value to parent failed: %s\n", this->childId, strerror(errno));
+        TEST_ERROR("Child %d write return value to parent failed: %s\n", this->childId, strerror(errno));
         break;
       }
     }
@@ -232,7 +232,7 @@ namespace RcclUnitTesting
 
         if (hipSetDevice(currGpu) != hipSuccess)
         {
-          ERROR("Rank %d on child %d unable to switch to GPU %d\n", globalRank, this->childId, currGpu);
+          TEST_ERROR("Rank %d on child %d unable to switch to GPU %d\n", globalRank, this->childId, currGpu);
           status = TEST_FAIL;
           break;
         }
@@ -241,7 +241,7 @@ namespace RcclUnitTesting
         {
           if (hipStreamCreate(&(this->streams[groupCallIdx][localRank][i])) != hipSuccess)
           {
-            ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d\n", globalRank, this->childId, i, currGpu, groupCallIdx);
+            TEST_ERROR("Rank %d on child %d unable to create stream %d for GPU %d in group %d\n", globalRank, this->childId, i, currGpu, groupCallIdx);
             status = TEST_FAIL;
             break;
           }
@@ -252,7 +252,7 @@ namespace RcclUnitTesting
           {
             //if (ncclCommInitRankMulti(&this->comms[localRank], this->totalRanks, id, globalRank, globalRank) != ncclSuccess)
             {
-              ERROR("Rank %d on child %d unable to call ncclCommInitRankMulti\n", globalRank, this->childId);
+              TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRankMulti\n", globalRank, this->childId);
               status = TEST_FAIL;
               break;
             }
@@ -269,7 +269,7 @@ namespace RcclUnitTesting
           {
             if (ncclCommInitRank(&this->comms[localRank], this->totalRanks, id, globalRank) != ncclSuccess)
             {
-              ERROR("Rank %d on child %d unable to call ncclCommInitRank\n", globalRank, this->childId);
+              TEST_ERROR("Rank %d on child %d unable to call ncclCommInitRank\n", globalRank, this->childId);
               status = TEST_FAIL;
               break;
             }
@@ -332,7 +332,7 @@ namespace RcclUnitTesting
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
-      ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
+      TEST_ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
@@ -392,7 +392,7 @@ namespace RcclUnitTesting
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
-      ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
+      TEST_ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
@@ -438,7 +438,7 @@ namespace RcclUnitTesting
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
-      ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
+      TEST_ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
       return TEST_FAIL;
     }
 
@@ -694,7 +694,7 @@ namespace RcclUnitTesting
                           "ncclRecv");
           break;
         default:
-          ERROR("Unknown func type %d\n", collArg.funcType);
+          TEST_ERROR("Unknown func type %d\n", collArg.funcType);
           RANK_RESULT(errCode, TEST_FAIL);
         }
         if (this->useBlocking == false)
@@ -828,7 +828,7 @@ namespace RcclUnitTesting
 
     if (timedout)
     {
-      ERROR("Child %d timed out and exceeded limit %d us in ExecuteCollectives()\n", this->childId, timeoutUs);
+      TEST_ERROR("Child %d timed out and exceeded limit %d us in ExecuteCollectives()\n", this->childId, timeoutUs);
       return TEST_TIMEOUT;
     }
 
@@ -848,7 +848,7 @@ namespace RcclUnitTesting
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
-      ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
+      TEST_ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
@@ -863,7 +863,7 @@ namespace RcclUnitTesting
                                 globalRank, this->childId, collIdx, groupId);
         if (this->collArgs[groupId][localRank][collIdx].ValidateResults() != TEST_SUCCESS)
         {
-          ERROR("Rank %d Group %d Collective %d output does not match expected\n", globalRank, groupId, collIdx);
+          TEST_ERROR("Rank %d Group %d Collective %d output does not match expected\n", globalRank, groupId, collIdx);
           status = TEST_FAIL;
         }
       }
@@ -906,7 +906,7 @@ namespace RcclUnitTesting
 
     if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
     {
-      ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
+      TEST_ERROR("Child %d does not contain rank %d\n", this->childId, globalRank);
       return TEST_FAIL;
     }
     int const localRank = globalRank - rankOffset;
