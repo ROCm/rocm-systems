@@ -383,7 +383,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_UserEnvSet)
 
             if(!value)
             {
-                INFO(
+                TEST_INFO(
                     NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment variable "
                     "NCCL_THREAD_THRESHOLD"
@@ -422,7 +422,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MinNChannelsSet)
             const char* value = getenv("NCCL_MIN_NCHANNELS");
             if(!value)
             {
-                INFO(
+                TEST_INFO(
                     NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MIN_NCHANNELS"
@@ -460,7 +460,7 @@ TEST(Rcclwrap, RcclUpdateThreadThreshold_MaxChannelsSet)
             const char* value = getenv("NCCL_MAX_NCHANNELS");
             if(!value)
             {
-                INFO(
+                TEST_INFO(
                     NCCL_LOG_INFO,
                     "[Rcclwrap] Test skipped. Set environment "
                     "variable NCCL_MAX_NCHANNELS"
@@ -1076,7 +1076,7 @@ TEST(Rcclwrap, RcclOverrideAlgorithm_InvalidOverridePersists)
 
 TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
 {
-    INFO(
+    TEST_INFO(
         NCCL_LOG_INFO,
         "=== Starting Process-Isolated rcclSetP2pNetChunkSize "
         "Tests Execution ==="
@@ -1189,7 +1189,7 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
     // Verify that all tests passed
     EXPECT_TRUE(allTestsPassed) << "One or more process-isolated GFX tests failed";
 
-    INFO(
+    TEST_INFO(
         NCCL_LOG_INFO,
         "=== Process-Isolated rcclSetP2pNetChunkSize Tests "
         "Execution Completed ==="
@@ -1256,7 +1256,7 @@ TEST(Rcclwrap, AllPxnTests)
                         return;
                     }
 
-                    INFO(
+                    TEST_INFO(
                         NCCL_LOG_INFO,
                         "Testing rcclSetPxn for %s with %d ranks",
                         tc.arch.c_str(),
@@ -1274,7 +1274,7 @@ TEST(Rcclwrap, AllPxnTests)
                     EXPECT_EQ(pxnDisable, tc.expectedPxnDisable)
                         << "Failed for " << tc.arch << " with " << tc.ranks << " ranks";
 
-                    INFO(
+                    TEST_INFO(
                         NCCL_LOG_INFO,
                         "%s test completed - pxnDisable: %d",
                         tc.name.c_str(),

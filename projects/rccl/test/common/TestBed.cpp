@@ -13,9 +13,9 @@
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
-    if (ev.verbose) INFO("Calling PIPE_READ to Child %d\n", childId); \
+    if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d\n", childId); \
     ssize_t retval = read(childList[childId]->parentReadFd, &val, sizeof(val)); \
-    if (ev.verbose) INFO("Got PIPE_READ %ld from Child %d\n", retval, childId); \
+    if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d\n", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
       TEST_ERROR("Unable to read from child %d: Error %s\n", childId, strerror(errno));      \
@@ -54,7 +54,7 @@ namespace RcclUnitTesting
   {
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
-    if (ev.verbose) INFO("Detected %d GPUs\n", this->numDevicesAvailable);
+    if (ev.verbose) TEST_INFO("Detected %d GPUs\n", this->numDevicesAvailable);
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -74,7 +74,7 @@ namespace RcclUnitTesting
     this->numStreamsPerGroup = numStreamsPerGroup;
     this->rankToChildMap.clear();
     this->rankToDeviceMap.clear();
-    if (ev.verbose) INFO("Setting up %d active child processes\n", this->numActiveChildren);
+    if (ev.verbose) TEST_INFO("Setting up %d active child processes\n", this->numActiveChildren);
 
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
@@ -122,14 +122,14 @@ namespace RcclUnitTesting
 
     // If debugging is enabled, pause here to allow users to attach debugger
     if (ev.debugPause) {
-      INFO("============================================================\n");
-      INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)\n");
-      INFO("============================================================\n");
+      TEST_INFO("============================================================\n");
+      TEST_INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)\n");
+      TEST_INFO("============================================================\n");
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        INFO(" Child %02d: processID: %d\n", childId, childList[childId]->pid);
+        TEST_INFO(" Child %02d: processID: %d\n", childId, childList[childId]->pid);
       }
-      INFO("============================================================\n");
-      INFO("<Press enter to continue>\n");
+      TEST_INFO("============================================================\n");
+      TEST_INFO("<Press enter to continue>\n");
       scanf("%*c");
     }
 
@@ -153,7 +153,7 @@ namespace RcclUnitTesting
     int rankOffset = 0;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
-      if (ev.verbose) INFO("Sending InitComm event to child %d\n", childId);
+      if (ev.verbose) TEST_INFO("Sending InitComm event to child %d\n", childId);
       PIPE_WRITE(childId, cmd);
 
       // Send unique ID to child process
@@ -785,7 +785,7 @@ namespace RcclUnitTesting
 
             if (ev.showNames)
             {
-              INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
+              TEST_INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
             }
 
             std::vector<int> currentRanksEmpty = {};
@@ -817,8 +817,8 @@ namespace RcclUnitTesting
   {
     if (ev.useInteractive)
     {
-      INFO("%s\n", message.c_str());
-      INFO("<Hit any key to continue>\n");
+      TEST_INFO("%s\n", message.c_str());
+      TEST_INFO("<Hit any key to continue>\n");
       scanf("%*c");
     }
   }
