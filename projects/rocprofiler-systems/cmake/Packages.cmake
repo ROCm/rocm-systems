@@ -39,6 +39,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
 rocprofiler_systems_add_interface_library(rocprofiler-systems-libva
     "Provides VA-API headers"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
+    "Provides UCX headers"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
@@ -954,6 +957,12 @@ find_package(Libva-headers ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_include_directories(
     rocprofiler-systems-libva
     INTERFACE ${LIBVA_HEADERS_INCLUDE_DIR}
+)
+
+find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_include_directories(
+    rocprofiler-systems-ucx
+    INTERFACE ${UCX_HEADERS_INCLUDE_DIR}
 )
 
 # ----------------------------------------------------------------------------------------#
