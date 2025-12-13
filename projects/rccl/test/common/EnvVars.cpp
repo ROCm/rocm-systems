@@ -31,11 +31,11 @@ namespace RcclUnitTesting
     if (0 == pid) {
       bool isGfxTest = false;
       int dev;
-      hipGetDeviceCount(&dev);
+      if (hipGetDeviceCount(&dev) != hipSuccess) return TEST_FAIL;
       for (int deviceId = 0; deviceId < dev; deviceId++) {
         char gcn[256];
         hipDeviceProp_t devProp;
-        hipGetDeviceProperties(&devProp, deviceId);
+        if (hipGetDeviceProperties(&devProp, deviceId) != hipSuccess) return TEST_FAIL;
         char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
         strcpy(gcn, gcnArchNameToken);
         if(std::strncmp(gfx, gcn, 5) == 0) {
@@ -74,7 +74,7 @@ namespace RcclUnitTesting
     if (0 == pid)
     {
       int dev;
-      hipGetDeviceCount(&dev);
+      if (hipGetDeviceCount(&dev) != hipSuccess) return TEST_FAIL;
       if (write(pipefd[1], &dev, sizeof(dev)) != sizeof(dev)) return TEST_FAIL;
       close(pipefd[0]);
       close(pipefd[1]);
@@ -106,7 +106,7 @@ namespace RcclUnitTesting
       bool isCpxMode = false;
       int numDeviceCUs;
       int deviceIdx = 0;
-      hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, deviceIdx);
+      if (hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, deviceIdx) != hipSuccess) return TEST_FAIL;
       if(numDeviceCUs == 20 || numDeviceCUs == 38) isCpxMode = true;
       if (write(pipefd[1], &isCpxMode, sizeof(isCpxMode)) != sizeof(isCpxMode)) return TEST_FAIL;
       close(pipefd[0]);
@@ -155,12 +155,12 @@ namespace RcclUnitTesting
       std::vector<int> result;
       try {
           int numDev;
-          hipGetDeviceCount(&numDev);
+          if (hipGetDeviceCount(&numDev) != hipSuccess) return TEST_FAIL;
           std::unordered_map<int64_t, std::vector<int>> uniqueIdToGpuIndexes;
           for(int dev=0;dev<numDev;dev++){
             char busIdStr[] = "00000000:00:00.0";
             int64_t busId;
-            hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev);
+            if (hipDeviceGetPCIBusId(busIdStr, sizeof(busIdStr), dev) != hipSuccess) return TEST_FAIL;
             busIdToInt64(busIdStr, &busId);
             uniqueIdToGpuIndexes[busId].push_back(dev);
           }

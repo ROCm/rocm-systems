@@ -99,7 +99,13 @@ namespace RcclUnitTesting
       if (userRegistered)
         ncclMemFree(this->ptr);
       else
-        hipFree(this->ptr);
+      {
+        if (hipFree(this->ptr) != hipSuccess)
+        {
+          ERROR("Unable to free GPU memory\n");
+          return TEST_FAIL;
+        }
+      }
       this->ptr = nullptr;
     }
     return TEST_SUCCESS;
@@ -122,7 +128,11 @@ namespace RcclUnitTesting
       ERROR("Unable to call hipMemset\n");
       return TEST_FAIL;
     }
-    hipStreamSynchronize(NULL);
+    if (hipStreamSynchronize(NULL) != hipSuccess)
+    {
+      ERROR("Unable to synchronize stream\n");
+      return TEST_FAIL;
+    }
     return TEST_SUCCESS;
   }
 

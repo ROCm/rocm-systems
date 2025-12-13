@@ -25,7 +25,14 @@ namespace RcclUnitTesting
       if (this->localScalar.ptr != nullptr)
       {
         if (this->options.scalarMode == 0) this->localScalar.FreeGpuMem();
-        if (this->options.scalarMode == 1) hipHostFree(this->localScalar.ptr);
+        if (this->options.scalarMode == 1)
+        {
+          if (hipHostFree(this->localScalar.ptr) != hipSuccess)
+          {
+            ERROR("Unable to free host memory\n");
+            return TEST_FAIL;
+          }
+        }
       }
     }
 

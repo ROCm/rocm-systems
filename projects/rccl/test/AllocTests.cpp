@@ -138,8 +138,8 @@ TEST(Alloc, NcclCudaMemcpy)
                 EXPECT_EQ(h_src[i], h_dst[i]) << "Mismatch at index " << i;
             }
             // Free memory
-            hipFree(d_src);
-            hipFree(d_dst);
+            ASSERT_EQ(hipFree(d_src), hipSuccess);
+            ASSERT_EQ(hipFree(d_dst), hipSuccess);
         }
     );
 }
@@ -157,8 +157,8 @@ TEST(Alloc, ZeroElementMemcpy)
             ncclResult_t result = ncclCudaMemcpy<float>(d_dst, d_src, 0);
             EXPECT_EQ(result, ncclSuccess) << "Zero-element copy should succeed (no-op)";
 
-            hipFree(d_src);
-            hipFree(d_dst);
+            ASSERT_EQ(hipFree(d_src), hipSuccess);
+            ASSERT_EQ(hipFree(d_dst), hipSuccess);
         }
     );
 }
@@ -183,7 +183,7 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
             EXPECT_EQ(result, ncclUnhandledCudaError)
                 << "Expected ncclUnhandledCudaError when dst is nullptr";
 
-            hipFree(d_valid);
+            ASSERT_EQ(hipFree(d_valid), hipSuccess);
         }
     );
 }
