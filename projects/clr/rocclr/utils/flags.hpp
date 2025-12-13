@@ -253,6 +253,8 @@ release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
+release(uint, DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE, 64,                          \
+        "Maximum number of packets per batch for graph execution")             \
 release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
         "0 = Disable, 1 = Enable, 2 = Force")                                 \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \

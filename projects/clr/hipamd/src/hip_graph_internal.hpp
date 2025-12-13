@@ -1025,6 +1025,8 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale
     void rebuildFilteredLists();
+    // Validate batch size against configured limits
+    bool validateBatchSize() const;
   };
 
   //! Structure linking packet batches to segments

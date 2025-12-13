@@ -1046,6 +1046,21 @@ void GraphExec::PacketBatch::rebuildFilteredLists() {
 }
 
 // ================================================================================================
+// Validate batch size against configured limits
+// Returns true if batch is within limits, false otherwise
+// ================================================================================================
+bool GraphExec::PacketBatch::validateBatchSize() const {
+  const size_t maxPacketsPerBatch = DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE;
+  if (dispatchPackets.size() > maxPacketsPerBatch) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+            "[hipGraph] Batch exceeds size limit: %zu > %zu packets",
+            dispatchPackets.size(), maxPacketsPerBatch);
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
 hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
   // Fixme: Only single stream child graph nodes are supported.
   hipError_t status = hipSuccess;
@@ -1082,9 +1097,12 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       if (node->GraphCaptureEnabled()) {
         // Start of a new batch
         PacketBatch newBatch;
+        const size_t maxPacketsPerBatch = DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE;
 
-        // Collect packets from consecutive captured nodes
+        // Collect packets from consecutive captured nodes, respecting batch size limits
         size_t j = i;
+        size_t currentBatchPacketCount = 0;
+
         while (j < segment.nodes.size() && segment.nodes[j]->GraphCaptureEnabled()) {
           auto& currentNode = segment.nodes[j];
           // Capture packets for this node
@@ -1098,8 +1116,20 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
             return status;
           }
 
+          // Check if adding this node's packets would exceed the batch size limit
+          if (currentBatchPacketCount + nodePackets.size() > maxPacketsPerBatch) {
+            // Current batch is full, finish it and start a new one
+            ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+                    "[hipGraph] Completed packet batch with %zu packets (%zu nodes), starting new "
+                    "batch",
+                    newBatch.dispatchPackets.size(), newBatch.nodeRanges.size());
+            currentSegBatch.packet_batches.emplace_back(std::move(newBatch));
+
+            newBatch = PacketBatch();  // Start fresh batch
+            currentBatchPacketCount = 0;
+          }
+
           // Create NodeRange for this node
-          // RangeIndex is 0 at the start
           const size_t rangeIndex = newBatch.nodeRanges.size();
           const size_t startIndex = newBatch.dispatchPackets.size();
           const size_t packetCount = nodePackets.size();
@@ -1120,10 +1150,11 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
 
           // Mark this node as successfully captured
           currentSegBatch.node_capture_status[j] = true;
+          currentBatchPacketCount += packetCount;
           ++j;
         }
 
-        // Add the batch if it has packets
+        // Add the final batch if it has packets
         if (!newBatch.dispatchPackets.empty()) {
           currentSegBatch.packet_batches.emplace_back(std::move(newBatch));
         }
@@ -1242,11 +1273,24 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
       // Number of packets per node can change
       const size_t oldPacketCount = range.packetCount;
       const size_t newPacketCount = newPackets.size();
+      const size_t maxPacketsPerBatch = DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE;
 
+      // Check if the new packet count would exceed batch size limits
       if (newPacketCount != oldPacketCount) {
+        const size_t currentBatchSize = packetBatch.dispatchPackets.size();
+        const int64_t packetDelta = static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
+        const size_t newBatchSize = currentBatchSize + packetDelta;
+
+        if (newBatchSize > maxPacketsPerBatch && packetDelta > 0) {
+          // Would exceed batch size limit - need to handle overflow
+          ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+                  "[hipGraph] Packet update would exceed batch size limit: current=%zu, delta=%ld, limit=%zu",
+                  currentBatchSize, packetDelta, maxPacketsPerBatch);
+          // For now, allow the update but log a warning
+          // Future enhancement: could split into multiple batches
+        }
+
         const size_t rangeIdx = it->second;
-        const int64_t packetDelta =
-            static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
 
         ClPrint(
             amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
@@ -1332,6 +1376,15 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
     auto it = packetBatch.nodeToRangeIndex.find(node);
     if (it != packetBatch.nodeToRangeIndex.end()) {
       // Found the batch containing this node - update enabled state
+      // const size_t maxPacketsPerBatch = DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE;
+
+      // // Log if batch size exceeds limit (for monitoring purposes)
+      // if (packetBatch.dispatchPackets.size() > maxPacketsPerBatch) {
+      //   ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+      //           "[hipGraph] Node enable/disable on oversized batch: %zu > %zu packets",
+      //           packetBatch.dispatchPackets.size(), maxPacketsPerBatch);
+      // }
+
       packetBatch.setEnabled(node, isEnabled);
       return hipSuccess;
     }
@@ -1425,6 +1478,222 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     // Assign streams to segments at this level
     AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
 
+    // Check if we should use interleaved node processing for this level
+    bool use_interleaved_enqueue = false;
+    size_t total_packets_at_level = 0;
+
+    if (segments_at_level.size() >= 2) {
+      // Count total packets at this level
+      for (int segment_id : segments_at_level) {
+        if (segment_id >= 0 && segment_id < static_cast<int>(segments_.size())) {
+          const auto& segment = segments_[segment_id];
+          if (segment.child_graph_ptr == nullptr) {
+            // Count captured packets for this segment
+            auto segBatchIt = segmentBatches_.find(segment_id);
+            if (segBatchIt != segmentBatches_.end()) {
+              for (const auto& packetBatch : segBatchIt->second.packet_batches) {
+                total_packets_at_level += packetBatch.dispatchPackets.size();
+              }
+            }
+          }
+        }
+      }
+
+      // Enable interleaved processing if we have 2+ segments and DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE packets
+      use_interleaved_enqueue = total_packets_at_level >= DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE;
+
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+              "[hipGraph] Level %d: %zu segments, %zu packets, interleaved_enqueue = %s", level,
+              segments_at_level.size(), total_packets_at_level,
+              use_interleaved_enqueue ? "enabled" : "disabled");
+    }
+
+    if (use_interleaved_enqueue) {
+      // Interleaved node processing: group segments by stream ID and enqueue in stream-aware manner
+      std::unordered_map<int, size_t> segment_packet_index; // Track current packet index per segment
+      std::unordered_map<int, amd::AccumulateCommand*> segment_accumulate_map;
+
+      // Group segments by their assigned stream for stream-aware interleaving
+      std::unordered_map<hip::Stream*, std::vector<int>> stream_to_segments;
+
+      // Initialize tracking for each segment and group by stream
+      for (int segment_id : segments_at_level) {
+        segment_packet_index[segment_id] = 0;
+
+        // Handle dependencies for this segment
+        const auto& segment = segments_[segment_id];
+        hip::Stream* current_stream = segment_to_stream[segment_id];
+
+        // Group segments by stream
+        stream_to_segments[current_stream].push_back(segment_id);
+
+        amd::Command::EventWaitList wait_list;
+        for (int dep_segment_id : segment.segment_ids_dependencies) {
+          auto stream_it = segment_to_stream.find(dep_segment_id);
+          if (stream_it == segment_to_stream.end()) continue;
+
+          hip::Stream* dep_stream = stream_it->second;
+          if (dep_stream != current_stream) {
+            auto cmd_it = segment_last_command.find(dep_segment_id);
+            if (cmd_it != segment_last_command.end() && cmd_it->second != nullptr) {
+              cmd_it->second->retain();
+              wait_list.push_back(cmd_it->second);
+            }
+          }
+        }
+
+        if (!wait_list.empty()) {
+          enqueueMarker(current_stream, wait_list);
+          for (auto* cmd : wait_list) {
+            cmd->release();
+          }
+        }
+
+        // Create accumulate command only for non-child-graph segments
+        if (segment.child_graph_ptr == nullptr) {
+          amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(*current_stream, {}, nullptr);
+          segment_accumulate_map[segment_id] = accumulate;
+        }
+      }
+
+      // Round-robin processing across different streams: alternate between streams for better parallelism
+      const size_t packets_per_batch = DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE; // Dispatch packets based on DEBUG_HIP_GRAPH_PACKET_BATCH_SIZE size
+      bool has_remaining_work = true;
+
+      // Create a flat list of streams for round-robin processing
+      std::vector<hip::Stream*> active_streams;
+      for (const auto& [stream, segment_ids] : stream_to_segments) {
+        if (!segment_ids.empty()) {
+          active_streams.push_back(stream);
+        }
+      }
+
+      // Track current segment index within each stream for round-robin
+      std::unordered_map<hip::Stream*, size_t> stream_current_segment_idx;
+      for (hip::Stream* stream : active_streams) {
+        stream_current_segment_idx[stream] = 0;
+      }
+
+      while (has_remaining_work) {
+        has_remaining_work = false;
+
+        // Round-robin through different streams to maximize cross-stream parallelism
+        for (hip::Stream* current_stream : active_streams) {
+          const auto& segment_ids_for_stream = stream_to_segments[current_stream];
+          size_t& stream_seg_idx = stream_current_segment_idx[current_stream];
+
+          // Find next active segment on this stream (round-robin within stream)
+          bool found_work_on_stream = false;
+          size_t start_seg_idx = stream_seg_idx;
+
+          do {
+            if (stream_seg_idx >= segment_ids_for_stream.size()) {
+              stream_seg_idx = 0;
+            }
+
+            int segment_id = segment_ids_for_stream[stream_seg_idx];
+            const auto& segment = segments_[segment_id];
+            size_t& current_index = segment_packet_index[segment_id];
+
+            // Skip if this segment is complete or is a child graph
+            auto segBatchIt = segmentBatches_.find(segment_id);
+            size_t total_segment_packets = 0;
+            if (segBatchIt != segmentBatches_.end()) {
+              for (const auto& packetBatch : segBatchIt->second.packet_batches) {
+                total_segment_packets += packetBatch.dispatchPackets.size();
+              }
+            }
+
+            if (current_index >= total_segment_packets || segment.child_graph_ptr != nullptr) {
+              stream_seg_idx = (stream_seg_idx + 1) % segment_ids_for_stream.size();
+              continue;
+            }
+
+            found_work_on_stream = true;
+            has_remaining_work = true;
+
+            // Process a batch of packets from this segment
+            size_t end_index = std::min(current_index + packets_per_batch, total_segment_packets);
+            
+            // Dispatch packet batches directly to the stream
+            if (segBatchIt != segmentBatches_.end()) {
+              auto accumulate = segment_accumulate_map[segment_id];
+              if (accumulate != nullptr) {
+                size_t packets_processed = 0;
+                for (auto& packetBatch : segBatchIt->second.packet_batches) {
+                  if (packets_processed >= end_index) break;
+                  
+                  size_t batch_start = (packets_processed < current_index) ? 
+                                     current_index - packets_processed : 0;
+                  size_t batch_end = std::min(packetBatch.dispatchPackets.size(), 
+                                            end_index - packets_processed);
+                  
+                  if (batch_start < batch_end) {
+                    // Create sub-batch for this portion
+                    std::vector<uint8_t*> sub_packets(
+                        packetBatch.dispatchPackets.begin() + batch_start,
+                        packetBatch.dispatchPackets.begin() + batch_end);
+                    std::vector<std::string> sub_kernel_names(
+                        packetBatch.dispatchKernelNames.begin() + batch_start,
+                        packetBatch.dispatchKernelNames.begin() + batch_end);
+                    
+                    if (!sub_packets.empty()) {
+                      bool batchStatus = current_stream->vdev()->dispatchAqlPacketBatch(
+                          sub_packets, sub_kernel_names, accumulate);
+                      if (!batchStatus) {
+                        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+                                "[hipGraph] Failed to dispatch packet sub-batch for segment %d", segment_id);
+                      }
+                    }
+                  }
+                  packets_processed += packetBatch.dispatchPackets.size();
+                }
+              }
+            }
+
+            current_index = end_index;
+
+            // Move to next segment on this stream for next round
+            stream_seg_idx = (stream_seg_idx + 1) % segment_ids_for_stream.size();
+            break;
+
+          } while (stream_seg_idx != start_seg_idx); // Avoid infinite loop
+
+          // If no work found on this stream, continue to next stream
+          if (!found_work_on_stream) {
+            continue;
+          }
+        }
+      }
+
+      // Finalize all segment accumulate commands
+      for (auto& [seg_id, accumulate] : segment_accumulate_map) {
+        if (accumulate) {
+          accumulate->enqueue();
+          segment_last_command[seg_id] = accumulate;
+        }
+      }
+
+      // Handle child graph segments separately after interleaved processing
+      for (int segment_id : segments_at_level) {
+        const auto& segment = segments_[segment_id];
+        if (segment.child_graph_ptr != nullptr) {
+          hip::Stream* current_stream = segment_to_stream[segment_id];
+          amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(*current_stream, {}, nullptr);
+
+          status = EnqueueSegment(segment, current_stream, accumulate);
+          if (status != hipSuccess) {
+            accumulate->release();
+            if (out_status != nullptr) *out_status = status;
+            return nullptr;
+          }
+
+          accumulate->enqueue();
+          segment_last_command[segment_id] = accumulate;
+        }
+      }
+    } else {
+      // Sequential processing (original logic)
     // Process each segment at this level
     for (int segment_id : segments_at_level) {
       const auto& segment = segments_[segment_id];
@@ -1486,6 +1755,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
       segment_last_command[segment_id] = accumulate;
     }
+    }  // End of sequential processing block
   }
 
   // Synchronize all streams with work back to launch_stream
