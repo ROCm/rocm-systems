@@ -5,8 +5,8 @@
 #
 # OMPVV (OpenMP Validation and Verification) submodule
 #
-# * Currently, GNU's libgomp cannot be used to capture traces. Only LLVM's
-#   LIBOMP can be used for trace capture
+# * Currently, GNU's libgomp does not support the OMPT API. Only LLVM's
+#   LIBOMP can be used for trace capture.
 # * As of implementation, amdflang uses LIBOMP 201611 (5.0), but not all
 #   OpenMP 5.0 features are implemented. Only a subset of tests can be compiled.
 # ----------------------------------------------------------------------------------------#
