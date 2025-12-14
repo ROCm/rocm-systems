@@ -4627,7 +4627,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            node_number = amdsmi_topo_get_numa_node_number()
+            node_number = amdsmi_topo_get_numa_node_number(device)
             print(node_number)
 except AmdSmiException as e:
     print(e)
@@ -5447,8 +5447,7 @@ try:
     else:
         for processor in processor_handles:
             version = amdsmi_get_cpu_hsmp_driver_version(processor)
-            print(version['major'])
-            print(version['minor'])
+            print(version)
 except AmdSmiException as e:
     print(e)
 ```
@@ -5481,9 +5480,7 @@ try:
     else:
         for processor in processor_handles:
             version = amdsmi_get_cpu_smu_fw_version(processor)
-            print(version['debug'])
-            print(version['minor'])
-            print(version['major'])
+            print(version)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6105,14 +6102,14 @@ Example:
 
 ```python
 try:
+    dimm_addr =0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor)
-            print(dimm['range'])
-            print(dimm['ref_rate'])
+            dimm = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor, dimm_addr)
+            print(dimm)
 except AmdSmiException as e:
     print(e)
 ```
@@ -6139,12 +6136,13 @@ Example:
 
 ```python
 try:
+    dimm_addr = 0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_power_consumption(processor)
+            dimm = amdsmi_get_cpu_dimm_power_consumption(processor, dimm_addr)
             print(dimm['power'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
@@ -6174,12 +6172,13 @@ Example:
 
 ```python
 try:
+    dimm_addr = 0
     processor_handles = amdsmi_get_cpusocket_handles()
     if len(processor_handles) == 0:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            dimm = amdsmi_get_cpu_dimm_thermal_sensor(processor)
+            dimm = amdsmi_get_cpu_dimm_thermal_sensor(processor,dimm_addr)
             print(dimm['sensor'])
             print(dimm['update_rate'])
             print(dimm['dimm_addr'])
@@ -6692,8 +6691,13 @@ Example:
 
 ```python
 try:
-     cpu_model_name = amdsmi_get_cpu_model_name()
-     print(cpu_model_name)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles: 
+            cpu_model_name = amdsmi_get_cpu_model_name(processor)
+            print(cpu_model_name)
 except AmdSmiException as e:
     print(e)
 ```
