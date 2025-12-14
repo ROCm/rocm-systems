@@ -446,6 +446,14 @@ get_track_id_impl(sqlite3*         conn,
 #define get_track_id(...) get_track_id_impl(__VA_ARGS__, __LINE__)
 }  // namespace
 
+// Reset UUID/GUID state for attach/detach cycles
+void
+reset_uuid_guid_state()
+{
+    get_guid().clear();
+    get_uuid().clear();
+}
+
 size_t
 track_data::hash() const
 {

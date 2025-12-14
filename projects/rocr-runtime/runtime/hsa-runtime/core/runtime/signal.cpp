@@ -58,6 +58,10 @@
 namespace rocr {
 namespace core {
 
+// External flag from runtime.cpp to signal async threads to exit immediately.
+// This is set by the atexit handler before any cleanup begins.
+extern std::atomic<bool> g_async_threads_should_exit;
+
 KernelMutex Signal::ipcLock_;
 std::map<decltype(hsa_signal_t::handle), Signal*> Signal::ipcMap_;
 
@@ -108,6 +112,9 @@ SharedSignal* SharedSignalPool_t::alloc() {
 void SharedSignalPool_t::free(SharedSignal* ptr) {
   if (ptr == nullptr) return;
 
+  // Invalidate the check before freeing to prevent use-after-free
+  // when IsValid() is called on freed memory.
+  ptr->id.Invalidate();
   ptr->~SharedSignal();
   ScopedAcquire<HybridMutex> lock(&lock_);
 
@@ -188,6 +195,12 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
                               uint64_t timeout, hsa_wait_state_t wait_hint,
                               std::vector<hsa_signal_value_t>& satisfying_values,
                               bool wait_on_all) {
+  // Check if async threads should exit before accessing any signals.
+  // This prevents SIGSEGV during exit() when signals may be invalid.
+  if (g_async_threads_should_exit.load(std::memory_order_acquire)) {
+    return uint32_t(-1);
+  }
+
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
 
@@ -336,6 +349,12 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
 uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hsa_signals,
                          const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
                          hsa_signal_value_t* satisfying_value) {
+
+  // Check if async threads should exit before accessing any signals.
+  // This prevents SIGSEGV during exit() when signals may be invalid.
+  if (g_async_threads_should_exit.load(std::memory_order_acquire)) {
+    return uint32_t(-1);
+  }
 
   uint32_t wait_ms = uint32_t(-1);
   hsa_signal_handle* signals =

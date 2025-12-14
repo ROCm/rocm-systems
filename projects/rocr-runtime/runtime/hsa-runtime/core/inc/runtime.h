@@ -530,6 +530,12 @@ class Runtime {
         ;
   }
 
+  /// @brief Shutdown async event handler threads.
+  /// Called by atexit handler to ensure async threads are stopped before
+  /// static destruction begins. This prevents SIGSEGV when exit() is called
+  /// without hsa_shut_down().
+  void ShutdownAsyncHandlers();
+
  protected:
   static void AsyncEventsLoop(void*);
   static void AsyncIPCSockServerConnLoop(void*);
@@ -573,7 +579,10 @@ class Runtime {
 
     hsa_signal_t wake;
     os::Thread thread_;
-    bool exit;
+    std::atomic<bool> exit{false};
+    // Set before destruction begins - checked early in async loop to avoid
+    // accessing potentially destroyed member data.
+    std::atomic<bool> shutting_down{false};
   };
 
   struct AsyncEvents {
@@ -751,7 +760,6 @@ class Runtime {
 
   /// @brief Close tool libraries.
   void CloseTools();
-
   // @brief Binds Error handlers to this node.
   void BindErrorHandlers();
 
@@ -840,9 +848,6 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  lazy_ptr<AsyncEventsInfo> asyncSignals_;
-  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
-
   // System clock frequency.
   uint64_t sys_clock_freq_;
 
@@ -886,6 +891,13 @@ class Runtime {
 
   // Pools KFD Events for InterruptSignal
   InterruptSignal::EventPool EventPool;
+
+  // Async event handlers - MUST be declared AFTER SharedSignalPool and EventPool
+  // to ensure correct destruction order during exit(). C++ destroys members in
+  // reverse declaration order, so these will be destroyed BEFORE the pools,
+  // ensuring async threads are joined before signal memory is freed.
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
 
   // Kfd version
   KfdVersion_t kfd_version;

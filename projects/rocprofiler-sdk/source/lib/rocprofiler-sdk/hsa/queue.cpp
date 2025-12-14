@@ -43,7 +43,9 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
@@ -110,14 +112,19 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
-        auto* _session = static_cast<Queue::queue_info_session_t**>(data);
+        // Data is a heap-allocated shared_ptr, not a raw pointer to queue_info_session_t.
+        // This must match the type allocated at line 502.
+        auto* _session = static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
         delete _session;
         return false;
     }
 
     get_balanced_signal_slots().fetch_add(1);
 
-    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    // Store the pointer for proper deletion at the end of the function.
+    // We must delete the heap-allocated shared_ptr, not the address of a reference.
+    auto* shared_ptr_ptr     = static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    auto& shared_ptr_info    = *shared_ptr_ptr;
     auto& queue_info_session = *shared_ptr_info;
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
@@ -176,7 +183,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     queue_info_session.queue.async_complete();
-    delete &shared_ptr_info;
+    delete shared_ptr_ptr;
 
     return false;
 }
@@ -690,8 +697,25 @@ Queue::sync() const
     // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
     // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
     // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
-    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
-        "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
+    //
+    // Due to relaxed memory ordering in HSA signal operations, we need to wait for
+    // get_balanced_signal_slots() to reach NUM_SIGNALS rather than just checking once.
+    // This ensures all AsyncSignalHandler threads have completed their increment operations
+    // and their memory writes are visible to this thread.
+    constexpr auto max_wait_iterations = 10000;
+    constexpr auto wait_interval_ns    = std::chrono::nanoseconds{100};
+    auto           iterations          = 0;
+    while(get_balanced_signal_slots().load(std::memory_order_acquire) != NUM_SIGNALS &&
+          iterations < max_wait_iterations)
+    {
+        std::this_thread::sleep_for(wait_interval_ns);
+        ++iterations;
+    }
+
+    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS)
+        << fmt::format("There are {} incomplete dispatches after waiting {} iterations",
+                       NUM_SIGNALS - get_balanced_signal_slots().load(),
+                       iterations);
 }
 
 void

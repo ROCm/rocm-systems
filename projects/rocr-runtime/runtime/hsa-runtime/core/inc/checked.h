@@ -81,10 +81,16 @@ template <uint64_t code> class Check<code, true> final {
   Check(const Check&) { object_ = uintptr_t(code); }
   Check(Check&&) { object_ = uintptr_t(code); }
 
+  // No destructor - must remain trivially destructible for IPC use.
+  // Invalidation must be done explicitly via Invalidate().
+
   const Check& operator=(Check&& rhs) { return *this; }
   const Check& operator=(const Check& rhs) { return *this; }
 
   bool IsValid() const { return object_ == uintptr_t(code); }
+
+  // Explicitly invalidate the check - must be called before reusing memory.
+  void Invalidate() { object_ = 0; }
 
   uint64_t check_code() const { return code; }
 

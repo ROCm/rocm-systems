@@ -43,7 +43,9 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
+#include <cstdlib>
 #include <cstring>
+#include <csignal>
 #include <regex>
 #include <string>
 #include <vector>
@@ -117,6 +119,74 @@ namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 Runtime* Runtime::runtime_singleton_ = NULL;
+
+// Flag to track if atexit handler has already run
+static std::atomic<bool> g_atexit_handler_registered{false};
+static std::atomic<bool> g_atexit_handler_ran{false};
+static std::atomic<bool> g_early_exit_handler_registered{false};
+
+// Global flag to signal async threads to exit immediately.
+// This is set BEFORE any cleanup happens to ensure threads don't access
+// potentially invalid memory. The flag is checked at the top of the async
+// loop before any signal access.
+// Note: Not static - needs external linkage for signal.cpp to access it.
+std::atomic<bool> g_async_threads_should_exit{false};
+
+// Thread-local flag to identify the async thread for SIGSEGV handler
+static thread_local bool g_is_async_event_thread{false};
+
+// SIGSEGV handler that allows graceful exit during shutdown.
+// When the async thread crashes while the exit flag is set, we just exit
+// the thread instead of crashing the whole process.
+static void AsyncThreadSigsegvHandler(int sig) {
+  // Only handle SIGSEGV in the async event thread during shutdown
+  if (g_is_async_event_thread &&
+      g_async_threads_should_exit.load(std::memory_order_relaxed)) {
+    // During shutdown, just exit the thread gracefully
+    pthread_exit(NULL);
+  }
+  // Otherwise, restore default handler and re-raise
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+// Early atexit handler that just sets the exit flag.
+// This is registered during library initialization (via constructor attribute)
+// so it runs LATE during exit (atexit is LIFO). But we also register it
+// from a late constructor so it's added after most other atexit handlers.
+static void AsyncThreadsEarlyExitHandler() {
+  // Set the flag to tell async threads to exit immediately.
+  g_async_threads_should_exit.store(true, std::memory_order_release);
+}
+
+// Late atexit handler to stop async threads before static destruction.
+// This prevents SIGSEGV when exit() is called without hsa_shut_down().
+// During exit(), static destructors run in undefined order, and the
+// SharedSignalPool memory may be unmapped before the async threads are stopped.
+// By using atexit, we ensure the async threads are joined first.
+static void AsyncThreadsAtExitHandler() {
+  if (g_atexit_handler_ran.exchange(true)) return;  // Already ran
+
+  // Set the global exit flag (in case early handler hasn't run yet)
+  g_async_threads_should_exit.store(true, std::memory_order_release);
+
+  if (Runtime::runtime_singleton_ == nullptr) return;
+
+  // Reset the async handlers to stop their threads.
+  // This must happen before any static destruction that might unmap signal memory.
+  Runtime::runtime_singleton_->ShutdownAsyncHandlers();
+}
+
+// Constructor with high priority (runs late) to register an atexit handler.
+// Because this runs late during initialization, the atexit handler is registered
+// AFTER most other handlers, and thus runs BEFORE them during exit (LIFO order).
+// This sets the exit flag early, before other handlers can deallocate signals.
+__attribute__((constructor(65535)))
+static void RegisterEarlyExitHandler() {
+  if (!g_early_exit_handler_registered.exchange(true)) {
+    std::atexit(AsyncThreadsEarlyExitHandler);
+  }
+}
 
 hsa_status_t Runtime::Acquire() {
   ScopedAcquire<KernelMutex> boot(&bootstrap_lock());
@@ -1751,6 +1821,18 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
+  // Mark this thread as the async event thread for the SIGSEGV handler.
+  // This allows graceful exit if we crash while accessing freed signals during shutdown.
+  g_is_async_event_thread = true;
+
+  // Install SIGSEGV handler for graceful shutdown on crash.
+  // If we crash while the exit flag is set, just exit the thread.
+  struct sigaction sa = {};
+  sa.sa_handler = AsyncThreadSigsegvHandler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGSEGV, &sa, nullptr);
+
   auto& async_events_control_ = eventsInfo->control;
   auto& async_events_ = eventsInfo->events;
   auto& new_async_events_ = eventsInfo->new_events;
@@ -1759,16 +1841,35 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
 
+  // Helper to check if a signal is valid before accessing it.
+  // Returns true if signal is valid, false if freed, invalid, or shutdown is in progress.
+  // Captures async_events_control_ to check shutting_down flag.
+  auto isSignalValid = [&async_events_control_](hsa_signal_t signal) {
+    // If shutdown is in progress, treat all signals as invalid to avoid
+    // accessing potentially unmapped memory. Check ALL shutdown flags.
+    if (g_async_threads_should_exit.load(std::memory_order_acquire) ||
+        async_events_control_.shutting_down.load(std::memory_order_acquire) ||
+        async_events_control_.exit.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (signal.handle == 0) return false;
+    SharedSignal* shared = SharedSignal::Convert(signal);
+    return shared->IsValid();
+  };
+
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
     // Call handler for the known satisfied signal.
     assert(async_events_.handler_[index] != nullptr);
     bool keep = async_events_.handler_[index](value, async_events_.arg_[index]);
     if (!keep) {
-      if (!wait_any) {
+      // Check signal validity before accessing - signal may have been freed
+      if (!wait_any && isSignalValid(async_events_.signal_[index])) {
         hsa_signals[index]->WaitingDec();
       }
-      hsa_signal_handle(async_events_.signal_[index])->Release();
+      if (isSignalValid(async_events_.signal_[index])) {
+        hsa_signal_handle(async_events_.signal_[index])->Release();
+      }
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
     }
@@ -1777,6 +1878,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx, bool init_age) {
+    // Check signal validity before accessing
+    if (!isSignalValid(async_events_.signal_[idx])) return false;
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
     // If any signal doesn't have an interrupt, then switch to polling
     if (hsa_event == nullptr) {
@@ -1805,19 +1908,35 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
   };
 
-  while (!async_events_control_.exit) {
+  while (!async_events_control_.exit.load(std::memory_order_acquire)) {
+    // Check shutdown flags FIRST, before any signal access.
+    // shutting_down is set by the destructor before any destruction begins.
+    // g_async_threads_should_exit is set by the atexit handler.
+    if (async_events_control_.shutting_down.load(std::memory_order_acquire) ||
+        g_async_threads_should_exit.load(std::memory_order_acquire)) {
+      break;
+    }
+
     // Wait for a signal
     std::vector<hsa_signal_value_t> value(1);
     value[0] = 0;
     uint32_t index = 0;
     uint32_t wait_any = true;
+
+    // Check if we have any events to wait on and if the vector is valid
+    size_t event_count = async_events_.Size();
+    if (event_count == 0) {
+      // No events to process, sleep briefly and continue
+      continue;
+    }
+
     if (eventsInfo->monitor_exceptions) {
       index =
-          Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+          Signal::WaitAnyExceptions(uint32_t(event_count), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
     } else {
      if (core::Runtime::runtime_singleton_->flag().wait_any()) {
-       index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+       index = Signal::WaitMultiple(uint32_t(event_count), &async_events_.signal_[0],
                                     &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
                                     HSA_WAIT_STATE_BLOCKED, value, false);
      } else {
@@ -1847,10 +1966,22 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // @note: Waiting tag must be marked before the signal state check on CPU to
       // avoid a possible race condition between KFD sleep and rocr's awake call
       if (!wait_any) {
-        for (size_t e = 0; e < async_events_.Size(); e++) {
+        // Cache size and check exit flag first to avoid race with destruction
+        size_t events_size = async_events_.Size();
+        for (size_t e = 0; e < events_size; e++) {
+          // Check all exit flags to avoid accessing signals during shutdown
+          if (async_events_control_.exit.load(std::memory_order_acquire) ||
+              async_events_control_.shutting_down.load(std::memory_order_acquire) ||
+              g_async_threads_should_exit.load(std::memory_order_acquire)) break;
+          // Skip invalid signals to avoid SEGV during shutdown
+          if (!isSignalValid(async_events_.signal_[e])) continue;
           hsa_signals[e]->WaitingInc();
         }
       }
+      // Early exit check after marking signals
+      if (async_events_control_.exit.load(std::memory_order_acquire) ||
+          async_events_control_.shutting_down.load(std::memory_order_acquire) ||
+          g_async_threads_should_exit.load(std::memory_order_acquire)) break;
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
         if (wait_any) {
@@ -1860,7 +1991,18 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         unique_evts = 0;
 
         // Check remaining signals before sleeping.
-        for (size_t i = index; i < async_events_.Size(); i++) {
+        // Cache size to avoid calling Size() on each iteration
+        size_t loop_size = async_events_.Size();
+        for (size_t i = index; i < loop_size; i++) {
+          // Check all exit flags to avoid accessing signals during shutdown
+          if (async_events_control_.exit.load(std::memory_order_acquire) ||
+              async_events_control_.shutting_down.load(std::memory_order_acquire) ||
+              g_async_threads_should_exit.load(std::memory_order_acquire)) {
+            finish = true;
+            break;
+          }
+          // Skip invalid signals to avoid SEGV during shutdown
+          if (!isSignalValid(async_events_.signal_[i])) continue;
           hsa_signal_handle sig(async_events_.signal_[i]);
           value[0] = atomic::Load(&sig->signal_.value, std::memory_order_relaxed);
           if (CheckSignalCondition(value[0], async_events_.cond_[i], async_events_.value_[i])) {
@@ -1901,7 +2043,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     if (!wait_any) {
       // Remove the waiting tags from events
       for (size_t e = 0; e < async_events_.Size(); e++) {
-        hsa_signals[e]->WaitingDec();
+        // Check signal validity before accessing - signal may have been freed
+        if (isSignalValid(async_events_.signal_[e])) {
+          hsa_signals[e]->WaitingDec();
+        }
       }
     }
 
@@ -1922,17 +2067,37 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       functions[i].first(functions[i].second);
     }
     functions.clear();
+
+    // Recalculate hsa_signals pointer after potential vector reallocation from PushBack
+    hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
   }
 
-  // Release wait count of all pending signals
-  for (size_t i = 1; i < async_events_.Size(); i++)
-    hsa_signal_handle(async_events_.signal_[i])->Release();
+  // Skip cleanup if we're exiting due to shutdown flags.
+  // During shutdown, the signal memory may already be freed or unmapped,
+  // so we must not access it. The process is exiting anyway, so the leak
+  // is acceptable.
+  if (g_async_threads_should_exit.load(std::memory_order_acquire) ||
+      async_events_control_.shutting_down.load(std::memory_order_acquire)) {
+    // Just clear the lists without accessing signal memory
+    async_events_.Clear();
+    new_async_events_.Clear();
+    return;
+  }
+
+  // Release wait count of all pending signals (normal exit path only)
+  for (size_t i = 1; i < async_events_.Size(); i++) {
+    // Check signal validity before accessing - signal may have been freed
+    if (isSignalValid(async_events_.signal_[i])) {
+      hsa_signal_handle(async_events_.signal_[i])->Release();
+    }
+  }
   async_events_.Clear();
 
   std::vector<AsyncEventItem> remaining_events;
   new_async_events_.GetAllEvents(remaining_events);
   for (const auto& event : remaining_events) {
-    if (event.signal.handle != 0) {
+    // Check signal validity before accessing - signal may have been freed
+    if (event.signal.handle != 0 && isSignalValid(event.signal)) {
       hsa_signal_handle(event.signal)->Release();
     }
   }
@@ -2320,11 +2485,13 @@ Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
 }
 
 Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
+  // Set shutting_down flag FIRST to signal the async thread to exit
+  // immediately before we start destroying any member data.
+  control.shutting_down.store(true, std::memory_order_release);
   control.Shutdown();
 }
 
-Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : exit(false) {
+Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo) {
 
   int priority = asyncInfo->monitor_exceptions ? os::OS_THREAD_PRIORITY_DEFAULT :
                   runtime_singleton_->flag().async_events_thread_priority();
@@ -2397,6 +2564,12 @@ hsa_status_t Runtime::Load() {
 
   asyncSignals_.reset(new AsyncEventsInfo(false));
   asyncExceptions_.reset(new AsyncEventsInfo(g_use_interrupt_wait));
+
+  // Register atexit handler to stop async threads before static destruction.
+  // This prevents SIGSEGV when exit() is called without hsa_shut_down().
+  if (!g_atexit_handler_registered.exchange(true)) {
+    std::atexit(AsyncThreadsAtExitHandler);
+  }
 
   // Setup system clock frequency for the first time.
   if (sys_clock_freq_ == 0) {
@@ -2838,6 +3011,14 @@ void Runtime::CloseTools() {
     for (auto& lib : tool_libs_) os::CloseLib(lib);
   }
   tool_libs_.clear();
+}
+
+void Runtime::ShutdownAsyncHandlers() {
+  // Stop async event handler threads.
+  // This is called by atexit handler to ensure threads are stopped
+  // before static destruction begins.
+  asyncSignals_.reset();
+  asyncExceptions_.reset();
 }
 
 void Runtime::AsyncEventsControl::Shutdown() {

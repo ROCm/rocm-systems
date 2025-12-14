@@ -157,11 +157,14 @@ ring_buffer::request(size_t _length, size_t _align, bool _wrap)
         _write_count = m_write_count.load(std::memory_order_acquire);
         auto _modulo = m_size - (_write_count % m_size);
         if(_modulo < _length) _offset = _modulo;
-        auto _align_modulo = (_write_count % _align);
+        // Calculate alignment AFTER adding offset to handle buffer wrap correctly.
+        // If we're wrapping (_offset > 0), we need to align from the wrapped position.
+        auto _base_pos     = _write_count + _offset;
+        auto _align_modulo = (_base_pos % _align);
         auto _align_offset = (_align_modulo > 0) ? (_align - _align_modulo) : 0;
-        _write_pos         = _write_count + _align_offset;
+        _write_pos         = _base_pos + _align_offset;
     } while(!m_write_count.compare_exchange_strong(
-        _write_count, _write_pos + _length + _offset, std::memory_order_seq_cst));
+        _write_count, _write_pos + _length, std::memory_order_seq_cst));
 
     // pointer in buffer
     void* _out = write_ptr(_write_pos);
@@ -189,11 +192,14 @@ ring_buffer::retrieve(size_t _length, size_t _align) const
         _read_count  = m_read_count.load(std::memory_order_acquire);
         auto _modulo = m_size - (_read_count % m_size);
         if(_modulo < _length) _offset = _modulo;
-        auto _align_modulo = (_read_count % _align);
+        // Calculate alignment AFTER adding offset to handle buffer wrap correctly.
+        // If we're wrapping (_offset > 0), we need to align from the wrapped position.
+        auto _base_pos     = _read_count + _offset;
+        auto _align_modulo = (_base_pos % _align);
         auto _align_offset = (_align_modulo > 0) ? (_align - _align_modulo) : 0;
-        _read_pos          = _read_count + _align_offset;
+        _read_pos          = _base_pos + _align_offset;
     } while(!m_read_count.compare_exchange_strong(
-        _read_count, _read_pos + _length + _offset, std::memory_order_seq_cst));
+        _read_count, _read_pos + _length, std::memory_order_seq_cst));
 
     // pointer in buffer
     void* _out = read_ptr(_read_pos);

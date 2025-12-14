@@ -53,8 +53,10 @@
 namespace rocr {
 namespace AMD {
 
-static std::string& kBlitKernelSource() {
-  static std::string kBlitKernelSource_(R"(
+static std::string* kBlitKernelSource() {
+  // Use a heap-allocated string that is intentionally never freed to avoid
+  // use-after-free when other threads access this during program shutdown.
+  static std::string* kBlitKernelSource_ = new std::string(R"(
   // Compatibility function for GFXIP 7.
 
   function s_load_dword_offset(byte_offset)
@@ -500,16 +502,14 @@ int GetKernelSourceParam(const char* paramName) {
   std::stringstream paramDef;
   paramDef << "var " << paramName << " = ";
 
-  std::string::size_type paramDefLoc =
-                              kBlitKernelSource().find(paramDef.str());
+  const std::string& source = *kBlitKernelSource();
+  std::string::size_type paramDefLoc = source.find(paramDef.str());
   assert(paramDefLoc != std::string::npos);
   std::string::size_type paramValLoc = paramDefLoc + paramDef.str().size();
-  std::string::size_type paramEndLoc =
-      kBlitKernelSource().find('\n', paramDefLoc);
+  std::string::size_type paramEndLoc = source.find('\n', paramDefLoc);
   assert(paramEndLoc != std::string::npos);
 
-  std::string paramVal(&kBlitKernelSource()[paramValLoc],
-                       &kBlitKernelSource()[paramEndLoc]);
+  std::string paramVal(&source[paramValLoc], &source[paramEndLoc]);
   return std::stoi(paramVal);
 }
 

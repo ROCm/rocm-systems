@@ -64,7 +64,9 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
     }
     else
     {
-        ROCP_CI_LOG(ERROR) << fmt::format(
+        // Use WARNING instead of CI_LOG(ERROR) to avoid FATAL abort on profiling failures.
+        // Invalid signals during shutdown are expected and shouldn't crash the profiled app.
+        ROCP_WARNING << fmt::format(
             "hsa_amd_profiling_get_dispatch_time for kernel id={} on agent-{} returned status={} "
             ":: {}",
             _kernel_id,

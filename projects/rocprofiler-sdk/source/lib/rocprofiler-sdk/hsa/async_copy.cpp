@@ -288,7 +288,9 @@ active_signals::sync()
         auto _cnt_end = m_count.load();
         if(_signal_value != 0)
         {
-            ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
+            // Use WARNING_IF instead of CI_LOG_IF to avoid FATAL abort on timeout.
+            // Timeouts during shutdown are expected and shouldn't crash.
+            ROCP_WARNING_IF(_cnt_end > 0)
                 << "rocprofiler-sdk timed out after " << timeout_sec.count()
                 << " seconds waiting for " << _cnt_beg
                 << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
@@ -313,8 +315,9 @@ active_signals::fetch_sub(int v)
     if(m_signal.handle == 0) return;
 
     auto _cnt = m_count.load();
-    ROCP_CI_LOG_IF(WARNING, _cnt == 0) << "active_signals count (currently = 0) was requested to "
-                                          "decrement more times than it was incremented";
+    // Use WARNING_IF instead of CI_LOG_IF to avoid FATAL abort during shutdown.
+    ROCP_WARNING_IF(_cnt == 0) << "active_signals count (currently = 0) was requested to "
+                                  "decrement more times than it was incremented";
 
     if(_cnt > 0) m_count.fetch_sub(1);
     get_core_table()->hsa_signal_subtract_screlease_fn(m_signal, v);
@@ -376,7 +379,9 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     }
     else
     {
-        ROCP_CI_LOG(ERROR) << fmt::format(
+        // Use WARNING instead of CI_LOG(ERROR) to avoid FATAL abort on profiling failures.
+        // Invalid signals during shutdown are expected and shouldn't crash the profiled app.
+        ROCP_WARNING << fmt::format(
             "hsa_amd_profiling_get_async_copy_time for the {} copy operation from agent-{} to "
             "agent-{} returned status={} :: {}",
             std::string_view{hsa::async_copy::name_by_id(_data->direction)},
