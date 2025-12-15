@@ -92,7 +92,7 @@ TEST_CASE(Unit_hipGetDeviceCount_HideDevices) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Print_Out_Device_Count") {
+TEST_CASE(Print_Out_Device_Count) {
   std::cout << "Device Count: " << HipTest::getDeviceCount() << std::endl;
 }
 

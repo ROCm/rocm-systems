@@ -51,7 +51,7 @@ template <typename T> struct AtomicWrap {
 
 // Have multiple threads and enqueue commands from them on a single stream
 // Validate at the end that all commands have completed successfully
-TEST_CASE("Stress_StreamEnqueue_DifferentThreads") {
+TEST_CASE(Stress_StreamEnqueue_DifferentThreads) {
   auto hwThreads = std::thread::hardware_concurrency();
   hwThreads = (hwThreads >= 2) ? hwThreads : 2;  // Run atleast 2 threads
 
@@ -121,7 +121,7 @@ __global__ void doOperation(int* dPtr, int val) {
 
 // Allocate mulitple stream for same device.
 // Same device stream operate on same memory
-TEST_CASE("Stress_StreamEnqueue_DifferentThreads_MultiGPU") {
+TEST_CASE(Stress_StreamEnqueue_DifferentThreads_MultiGPU) {
   int deviceCount{0};
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   REQUIRE(deviceCount > 0);

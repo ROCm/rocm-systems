@@ -24,7 +24,7 @@
 // Stress allocation tests
 // Try to allocate as much memory as possible
 // But since max allocation can fail, we need to be happy with atleast 1/4th of memory
-TEST_CASE("Stress_hipMalloc_HighSizeAlloc") {
+TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   size_t devMemTotal{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemTotal));
   REQUIRE(devMemFree > 0);

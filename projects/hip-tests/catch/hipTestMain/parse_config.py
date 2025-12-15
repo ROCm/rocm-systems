@@ -36,8 +36,22 @@ with open(config_path) as file:
 
 test_definitions = []
 
-for group, cases in config["tests"].items():
+for group, cases in config["unit"].items():
     for case_name, case_config in cases.items():
+        test_definitions.append(
+            create_test_definition(group, case_name, case_config, platform, os, arch)
+        )
+
+non_unit_groups = [
+    "ABM",
+    "multiproc",
+    "performance",
+    "perftests",
+    "stress",
+    "TypeQualifiers",
+]
+for group in non_unit_groups:
+    for case_name, case_config in config[group].items():
         test_definitions.append(
             create_test_definition(group, case_name, case_config, platform, os, arch)
         )

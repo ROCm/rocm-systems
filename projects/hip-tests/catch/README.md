@@ -47,29 +47,40 @@ TEST_CASE("hipExtAPIs") {
 #endif
 ```
 
-TODO
-## Config file schema
-Some tests can be skipped using a config file placed in hipTestMain/config folder. Multiple config files can be defined for different configurations.
-The naming convention for the file needs to be "config_platform_os_archname.json"
-Platform and os are mandatory.
-Arch name is optional and takes precedence while loading the json file.
-Currently the json files need to be manually chosen by the executor for the architecture of choice.
+## Configuration
 
-example:
-config_amd_windows.json
-config_nvidia_windows.json
+All configuration for the test cases is done through the `hip_tests_config.yaml` file.
+Every test case has its own entry. Currently supported options are:
+- level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
+- tags : List all Catch2 tags that the case is associated with
+- disabled : List all platforms where the case should be disabled
+The group name is automatically added as a tag for every case.
+Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
-The schema of the json file is as follows:
-```json
-{
-    "DisabledTests":
-    [
-        "TestName1",
-        "TestName2",
-        ...
-    ]
-}
+Example:
+```yaml
+unit:
+  atomics:
+    Unit_atomicExch_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl]
 ```
+will be generated as (on an AMD linux machine) as:
+```cpp
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][atomics]"
+```
+and on an AMD WSL machine as (skipping the test):
+```cpp
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[.]"
+```
+and this macro is expanded in the actual test case definition
+```cpp
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double)
+```
+
+<b>Every newly added test should mandate adding an entry to the configuration file.</b>
 
 ## Environment Variables
 - `HT_LOG_ENABLE` : This is for debugging the HIP Test Framework itself. Setting it to 1, all `LogPrintf` will be printed on screen
@@ -184,6 +195,7 @@ Catch2 allows multiple ways in which you can debug the test case.
 ## External Libs being used
 - [Catch2](https://github.com/catchorg/Catch2) - Testing framework
 - [picojson](https://github.com/kazuho/picojson) - For config file parsing
+- [PyYAML](https://pyyaml.org/) - For config file parsing (Python script)
 
 # Testing Guidelines
 Tests fall in 5 categories and its file name prefix are as follows:

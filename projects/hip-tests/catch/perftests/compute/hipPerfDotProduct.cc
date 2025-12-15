@@ -230,7 +230,7 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfDotProduct") {
+TEST_CASE(Perf_hipPerfDotProduct) {
   int nGpu = 0;
   int p_gpuDevice = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));

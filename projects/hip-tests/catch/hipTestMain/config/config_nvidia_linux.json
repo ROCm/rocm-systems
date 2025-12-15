@@ -1,6 +1,0 @@
-{
-    "DisabledTests": [
-        "=== Below tests are failing PSDB ===",
-        "Unit_hipMemMapArrayAsync_Positive_Basic"
-    ]
-}

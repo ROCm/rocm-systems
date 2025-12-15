@@ -416,7 +416,7 @@ void printAttributes(const AttributeToStringMap<n>& attributes, const int device
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Print_Out_Attributes") {
+TEST_CASE(Print_Out_Attributes) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   hipDeviceProp_t properties;
   HIP_CHECK(hipGetDeviceProperties(&properties, device));

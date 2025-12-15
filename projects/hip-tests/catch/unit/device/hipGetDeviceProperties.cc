@@ -225,7 +225,7 @@ TEST_CASE(Unit_hipGetDeviceProperties_NegTst) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Print_Out_Properties") {
+TEST_CASE(Print_Out_Properties) {
   constexpr int w = 42;
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
@@ -354,7 +354,7 @@ TEST_CASE("Print_Out_Properties") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Print_Out_Properties_6.0") {
+TEST_CASE(Print_Out_Properties_6_0) {
   constexpr int w = 42;
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 

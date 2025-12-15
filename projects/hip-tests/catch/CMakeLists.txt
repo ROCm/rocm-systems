@@ -241,8 +241,18 @@ foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
 endforeach()
 
 # config generation
-# TODO PyYAML
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# Check for PyYAML
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import yaml"
+    RESULT_VARIABLE PY_YAML_RESULT
+    ERROR_QUIET
+)
+if(NOT PY_YAML_RESULT EQUAL 0)
+    message(FATAL_ERROR "PyYAML is required in order to read the configuration file. Please install it")
+endif()
+
 if(WIN32)
     set(CONFIG_OS "windows")
     set(CONFIG_ARCH "windows")
@@ -258,15 +268,15 @@ set(CONFIG_PARSER_SCRIPT ${CMAKE_SOURCE_DIR}/hipTestMain/parse_config.py)
 set(HIP_TESTS_CONFIG_YAML ${CMAKE_SOURCE_DIR}/hipTestMain/config/hip_tests_config.yaml)
 set(HIP_TESTS_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_tests_config.hh)
 
-execute_process(
+add_custom_command(
+    OUTPUT ${HIP_TESTS_CONFIG_HEADER}
     COMMAND "${Python3_EXECUTABLE}" "${CONFIG_PARSER_SCRIPT}" "${HIP_TESTS_CONFIG_YAML}" "${HIP_PLATFORM}" "${CONFIG_OS}" "${CONFIG_ARCH}" "${HIP_TESTS_CONFIG_HEADER}"
-    RESULT_VARIABLE _HIP_TESTS_CONFIG_RESULT
-    ERROR_VARIABLE _HIP_TESTS_CONFIG_ERROR
+    DEPENDS ${HIP_TESTS_CONFIG_YAML} ${CONFIG_PARSER_SCRIPT}
+    COMMENT "Generating hip_tests_config.hh"
 )
-if(NOT _HIP_TESTS_CONFIG_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed generating ${HIP_TESTS_CONFIG_HEADER}: ${_HIP_TESTS_CONFIG_ERROR}")
-endif()
 
+# Ensure the generated header file is built before the main target
+add_custom_target(hip_tests_config DEPENDS ${HIP_TESTS_CONFIG_HEADER})
 set_source_files_properties(${HIP_TESTS_CONFIG_HEADER} PROPERTIES GENERATED TRUE)
 
 # prints the catch info to a file
@@ -305,6 +315,7 @@ endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_custom_target(build_tests ALL)
+add_dependencies(build_tests hip_tests_config)
 
 # Tests folder
 if(BUILD_UNIT_TESTS)

@@ -37,7 +37,7 @@ __global__ void add(const float* A, float* B) {
 
 __global__ void GPU_func() { x++; }
 
-TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
+TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   for (int i = 0; i < N; i++) {
     A[i] = 1.0f;
     B[i] = 2.0f;
@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   REQUIRE(maxError == 0.0f);
 }
 
-TEST_CASE("Unit_hipManagedKeyword_MultiGpu") {
+TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
