@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: 
+        system: |
           - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
           - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
@@ -132,7 +132,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: 
+        system:
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
@@ -200,7 +200,7 @@ jobs:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" 
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16"
           -DCTEST_SITE=${{ matrix.system.runner }}
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""

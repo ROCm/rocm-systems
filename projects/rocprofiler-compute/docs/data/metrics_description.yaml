@@ -1580,6 +1580,12 @@ System Speed-of-Light:
       Computed as the ratio of the total number of cycles spent by the :ref:`scheduler
       <desc-scheduler>` issuing VALU instructions over the :ref:`total CU cycles <total-cu-cycles>`.
     unit: Percent
+  Dual-issue VALU Utilization:
+    rst: Indicates what percent of the kernel's duration the :ref:`VALU <desc-valu>`
+      was busy executing dual-issued instructions. Computed as the ratio of the total number of
+      cycles spent by the scheduler co-issuing VALU instructions over the total
+      CU cycles.
+    unit: Percent
   VMEM Utilization:
     rst: Indicates what percent of the kernel's duration the :ref:`VMEM <desc-vmem>`
       unit was busy executing instructions, including both global/generic and spill/scratch
