@@ -76,7 +76,29 @@ set_tests_properties(
         TIMEOUT 30
 )
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+# ------------------------------------------------------------------------------#
+#
+# Pytests install
+#
+# ------------------------------------------------------------------------------#
+
+rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTS "Create tests that link to the installed examples" OFF)
+if(NOT ROCPROFSYS_INSTALL_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_TESTS)
+        set(ROCPROFSYS_INSTALL_TESTS
+            OFF
+            CACHE BOOL
+            "Create tests that link to the installed examples"
+            FORCE
+        )
+        rocprofiler_systems_message(STATUS "ROCPROFSYS_INSTALL_TESTS requires ROCPROFSYS_INSTALL_EXAMPLES to be enabled. Disabling...")
+    endif()
+endif()
+
+if(ROCPROFSYS_INSTALL_TESTS)
+    # Pytest
+    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+
     # Python Validation scripts
     install(
         PROGRAMS
