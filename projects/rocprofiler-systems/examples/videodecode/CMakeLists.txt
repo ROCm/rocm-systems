@@ -183,7 +183,7 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
             COMPONENT rocprofiler-systems-examples
         )
         install(
-            FILES ${CMAKE_BINARY_DIR}/videos
+            DIRECTORY ${CMAKE_BINARY_DIR}/videos/
             DESTINATION share/rocprofiler-systems/examples/videos
             COMPONENT rocprofiler-systems-examples
         )

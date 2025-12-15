@@ -164,7 +164,7 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
             COMPONENT rocprofiler-systems-examples
         )
         install(
-            FILES ${CMAKE_BINARY_DIR}/images
+            DIRECTORY ${CMAKE_BINARY_DIR}/images/
             DESTINATION share/rocprofiler-systems/examples/images
             COMPONENT rocprofiler-systems-examples
         )
