@@ -237,7 +237,7 @@ set(OMPVV_HOST_TESTS_TO_COMPILE
 
 # Set of offloading tests to be compiled (excluding reduction and simd_atomic
 # tests due to OMPVV test failure)
-# Compile for 20 and above
+# amdflang v20 and above required
 set(OMPVV_OFFLOAD_TESTS_TO_COMPILE "")
 if(OMPVV_USE_OFFLOAD_TESTS AND AMDFLANG_VERSION_MAJOR GREATER_EQUAL 20)
     set(OMPVV_OFFLOAD_TESTS_TO_COMPILE
