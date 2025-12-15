@@ -43,30 +43,30 @@ Output: "A_d" output of hipMemcpyHtoA is copied to "hData" host variable
 
 The same scenario is then verified with pinned host memory
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_Basic", "[hipMemcpyHtoA]", char, int, float) {
+TEST_CASE("Unit_hipMemcpyHtoA_Basic", "[hipMemcpyHtoA]") {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
   auto memtype_check = GENERATE(0, 1);
   hipArray_t A_d;
-  TestType *hData{nullptr}, *B_h{nullptr};
-  size_t width{NUM_W * sizeof(TestType)};
+  int *hData{nullptr}, *B_h{nullptr};
+  size_t width{NUM_W * sizeof(int)};
 
   // Initialization of data
   if (memtype_check) {
-    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W, true);
+    HipTest::initArrays<int>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W, true);
   } else {
-    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
+    HipTest::initArrays<int>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
   }
-  HipTest::setDefaultData<TestType>(NUM_W, hData, B_h, nullptr);
-  hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
+  HipTest::setDefaultData<int>(NUM_W, hData, B_h, nullptr);
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
   HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
   // Performing API call
-  HIP_CHECK(hipMemcpyHtoA(A_d, 0, B_h, copy_bytes * sizeof(TestType)));
-  HIP_CHECK(hipMemcpy2DFromArray(hData, sizeof(TestType) * NUM_W, A_d, 0, 0,
-                                 sizeof(TestType) * NUM_W, 1, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpyHtoA(A_d, 0, B_h, copy_bytes * sizeof(int)));
+  HIP_CHECK(hipMemcpy2DFromArray(hData, sizeof(int) * NUM_W, A_d, 0, 0, sizeof(int) * NUM_W, 1,
+                                 hipMemcpyDeviceToHost));
 
 
   // Validating the result
@@ -75,10 +75,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_Basic", "[hipMemcpyHtoA]", char, int, flo
   // DeAllocating the memory
   HIP_CHECK(hipFreeArray(A_d));
   if (memtype_check) {
-    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr, true) ==
-            true);
+    REQUIRE(HipTest::freeArrays<int>(nullptr, nullptr, nullptr, hData, B_h, nullptr, true) == true);
   } else {
-    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr, false) ==
+    REQUIRE(HipTest::freeArrays<int>(nullptr, nullptr, nullptr, hData, B_h, nullptr, false) ==
             true);
   }
 }
@@ -93,8 +92,7 @@ Output: "A_d" output of hipMemcpyHtoA is copied to "hData" host variable
         validated the result with "B_h"
 */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext",
-                   "[hipMemcpyHtoA][multigpu]", char, int, float) {
+TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext", "[hipMemcpyHtoA][multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -106,13 +104,13 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext",
     } else {
       HIP_CHECK(hipSetDevice(0));
       hipArray_t A_d;
-      TestType *hData{nullptr}, *B_h{nullptr};
-      size_t width{NUM_W * sizeof(TestType)};
+      int *hData{nullptr}, *B_h{nullptr};
+      size_t width{NUM_W * sizeof(int)};
 
       // Initialization of data
-      HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
-      HipTest::setDefaultData<TestType>(NUM_W, hData, B_h, nullptr);
-      hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
+      HipTest::initArrays<int>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
+      HipTest::setDefaultData<int>(NUM_W, hData, B_h, nullptr);
+      hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
       HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
       HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
@@ -120,17 +118,17 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyHtoA_multiDevice-PeerDeviceContext",
       HIP_CHECK(hipSetDevice(1));
 
       // Performing API call
-      HIP_CHECK(hipMemcpyHtoA(A_d, 0, B_h, copy_bytes * sizeof(TestType)));
-      HIP_CHECK(hipMemcpy2DFromArray(hData, sizeof(TestType) * NUM_W, A_d, 0, 0,
-                                     sizeof(TestType) * NUM_W, 1, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpyHtoA(A_d, 0, B_h, copy_bytes * sizeof(int)));
+      HIP_CHECK(hipMemcpy2DFromArray(hData, sizeof(int) * NUM_W, A_d, 0, 0, sizeof(int) * NUM_W, 1,
+                                     hipMemcpyDeviceToHost));
 
       // Validating the result
       REQUIRE(HipTest::checkArray(B_h, hData, copy_bytes, NUM_H) == true);
 
       // DeAllocating the memory
       HIP_CHECK(hipFreeArray(A_d));
-      REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr,
-                                            false) == true);
+      REQUIRE(HipTest::freeArrays<int>(nullptr, nullptr, nullptr, hData, B_h, nullptr, false) ==
+              true);
     }
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");

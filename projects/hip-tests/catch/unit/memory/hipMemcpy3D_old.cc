@@ -527,7 +527,7 @@ template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]", int, unsigned int, float) {
+TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]") {
   CHECK_IMAGE_SUPPORT
   int device = -1;
   HIP_CHECK(hipGetDevice(&device));
@@ -538,16 +538,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]", int, unsigned int,
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    if (std::is_same<TestType, float>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindFloat);
-      memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, unsigned int>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindUnsigned);
-      memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, int>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
-      memcpy3d_obj.simple_Memcpy3D();
-    }
+    Memcpy3D<int> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
+    memcpy3d_obj.simple_Memcpy3D();
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
   }

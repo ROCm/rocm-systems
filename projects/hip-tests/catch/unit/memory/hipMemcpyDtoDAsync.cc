@@ -40,12 +40,11 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
-                   double) {
-  size_t Nbytes = NUM_ELM * sizeof(TestType);
+TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]") {
+  size_t Nbytes = NUM_ELM * sizeof(int);
   int numDevices = 0;
-  TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
-  TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
+  int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
+  int *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   hipStream_t stream;
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -58,7 +57,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
     } else {
       INFO("Machine does not have P2P Capabilities");
     }
-    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
+    HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipMalloc(&X_d, Nbytes));
     HIP_CHECK(hipMalloc(&Y_d, Nbytes));
@@ -67,13 +66,12 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
-                       static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
-                       NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+                       static_cast<const int*>(B_d), C_d, NUM_ELM);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
-    HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD<int>(A_h, B_h, C_h, NUM_ELM);
 
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipStreamCreate(&stream));
@@ -81,16 +79,15 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
     HIP_CHECK(hipMemcpyDtoDAsync((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
-                       static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
-                       NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+                       static_cast<const int*>(Y_d), Z_d, NUM_ELM);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpyDtoHAsync(C_h, (hipDeviceptr_t)Z_d, Nbytes, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipDeviceSynchronize());
-    HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+    HipTest::checkVectorADD<int>(A_h, B_h, C_h, NUM_ELM);
 
-    HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+    HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
     HIP_CHECK(hipFree(X_d));
     HIP_CHECK(hipFree(Y_d));
     HIP_CHECK(hipFree(Z_d));

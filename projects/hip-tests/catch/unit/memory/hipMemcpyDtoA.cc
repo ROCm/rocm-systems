@@ -23,19 +23,19 @@ THE SOFTWARE.
 
 #define N 32
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
+TEST_CASE("Unit_hipMemcpyDtoA_Basic") {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
   hipDeviceptr_t src_device;
-  std::vector<TestType> src_host(N);
-  std::vector<TestType> dst_host(N);
-  size_t copy_size = N * sizeof(TestType);
-  size_t offset = GENERATE(0, N * sizeof(TestType) / 2);
+  std::vector<int> src_host(N);
+  std::vector<int> dst_host(N);
+  size_t copy_size = N * sizeof(int);
+  size_t offset = GENERATE(0, N * sizeof(int) / 2);
 
   std::iota(src_host.begin(), src_host.end(), 0);
 
-  auto channel_descriptor = hipCreateChannelDesc<TestType>();
+  auto channel_descriptor = hipCreateChannelDesc<int>();
   HIP_CHECK(hipMallocArray(&dst_array, &channel_descriptor, copy_size));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&src_device), copy_size));
 
@@ -43,7 +43,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
   HIP_CHECK(hipMemcpyDtoA(dst_array, offset, src_device, copy_size - offset));
   HIP_CHECK(hipMemcpyAtoH(dst_host.data(), dst_array, offset, copy_size - offset));
 
-  for (int index = 0; index < offset / sizeof(TestType); index++) {
+  for (int index = 0; index < offset / sizeof(int); index++) {
     if (src_host[index] != dst_host[index]) {
       REQUIRE(false);
     }

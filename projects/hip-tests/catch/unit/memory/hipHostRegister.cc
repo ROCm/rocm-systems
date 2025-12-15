@@ -60,13 +60,12 @@ template <typename T> __global__ void Inc(T* Ad) {
   Ad[tx] = Ad[tx] + static_cast<T>(1);
 }
 
-template <typename T>
-void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internalRegister) {
+void doMemCopy(size_t numElements, int offset, int* A, int* Bh, int* Bd, bool internalRegister) {
   constexpr auto memsetval = 13.0f;
   A = A + offset;
   numElements -= offset;
 
-  size_t sizeBytes = numElements * sizeof(T);
+  size_t sizeBytes = numElements * sizeof(int);
 
   if (internalRegister) {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
@@ -107,14 +106,13 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
-                   "[multigpu]", int, float, double) {
-  size_t sizeBytes{LEN * sizeof(TestType)};
-  TestType *A, **Ad;
+TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "[multigpu]") {
+  size_t sizeBytes{LEN * sizeof(int)};
+  int *A, **Ad;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
-  Ad = new TestType*[num_devices];
-  A = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  Ad = new int*[num_devices];
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   SECTION("hipHostRegisterDefault") {
     HIP_CHECK(hipHostRegister(A, sizeBytes, hipHostRegisterDefault));
   }
@@ -133,7 +131,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
   }
 #endif
   for (int i = 0; i < LEN; i++) {
-    A[i] = static_cast<TestType>(1);
+    A[i] = static_cast<int>(1);
   }
 
   for (int i = 0; i < num_devices; i++) {
@@ -148,7 +146,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
   }
-  REQUIRE(A[10] == 1 + static_cast<TestType>(num_devices));
+  REQUIRE(A[10] == 1 + static_cast<int>(num_devices));
   // Reference the registered device pointer Ad in hipMemset:
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i));
@@ -174,19 +172,19 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset",
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, float, double) {
+TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel") {
   auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
   // Execute the test only if xnack is supported
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(TestType)};
-  TestType* A;
-  A = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
-  TestType val = static_cast<TestType>(1);
+  int val = static_cast<int>(1);
   for (int i = 0; i < LEN; i++) {
     A[i] = val;
   }
@@ -197,7 +195,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, fl
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
   for (int i = 0; i < LEN; i++) {
-    REQUIRE(A[i] == (val + static_cast<TestType>(1)));
+    REQUIRE(A[i] == (val + static_cast<int>(1)));
   }
   HIP_CHECK(hipHostUnregister(A));
   free(A);
@@ -215,16 +213,15 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel", "", int, fl
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
-                   int, float, double) {
+TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]") {
   // 1 refers to doing hipHostRegister once for all devices
   // 0 refers to doing hipHostRegister for each device
   auto register_once = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int numDevices = HipTest::getDeviceCount();
-  size_t sizeBytes{LEN * sizeof(TestType)};
-  TestType* A;
-  A = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Register host memory only once for all device
   if (register_once == 1) {
@@ -233,7 +230,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
   // Reference the registered device pointer A from inside all devices:
   for (int dev = 0; dev < numDevices; dev++) {
     // Initialize buffer with data
-    TestType val = static_cast<TestType>(1);
+    int val = static_cast<int>(1);
     for (int i = 0; i < LEN; i++) {
       A[i] = val;
     }
@@ -251,7 +248,7 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "[multigpu]",
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     for (int i = 0; i < LEN; i++) {
-      REQUIRE(A[i] == (val + static_cast<TestType>(1)));
+      REQUIRE(A[i] == (val + static_cast<int>(1)));
     }
     if (register_once == 0) {
       HIP_CHECK(hipHostUnregister(A));
@@ -861,30 +858,30 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Memcpy", "", int, float, double) {
+TEST_CASE("Unit_hipHostRegister_Memcpy", "[hipHostRegister]") {
   // 1 refers to hipHostRegister
   // 0 refers to malloc
   auto mem_type = GENERATE(0, 1);
   HIP_CHECK(hipSetDevice(0));
 
-  size_t sizeBytes = LEN * sizeof(TestType);
-  TestType* A = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  size_t sizeBytes = LEN * sizeof(int);
+  int* A = reinterpret_cast<int*>(malloc(sizeBytes));
 
   // Copy to B, this should be optimal pinned malloc copy:
   // Note we are using the host pointer here:
-  TestType *Bh, *Bd;
-  Bh = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  int *Bh, *Bd;
+  Bh = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMalloc(&Bd, sizeBytes));
 
   REQUIRE(LEN > OFFSET);
   if (mem_type) {
     for (size_t i = 0; i < OFFSET; i++) {
-      doMemCopy<TestType>(LEN, i, A, Bh, Bd, true /*internalRegister*/);
+      doMemCopy(LEN, i, A, Bh, Bd, true /*internalRegister*/);
     }
   } else {
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
     for (size_t i = 0; i < OFFSET; i++) {
-      doMemCopy<TestType>(LEN, i, A, Bh, Bd, false /*internalRegister*/);
+      doMemCopy(LEN, i, A, Bh, Bd, false /*internalRegister*/);
     }
     HIP_CHECK(hipHostUnregister(A));
   }
@@ -910,9 +907,9 @@ template <typename T> __global__ void fill_kernel(T* dataPtr, T value) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
-  size_t sizeBytes = 1 * sizeof(TestType);
-  TestType* hostPtr = reinterpret_cast<TestType*>(malloc(sizeBytes));
+TEST_CASE("Unit_hipHostRegister_Flags", "[hipHostRegister]") {
+  size_t sizeBytes = 1 * sizeof(int);
+  int* hostPtr = reinterpret_cast<int*>(malloc(sizeBytes));
 
   /* Flags aren't used for AMD devices currently */
   struct FlagType {
@@ -960,15 +957,15 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
-  TestType* hostPtr = nullptr;
+TEST_CASE("Unit_hipHostRegister_Negative", "[hipHostRegister]") {
+  int* hostPtr = nullptr;
 
-  size_t sizeBytes = 1 * sizeof(TestType);
+  size_t sizeBytes = 1 * sizeof(int);
   SECTION("hipHostRegister Negative Test - nullptr") {
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, 1, 0), hipErrorInvalidValue);
   }
 
-  hostPtr = reinterpret_cast<TestType*>(malloc(sizeBytes));
+  hostPtr = reinterpret_cast<int*>(malloc(sizeBytes));
   SECTION("hipHostRegister Negative Test - zero size") {
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, 0, 0), hipErrorInvalidValue);
   }

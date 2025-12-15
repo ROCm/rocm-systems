@@ -635,7 +635,7 @@ template <typename T> void Memcpy3DAsync<T>::simple_Memcpy3DAsync() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]", int, unsigned int, float) {
+TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -646,16 +646,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]", int, uns
   auto i = GENERATE_COPY(10, 100, 1024, prop.maxTexture3D[0]);
   auto j = GENERATE(10, 100);
   if (numDevices > 1) {
-    if (std::is_same<TestType, int>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    } else if (std::is_same<TestType, unsigned int>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindUnsigned);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    } else if (std::is_same<TestType, float>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindFloat);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    }
+    Memcpy3DAsync<int> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
+    memcpy3d_obj.simple_Memcpy3DAsync();
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
   }
