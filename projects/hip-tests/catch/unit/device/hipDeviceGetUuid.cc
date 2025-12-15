@@ -205,7 +205,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[multigpu]") {
     REQUIRE(memcmp(d_uuid.bytes, i.second.data(), 16) == 0);
   }
 }
-#endif
+
 /**
  * Test Description
  * ------------------------
@@ -218,9 +218,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[multigpu]") {
  *  - HIP_VERSION >= 5.7
  */
 // Guarding it against NVIDIA as this test is faling on it.
-#if HT_AMD
-TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties",
-          "[multigpu]") {
+TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties", "[multigpu]") {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;
@@ -235,11 +233,7 @@ TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties",
     REQUIRE(memcmp(uuid.bytes, prop.uuid.bytes, 16) == 0);
   }
 }
-#endif
-#endif
 
-#if HT_AMD
-#ifdef __linux__
 auto getUUIDlistFromRocmInfo() {
   FILE* fpipe;
   char command[COMMAND_LEN] = "";
@@ -272,7 +266,9 @@ auto getUUIDlistFromRocmInfo() {
   return uuid_map;
 }
 #endif
+#endif
 
+#if HT_AMD
 auto getUUIDlistWithoutRocmInfo() {
   hip::SpawnProc proc("uuidList", true);
   REQUIRE(proc.run() == 0);

@@ -3,7 +3,6 @@ set(TEST_SRC
     hipChooseDevice.cc
     hipDeviceComputeCapability.cc
     hipDeviceGetByPCIBusId.cc
-    hipDeviceGetLimit_old.cc
     hipDeviceGetName.cc
     hipDeviceGetPCIBusId.cc
     hipDeviceSetGetCacheConfig.cc
