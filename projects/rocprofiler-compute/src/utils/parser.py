@@ -186,6 +186,9 @@ def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
 
 def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
+        # Define std as 0.0 if there is only one element
+        if len(a) <= 1:
+            return 0.0
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
