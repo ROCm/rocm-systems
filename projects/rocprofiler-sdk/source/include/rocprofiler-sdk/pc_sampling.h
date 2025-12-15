@@ -39,22 +39,24 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * This enum allows users to specify which PC sampling record format they want to receive.
  * Different versions are optimized for different GPU architectures and sampling methods:
- * - VERSION_0: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
- * - VERSION_1: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
- * - VERSION_2: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
- * - VERSION_3: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
- * - VERSION_4: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
- * - VERSION_5: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ * - VERSION_0: Invalid sample
+ * - VERSION_1: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
+ * - VERSION_2: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
+ * - VERSION_3: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
+ * - VERSION_4: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ * - VERSION_5: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
+ * - VERSION_6: Stochastic sampling on FUTURE_GEN_3/FUTURE_GEN_4 (136 bytes)
  */
 typedef enum rocprofiler_pc_sampling_record_version_t
 {
     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_NONE = 0,
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0    = 1,  ///< host-trap for GFX9/Navi4x (96B)
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1    = 2,  ///< stochastic for MI300/MI350 (104B)
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2    = 3,  ///< host-trap on FUTURE_GEN_1_2 (112B)
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_3    = 4,  ///< stochastic on FUTURE_GEN_1_2 (136B)
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_4    = 5,  ///< host-trap on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
-    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_5    = 6,  ///< stochastic on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0    = 1,  ///< invalid record
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1    = 2,  ///< host-trap for GFX9/Navi4x (96B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2    = 3,  ///< stochastic for MI300/MI350 (104B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_3    = 4,  ///< host-trap on FUTURE_GEN_1_2 (112B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_4    = 5,  ///< stochastic on FUTURE_GEN_1_2 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_5    = 6,  ///< host-trap on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_6    = 7,  ///< stochastic on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_LAST,
 } rocprofiler_pc_sampling_record_version_t;
 
@@ -82,19 +84,20 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * The client must specify which record format to receive by providing @p record_version and
  * @p record_size parameters. Different versions are optimized for different hardware architectures
  * and sampling methods:
- * - VERSION_0: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
- * - VERSION_1: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
- * - VERSION_2: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
- * - VERSION_3: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
- * - VERSION_4: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
- * - VERSION_5: Stochastic sampling on FUTURE_GEN_3/FUTURE_GEN_4 (136 bytes)
+ * - VERSION_0: Invalid record
+ * - VERSION_1: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
+ * - VERSION_2: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
+ * - VERSION_3: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
+ * - VERSION_4: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ * - VERSION_5: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
+ * - VERSION_6: Stochastic sampling on FUTURE_GEN_3/FUTURE_GEN_4 (136 bytes)
  *
  * Example:
  * @code
  * rocprofiler_configure_pc_sampling_service(
  *     context_id, agent_id, method, unit, interval, buffer_id,
- *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
- *     sizeof(rocprofiler_pc_sampling_record_v0_t),
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,
+ *     sizeof(rocprofiler_pc_sampling_record_v1_t),
  *     0);
  * @endcode
  *
@@ -607,10 +610,20 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_record
 // } rocprofiler_pc_sampling_hw_id_record_packed_t;
 
 /**
+ * @brief (experimental) Minimal sampling record indicating that sampled occured.
+ * Mostly used to represent an invalid/error samples.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
+{
+    uint64_t size;  ///< Size of the struct
+} rocprofiler_pc_sampling_record_v0_t;
+
+
+/**
  * @brief 96B in total (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
  *
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -629,14 +642,14 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-} rocprofiler_pc_sampling_record_v0_t;
+} rocprofiler_pc_sampling_record_v1_t;
 
 
 /**
  * @brief 104B in total (experimental) PC Sampling Record tailored for stochastic sampling on MI300/MI350
  * 
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -657,7 +670,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-} rocprofiler_pc_sampling_record_v1_t;
+} rocprofiler_pc_sampling_record_v2_t;
 
 
 
@@ -666,7 +679,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
  * on the FUTURE_GEN_1_2 architectures.
  *
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -693,7 +706,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-} rocprofiler_pc_sampling_record_v2_t;
+} rocprofiler_pc_sampling_record_v3_t;
 
 
 
@@ -704,7 +717,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
  * then we can squeeze some space by using the rocprofiler_pc_sampling_hw_id_record_unpacked_t
  * and force our users to use bit offsets when accessing HW_ID information.
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -735,7 +748,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-} rocprofiler_pc_sampling_record_v3_t;
+} rocprofiler_pc_sampling_record_v4_t;
 
 
 /**
@@ -743,7 +756,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
  * on the FUTURE_GEN_4 and FUTURE_GEN_3 compatible architectures.
  *
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -771,7 +784,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
-} rocprofiler_pc_sampling_record_v4_t;
+} rocprofiler_pc_sampling_record_v5_t;
 
 
 
@@ -782,7 +795,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
  * then we can squeeze some space by using the rocprofiler_pc_sampling_hw_id_record_unpacked_t
  * and force our users to use bit offsets when accessing HW_ID information.
  */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v6_t
 {
     // 64B
     uint64_t                           size;         ///< Size of this struct
@@ -815,13 +828,13 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
     /// @var flags
-} rocprofiler_pc_sampling_record_v5_t;
+} rocprofiler_pc_sampling_record_v6_t;
 
 /**
  * @brief Typedef for the current ::rocprofiler_agent_version_t
  *
  */
-typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
+typedef rocprofiler_agent_v1_t rocprofiler_agent_t;
 
 /**
  * @brief (experimental) IDs of arbiter_state field.
@@ -1012,7 +1025,7 @@ rocprofiler_pc_sampling_arbiter_field_is_supported(
  * Example usage:
  * @code
  * // Given a PC sampling record from the buffer callback
- * const rocprofiler_pc_sampling_record_v1_t* record = ...;
+ * const rocprofiler_pc_sampling_record_v2_t* record = ...;
  *
  * // Extract hardware version and snapshot information from the record
  * rocprofiler_pc_sampling_hardware_version_t hw_version =
