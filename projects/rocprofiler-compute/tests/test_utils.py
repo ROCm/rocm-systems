@@ -7967,3 +7967,48 @@ def test_merge_counters_iteration_multiplex():
     assert "Mean_Time" in column_headers
     assert "Median_Time" in column_headers
     assert len(result) == 3
+
+
+# =============================================================================
+# validate_roofline_csv TESTS
+# =============================================================================
+
+
+def test_validate_roofline_csv_valid():
+    """
+    Test validate_roofline_csv returns True for a valid roofline.csv file.
+    Creates a temporary directory with a properly formatted CSV.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n"
+            "0,1000.0,2000.0,3000.0,4000.0,5000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is True
+        assert error_msg == ""
+
+
+def test_validate_roofline_csv_invalid_inconsistent_columns():
+    """
+    Test validate_roofline_csv returns False for a CSV with inconsistent row lengths.
+    This simulates corrupted or incomplete benchmark data.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n0,1000.0,2000.0,3000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is False
+        assert "Inconsistent row length" in error_msg
+        assert "row 2" in error_msg
