@@ -28,7 +28,6 @@ THE SOFTWARE.
 #if !defined(__HIPCC_RTC__)
 #include "host_defines.h"
 #endif
-#ifndef __CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
 extern "C" {
 __device__ __attribute__((const)) _Float16 __ocml_ceil_f16(_Float16);
 __device__ _Float16 __ocml_cos_f16(_Float16);
@@ -79,7 +78,6 @@ __device__ __attribute__((const)) _Float16 __ocml_cvtrtn_f16_f32(float);
 __device__ __attribute__((const)) _Float16 __ocml_cvtrtp_f16_f32(float);
 __device__ __attribute__((const)) _Float16 __ocml_cvtrtz_f16_f32(float);
 }
-#endif  // !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
 // TODO: remove these after they get into clang header __clang_hip_libdevice_declares.h'
 extern "C" {
 __device__ __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
