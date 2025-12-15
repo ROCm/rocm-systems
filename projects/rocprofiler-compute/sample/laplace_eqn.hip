@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // Reference:  Finite Difference Methods for Ordinary and Partial Differential
-// Equations by Randall J. LeVeque.
+// Equations by Randall J. LeVeque, Page 69-71
 
 #include <algorithm>
 #include <hip/hip_runtime.h>
