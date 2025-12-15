@@ -349,7 +349,7 @@ class MetricEvaluator:
 
             # eval_result can be None if expression has None explicitly specified
             # Do not give warning for this case and simply return "N/A"
-            if eval_result is None or "None" in expr:
+            if eval_result is None and "None" in expr:
                 return "N/A"
 
             # Only return "N/A" for scalar NA values
