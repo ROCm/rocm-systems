@@ -292,7 +292,9 @@ TEST_CASE("Print_Out_Properties") {
   std::cout << std::setw(w) << "pageableMemoryAccessUsesHostPageTables: "
             << properties.pageableMemoryAccessUsesHostPageTables << "\n";
 
+  std::cout << std::setw(w) << "New Attributes added in Rocm 6.0" << "\n";
 #if HT_AMD
+  std::cout << std::setw(w) << "uuid: " << properties.uuid.bytes << "\n";
   std::cout << std::setw(w) << "gcnArchName: " << std::string(properties.gcnArchName, 256) << "\n";
   std::cout << std::setw(w) << "asicRevision: " << properties.asicRevision << "\n";
   std::cout << std::setw(w)
@@ -339,32 +341,6 @@ TEST_CASE("Print_Out_Properties") {
             << properties.cooperativeMultiDeviceUnmatchedBlockDim << "\n";
   std::cout << std::setw(w) << "cooperativeMultiDeviceUnmatchedSharedMem: "
             << properties.cooperativeMultiDeviceUnmatchedSharedMem << "\n";
-#endif
-  std::flush(std::cout);
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Print out all properties in agreed upon format.
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceProperties.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-TEST_CASE("Print_Out_Properties_6.0") {
-  constexpr int w = 42;
-  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-
-  hipDeviceProp_t properties;
-  HIP_CHECK(hipGetDeviceProperties(&properties, device));
-
-  std::cout << std::left;
-  std::cout << std::setw(w) << "New Attributes added in Rocm 6.0" << "\n";
-#if HT_AMD
-  std::cout << std::setw(w) << "uuid: " << properties.uuid.bytes << "\n";
 #endif
   std::cout << std::setw(w) << "maxTexture1DLayered.width: " << properties.maxTexture1DLayered[0]
             << "\n";

@@ -31,8 +31,7 @@ THE SOFTWARE.
  * - Returns the link type and hop count between two devices.
  */
 
-#if __linux__
-#if HT_AMD
+#if __linux__ && HT_AMD
 /**
  * Test Description
  * ------------------------
@@ -160,7 +159,6 @@ TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters") {
     HIP_CHECK_ERROR(hipExtGetLinkTypeAndHopCount(0, 1, nullptr, nullptr), hipErrorInvalidValue);
   }
 }
-#endif
 #endif
 
 /**
