@@ -1,0 +1,8 @@
+# Copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Parameters related to building rccl
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="rccl-maintainer@amd.com"
+
+#empty for now

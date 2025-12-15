@@ -1,0 +1,83 @@
+<!--
+ - Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -->
+<system version="2">
+  <cpu numaid="1" affinity="00000000,00000000,ffffffff,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+    <pci busid="0000:01:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:03:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="0" sm="64" gcn="906" arch="38911" rank="0" gdr="1">
+          <xgmi target="0000:43:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:c6:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:24:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:26:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="2" sm="64" gcn="906" arch="38911" rank="2" gdr="1">
+          <xgmi target="0000:43:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:c6:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:21:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:23:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="5" sm="64" gcn="906" arch="38911" rank="5" gdr="1">
+          <xgmi target="0000:c3:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:83:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+  </cpu>
+  <cpu numaid="0" affinity="00000000,00000000,00000000,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+    <pci busid="0000:41:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:43:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="1" sm="64" gcn="906" arch="38911" rank="1" gdr="1">
+          <xgmi target="0000:03:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:26:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+  </cpu>
+  <cpu numaid="2" affinity="00000000,ffffffff,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+    <pci busid="0000:c1:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:c3:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="3" sm="64" gcn="906" arch="38911" rank="3" gdr="1">
+          <xgmi target="0000:23:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:a3:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:c4:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:c6:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="6" sm="64" gcn="906" arch="38911" rank="6" gdr="1">
+          <xgmi target="0000:03:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:26:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:e1:00.0" class="0x020700" link_speed="16 GT/s" link_width="16">
+      <nic>
+        <net name="mlx5_0" dev="0" speed="200000" port="1" guid="0x20cd600003da341c" maxconn="262144" gdr="1"/>
+      </nic>
+    </pci>
+  </cpu>
+  <cpu numaid="3" affinity="ffffffff,00000000,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+    <pci busid="0000:81:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:83:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="4" sm="64" gcn="906" arch="38911" rank="4" gdr="1">
+          <xgmi target="0000:23:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:a3:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+    <pci busid="0000:a1:00.0" class="0x060400" link_speed="16 GT/s" link_width="16">
+      <pci busid="0000:a3:00.0" class="0x038000" link_speed="16 GT/s" link_width="16">
+        <gpu dev="7" sm="64" gcn="906" arch="38911" rank="7" gdr="1">
+          <xgmi target="0000:c3:00.0" count="1" tclass="0x038000"/>
+          <xgmi target="0000:83:00.0" count="1" tclass="0x038000"/>
+        </gpu>
+      </pci>
+    </pci>
+  </cpu>
+</system>

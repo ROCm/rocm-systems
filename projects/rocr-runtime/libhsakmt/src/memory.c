@@ -931,8 +931,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 }
 
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetMemoryHandle(void *MemoryAddress, HSAuint64 SizeInBytes,
-                      uint64_t *SharedMemoryHandle) {
+hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
+                      uint64_t* SharedMemoryHandle) {
 	CHECK_KFD_OPEN();
 
 	return HSAKMT_STATUS_NOT_SUPPORTED;

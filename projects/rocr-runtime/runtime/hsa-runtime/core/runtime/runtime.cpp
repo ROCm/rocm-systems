@@ -3681,7 +3681,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
     if (ret) return HSA_STATUS_ERROR;
   } else {
-    hsa_status_t status = agent_driver.GetShareableHandle(memoryHandleIt->first, size, &shareable_handle);
+    hsa_status_t status = agent_driver.GetShareableHandle(va, memoryHandleIt->first, size, &shareable_handle);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
     }
