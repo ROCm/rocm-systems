@@ -723,6 +723,7 @@ if(INSTALL_TESTS)
             tests/vsequential_access
             tests/occupancy
             tests/hip_dynamic_shared
+            tests/laplace_eqn
             tests/mat_mul_max
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
