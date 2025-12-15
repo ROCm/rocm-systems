@@ -16,7 +16,7 @@ See the following example output of the rocm_agent_enumerator command on a syste
     gfx941
 
 
-.. Note:: 
+.. Note::
 
 The gfx000 represents the CPU agent.
 
