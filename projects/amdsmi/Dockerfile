@@ -16,8 +16,10 @@ RUN apt update && apt-get install -y git build-essential rpm pkg-config g++ pyth
 RUN python3 -m pip install --upgrade pip setuptools && \
     python3 -m pip install cmake virtualenv
 
-# Clone the AMD SMI repository from GitHub
-RUN git clone -b develop https://github.com/ROCm/rocm-systems.git
+# Clone the AMD SMI repository from GitHub using sparse checkout
+RUN git clone --filter=blob:none --sparse -b develop https://github.com/ROCm/rocm-systems.git && \
+    cd rocm-systems && \
+    git sparse-checkout set projects/amdsmi
 
 # Navigate to the amdsmi directory
 WORKDIR /home/rocm-systems/projects/amdsmi
