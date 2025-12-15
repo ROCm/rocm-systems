@@ -35,6 +35,12 @@ set(UNIT_TEST_SOURCES
     reader/c_interface_test.cpp
 )
 
+# Remote database tests require CURL
+find_package(CURL QUIET)
+if(CURL_FOUND AND ROCSTORAGE_ENABLE_REMOTE)
+    list(APPEND UNIT_TEST_SOURCES reader/remote_database_test.cpp)
+endif()
+
 add_executable(rocstorage_unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(

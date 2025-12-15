@@ -75,6 +75,36 @@ target_include_directories(rocstorage PRIVATE
 )
 
 # ------------------------------------------------------------ #
+# Remote Database Backend (optional - requires CURL)
+# ------------------------------------------------------------ #
+
+option(ROCSTORAGE_ENABLE_REMOTE "Enable remote database backend (requires CURL)" ON)
+
+find_package(CURL QUIET)
+if(CURL_FOUND AND ROCSTORAGE_ENABLE_REMOTE)
+    target_sources(rocstorage PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/database/rocprofvis_db_remote.cpp
+    )
+    target_link_libraries(rocstorage PRIVATE CURL::libcurl)
+
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+        include(nlohmann_json)
+    endif()
+    target_link_libraries(rocstorage PRIVATE nlohmann_json::nlohmann_json)
+
+    target_compile_definitions(rocstorage PRIVATE ROCSTORAGE_HAS_REMOTE=1)
+    message(STATUS "[rocstorage] Remote database backend enabled")
+else()
+    target_compile_definitions(rocstorage PRIVATE ROCSTORAGE_HAS_REMOTE=0)
+    if(ROCSTORAGE_ENABLE_REMOTE)
+        message(STATUS "[rocstorage] Remote database backend disabled (CURL not found)")
+    else()
+        message(STATUS "[rocstorage] Remote database backend disabled")
+    endif()
+endif()
+
+# ------------------------------------------------------------ #
 # Compile definitions
 # ------------------------------------------------------------ #
 

@@ -1,0 +1,615 @@
+#!/usr/bin/env python3
+"""
+rocstorage-ssh-proxy - Local HTTP server that proxies SQL queries to remote SQLite via SSH
+
+This runs a lightweight HTTP server on your local machine that accepts SQL queries
+and executes them on a remote SQLite database via SSH. It piggybacks on an existing
+SSH ControlMaster connection that you establish separately, allowing you to handle
+authentication (passwords, 2FA, security keys) in your own terminal.
+
+Setup:
+    1. Create socket directory:   mkdir -p ~/.ssh/sockets
+    2. Open master connection:    ssh -fNM -S ~/.ssh/sockets/hpc.sock hpc-login
+    3. Run proxy:                 rocstorage-ssh-proxy --host hpc-login --db /path/to/db.sqlite
+
+Usage:
+    rocstorage-ssh-proxy --host <ssh-host> --db <remote-db-path> [--port <port>]
+    rocstorage-ssh-proxy --host <ssh-host> --db <remote-db-path> --socket <socket-path>
+    rocstorage-ssh-proxy --config <config-file>
+
+Example:
+    # First establish the SSH connection in your terminal
+    ssh -fNM -S ~/.ssh/sockets/hpc.sock hpc-login
+
+    # Then run the proxy
+    rocstorage-ssh-proxy --host hpc-login --db /scratch/user/trace.db --port 8080
+
+    # Query via HTTP
+    curl -X POST http://localhost:8080/query -d '{"sql": "SELECT COUNT(*) FROM rocpd_op"}'
+
+"""
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+from urllib.parse import parse_qs, urlparse
+
+
+class SSHConnection:
+    """Manages SSH connection using an existing ControlMaster socket.
+
+    This class piggybacks on an existing SSH ControlMaster connection that the
+    user has established in their own terminal. This allows the user to handle
+    authentication (including 2FA, security keys, etc.) separately.
+    """
+
+    def __init__(self, host: str, socket_path: Path,
+                 jump_host: Optional[str] = None, compress: bool = False):
+        self.host = host
+        self.socket_path = socket_path
+        self.jump_host = jump_host
+        self.compress = compress
+        self._lock = threading.Lock()
+        self._connected = False
+
+    def _build_ssh_args(self, extra_args: List[str] = None) -> List[str]:
+        """Build SSH command arguments."""
+        args = ["ssh"]
+
+        # ControlMaster settings
+        args.extend(["-o", f"ControlPath={self.socket_path}"])
+
+        if self.jump_host:
+            args.extend(["-o", f"ProxyJump={self.jump_host}"])
+
+        if self.compress:
+            args.append("-C")
+
+        # Connection keep-alive
+        args.extend(["-o", "ServerAliveInterval=30"])
+        args.extend(["-o", "ServerAliveCountMax=3"])
+
+        # Don't allocate TTY
+        args.append("-T")
+
+        if extra_args:
+            args.extend(extra_args)
+
+        args.append(self.host)
+        return args
+
+    def connect(self) -> bool:
+        """Verify the existing ControlMaster connection is available."""
+        with self._lock:
+            if self._connected:
+                return True
+
+            print(f"[SSH] Checking connection to {self.host} via {self.socket_path}...")
+
+            if not self.check_connection():
+                print(f"[SSH] No active connection found at {self.socket_path}")
+                return False
+
+            self._connected = True
+            print(f"[SSH] Connected to {self.host}")
+            return True
+
+    def check_connection(self) -> bool:
+        """Check if ControlMaster connection is alive."""
+        args = ["ssh", "-o", f"ControlPath={self.socket_path}", "-O", "check", self.host]
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+            return result.returncode == 0
+        except:
+            return False
+
+    def run_command(self, command: str, timeout: int = 30) -> tuple[int, str, str]:
+        """Run a command on the remote host."""
+        if not self._connected:
+            if not self.connect():
+                return -1, "", "SSH connection not established"
+
+        args = self._build_ssh_args()
+        args.append(command)
+
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            return result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired:
+            return -1, "", f"Command timed out after {timeout}s"
+        except Exception as e:
+            return -1, "", str(e)
+
+    def disconnect(self):
+        """Close ControlMaster connection."""
+        with self._lock:
+            if not self._connected:
+                return
+
+            args = ["ssh", "-o", f"ControlPath={self.socket_path}", "-O", "exit", self.host]
+            try:
+                subprocess.run(args, capture_output=True, timeout=5)
+            except:
+                pass
+            self._connected = False
+            print(f"[SSH] Disconnected from {self.host}")
+
+
+class RemoteDatabase:
+    """Interface to remote SQLite database via SSH."""
+
+    def __init__(self, ssh: SSHConnection, db_path: str):
+        self.ssh = ssh
+        self.db_path = db_path
+        self._cache: Dict[str, tuple[float, Any]] = {}
+        self._cache_ttl = 60  # seconds
+        self._lock = threading.Lock()
+
+    def _escape_sql(self, sql: str) -> str:
+        """Escape SQL for shell command."""
+        # Use single quotes and escape any existing single quotes
+        return sql.replace("'", "'\"'\"'")
+
+    def execute(self, sql: str, use_cache: bool = True,
+                timeout: int = 30, output_format: str = "json") -> Dict[str, Any]:
+        """Execute SQL query on remote database."""
+
+        # Check cache
+        if use_cache:
+            with self._lock:
+                if sql in self._cache:
+                    cached_time, cached_result = self._cache[sql]
+                    if time.time() - cached_time < self._cache_ttl:
+                        return {"cached": True, **cached_result}
+
+        # Build sqlite3 command
+        if output_format == "json":
+            cmd = f"sqlite3 -json '{self.db_path}' '{self._escape_sql(sql)}'"
+        elif output_format == "csv":
+            cmd = f"sqlite3 -header -csv '{self.db_path}' '{self._escape_sql(sql)}'"
+        else:
+            cmd = f"sqlite3 -header -column '{self.db_path}' '{self._escape_sql(sql)}'"
+
+        returncode, stdout, stderr = self.ssh.run_command(cmd, timeout=timeout)
+
+        if returncode != 0:
+            return {
+                "success": False,
+                "error": stderr or f"Command failed with code {returncode}",
+                "sql": sql
+            }
+
+        # Parse result
+        try:
+            if output_format == "json":
+                if stdout.strip():
+                    data = json.loads(stdout)
+                else:
+                    data = []
+                result = {
+                    "success": True,
+                    "data": data,
+                    "row_count": len(data) if isinstance(data, list) else 0,
+                    "format": "json"
+                }
+            else:
+                result = {
+                    "success": True,
+                    "data": stdout,
+                    "format": output_format
+                }
+
+            # Cache successful results
+            if use_cache:
+                with self._lock:
+                    self._cache[sql] = (time.time(), result)
+
+            return result
+
+        except json.JSONDecodeError as e:
+            return {
+                "success": False,
+                "error": f"Failed to parse JSON output: {e}",
+                "raw_output": stdout
+            }
+
+    def get_schema(self) -> Dict[str, Any]:
+        """Get database schema information."""
+        sql = """
+            SELECT type, name, sql
+            FROM sqlite_master
+            WHERE type IN ('table', 'view')
+            ORDER BY type, name
+        """
+        return self.execute(sql, use_cache=True, timeout=10)
+
+    def get_tables(self) -> Dict[str, Any]:
+        """List all tables."""
+        sql = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        return self.execute(sql, use_cache=True, timeout=10)
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get rocstorage metadata."""
+        sql = "SELECT tag, value FROM rocpd_metadata"
+        return self.execute(sql, use_cache=True, timeout=10)
+
+    def get_traces(self) -> Dict[str, Any]:
+        """Get trace information (time range, etc.)."""
+        result = {}
+
+        # Get time range from events
+        time_sql = """
+            SELECT
+                MIN(start) as start_time,
+                MAX(end) as end_time,
+                COUNT(*) as event_count
+            FROM rocpd_op
+        """
+        time_result = self.execute(time_sql, use_cache=True, timeout=10)
+
+        if time_result.get("success") and time_result.get("data"):
+            result["time_range"] = time_result["data"][0]
+
+        # Get track info
+        tracks_result = self.execute("SELECT * FROM rocpd_track", use_cache=True, timeout=10)
+
+        if tracks_result.get("success"):
+            result["tracks"] = tracks_result["data"]
+
+        return {"success": True, "data": result}
+
+    def clear_cache(self):
+        """Clear query cache."""
+        with self._lock:
+            self._cache.clear()
+
+
+class QueryHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for SQL queries."""
+
+    db: RemoteDatabase = None  # Set by server
+    allowed_origins: List[str] = ["*"]
+
+    def log_message(self, format, *args):
+        """Custom log format."""
+        print(f"[HTTP] {self.address_string()} - {format % args}")
+
+    def _send_cors_headers(self):
+        """Send CORS headers for browser access."""
+        origin = self.headers.get("Origin", "*")
+        if "*" in self.allowed_origins or origin in self.allowed_origins:
+            self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _send_json(self, data: Dict[str, Any], status: int = 200):
+        """Send JSON response."""
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self._send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(data, indent=2).encode())
+
+    def _send_error(self, message: str, status: int = 400):
+        """Send error response."""
+        self._send_json({"success": False, "error": message}, status)
+
+    def do_OPTIONS(self):
+        """Handle CORS preflight."""
+        self.send_response(200)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        """Handle GET requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/" or path == "/status":
+            # Status endpoint
+            self._send_json({
+                "status": "ok",
+                "host": self.db.ssh.host,
+                "database": self.db.db_path,
+                "connected": self.db.ssh.check_connection(),
+                "endpoints": {
+                    "/status": "Server status",
+                    "/tables": "List tables",
+                    "/schema": "Database schema",
+                    "/metadata": "rocstorage metadata",
+                    "/traces": "Trace information",
+                    "/query": "Execute SQL (GET with ?sql= or POST)",
+                    "/cache/clear": "Clear query cache"
+                }
+            })
+
+        elif path == "/tables":
+            result = self.db.get_tables()
+            self._send_json(result)
+
+        elif path == "/schema":
+            result = self.db.get_schema()
+            self._send_json(result)
+
+        elif path == "/metadata":
+            result = self.db.get_metadata()
+            self._send_json(result)
+
+        elif path == "/traces":
+            result = self.db.get_traces()
+            self._send_json(result)
+
+        elif path == "/cache/clear":
+            self.db.clear_cache()
+            self._send_json({"success": True, "message": "Cache cleared"})
+
+        elif path == "/query":
+            # Allow GET with query parameter for simple queries
+            params = parse_qs(parsed.query)
+            sql = params.get("sql", [None])[0]
+            if sql:
+                result = self.db.execute(sql)
+                self._send_json(result)
+            else:
+                self._send_error("Missing 'sql' parameter")
+
+        else:
+            self._send_error(f"Unknown endpoint: {path}", 404)
+
+    def do_POST(self):
+        """Handle POST requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path != "/query":
+            self._send_error(f"POST not supported for: {path}", 405)
+            return
+
+        # Read request body
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode()
+        except Exception as e:
+            self._send_error(f"Failed to read request body: {e}")
+            return
+
+        # Parse request
+        try:
+            if self.headers.get("Content-Type", "").startswith("application/json"):
+                request = json.loads(body)
+                sql = request.get("sql")
+                timeout = request.get("timeout", 30)
+                output_format = request.get("format", "json")
+                use_cache = request.get("cache", True)
+            else:
+                # Plain text body is the SQL
+                sql = body
+                timeout = 30
+                output_format = "json"
+                use_cache = True
+        except json.JSONDecodeError:
+            self._send_error("Invalid JSON in request body")
+            return
+
+        if not sql:
+            self._send_error("Missing 'sql' in request")
+            return
+
+        # Execute query
+        result = self.db.execute(
+            sql,
+            use_cache=use_cache,
+            timeout=timeout,
+            output_format=output_format
+        )
+
+        status = 200 if result.get("success") else 400
+        self._send_json(result, status)
+
+
+def find_sockets_for_host(host: str, search_dirs: List[Path]) -> List[Path]:
+    """Find all existing control sockets that might match this host."""
+    import getpass
+    import stat
+    username = getpass.getuser()
+
+    found_sockets = []
+
+    # Patterns that indicate a socket for this host
+    host_patterns = [
+        f"{username}@{host}-22",
+        f"{username}@{host}",
+        f"{host}.sock",
+        f"{host}",
+        f"ssh-{host}.sock",
+        f"ssh-{host}",
+    ]
+
+    for search_dir in search_dirs:
+        if not search_dir.exists() or not os.access(search_dir, os.R_OK):
+            continue
+        for entry in search_dir.iterdir():
+            if not os.access(entry, os.F_OK):
+                continue
+            entry_stat = entry.stat()
+            if not stat.S_ISSOCK(entry_stat.st_mode):
+                continue
+            name = entry.name
+            for pattern in host_patterns:
+                if name == pattern or name.startswith(pattern):
+                    found_sockets.append(entry)
+                    break
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_sockets = []
+    for s in found_sockets:
+        if s not in seen:
+            seen.add(s)
+            unique_sockets.append(s)
+
+    return unique_sockets
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Local HTTP proxy for remote SQLite queries via SSH",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This tool piggybacks on an existing SSH ControlMaster connection. You must
+establish the SSH connection in your own terminal first, which allows you to
+handle any authentication (passwords, 2FA, security keys) separately.
+
+Setup:
+  1. Create socket directory:   mkdir -p ~/.ssh/sockets
+  2. Open master connection:    ssh -fNM -S ~/.ssh/sockets/HOSTNAME.sock HOSTNAME
+  3. Run this proxy:            %(prog)s --host HOSTNAME --db /path/to/db.sqlite
+
+Examples:
+  %(prog)s --host hpc-login --db /scratch/user/trace.db
+  %(prog)s --host hpc-login --db /scratch/user/trace.db --socket ~/.ssh/sockets/hpc.sock
+  %(prog)s --config ~/.rocstorage-proxy.json
+
+Query the server:
+  curl http://localhost:8080/tables
+  curl http://localhost:8080/query?sql=SELECT+COUNT(*)+FROM+rocpd_op
+  curl -X POST http://localhost:8080/query -d '{"sql": "SELECT * FROM rocpd_op LIMIT 10"}'
+        """
+    )
+
+    parser.add_argument("--host", "-H", help="SSH host to connect to")
+    parser.add_argument("--db", "-d", help="Path to SQLite database on remote host")
+    parser.add_argument("--socket", "-S", help="Path to existing SSH ControlMaster socket")
+    parser.add_argument("--port", "-p", type=int, default=8080, help="Local port to listen on (default: 8080)")
+    parser.add_argument("--bind", "-b", default="127.0.0.1", help="Address to bind to (default: 127.0.0.1)")
+    parser.add_argument("--jump", "-J", help="Jump host for SSH connection")
+    parser.add_argument("--compress", "-C", action="store_true", help="Enable SSH compression")
+    parser.add_argument("--config", "-c", help="Path to JSON config file")
+    parser.add_argument("--timeout", "-t", type=int, default=30, help="Default query timeout in seconds")
+
+    args = parser.parse_args()
+
+    # Load config file if specified
+    if args.config:
+        config_path = Path(args.config).expanduser()
+        if not config_path.exists():
+            print(f"Error: Config file not found: {config_path}", file=sys.stderr)
+            sys.exit(1)
+        with open(config_path) as f:
+            config = json.load(f)
+        args.host = config.get("host", args.host)
+        args.db = config.get("db", args.db)
+        args.socket = config.get("socket", args.socket)
+        args.port = config.get("port", args.port)
+        args.bind = config.get("bind", args.bind)
+        args.jump = config.get("jump", args.jump)
+        args.compress = config.get("compress", args.compress)
+
+    # Validate required arguments
+    if not args.host:
+        parser.error("--host is required")
+    if not args.db:
+        parser.error("--db is required")
+
+    # Resolve socket path
+    if args.socket:
+        socket_path = Path(args.socket).expanduser()
+        if not socket_path.exists():
+            print(f"Error: Socket not found: {socket_path}", file=sys.stderr)
+            print(f"\nEstablish the master connection first:", file=sys.stderr)
+            print(f"    ssh -fNM -S {socket_path} {args.host}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Search for existing sockets
+        search_dirs = [
+            Path.home() / ".ssh" / "sockets",
+            Path(tempfile.gettempdir()) / "rocstorage-ssh",
+            Path("/tmp"),
+        ]
+        sockets = find_sockets_for_host(args.host, search_dirs)
+
+        if len(sockets) == 0:
+            suggested = Path.home() / ".ssh" / "sockets" / f"{args.host}.sock"
+            print(f"Error: No SSH control socket found for '{args.host}'.", file=sys.stderr)
+            print(f"\nEstablish a master connection first:", file=sys.stderr)
+            print(f"    mkdir -p ~/.ssh/sockets", file=sys.stderr)
+            print(f"    ssh -fNM -S {suggested} {args.host}", file=sys.stderr)
+            print(f"\nThen re-run this command.", file=sys.stderr)
+            sys.exit(1)
+        elif len(sockets) == 1:
+            socket_path = sockets[0]
+        else:
+            print(f"Error: Multiple SSH control sockets found for '{args.host}':", file=sys.stderr)
+            for s in sockets:
+                print(f"    {s}", file=sys.stderr)
+            print(f"\nSpecify which socket to use with --socket <path>", file=sys.stderr)
+            sys.exit(1)
+
+    # Create SSH connection
+    ssh = SSHConnection(
+        host=args.host,
+        socket_path=socket_path,
+        jump_host=args.jump,
+        compress=args.compress
+    )
+
+    # Verify connection
+    if not ssh.connect():
+        print(f"\nThe socket exists but the connection is not active.", file=sys.stderr)
+        print(f"Re-establish the master connection:", file=sys.stderr)
+        print(f"    ssh -fNM -S {socket_path} {args.host}", file=sys.stderr)
+        sys.exit(1)
+
+    # Create database interface
+    db = RemoteDatabase(ssh, args.db)
+
+    # Test database access
+    print(f"[DB] Testing database access: {args.db}")
+    test_result = db.get_tables()
+    if not test_result.get("success"):
+        print(f"[DB] Warning: Could not access database: {test_result.get('error')}")
+    else:
+        tables = test_result.get("data", [])
+        print(f"[DB] Found {len(tables)} tables")
+
+    # Set up HTTP handler
+    QueryHandler.db = db
+
+    # Create and start server
+    server_address = (args.bind, args.port)
+    httpd = HTTPServer(server_address, QueryHandler)
+
+    print(f"\n[Server] Listening on http://{args.bind}:{args.port}")
+    print(f"[Server] Remote database: {args.host}:{args.db}")
+    print(f"\nEndpoints:")
+    print(f"  GET  /status  - Server status")
+    print(f"  GET  /tables  - List tables")
+    print(f"  GET  /schema  - Database schema")
+    print(f"  POST /query   - Execute SQL query")
+    print(f"\nPress Ctrl+C to stop\n")
+
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[Server] Shutting down...")
+    finally:
+        ssh.disconnect()
+        httpd.server_close()
+
+
+if __name__ == "__main__":
+    main()
