@@ -31,7 +31,13 @@ Provides reusable components for testing rocprofiler-systems:
 """
 
 
-from .config import RocprofsysConfig, discover_install_config, discover_build_config
+from .config import (
+    RocprofsysConfig,
+    discover_install_config,
+    discover_build_config,
+    get_rocm_version,
+    check_rocm_version,
+)
 
 from .runners import (
     TestResult,
@@ -57,6 +63,8 @@ __all__ = [
     "RocprofsysConfig",
     "discover_build_config",
     "discover_install_config",
+    "get_rocm_version",
+    "check_rocm_version",
     # Runners
     "TestResult",
     "BaselineRunner",

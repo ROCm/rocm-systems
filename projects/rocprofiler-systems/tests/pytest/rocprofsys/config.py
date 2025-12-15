@@ -204,6 +204,58 @@ def _find_rocm_path() -> Optional[Path]:
             return Path(candidate)
     return None
 
+
+def get_rocm_version() -> Optional[tuple[int, int, int]]:
+    """Get the installed ROCm version as a tuple (major, minor, patch).
+
+    Returns:
+        Tuple of (major, minor, patch) or None if ROCm not found or version undetectable.
+    """
+    rocm_path = _find_rocm_path()
+    if not rocm_path:
+        return None
+
+    # Check .info/version file (standard location)
+    version_file = rocm_path / ".info" / "version"
+    if not version_file.exists():
+        # Try alternative location
+        version_file = rocm_path / "share" / "rocm" / "version"
+
+    if version_file.exists():
+        try:
+            version_str = version_file.read_text().strip()
+            # Parse version like "6.2.0" or "6.2.0-12345"
+            match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
+            if match:
+                return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except (OSError, ValueError):
+            pass
+
+    return None
+
+
+def check_rocm_version(min_version: str) -> bool:
+    """Check if installed ROCm version meets minimum requirement.
+
+    Args:
+        min_version: Minimum version string like "7.0" or "6.2.1"
+
+    Returns:
+        True if ROCm version >= min_version, False otherwise.
+    """
+    current = get_rocm_version()
+    if current is None:
+        return False
+
+    # Parse min_version
+    parts = min_version.split(".")
+    min_tuple = tuple(int(p) for p in parts)
+    # Pad with zeros if needed (e.g., "7.0" -> (7, 0, 0))
+    while len(min_tuple) < 3:
+        min_tuple = min_tuple + (0,)
+
+    return current >= min_tuple
+
 def _find_mpiexec() -> Optional[Path]:
     """Find MPI laucnher executable."""
     for candidate in ["mpiexec", "mpirun"]:

@@ -44,6 +44,8 @@ from rocprofsys import (
     discover_build_config,
     GPUInfo,
     detect_gpu,
+    get_rocm_version,
+    check_rocm_version,
 )
 
 
@@ -75,6 +77,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "loops: mark test as testing loop instrumentation"
     )
+    config.addinivalue_line(
+        "markers", "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')"
+    )
 
 
 def pytest_collection_modifyitems(
@@ -82,6 +87,7 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
+    rocm_version = get_rocm_version()
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
@@ -100,6 +106,19 @@ def pytest_collection_modifyitems(
 
         if "rocpd" in item.keywords and not rocpd_available:
             item.add_marker(skip_rocpd)
+
+        # Check rocm_min_version marker
+        rocm_min_marker = item.get_closest_marker("rocm_min_version")
+        if rocm_min_marker:
+            min_version = rocm_min_marker.args[0] if rocm_min_marker.args else None
+            if min_version:
+                if rocm_version is None:
+                    item.add_marker(pytest.mark.skip(reason="ROCm not found"))
+                elif not check_rocm_version(min_version):
+                    current_str = f"{rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]}"
+                    item.add_marker(pytest.mark.skip(
+                        reason=f"ROCm {current_str} < required {min_version}"
+                    ))
 
 
 # ============================================================================
@@ -147,15 +166,35 @@ def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
 
 # Debug helper, use -s to see
 @pytest.fixture(scope="session", autouse=True)
-def print_test_directories(rocprof_config: RocprofsysConfig) -> None:
-    """Print test directories at the start of the session."""
+def print_test_information(rocprof_config: RocprofsysConfig) -> None:
+    """Print test information at the start of the session."""
+    rocm_ver = get_rocm_version()
+    rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
+
     print("\n" + "=" * 70)
-    print("Test Configuration Directories:")
+    print("Test Configuration:")
     print("=" * 70)
+    print(f"  ROCm version:   {rocm_ver_str}")
+    print(f"  ROCm path:      {rocprof_config.rocm_path}")
+    print(f"  Is installed:   {rocprof_config.is_installed}")
+    print("-" * 70)
+    print("Directories:")
     print(f"  Root dir:       {rocprof_config.rocprofsys_root_dir}")
     print(f"  Build dir:      {rocprof_config.rocprofsys_build_dir}")
+    print(f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}")
+    print(f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}")
     print(f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}")
+    print(f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}")
+    print(f"  Output dir:     {rocprof_config.test_output_dir}")
     print(f"  Validation dir: {rocprof_config.rocpd_validation_rules}")
+    print("-" * 70)
+    print("Executables:")
+    print(f"  Instrument:     {rocprof_config.rocprofsys_instrument}")
+    print(f"  Run:            {rocprof_config.rocprofsys_run}")
+    print(f"  Sample:         {rocprof_config.rocprofsys_sample}")
+    print(f"  Avail:          {rocprof_config.rocprofsys_avail}")
+    print(f"  Causal:         {rocprof_config.rocprofsys_causal}")
+    print(f"  MPI exec:       {rocprof_config.mpiexec}")
     print("=" * 70 + "\n")
 
 # ============================================================================
