@@ -146,7 +146,7 @@ TEST_CASE("Unit_hipCtxGetSetCacheConfig_not_supported") {
 TEST_CASE("Unit_hipCtxGetSetSharedMemConfig_not_supported") {
   hipSharedMemConfig config;
   config = hipSharedMemBankSizeEightByte;
-  SECTION("hipCtxSetSharedMemConfig_not_supported") {
+  SECTION("hipCtxGetSharedMemConfig_not_supported") {
     auto res = hipCtxGetSharedMemConfig(&config);
     REQUIRE(res == hipSuccess);
     REQUIRE(config == hipSharedMemBankSizeFourByte);

@@ -160,6 +160,45 @@ TEST_CASE("Unit_hipDeviceSetLimit_Negative_Parameters") {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Tests basic limit set-get functionality across all available devices
+ *  - Validates that device limits are per-device, not global
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceSetGetLimit.cc
+ * Test requirements
+ * ------------------------
+ *  - Multi-device
+ *  - HIP_VERSION >= 5.3
+ */
+TEST_CASE("Unit_hipDeviceSetLimit_MultiDevice", "[multigpu]") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+
+  if (numDevices < 2) {
+    HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
+    return;
+  }
+
+  for (int dev = 0; dev < numDevices; dev++) {
+    HIP_CHECK(hipSetDevice(dev));
+    INFO("Testing device " << dev);
+
+    // Test stack size on all devices
+    DeviceSetLimitTest(hipLimitStackSize);
+
+#if HT_NVIDIA
+    // Test printf FIFO size on all devices
+    DeviceSetLimitTest(hipLimitPrintfFifoSize);
+
+    // Test malloc heap size on all devices
+    DeviceSetLimitTest(hipLimitMallocHeapSize);
+#endif
+  }
+}
+
+/**
  * End doxygen group hipDeviceSetLimit.
  * @}
  */
