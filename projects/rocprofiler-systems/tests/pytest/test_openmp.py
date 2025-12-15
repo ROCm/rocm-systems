@@ -230,19 +230,35 @@ class TestOpenMPLU:
 class TestOpenMPTarget:
     """Tests for OpenMP target offload (GPU) example."""
 
+    @pytest.fixture
+    def openmp_target_rules(self, validation_rules_dir: Path) -> list[Path]:
+        """Get validation rules for OpenMP target tests."""
+        rules_dir = validation_rules_dir / "openmp-target"
+        return [
+            rules_dir / "kernel-rules.json",
+            rules_dir / "sdk-metrics-rules.json",
+        ]
+
+
     def test_target_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         openmp_target_env: dict[str, str],
+        openmp_target_rules: list[Path],
+        use_rocpd: bool,
     ):
         """Test OpenMP target with sampling instrumentation."""
+        env = openmp_target_env.copy()
+        if use_rocpd:
+            env["ROCPROFSYS_USE_ROCPD"] = "ON"
+
         try:
             runner = SamplingRunner(
                 config=rocprof_config,
                 target="openmp-target",
                 output_dir=test_output_dir,
-                env=openmp_target_env,
+                env=env,
                 timeout=300,
             )
         except FileNotFoundError:
@@ -262,6 +278,20 @@ class TestOpenMPTarget:
             # Kernel dispatch may or may not be present based on GPU
             if not validation.is_valid:
                 pytest.skip("No kernel dispatch events - may need GPU")
+
+        # ROCpd validation
+        if use_rocpd:
+            rocpd_file = result.rocpd_file
+            assert rocpd_file is not None, "ROCpd database not created"
+            existing_rules = [r for r in openmp_target_rules if r.exists()]
+            if not existing_rules:
+                pytest.skip("No validation rules found")
+            validation = validate_rocpd_database(
+                rocpd_file,
+                rocprof_config.rocprofsys_tests_dir,
+                rules_files=existing_rules,
+            )
+            assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
     def test_target_perfetto_validation(
         self,
@@ -584,67 +614,6 @@ class TestOpenMPVVOffload:
         assert result.perfetto_file is not None or \
                len(list(result.output_dir.glob("*.json"))) > 0, \
                "No output files created"
-
-
-# ============================================================================
-# Test Class: OpenMP Target ROCpd Tests
-# ============================================================================
-
-
-@pytest.mark.gpu
-@pytest.mark.rocpd
-class TestOpenMPTargetROCpd:
-    """Tests for OpenMP target with ROCpd database output."""
-
-    @pytest.fixture
-    def openmp_target_rules(self, validation_rules_dir: Path) -> list[Path]:
-        """Get validation rules for OpenMP target tests."""
-        rules_dir = validation_rules_dir / "openmp-target"
-        return [
-            rules_dir / "kernel-rules.json",
-            rules_dir / "sdk-metrics-rules.json",
-        ]
-
-    def test_validate_rocpd(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        openmp_target_env: dict[str, str],
-        openmp_target_rules: list[Path],
-    ):
-        """Validate OpenMP target ROCpd database."""
-        env = openmp_target_env.copy()
-        env["ROCPROFSYS_USE_ROCPD"] = "ON"
-
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-target",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-target not built")
-
-        result = runner.run()
-        assert result.success, f"OpenMP target failed: {result.stderr}"
-
-        rocpd_file = result.rocpd_file
-        if rocpd_file is None:
-            pytest.skip("ROCpd database not created")
-
-        existing_rules = [r for r in openmp_target_rules if r.exists()]
-        if not existing_rules:
-            pytest.skip("No validation rules found")
-
-        validation = validate_rocpd_database(
-            rocpd_file,
-            rocprof_config.rocprofsys_tests_dir,
-            rules_files=existing_rules
-        )
-        assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
-
 
 # ============================================================================
 # Test Class: Sampling Duration Tests

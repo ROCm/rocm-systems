@@ -32,6 +32,7 @@ from rocprofsys import (
     SamplingRunner,
     SysRunRunner,
     validate_perfetto_trace,
+    validate_rocpd_database,
 )
 
 from pathlib import Path
@@ -57,19 +58,38 @@ def jpeg_decode_env() -> dict[str, str]:
 class TestJPEGDecode:
     """Tests for the jpegdecode example."""
 
+    @pytest.fixture
+    def jpeg_decode_rules(self, validation_rules_dir: Path) -> list[Path]:
+        """Get validation rules for JPEG decode tests."""
+        rules_dir = validation_rules_dir / "jpeg-decode"
+        return [
+            validation_rules_dir / "default-rules.json",
+            rules_dir / "validation-rules.json",
+            rules_dir / "sdk-metrics-rules.json",
+        ]
+
     def test_jpeg_decode_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         jpeg_decode_env: dict[str, str],
         gpu_info: GPUInfo,
+        jpeg_decode_rules: list[Path],
+        use_rocpd: bool,
     ):
         """Test JPEG decode sampling."""
+        env = jpeg_decode_env.copy()
+        if use_rocpd:
+            env["ROCPROFSYS_USE_ROCPD"] = "ON"
+            if gpu_info.is_mi300:
+                rules_dir = rocprof_config.rocprofsys_tests_dir / "rocpd-validation-rules" / "jpeg-decode"
+                jpeg_decode_rules.append(rules_dir / "amd-smi-rules.json")
+
         runner = SamplingRunner(
             config=rocprof_config,
             target="jpegdecode",
             output_dir=test_output_dir,
-            env=jpeg_decode_env,
+            env=env,
             run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
         )
         result = runner.run()
@@ -89,6 +109,20 @@ class TestJPEGDecode:
             print_output=True,
         )
         assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+
+        # ROCpd validation
+        if use_rocpd:
+            rocpd_file = result.rocpd_file
+            assert rocpd_file is not None, "ROCpd database not created"
+            existing_rules = [r for r in jpeg_decode_rules if r.exists()]
+            if not existing_rules:
+                pytest.skip("No validation rules found")
+            validation = validate_rocpd_database(
+                rocpd_file,
+                rocprof_config.rocprofsys_tests_dir,
+                rules_files=existing_rules,
+            )
+            assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
     def test_jpeg_decode_sys_run(
         self,

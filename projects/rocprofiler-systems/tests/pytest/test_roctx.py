@@ -69,6 +69,16 @@ def roctx_env(base_env: dict[str, str]) -> dict[str, str]:
 @pytest.mark.gpu
 class TestRoctx:
     """Tests for rocTX marker API."""
+    @pytest.fixture
+    def roctx_rules(self, validation_rules_dir: Path) -> list[Path]:
+        """Get validation rules for rocTX tests."""
+        rules_dir = validation_rules_dir / "roctx"
+        return [
+            rules_dir / "validation-rules.json",
+            rules_dir / "amd-smi-rules.json",
+            rules_dir / "sdk-metrics-rules.json",
+        ]
+
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
     def test_roctx_baseline(
@@ -89,27 +99,48 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"ROCTX baseline failed: {result.stderr}"
+        assert result.success, f"rocTX baseline failed: {result.stderr}"
 
     def test_roctx_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         roctx_env: dict[str, str],
+        roctx_rules: list[Path],
+        use_rocpd: bool,
     ):
+        env = roctx_env.copy()
+        if use_rocpd:
+            env["ROCPROFSYS_USE_ROCPD"] = "ON"
         try:
             runner = SamplingRunner(
                 config=rocprof_config,
                 target="roctx",
                 output_dir=test_output_dir,
-                env=roctx_env,
+                env=env,
                 timeout=120,
             )
 
         except FileNotFoundError:
             pytest.skip("roctx target not built")
         result = runner.run()
-        assert result.success, f"ROCTX sampling failed: {result.stderr}"
+        assert result.success, f"rocTX sampling failed: {result.stderr}"
+
+        # ROCpd validation
+        if use_rocpd:
+            rocpd_file = result.rocpd_file
+            assert rocpd_file is not None, "ROCpd database not created"
+
+            existing_rules = [r for r in roctx_rules if r.exists()]
+            if not existing_rules:
+                pytest.skip("No validation rules found")
+
+            validation = validate_rocpd_database(
+                rocpd_file,
+                rocprof_config.rocprofsys_tests_dir,
+                rules_files=existing_rules,
+            )
+            assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
     def test_roctx_binary_rewrite(
         self,
@@ -149,63 +180,4 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"ROCTX sys run failed: {result.stderr}"
-
-
-# ============================================================================
-# Test Class: rocTX ROCpd Tests
-# ============================================================================
-
-@pytest.mark.gpu
-@pytest.mark.rocpd
-class TestRoctxROCpd:
-    """Tests for Roctx with ROCpd database output."""
-
-    @pytest.fixture
-    def roctx_rules(self, validation_rules_dir: Path) -> list[Path]:
-        """Get validation rules for roctx tests."""
-        rules_dir = validation_rules_dir / "roctx"
-        return [
-            rules_dir / "validation-rules.json",
-            rules_dir / "amd-smi-rules.json",
-            rules_dir / "sdk-metrics-rules.json",
-        ]
-
-    def test_validate_rocpd(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        roctx_env: dict[str, str],
-        roctx_rules: list[Path],
-    ):
-        """Validate roctx ROCpd database."""
-        env = roctx_env.copy()
-        env["ROCPROFSYS_USE_ROCPD"] = "ON"
-
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="roctx",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("roctx target not built")
-
-        result = runner.run()
-        assert result.success, f"ROCTX ROCpd validation failed: {result.stderr}"
-
-        rocpd_file = result.rocpd_file
-        assert rocpd_file is not None, "ROCpd database not created"
-
-        existing_rules = [r for r in roctx_rules if r.exists()]
-        if not existing_rules:
-            pytest.skip("No validation rules found")
-
-        validation = validate_rocpd_database(
-            rocpd_file,
-            rocprof_config.rocprofsys_tests_dir,
-            rules_files=existing_rules,
-        )
-        assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
+        assert result.success, f"rocTX sys run failed: {result.stderr}"

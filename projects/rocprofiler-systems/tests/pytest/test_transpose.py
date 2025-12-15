@@ -71,6 +71,19 @@ from rocprofsys import (
 class TestTranspose:
     """Basic transpose tests with all instrumentation modes."""
 
+    @pytest.fixture
+    def transpose_rules(self, validation_rules_dir: Path) -> list[Path]:
+        """Get validation rules files for transpose tests."""
+        rules_dir = validation_rules_dir / "transpose"
+        return [
+            validation_rules_dir / "default-rules.json",
+            rules_dir / "validation-rules.json",
+            rules_dir / "amd-smi-rules.json",
+            rules_dir / "cpu-metrics-rules.json",
+            rules_dir / "timer-sampling-rules.json",
+            rules_dir / "sdk-metrics-rules.json",
+        ]
+
     REWRITE_ARGS = [
         "-e",
         "-v", "2",
@@ -109,13 +122,18 @@ class TestTranspose:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         transpose_env: dict[str, str],
+        transpose_rules: list[Path],
+        use_rocpd: bool,
     ):
         """Test transpose with sampling instrumentation."""
+        env = transpose_env.copy()
+        if use_rocpd:
+            env["ROCPROFSYS_USE_ROCPD"] = "ON"
         runner = SamplingRunner(
             config=rocprof_config,
             target="transpose",
             output_dir=test_output_dir,
-            env=transpose_env,
+            env=env,
             timeout=120,
         )
 
@@ -128,6 +146,20 @@ class TestTranspose:
         perfetto = result.perfetto_file
         assert perfetto is not None, "Perfetto trace not created"
         assert perfetto.stat().st_size > 0, "Perfetto trace is empty"
+
+        # ROCpd validation
+        if use_rocpd:
+            rocpd_file = result.rocpd_file
+            assert rocpd_file is not None, "ROCpd database not created"
+            existing_rules = [r for r in transpose_rules if r.exists()]
+            if not existing_rules:
+                pytest.skip("No validation rules found")
+            validation = validate_rocpd_database(
+                rocpd_file,
+                rocprof_config.rocprofsys_tests_dir,
+                rules_files=existing_rules,
+            )
+            assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
     def test_binary_rewrite(
         self,
@@ -420,87 +452,6 @@ class TestTransposeROCProfiler:
                 tests_dir=rocprof_config.rocprofsys_tests_dir,
             )
             assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-
-
-# ============================================================================
-# Test Class: ROCpd Database Validation
-# ============================================================================
-
-
-@pytest.mark.gpu
-@pytest.mark.rocpd
-class TestTransposeROCpd:
-    """Test transpose with ROCpd database output and validation."""
-
-    @pytest.fixture
-    def transpose_rules(self, validation_rules_dir: Path) -> list[Path]:
-        """Get validation rules files for transpose tests."""
-        rules_dir = validation_rules_dir / "transpose"
-        return [
-            validation_rules_dir / "default-rules.json",
-            rules_dir / "validation-rules.json",
-            rules_dir / "amd-smi-rules.json",
-            rules_dir / "cpu-metrics-rules.json",
-            rules_dir / "timer-sampling-rules.json",
-            rules_dir / "sdk-metrics-rules.json",
-        ]
-
-    def test_sampling_rocpd(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        rocpd_env: dict[str, str],
-    ):
-        """Test transpose with ROCpd output enabled."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=rocpd_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-
-        assert result.success, f"ROCpd sampling failed: {result.stderr}"
-
-        rocpd_file = result.rocpd_file
-        assert rocpd_file is not None, "ROCpd database not created"
-        assert rocpd_file.stat().st_size > 0, "ROCpd database is empty"
-
-    def test_validate_rocpd_database(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        rocpd_env: dict[str, str],
-        transpose_rules: list[Path],
-    ):
-        """Validate ROCpd database contents for transpose."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=rocpd_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-        assert result.success, f"Test execution failed: {result.stderr}"
-
-        rocpd_file = result.rocpd_file
-        assert rocpd_file is not None, "ROCpd database not created"
-
-        existing_rules = [r for r in transpose_rules if r.exists()]
-
-
-        validation = validate_rocpd_database(
-            rocpd_file,
-            rocprof_config.rocprofsys_tests_dir,
-            rules_files=existing_rules,
-        )
-
-        assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
-
 
 # ============================================================================
 # Test Class: Perfetto Trace Validation

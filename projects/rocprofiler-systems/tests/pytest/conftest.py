@@ -44,8 +44,8 @@ from rocprofsys import (
     discover_build_config,
     GPUInfo,
     detect_gpu,
-    get_rocm_version,
-    check_rocm_version,
+    _get_rocm_version,
+    _check_rocm_version,
 )
 
 
@@ -66,9 +66,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers", "rocm: mark test as requiring ROCm"
     )
     config.addinivalue_line(
-        "markers", "rocpd: mark test as requiring ROCpd support"
-    )
-    config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
     )
     config.addinivalue_line(
@@ -87,15 +84,13 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
-    rocm_version = get_rocm_version()
+    rocm_version = _get_rocm_version()
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
-    skip_rocpd = pytest.mark.skip(reason="ROCpd not available (requires ROCm >= 7.0)")
 
     mpi_available = shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
 
-    rocpd_available = gpu_info.available
 
     for item in items:
         if "gpu" in item.keywords and not gpu_info.available:
@@ -104,9 +99,6 @@ def pytest_collection_modifyitems(
         if "mpi" in item.keywords and not mpi_available:
             item.add_marker(skip_mpi)
 
-        if "rocpd" in item.keywords and not rocpd_available:
-            item.add_marker(skip_rocpd)
-
         # Check rocm_min_version marker
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
         if rocm_min_marker:
@@ -114,7 +106,7 @@ def pytest_collection_modifyitems(
             if min_version:
                 if rocm_version is None:
                     item.add_marker(pytest.mark.skip(reason="ROCm not found"))
-                elif not check_rocm_version(min_version):
+                elif not _check_rocm_version(min_version):
                     current_str = f"{rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]}"
                     item.add_marker(pytest.mark.skip(
                         reason=f"ROCm {current_str} < required {min_version}"
@@ -124,6 +116,25 @@ def pytest_collection_modifyitems(
 # ============================================================================
 # Session-scoped Fixtures
 # ============================================================================
+
+@pytest.fixture(scope="session")
+def use_rocpd(gpu_info: GPUInfo) -> bool:
+    """Whether ROCpd is available for tests.
+
+    ROCpd requires:
+    - ROCPROFSYS_USE_ROCPD not set to OFF (default: ON)
+    - A valid GPU
+    - ROCm >= 7.0
+    """
+
+    if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
+        return False
+    if not gpu_info.available:
+        return False
+    rocm_version = _get_rocm_version()
+    if rocm_version is None:
+        return False
+    return rocm_version >= (7, 0, 0)
 
 @pytest.fixture(scope="session")
 def rocprof_config() -> RocprofsysConfig:
@@ -168,7 +179,7 @@ def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
 @pytest.fixture(scope="session", autouse=True)
 def print_test_information(rocprof_config: RocprofsysConfig) -> None:
     """Print test information at the start of the session."""
-    rocm_ver = get_rocm_version()
+    rocm_ver = _get_rocm_version()
     rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
 
     print("\n" + "=" * 70)
@@ -269,15 +280,6 @@ def transpose_env(base_env: dict[str, str]) -> dict[str, str]:
     env.update({
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
     })
-    return env
-
-
-@pytest.fixture
-def rocpd_env(transpose_env: dict[str, str], gpu_info: GPUInfo) -> dict[str, str]:
-    """Environment variables for ROCpd-enabled tests."""
-    env = transpose_env.copy()
-    if gpu_info.available:
-        env["ROCPROFSYS_USE_ROCPD"] = "ON"
     return env
 
 

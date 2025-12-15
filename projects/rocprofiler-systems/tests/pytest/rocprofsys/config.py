@@ -205,7 +205,7 @@ def _find_rocm_path() -> Optional[Path]:
     return None
 
 
-def get_rocm_version() -> Optional[tuple[int, int, int]]:
+def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     """Get the installed ROCm version as a tuple (major, minor, patch).
 
     Returns:
@@ -234,7 +234,7 @@ def get_rocm_version() -> Optional[tuple[int, int, int]]:
     return None
 
 
-def check_rocm_version(min_version: str) -> bool:
+def _check_rocm_version(min_version: str) -> bool:
     """Check if installed ROCm version meets minimum requirement.
 
     Args:
@@ -243,7 +243,7 @@ def check_rocm_version(min_version: str) -> bool:
     Returns:
         True if ROCm version >= min_version, False otherwise.
     """
-    current = get_rocm_version()
+    current = _get_rocm_version()
     if current is None:
         return False
 
