@@ -1,5 +1,12 @@
-# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying file
-# Copyright.txt or https://cmake.org/licensing for details.
+# ------------------------------------------------------------------------------#
+#
+# Finds headers for UCX (Unified Communication X)
+#
+# UCX is a high-performance communication framework used as a transport layer
+# for MPI and other communication libraries. This module locates UCX headers
+# (ucp.h, uct.h) for tracing and interception purposes.
+#
+# ------------------------------------------------------------------------------#
 
 include(FindPackageHandleStandardArgs)
 

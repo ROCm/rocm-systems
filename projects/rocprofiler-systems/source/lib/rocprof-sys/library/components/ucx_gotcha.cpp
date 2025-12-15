@@ -54,17 +54,15 @@ get_ucx_gotcha()
 void
 ucx_gotcha::configure()
 {
-    std::cout << "[DEBUG] UCX Gotcha: configure()" << std::endl;
     // don't emit warnings for missing UCX functions unless debug or verbosity >= 3
-    // Temporarily disabled to see which functions are being found
-    /*if(get_verbose_env() < 3 && !get_debug_env())
+    if(get_verbose_env() < 3 && !get_debug_env())
     {
         for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
         {
             auto* itr = ucx_gotcha_t::at(i);
             if(itr) itr->verbose = -1;
         }
-    }*/
+    }
 
     ucx_gotcha_t::get_initializer() = []() {
         // Active Message
@@ -191,19 +189,18 @@ ucx_gotcha::configure()
 void
 ucx_gotcha::shutdown()
 {
-    std::cout << "[DEBUG] UCX Gotcha: shutdown()" << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("Shutdown UCX Gotcha\n");
     ucx_gotcha_t::disable();
 }
 
 void
 ucx_gotcha::start()
 {
-    std::cout << "[DEBUG] UCX Gotcha: start()" << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("Start UCX Gotcha\n");
     if(!get_ucx_gotcha().get<ucx_gotcha_t>()->get_is_running())
     {
         configure();
         get_ucx_gotcha().start();
-        std::cout << "[DEBUG] UCX Gotcha: started" << std::endl;
     }
 }
 
@@ -217,70 +214,70 @@ ucx_gotcha::stop()
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id });
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4, "arg5", arg5);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4, "arg5", arg5, "arg6", arg6);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4, "arg5", arg5, "arg6", arg6, "arg7", arg7);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7, void* arg8)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7, void* arg8): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*, void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4, "arg5", arg5, "arg6", arg6, "arg7", arg7, "arg8", arg8);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7, void* arg8, void* arg9)
 {   
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5, void* arg6, void* arg7, void* arg8, void* arg9)" << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(void*, void*, void*, void*, void*, void*, void*, void*, void*)\n", _data.tool_id.c_str());
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "arg1", arg1, "arg2", arg2, "arg3", arg3, "arg4", arg4, "arg5", arg5, "arg6", arg6, "arg7", arg7, "arg8", arg8, "arg9", arg9);
 }
 
@@ -288,8 +285,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2, size_t arg3, uint64_t arg4, const void* arg5)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_tag_send_nbx): " << std::string_view{ _data.tool_id } 
-              << " ep=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << " tag=" << arg4 << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, const void*, size_t, ucp_tag_t, const ucp_request_param_t*) :: count=%zu, tag=0x%lx\n",
+                             _data.tool_id.c_str(), arg3, (unsigned long) arg4);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, 
                                           "ep", arg1, "buffer", arg2, "count", arg3, "tag", arg4, "param", arg5);
 }
@@ -297,8 +294,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, size_t arg3, uint64_t arg4, uint64_t arg5, const void* arg6)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_tag_recv_nbx): " << std::string_view{ _data.tool_id }
-              << " worker=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << " tag=" << arg4 << " tag_mask=" << arg5 << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_worker_h, void*, size_t, ucp_tag_t, ucp_tag_t, const ucp_request_param_t*) :: count=%zu, tag=0x%lx, tag_mask=0x%lx\n",
+                             _data.tool_id.c_str(), arg3, (unsigned long) arg4, (unsigned long) arg5);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "worker", arg1, "buffer", arg2, "count", arg3, "tag", arg4, "tag_mask", arg5, "param", arg6);
 }
@@ -307,8 +304,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2, size_t arg3, uint64_t arg4, void* arg5, const void* arg6)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_put_nbx): " << std::string_view{ _data.tool_id }
-              << " ep=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << " remote_addr=0x" << std::hex << arg4 << std::dec << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, const void*, size_t, uint64_t, ucp_rkey_h, const ucp_request_param_t*) :: count=%zu, remote_addr=0x%lx\n",
+                             _data.tool_id.c_str(), arg3, (unsigned long) arg4);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "ep", arg1, "buffer", arg2, "count", arg3, "remote_addr", arg4, "rkey", arg5, "param", arg6);
 }
@@ -316,8 +313,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, size_t arg3, uint64_t arg4, void* arg5, const void* arg6)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_get_nbx): " << std::string_view{ _data.tool_id }
-              << " ep=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << " remote_addr=0x" << std::hex << arg4 << std::dec << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, void*, size_t, uint64_t, ucp_rkey_h, const ucp_request_param_t*) :: count=%zu, remote_addr=0x%lx\n",
+                             _data.tool_id.c_str(), arg3, (unsigned long) arg4);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "ep", arg1, "buffer", arg2, "count", arg3, "remote_addr", arg4, "rkey", arg5, "param", arg6);
 }
@@ -326,8 +323,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, unsigned arg2, const void* arg3, size_t arg4, const void* arg5, size_t arg6, const void* arg7)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_am_send_nbx): " << std::string_view{ _data.tool_id }
-              << " ep=" << arg1 << " id=" << arg2 << " header_length=" << arg4 << " count=" << arg6 << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, unsigned, const void*, size_t, const void*, size_t, const ucp_request_param_t*) :: id=%u, header_length=%zu, count=%zu\n",
+                             _data.tool_id.c_str(), arg2, arg4, arg6);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "ep", arg1, "id", arg2, "header", arg3, "header_length", arg4, "buffer", arg5, "count", arg6, "param", arg7);
 }
@@ -336,8 +333,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, unsigne
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const void* arg2, size_t arg3, const void* arg4)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_stream_send_nbx): " << std::string_view{ _data.tool_id }
-              << " ep=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, const void*, size_t, const ucp_request_param_t*) :: count=%zu\n",
+                             _data.tool_id.c_str(), arg3);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "ep", arg1, "buffer", arg2, "count", arg3, "param", arg4);
 }
@@ -345,8 +342,8 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* arg2, size_t arg3, size_t* arg4, const void* arg5)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(incoming, ucp_stream_recv_nbx): " << std::string_view{ _data.tool_id }
-              << " ep=" << arg1 << " buffer=" << arg2 << " count=" << arg3 << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s(ucp_ep_h, void*, size_t, size_t*, const ucp_request_param_t*) :: count=%zu\n",
+                             _data.tool_id.c_str(), arg3);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id },
                                           "ep", arg1, "buffer", arg2, "count", arg3, "length", arg4, "param", arg5);
 }
@@ -354,14 +351,14 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::outgoing, void* ret): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s() returned %p\n", _data.tool_id.c_str(), ret);
     category_region<category::ucx>::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
 void
 ucx_gotcha::audit(const gotcha_data& _data, audit::outgoing, int ret)
 {
-    std::cout << "[DEBUG] UCX Gotcha: audit(const gotcha_data& _data, audit::outgoing, int ret): " << std::string_view{ _data.tool_id } << std::endl;
+    ROCPROFSYS_BASIC_DEBUG_F("%s() returned %i\n", _data.tool_id.c_str(), ret);
     category_region<category::ucx>::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
