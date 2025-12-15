@@ -91,7 +91,6 @@ extern "C" __device__ __attribute__((const)) double __ocml_cvtrtn_f64_u64(__hip_
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtp_f64_u64(__hip_uint64_t);
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_uint64_t);
 
-extern "C" __device__ __attribute__((convergent)) void __ockl_gws_init(uint nwm1, uint rid);
 extern "C" __device__ __attribute__((convergent)) void __ockl_gws_barrier(uint nwm1, uint rid);
 
 extern "C" __device__ __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
