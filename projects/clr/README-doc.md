@@ -51,7 +51,7 @@ For detail instructions, please refer to [how to build HIP](https://rocm.docs.am
 
 ## Tests
 
-`hip-tests` is a separate repository hosted at [hip-tests](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip-tests).
+`hip-tests` is a separate project hosted at [hip-tests](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip-tests).
 
 To run `hip-tests` please go to the repository and follow the steps.
 
