@@ -137,6 +137,7 @@ class RocProfCompute_Base:
                 kernels_with_missing_counters.append(kernel_name)
 
         if kernels_with_missing_counters:
+            kernels_with_missing_counters = list(set(kernels_with_missing_counters))
             console_warning(
                 "join_prof",
                 (
@@ -147,6 +148,10 @@ class RocProfCompute_Base:
                     f"or turn off iteration multiplexing."
                 ),
             )
+            with open(f"{self.__args.path}/profiling_config.yaml", "a") as f:
+                yaml.dump(
+                    {"kernels_with_missing_counters": kernels_with_missing_counters}, f
+                )
 
     @demarcate
     def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
