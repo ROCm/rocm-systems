@@ -1028,8 +1028,8 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
     amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << 
-            "Failed to retrieve product serial number! error: " << 
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            "Failed to retrieve product serial number! error: " <<
             static_cast<int>(status);
         LOG_DEBUG(ss);
         return serial_number;
