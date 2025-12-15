@@ -35,6 +35,30 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief Enumeration for version of the rocprofiler_pc_sampling_record_v*_t struct
+ *
+ * This enum allows users to specify which PC sampling record format they want to receive.
+ * Different versions are optimized for different GPU architectures and sampling methods:
+ * - VERSION_0: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
+ * - VERSION_1: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
+ * - VERSION_2: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
+ * - VERSION_3: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ * - VERSION_4: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
+ * - VERSION_5: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ */
+typedef enum rocprofiler_pc_sampling_record_version_t
+{
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0    = 1,  ///< host-trap for GFX9/Navi4x (96B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1    = 2,  ///< stochastic for MI300/MI350 (104B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2    = 3,  ///< host-trap on FUTURE_GEN_1_2 (112B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_3    = 4,  ///< stochastic on FUTURE_GEN_1_2 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_4    = 5,  ///< host-trap on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_5    = 6,  ///< stochastic on FUTURE_GEN_3/FUTURE_GEN_4 (136B)
+    ROCPROFILER_PC_SAMPLING_RECORD_VERSION_LAST,
+} rocprofiler_pc_sampling_record_version_t;
+
+/**
  * @brief (experimental) Function used to configure the PC sampling service on the GPU agent with @p
  * agent_id.
  *
@@ -53,6 +77,26 @@ ROCPROFILER_EXTERN_C_INIT
  * [available_config.min_interval, available_config.max_interval],
  * where available_config is the instance of the @see rocprofiler_pc_sampling_configuration_s
  * supported/available at the moment.
+ *
+ * PC Sampling Record Versioning:
+ * The client must specify which record format to receive by providing @p record_version and
+ * @p record_size parameters. Different versions are optimized for different hardware architectures
+ * and sampling methods:
+ * - VERSION_0: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
+ * - VERSION_1: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
+ * - VERSION_2: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
+ * - VERSION_3: Stochastic sampling on FUTURE_GEN_1_2 (136 bytes)
+ * - VERSION_4: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
+ * - VERSION_5: Stochastic sampling on FUTURE_GEN_3/FUTURE_GEN_4 (136 bytes)
+ *
+ * Example:
+ * @code
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
+ *     sizeof(rocprofiler_pc_sampling_record_v0_t),
+ *     0);
+ * @endcode
  *
  * Rocprofiler-SDK checks whether the requsted configuration is actually supported
  * at the moment of calling this function. If the answer is yes, it returns
@@ -100,6 +144,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] unit       - The unit appropriate to the PC sampling type/method.
  * @param [in] interval   - frequency at which PC samples are generated
  * @param [in] buffer_id  - id of the buffer used for delivering PC samples
+ * @param [in] record_version - enum specifying which PC sampling record format to use
+ * @param [in] record_size - should be set to sizeof(rocprofiler_pc_sampling_record_vN_t) where N matches the version
  * @param [in] flags      - for future use
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling service configured successfully
@@ -110,20 +156,25 @@ ROCPROFILER_EXTERN_C_INIT
  * 4. GPU device does not support requested PC sampling method.
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI record_size does not match the size of the
+ * requested record version struct, or the record version is not supported
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT counter collection service already
  * setup in the context
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with an invalid argument
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with an invalid argument,
+ * invalid record_version value, or record_size mismatch
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
-                                          rocprofiler_agent_id_t           agent_id,
-                                          rocprofiler_pc_sampling_method_t method,
-                                          rocprofiler_pc_sampling_unit_t   unit,
-                                          uint64_t                         interval,
-                                          rocprofiler_buffer_id_t          buffer_id,
-                                          int                              flags) ROCPROFILER_API;
+rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t                   context_id,
+                                          rocprofiler_agent_id_t                     agent_id,
+                                          rocprofiler_pc_sampling_method_t           method,
+                                          rocprofiler_pc_sampling_unit_t             unit,
+                                          uint64_t                                   interval,
+                                          rocprofiler_buffer_id_t                    buffer_id,
+                                          rocprofiler_pc_sampling_record_version_t   record_version,
+                                          size_t                                     record_size,
+                                          int                                        flags) ROCPROFILER_API;
 
 /**
  * @brief (experimental) Enumeration describing values of flags of
@@ -358,134 +409,6 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_instruction_no
 } rocprofiler_pc_sampling_instruction_not_issued_reason_t;
 
 /**
- * @brief (experimental) Data provided by stochastic sampling hardware.
- *
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_t
-{
-    uint32_t reason_not_issued          : 4;
-    uint32_t reserved0                  : 1;  ///< reserved for future use
-    uint32_t arb_state_issue_valu       : 1;  ///< arbiter issued a VALU instruction
-    uint32_t arb_state_issue_matrix     : 1;  ///< arbiter issued a matrix instruction
-    uint32_t arb_state_issue_lds        : 1;  ///< arbiter issued a LDS instruction
-    uint32_t arb_state_issue_lds_direct : 1;  ///< arbiter issued a LDS direct instruction
-    uint32_t arb_state_issue_scalar     : 1;  ///< arbiter issued a scalar (SALU/SMEM) instruction
-    uint32_t arb_state_issue_vmem_tex   : 1;  ///< arbiter issued a texture instruction
-    uint32_t arb_state_issue_flat       : 1;  ///< arbiter issued a FLAT instruction
-    uint32_t arb_state_issue_exp        : 1;  ///< arbiter issued a export instruction
-    uint32_t arb_state_issue_misc       : 1;  ///< arbiter issued a miscellaneous instruction
-    uint32_t arb_state_issue_brmsg      : 1;  ///< arbiter issued a branch/message instruction
-    uint32_t arb_state_issue_reserved   : 1;  ///< reserved for the future use
-    uint32_t arb_state_stall_valu       : 1;
-    uint32_t arb_state_stall_matrix     : 1;  ///< matrix instruction was stalled
-    uint32_t arb_state_stall_lds        : 1;  ///< LDS instruction was stalled
-    uint32_t arb_state_stall_lds_direct : 1;  ///< LDS direct instruction was stalled
-    uint32_t arb_state_stall_scalar     : 1;  ///< Scalar (SALU/SMEM) instruction was stalled
-    uint32_t arb_state_stall_vmem_tex   : 1;  ///< texture instruction was stalled
-    uint32_t arb_state_stall_flat       : 1;  ///< flat instruction was stalled
-    uint32_t arb_state_stall_exp        : 1;  ///< export instruction was stalled
-    uint32_t arb_state_stall_misc       : 1;  ///< miscellaneous instruction was stalled
-    uint32_t arb_state_stall_brmsg      : 1;  ///< branch/message instruction was stalled
-    uint32_t arb_state_state_reserved   : 1;  ///< reserved for the future use
-    // We have two reserved bits
-    uint32_t dual_issue_valu : 1;
-    uint32_t reserved1       : 1;  ///< reserved for the future use
-    uint32_t reserved2       : 3;  ///< reserved for the future use
-
-    /// @var reason_not_issued
-    /// @brief The reason for not issuing an instruction. The field takes one of the value defined
-    /// in ::rocprofiler_pc_sampling_instruction_not_issued_reason_t
-    /// @var arb_state_stall_valu
-    /// @brief VALU instruction was stalled when a sample was generated
-    /// @var dual_issue_valu
-    /// @brief Two VALU instructions were issued for coexecution (MI3xx specific)
-} rocprofiler_pc_sampling_snapshot_v0_t;
-
-/**
- * @brief (experimental) Counters of issued but not yet completed instructions.
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_t
-{
-    uint32_t load_cnt   : 6;
-    uint32_t store_cnt  : 6;
-    uint32_t bvh_cnt    : 3;
-    uint32_t sample_cnt : 6;
-    uint32_t ds_cnt     : 6;
-    uint32_t km_cnt     : 5;
-
-    /// @var load_cnt
-    /// @brief Counts the number of VMEM load instructions issued but not yet completed.
-    /// @var store_cnt
-    /// @brief Counts the number of VMEM store instructions issued but not yet completed.
-    /// @var bvh_cnt
-    /// @brief Counts the number of VMEM BVH instructions issued but not yet completed.
-    /// @var sample_cnt
-    /// @brief Counts the number of VMEM sample instructions issued but not yet completed.
-    /// @var ds_cnt
-    /// @brief Counts the number of LDS instructions issued but not yet completed.
-    /// @var km_cnt
-    /// @brief Counts the number of scalar memory reads and memory instructions issued but not yet
-    /// completed.
-} rocprofiler_pc_sampling_memory_counters_t;
-
-/**
- * @brief (experimental) ROCProfiler Stochastic PC Sampling Record.
- */
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_stochastic_v0_t
-{
-    uint64_t                                           size;  ///< Size of this struct
-    rocprofiler_pc_sampling_record_stochastic_header_t flags;
-    uint8_t                                            wave_in_group;
-    uint8_t                                            wave_issued : 1;
-    uint8_t                                            inst_type   : 5;
-    uint8_t                                            reserved    : 2;
-    rocprofiler_pc_sampling_hw_id_v0_t                 hw_id;
-    rocprofiler_pc_t                                   pc;
-    uint64_t                                           exec_mask;
-    rocprofiler_dim3_t                                 workgroup_id;
-    uint32_t                                           wave_count;
-    uint64_t                                           timestamp;
-    uint64_t                                           dispatch_id;
-    rocprofiler_async_correlation_id_t                 correlation_id;
-    rocprofiler_pc_sampling_snapshot_v0_t              snapshot;
-    rocprofiler_pc_sampling_memory_counters_t          memory_counters;
-
-    /// @var flags
-    /// @brief Defines what fields are meaningful for the sample.
-    /// @var wave_in_group
-    /// @brief wave position within the workgroup (0-15)
-    /// @var wave_issued
-    /// @brief wave issued the instruction represented with the PC
-    /// @var inst_type
-    /// @brief instruction type, takes a value defined in @ref
-    /// ::rocprofiler_pc_sampling_instruction_type_t
-    /// @var reserved
-    /// @brief reserved 2 bits must be zero
-    /// @var hw_id
-    /// @brief @see ::rocprofiler_pc_sampling_hw_id_v0_t
-    /// @var pc
-    /// @brief information about sampled program counter
-    /// @var exec_mask
-    /// @brief active SIMD lanes at the moment of sampling
-    /// @var workgroup_id
-    /// @brief wave coordinates within the workgroup
-    /// @var wave_count
-    /// @brief active waves on the CU at the moment of sampling
-    /// @var timestamp
-    /// @brief timestamp when sample is generated
-    /// @var dispatch_id
-    /// @brief originating kernel dispatch ID
-    /// @var correlation_id
-    /// @brief API launch call id that matches dispatch ID
-    /// @var snapshot
-    /// @brief Data provided by stochastic sampling hardware. @see
-    /// ::rocprofiler_pc_sampling_snapshot_v0_t
-    /// @var memory_counters
-    /// @brief Counters of issued but not yet completed instructions. @see
-    /// ::rocprofiler_pc_sampling_memory_counters_t
-} rocprofiler_pc_sampling_record_stochastic_v0_t;
-
-/**
  * @brief (experimental) Record representing an invalid PC Sampling Record.
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_invalid_t
@@ -515,6 +438,615 @@ rocprofiler_get_pc_sampling_instruction_type_name(
 ROCPROFILER_SDK_EXPERIMENTAL const char*
 rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
     rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason) ROCPROFILER_API;
+
+/**
+ * @brief Information provided by snapshot block (relevant for stochastic PC sampling only)
+ * 
+ * 8B in total.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_information_t
+{
+    uint8_t  wave_issued; ///< 1 - wave issued an instruction at the moment of sampling;
+                         ///< 0 - wave didn't issue an instruction at the moment of sampling.
+    uint8_t  instruction_type; ///< if wave_issued=1, type of issued instruction (see ::rocprofiler_pc_sampling_instruction_type_t);
+                              ///< otherwise might be irrelevant
+    uint8_t  no_issue_reason; ///< if wave_issue=0, reason for not issuing the instruction (see ::rocprofiler_pc_sampling_no_issue_reason_t);
+                             ///< otherwise irrelevant
+    uint8_t  wave_count; ///< number of concurrently running waves on CU (on GFX9) or SIMD (GFX12+) at the moment of sampling
+    uint32_t arbiter_state;  ///< arbiter state bitfield. To decode, use ::rocprofiler_pc_sampling_arbiter_state_field_id_t
+                             ///< with ::rocprofiler_pc_sampling_get_arbiter_state_field() helper function,
+                             ///< or manually extract using hardware-specific lookup tables.
+} rocprofiler_pc_sampling_snapshot_information_t;
+
+/**
+ * @brief (experimental) Hardware version enumeration for PC sampling records.
+ *
+ * Indicates which GPU architecture generated the PC sampling record.
+ * This value determines which member of ::rocprofiler_pc_sampling_memory_counters_t
+ * union should be accessed:
+ * - GFX12 -> use .gfx12 member
+ * - FUTURE_GEN_1_2/FUTURE_GEN_3 -> use .future_gen_1 member
+ * - FUTURE_GEN_4 -> use .future_gen_4 member.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hardware_version_t
+{
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9,     ///< GFX9 architecture (e.g., MI200, MI300)
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12,    ///< GFX12 architecture (e.g., Navi4x) - use .gfx12
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_1,   ///< FUTURE_GEN_1
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_2,   ///< FUTURE_GEN_2
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_3,   ///< FUTURE_GEN_3
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_4,   ///< FUTURE_GEN_4
+    ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_LAST;     ///< Cannot exceed 63 (if we need to use ::rocprofiler_pc_sampling_hw_id_record_packed_t to save 8B).
+} rocprofiler_pc_sampling_hardware_version_t;
+
+/**
+ * @brief (experimental) Memory counters for GFX12 architectures.
+ *
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_gfx12_t
+{
+    uint8_t load_cnt;   ///< Number of VMEM load instructions issued but not yet completed
+    uint8_t store_cnt;  ///< Number of VMEM store instructions issued but not yet completed
+    uint8_t ds_cnt;     ///< Number of LDS instructions issued but not yet completed
+    uint8_t km_cnt;     ///< Number of scalar memory reads/instructions issued but not yet completed
+    uint8_t bvh_cnt;    ///< Number of VMEM BVH instructions issued but not yet completed
+    uint8_t sample_cnt; ///< Number of VMEM sample instructions issued but not yet completed
+} rocprofiler_pc_sampling_memory_counters_gfx12_t;
+
+/**
+ * @brief (experimental) Memory counters for future architectures.
+ *
+ * Total size must not exceed 16 bytes.
+ * 
+ * Used when the pcs_hw_version is one of the:
+ * 1. ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_1
+ * 2. ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_2
+ * 3. ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_3
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_future_gen_1_compatible_t
+{
+    uint8_t load_cnt;       ///< Number of VMEM load instructions issued but not yet completed
+    uint8_t store_cnt;      ///< Number of VMEM store instructions issued but not yet completed
+    uint8_t ds_cnt;         ///< Number of LDS instructions issued but not yet completed
+    uint8_t km_cnt;         ///< Number of scalar memory reads/instructions issued but not yet completed
+    uint8_t bvh_cnt;        ///< Number of VMEM BVH instructions issued but not yet completed
+    uint8_t sample_cnt;     ///< Number of VMEM sample instructions issued but not yet completed
+    // For descriptive purpose only. Mimics counters that will be introduced in the future.
+    uint8_t reserved1;      ///< Reserved for future use
+    uint8_t reserved2;      ///< Reserved for future use
+    uint8_t reserved3;      ///< Reserved for future use
+    uint8_t reserved_padding[7];  ///< Reserved for the future use
+} rocprofiler_pc_sampling_memory_counters_future_gen_1_compatible_t;
+
+/**
+ * @brief (experimental) Memory counters for future architectures.
+ *
+ * Total size must not exceed 16 bytes.
+ * 
+ * Used when the pcs_hw_version is one of the:
+ * 1. ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_4
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_future_gen_4_compatible_t
+{
+    uint8_t load_cnt;       ///< Number of VMEM load instructions issued but not yet completed
+    uint8_t store_cnt;      ///< Number of VMEM store instructions issued but not yet completed
+    uint8_t ds_cnt;         ///< Number of LDS instructions issued but not yet completed
+    uint8_t km_cnt;         ///< Number of scalar memory reads/instructions issued but not yet completed
+    uint8_t sample_cnt;     ///< Number of VMEM sample instructions issued but not yet completed
+    // For descriptive purpose only. Mimics counters that will be introduced in the future.
+    uint8_t reserved1;      ///< 
+    uint8_t reserved2;      ///<
+    uint8_t reserved3;
+    uint8_t reserved4;
+    uint8_t reserved5; 
+    uint8_t reserved_padding[6];  ///< Reserved for the future use
+} rocprofiler_pc_sampling_memory_counters_future_gen_4_compatible_t;
+
+
+/**
+ * @brief (experimental) Memory counters union.
+ *
+ * Union providing access to memory counters in architecture-specific layouts.
+ * The correct union member to access depends on the pcs_hw_version field in the
+ * PC sampling record:
+ * - If pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12, use .gfx12
+ * - If pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_1_2/FUTURE_GEN_3 use .future_gen_1
+ * - If pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_4 use .future_gen_4
+ *
+ * Total size must not exceed 16 bytes.
+ */
+typedef union ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counterss_t
+{
+    rocprofiler_pc_sampling_memory_counters_gfx12_t gfx12;   ///< GFX12-specific counters (6 bytes)
+    rocprofiler_pc_sampling_memory_counters_future_gen_1_compatible_t future_gen_1;  ///< FUTURE_GEN_1-specific counters (FUTURE_GEN_2 and FUTURE_GEN_3 are compatible)
+    rocprofiler_pc_sampling_memory_counters_future_gen_4_compatible_t future_gen_4;  ///< FUTURE_GEN_4-specific counters
+    uint64_t raw[2];  ///< Raw access ensuring 16-byte size
+} rocprofiler_pc_sampling_memory_counterss_t; 
+
+/**
+ * @brief Information about where was running when sampled.
+ * 
+ * Unpacked version of the ::rocprofiler_pc_sampling_hw_id_record_packed_t.
+ * 
+ * If size of the records is not that important, we should use this version as it's simpler.
+ * If however we need to save some more space in PC sampling record, then we can fall back
+ * to packing this information into 64-bit and use bit-offsets.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_record_unpacked_t
+{
+    // Do we need to make this uint32_t???
+    uint8_t pcs_hw_version;     ///< PC Sampling HW version (see ::rocprofiler_pc_sampling_hardware_version_t)
+    uint8_t chiplet;            ///< chiplet index (3 bits allocated by the ROCr runtime)
+    uint8_t wave_id;            ///< wave slot index
+    uint8_t simd_id;            ///< SIMD index
+    uint8_t pipe_id;            ///< pipe index
+    uint8_t cu_or_wgp_id;     
+    uint8_t shader_array_id;     ///< Shared array index
+    uint8_t shader_engine_id;    ///< shared engine index
+    uint8_t workgroup_id;        ///< thread_group index on GFX9, and workgroup index on GFX10+
+    uint8_t vm_id;               ///< virtual memory ID
+    uint8_t queue_id;            ///< queue id
+    uint8_t microengine_id;      ///< ACE (microengine) index
+    uint8_t reserved_padding[4]; 
+
+    /// @var cu_or_wgp_id
+    /// @brief Compute unit index on GFX9 or workgroup processor index on GFX10+.
+} rocprofiler_pc_sampling_hw_id_record_unpacked_t;
+
+// /**
+//  * @brief Information about where was running when sampled.
+//  * 
+//  * We might use this version to save 8B compared to the previous version that requires 16B.
+//  */
+// typedef struct rocprofiler_pc_sampling_hw_id_record_packed_t
+// {
+//     uint64_t value; ///< Lower 6 bits tell the pcs_hw_version. The upper 58 bits are encoded as specified in
+//                     ///< rocprofiler_pc_sampling_hw_id_v*_offset_t
+//                     ///< and the rocprofiler_pc_sampling_hw_id_v*_width_t.
+// } rocprofiler_pc_sampling_hw_id_record_packed_t;
+
+/**
+ * @brief 96B in total (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
+ *
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 4B (rounded for padding, 1B is sufficient)
+    uint32_t            wave_in_group; ///< wave position in the workgroup
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+} rocprofiler_pc_sampling_record_v0_t;
+
+
+/**
+ * @brief 104B in total (experimental) PC Sampling Record tailored for stochastic sampling on MI300/MI350
+ * 
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 8B
+    rocprofiler_pc_sampling_snapshot_information_t snapshot_information;
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 4B
+    uint32_t            wave_in_group; ///< wave position in the workgroup
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+} rocprofiler_pc_sampling_record_v1_t;
+
+
+
+/**
+ * @brief 112B in total (experimental) PC sampling record tailored for future host-trap sampling
+ * on the FUTURE_GEN_1_2 architectures.
+ *
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 12B - reserved for future use (unused in current generation)
+    rocprofiler_dim3_t reserved1;
+    
+    // 6B (will probably be padded to 8B)
+    uint8_t            wave_in_group; ///< wave position in the workgroup
+    uint8_t            reserved2;
+    uint8_t            reserved3;
+    uint8_t            reserved4;
+    uint8_t            reserved5;
+    uint8_t            reserved6;
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+} rocprofiler_pc_sampling_record_v2_t;
+
+
+
+/**
+ * @brief 136B in total (experimental) PC sampling record tailored for stochastic on FUTURE_GEN_1_2 HW.
+ * 
+ * In case we think that 136B is too big, and that will take this the 3rd cache line,
+ * then we can squeeze some space by using the rocprofiler_pc_sampling_hw_id_record_unpacked_t
+ * and force our users to use bit offsets when accessing HW_ID information.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 12B
+    rocprofiler_dim3_t reserved1;
+    // 8B
+    rocprofiler_pc_sampling_snapshot_information_t snapshot_information;
+    // 16B
+    rocprofiler_pc_sampling_memory_counters_t memory_counters;
+
+    // 6B (will probably be padded to 8B)
+    uint8_t            wave_in_group; ///< wave position in the workgroup
+    uint8_t            reserved2;
+    uint8_t            reserved3;
+    uint8_t            reserved4;
+    uint8_t            reserved5;
+    uint8_t            reserved6;
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+} rocprofiler_pc_sampling_record_v3_t;
+
+
+/**
+ * @brief 112B in total (experimental) PC sampling record tailored for future host-trap sampling
+ * on the FUTURE_GEN_4 and FUTURE_GEN_3 compatible architectures.
+ *
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 12B
+    rocprofiler_dim3_t reserved1;
+    
+    // 7B (will probably be padded to 8B)
+    uint8_t            wave_in_group; ///< wave position in the workgroup
+    uint8_t            reserved2 
+    uint8_t            reserved3;
+    uint8_t            reserved4;
+    uint8_t            reserved5;
+    uint8_t            reserved6;
+    uint8_t            reserved7;
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+} rocprofiler_pc_sampling_record_v4_t;
+
+
+
+/**
+ * @brief 136B in total (experimental) PC sampling record tailored for stochastic on FUTURE_GEN_1_2 HW.
+ * 
+ * In case we think that 136B is too big, and that will take this the 3rd cache line,
+ * then we can squeeze some space by using the rocprofiler_pc_sampling_hw_id_record_unpacked_t
+ * and force our users to use bit offsets when accessing HW_ID information.
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
+{
+    // 64B
+    uint64_t                           size;         ///< Size of this struct
+    rocprofiler_pc_t                   pc;           ///< information about sampled program counter
+    uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
+    uint64_t                           timestamp;    ///< timestamp when sample is generated
+    uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
+
+    // 16B
+    rocprofiler_pc_sampling_hw_id_record_unpacked_t hw_id; ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_unpacked_t
+    // 12B
+    rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
+    // 12B
+    rocprofiler_dim3_t reserved1;
+    // 8B
+    rocprofiler_pc_sampling_snapshot_information_t snapshot_information;
+    // 16B
+    rocprofiler_pc_sampling_memory_counters_t memory_counters;
+
+    // 7B (will probably be padded to 8B)
+    uint8_t            wave_in_group; ///< wave position in the workgroup
+    uint8_t            reserved2
+    uint8_t            reserved3;
+    uint8_t            reserved4;
+    uint8_t            reserved5;
+    uint8_t            reserved6;
+    uint8_t            reserved7;
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
+    /// @var flags
+} rocprofiler_pc_sampling_record_v5_t;
+
+/**
+ * @brief Typedef for the current ::rocprofiler_agent_version_t
+ *
+ */
+typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
+
+/**
+ * @brief (experimental) IDs of arbiter_state field.
+ *
+ * TODO: Think about ordering based on commonalities among architectures.
+ */
+typedef enum {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_NONE=0,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP,   
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT,  ///< GFX12 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU,  ///< GFX9 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED1,  ///< FUTURE_GEN_1_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED2,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED3,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_LAST
+} rocprofiler_pc_sampling_arbiter_state_field_id_t;
+
+/**
+ * @brief (experimental) Architecture-agnostic enumeration for arbiter_state field offsets
+ *
+ * This enum provides sequential offsets for all arbiter_state fields across all architectures.
+ * The ordering follows ::rocprofiler_pc_sampling_arbiter_state_field_id_t.
+ * Use with ::rocprofiler_pc_sampling_arbiter_state_field_id_t to index into architecture-specific
+ * mapping tables.
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_field_offset_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VALU = 0,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_LDS = 2,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_LDS_DIRECT = 3,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_SCALAR = 4,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VMEM_TEX = 5,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_FLAT = 6,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_EXP = 7,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_BRMSG_MISC = 8,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_VALU = 9,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_MATRIX = 10,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_LDS = 11,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_LDS_DIRECT = 12,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_SCALAR = 13,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_VMEM_TEX = 14,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_FLAT = 15,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_EXP = 16,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_STALL_BRMSG_MISC = 17,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_DUAL_ISSUE_VALU = 18
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_RESERVED1 = 19,  ///< FUTURE_GEN_1_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_RESERVED2 = 20,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_RESERVED3 = 21,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+} rocprofiler_pc_sampling_arbiter_state_field_offset_t;
+
+/**
+ * @brief (experimental) Architecture-agnostic enumeration for arbiter_state field widths
+ *
+ * This enum provides widths for all arbiter_state fields across all architectures.
+ * The ordering follows ::rocprofiler_pc_sampling_arbiter_state_field_id_t.
+ * All current fields are single-bit flags (width = 1).
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_arbiter_state_field_width_t {
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_LDS_DIRECT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VMEM_TEX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_FLAT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_BRMSG_MISC = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_VALU = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_MATRIX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_LDS = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_LDS_DIRECT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_SCALAR = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_VMEM_TEX = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_FLAT = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_EXP = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_STALL_BRMSG_MISC = 1,
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_DUAL_ISSUE_VALU = 1
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_RESERVED1 = 19,  ///< FUTURE_GEN_1_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_RESERVED2 = 20,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+    ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_RESERVED3 = 21,  ///< FUTURE_GEN_2/FUTURE_GEN_4/FUTURE_GEN_3 specific
+} rocprofiler_pc_sampling_arbiter_state_field_width_t;
+
+
+/**
+ * @brief (experimental) (Optional) Return the string encoding of
+ * ::rocprofiler_pc_sampling_arbiter_state_field_id_t value
+ *
+ * @param [in] field_id Arbiter state field enum value
+ * @return Will return a nullptr if invalid/unsupported
+ * ::rocprofiler_pc_sampling_arbiter_state_field_id_t value is provided.
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+const char*
+rocprofiler_get_pc_sampling_arbiter_state_field_name(
+    rocprofiler_pc_sampling_arbiter_state_field_id_t field_id) ROCPROFILER_API;
+
+/**
+ * @brief (experimental) Check if a hardware version supports a specific arbiter state field
+ *
+ * This predicate function determines whether a given PC sampling hardware version
+ * supports a particular arbiter state field. Different GPU architectures have
+ * different sets of supported arbiter state fields:
+ * - GFX9-specific: ISSUE_MATRIX, ISSUE_FLAT, STALL_MATRIX, STALL_FLAT, DUAL_ISSUE_VALU
+ * - GFX12-specific: ISSUE_LDS_DIRECT, STALL_LDS_DIRECT
+ * - Common: All other fields are supported across all architectures
+ *
+ * @param [in] pcs_hw_version Hardware version (e.g., GFX9, GFX12, FUTURE)
+ * @param [in] field_id Arbiter state field ID to check for support
+ * @return true if the field is supported on the given hardware version, false otherwise
+ */
+static inline bool
+rocprofiler_pc_sampling_arbiter_field_is_supported(
+    rocprofiler_pc_sampling_hardware_version_t       pcs_hw_version,
+    rocprofiler_pc_sampling_arbiter_state_field_id_t field_id)
+{
+    // Handle invalid inputs
+    if(pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_NONE ||
+       pcs_hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_LAST ||
+       field_id == ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_NONE ||
+       field_id >= ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_LAST)
+    {
+        return false;
+    }
+
+    // GFX9-specific fields
+    switch(field_id)
+    {
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU:
+            return pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX9;
+
+        // GFX12/FUTURE_GEN_1_2/FUTURE_GEN_3/FUTURE_GEN_4 specific fields
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT:
+            return pcs_hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_GFX12;
+
+        // FUTURE_GEN_1_2/FUTURE_GEN_3/FUTURE_GEN_4 specific fileds
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED1:
+            return pcs_hw_version >= ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_1;
+
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED2:
+        case ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_RESERVED3:
+            return (pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_2
+                   || pcs_hw_version == ROCPROFILER_PC_SAMPLING_HARDWARE_VERSION_FUTURE_GEN_3);
+
+        // Common fields supported across all architectures
+        default:
+            return true;
+    }
+}
+
+/**
+ * @brief (experimental) Extract an arbiter state field value from PC sampling snapshot
+ *
+ * This function performs raw bit extraction from the packed arbiter_state bitfield
+ * within the snapshot information structure.
+ *
+ * IMPORTANT: This function does NOT validate whether the requested field is supported
+ * on the hardware architecture that generated the sample. Before calling this function,
+ * you MUST use ::rocprofiler_pc_sampling_arbiter_field_is_supported to verify that
+ * the field is valid for your hardware version. Extracting unsupported fields may
+ * return undefined or reserved bit values.
+ *
+ * @param [in] snapshot Pointer to snapshot information containing the arbiter state
+ * @param [in] offset Bit offset of the field (from ::rocprofiler_pc_sampling_arbiter_state_field_offset_t)
+ * @param [in] width Bit width of the field (from ::rocprofiler_pc_sampling_arbiter_state_field_width_t)
+ * @return The extracted field value
+ *
+ * Example usage:
+ * @code
+ * // Given a PC sampling record from the buffer callback
+ * const rocprofiler_pc_sampling_record_v1_t* record = ...;
+ *
+ * // Extract hardware version and snapshot information from the record
+ * rocprofiler_pc_sampling_hardware_version_t hw_version =
+ *     (rocprofiler_pc_sampling_hardware_version_t) record->hw_id.pcs_hw_version;
+ * const rocprofiler_pc_sampling_snapshot_information_t* snapshot =
+ *     &record->snapshot_information;
+ *
+ * // Check if the ISSUE_VALU field is supported on this architecture
+ * if (rocprofiler_pc_sampling_arbiter_field_is_supported(
+ *         hw_version,
+ *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU))
+ * {
+ *     // Extract the ISSUE_VALU field value
+ *     uint32_t issue_valu = rocprofiler_pc_sampling_get_arbiter_state_field(
+ *         snapshot,
+ *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_OFFSET_ISSUE_VALU,
+ *         ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_WIDTH_ISSUE_VALU
+ *     );
+ *
+ *     if (issue_valu) {
+ *         // Wave issued a VALU instruction at the moment of sampling
+ *     }
+ * }
+ * @endcode
+ */
+static inline uint32_t
+rocprofiler_pc_sampling_get_arbiter_state_field(
+    const rocprofiler_pc_sampling_snapshot_information_t* snapshot,
+    rocprofiler_pc_sampling_arbiter_state_field_offset_t  offset,
+    rocprofiler_pc_sampling_arbiter_state_field_width_t   width)
+{
+    uint32_t mask = (1u << width) - 1;
+    return (snapshot->arbiter_state >> offset) & mask;
+}
 
 /** @} */
 
