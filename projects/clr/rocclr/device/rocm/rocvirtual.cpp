@@ -753,12 +753,10 @@ void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
-bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
-                                   size_t& ldsAddress, bool cooperativeGroups,
-                                   bool& imageBufferWrtBack,
+bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, Kernel& hsaKernel,
+                                   const_address params, size_t& ldsAddress,
+                                   bool cooperativeGroups, bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
-  Kernel& hsaKernel =
-      const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
   const amd::KernelParameters& kernelParams = kernel.parameters();
 
@@ -3604,7 +3602,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   // Check memory dependency and SVM objects
   bool coopGroups = (vcmd != nullptr) ? vcmd->cooperativeGroups() : false;
-  if (!processMemObjects(kernel, parameters, ldsUsage, coopGroups, imageBufferWrtBack,
+  if (!processMemObjects(kernel, gpuKernel, parameters, ldsUsage, coopGroups, imageBufferWrtBack,
                          wrtBackImageBuffer)) {
     LogError("Wrong memory objects!");
     return false;

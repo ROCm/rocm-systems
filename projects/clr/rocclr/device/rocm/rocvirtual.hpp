@@ -413,12 +413,13 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Detects memory dependency for HSA kernels and uses appropriate AQL header
   bool processMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
+                         Kernel& hsaKernel,          //!< Device kernel (pre-fetched)
                          const_address params,       //!< Pointer to the param's store
                          size_t& ldsAddress,         //!< LDS usage
                          bool cooperativeGroups,     //!< Dispatch with cooperative groups
                          bool& imageBufferWrtBack,   //!< Image buffer write back is required
                          std::vector<device::Memory*>& wrtBackImageBuffer  //!< Images for writeback
-  );
+                         );
 
   //! Returns a managed buffer for staging copies
   ManagedBuffer& Staging() { return managed_buffer_; }

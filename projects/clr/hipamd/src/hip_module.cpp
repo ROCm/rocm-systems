@@ -273,7 +273,7 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
 
 hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
                                      void** kernelParams, void** extra, int deviceId,
-                                     uint32_t params = 0) {
+                                     const device::Kernel* devKernel, uint32_t params = 0) {
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidImage;
@@ -464,8 +464,10 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   amd::Kernel* kernel = function->kernel();
   amd::ScopedLock lock(DEBUG_HIP_KERNARG_COPY_OPT ? nullptr : &function->dflock_);
 
+  auto device = g_devices[deviceId]->devices()[0];
+  auto devKernel = kernel->getDeviceKernel(*device);
   hipError_t status =
-      ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);
+      ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, devKernel, params);
   if (status != hipSuccess) {
     return status;
   }
@@ -481,9 +483,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     launch_params.local_[2] = launch_params.global_[2];
   }
 
-  auto device = g_devices[deviceId]->devices()[0];
   // Check if it's a uniform kernel and validate dimensions
-  if (kernel->getDeviceKernel(*device)->getUniformWorkGroupSize()) {
+  if (devKernel->getUniformWorkGroupSize()) {
     if (((launch_params.global_[0] % launch_params.local_[0]) != 0) ||
         ((launch_params.global_[1] % launch_params.local_[1]) != 0) ||
         ((launch_params.global_[2] % launch_params.local_[2]) != 0)) {

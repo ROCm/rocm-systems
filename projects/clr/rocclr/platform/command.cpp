@@ -431,7 +431,6 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
       firstDevice_(firstDevice),
       parameters_(nullptr) {
   auto& device = queue.device();
-  auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
   if (cooperativeGroups()) {
     setNumWorkgroups();
   }
