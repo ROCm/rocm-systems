@@ -24,12 +24,15 @@
 ##############################################################################
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import file_io, parser, tty
+from utils import file_io, parser, schema, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
+from utils.roofline_calc import calc_ai_analyze
 
 
 class cli_analysis(OmniAnalyze_Base):
+    SUPPORTED_ROOFLINE_ARCHS = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]
+
     # -----------------------
     # Required child methods
     # -----------------------
@@ -88,6 +91,29 @@ class cli_analysis(OmniAnalyze_Base):
                 config=self._profiling_config,
             )
 
+    def _populate_roofline_metrics(
+        self, workload_path: str, workload: schema.Workload
+    ) -> None:
+        """Populate per-run roofline metrics for CLI comparisons."""
+        socs = self.get_socs()
+        if not socs or workload.roofline_peaks.empty:
+            return
+
+        gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+        if gpu_arch not in self.SUPPORTED_ROOFLINE_ARCHS:
+            return
+        if gpu_arch not in socs or gpu_arch not in self._arch_configs:
+            return
+
+        workload.path = workload_path
+        calc_ai_analyze(
+            workload=workload,
+            mspec=socs[gpu_arch]._mspec,
+            sort_type=str(getattr(self.get_args(), "sort", "kernels")),
+            config=self._profiling_config,
+            arch_config=self._arch_configs[gpu_arch],
+        )
+
     @demarcate
     def run_analysis(self) -> None:
         """Run CLI analysis."""
@@ -97,6 +123,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         workload_path = args.path[0][0]
         workload = self._runs[workload_path]
+        workload.path = workload_path
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
@@ -111,23 +138,23 @@ class cli_analysis(OmniAnalyze_Base):
             roof_plot = None
 
             # Generate roofline plot for single-path, compatible architectures
-            if (len(args.path)) == 1:
-                if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
-                    soc = self.get_socs()
-                    if soc and gpu_arch in soc:
-                        roof_obj = soc[gpu_arch].roofline_obj
+            if len(args.path) == 1 and gpu_arch in self.SUPPORTED_ROOFLINE_ARCHS:
+                soc = self.get_socs()
+                if soc and gpu_arch in soc:
+                    roof_obj = soc[gpu_arch].roofline_obj
 
-                        if roof_obj:
-                            # store path in workload for calc_ai_analyze
-                            workload.path = workload_path
-
-                            # NOTE: using default data type
-                            roof_plot = roof_obj.cli_generate_plot(
-                                dtype=roof_obj.get_dtype()[0],
-                                workload=workload,
-                                config=self._profiling_config,
-                                arch_config=arch_config,
-                            )
+                    if roof_obj:
+                        # NOTE: using default data type
+                        roof_plot = roof_obj.cli_generate_plot(
+                            dtype=roof_obj.get_dtype()[0],
+                            workload=workload,
+                            config=self._profiling_config,
+                            arch_config=arch_config,
+                        )
+            else:
+                # Multi-run comparisons skip CLI plotting but still need per-run metrics.
+                for run_path, run_workload in self._runs.items():
+                    self._populate_roofline_metrics(run_path, run_workload)
 
             tty.show_all(
                 args,
