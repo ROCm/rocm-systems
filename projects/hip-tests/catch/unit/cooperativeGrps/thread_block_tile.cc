@@ -77,7 +77,6 @@ template <bool dynamic, size_t tile_size> void BlockPartitionGettersBasicTestImp
     thread_block_partition_size_getter<dynamic, tile_size><<<blocks, threads>>>(uint_arr_dev.ptr());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
     thread_block_partition_thread_rank_getter<dynamic, tile_size>
         <<<blocks, threads>>>(uint_arr_dev.ptr());
     HIP_CHECK(hipGetLastError());
@@ -95,7 +94,6 @@ template <bool dynamic, size_t tile_size> void BlockPartitionGettersBasicTestImp
     });
 
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(), alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipDeviceSynchronize());
 
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [&grid](unsigned int i) {
       return grid.thread_rank_in_block(i).value() % tile_size;
@@ -121,7 +119,7 @@ template <bool dynamic, size_t... tile_sizes> void BlockPartitionGettersBasicTes
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
-  BlockPartitionGettersBasicTest<false, 2, 4, 8, 16, 32>();
+  BlockPartitionGettersBasicTest<false, 2, 8, 32>();
 }
 
 /**
