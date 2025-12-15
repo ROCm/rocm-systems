@@ -185,8 +185,7 @@ else()
     ExternalProject_Add(
         rocprofiler-systems-tbb-build
         PREFIX ${TBB_ROOT_DIR}
-        URL
-            https://github.com/ajanicijamd/oneTBB/archive/refs/tags/v${_tbb_ver_major}.${_tbb_ver_minor}.01.tar.gz
+        URL https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v2022.3.0.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND ""
         BUILD_COMMAND
