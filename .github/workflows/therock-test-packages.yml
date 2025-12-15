@@ -29,7 +29,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       - name: "Configuring CI options"
         env:
@@ -84,7 +84,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: d76278526218def9fb1b016bc9e421738cb4f8f6 # 2025-12-09 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
