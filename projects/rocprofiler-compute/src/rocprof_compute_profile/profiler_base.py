@@ -143,7 +143,8 @@ class RocProfCompute_Base:
                     f"Insufficient number of kernel calls for kernels: "
                     f"{', '.join(kernels_with_missing_counters)} "
                     f"to collect all counters using iteration multiplexing. "
-                    f"Please use kernel filtering or turn off iteration multiplexing."
+                    f"Please use kernel filtering and exclude the above kernels "
+                    f"or turn off iteration multiplexing."
                 ),
             )
 
