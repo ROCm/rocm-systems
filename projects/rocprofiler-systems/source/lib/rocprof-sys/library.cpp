@@ -540,11 +540,6 @@ rocprofsys_init_tooling_hidden(void)
 
     rocprofsys_init_library_hidden();
 
-    // HOT_FIX: Force early instantiation of instrumentation_bundles to ensure
-    // its grow functor is registered before any threads can be created via
-    // pthread_create gotcha.
-    (void) instrumentation_bundles::get();
-
     ROCPROFSYS_DEBUG_F("\n");
 
     auto _dtor = scope::destructor{ []() {
