@@ -34,7 +34,7 @@ class RocprofsysConfig:
 
     Contains necessary paths to configure tests for build or for install modes.
 
-        Attributes:    
+        Attributes:
         - rocprofsys_root_dir: Path to either the source or install directory
         - rocprofsys_build_dir: Path to either the build or install directory
         - rocprofsys_instrument: Path to rocprof-sys-instrument executable
@@ -113,7 +113,7 @@ class RocprofsysConfig:
             exe = self.rocprofsys_examples_dir / name
             if exe.exists() and exe.is_file():
                 return exe
-            
+
             # binary directory
             exe = self.rocprofsys_bin_dir / name
             if exe.exists() and exe.is_file():
@@ -135,11 +135,11 @@ class RocprofsysConfig:
             # Build directory mode
             exe = self.rocprofsys_examples_dir / name
             if exe.exists() and exe.is_file():
-                return exe 
+                return exe
 
-            exe = self.rocprofsys_examples_dir / "examples" / name / name           
+            exe = self.rocprofsys_examples_dir / "examples" / name / name
             if exe.exists() and exe.is_file():
-                return exe 
+                return exe
 
             # binary directory
             exe = self.rocprofsys_bin_dir / name
@@ -163,6 +163,7 @@ class RocprofsysConfig:
         """Get base environment variables for test execution."""
         return {
             "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CONFIG_FILE": "",
             "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
@@ -177,6 +178,19 @@ class RocprofsysConfig:
             "OMP_PLACES": "threads",
             "OMP_NUM_THREADS": "2",
             "LD_LIBRARY_PATH": self.get_library_path(),
+        }
+
+    def get_base_binary_environment(self) -> dict[str, str]:
+        """Get base environment variables for rocprof-sys binary test execution."""
+        return {
+            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_PROFILE": "ON",
+            "ROCPROFSYS_USE_SAMPLING": "ON",
+            "ROCPROFSYS_TIME_OUTPUT": "OFF",
+            "LD_LIBRARY_PATH": self.get_library_path(),
+            "ROCPROFSYS_CI": "ON",
+            "ROCPROFSYS_CI_TIMEOUT": "300",
+            "ROCPROFSYS_CONFIG_FILE": "",
         }
 
 def _find_rocm_path() -> Optional[Path]:
@@ -241,7 +255,7 @@ def discover_install_config(
                 Path("/usr"),
                 Path("/opt/rocprofiler-systems"), # Standard install location from README.md
             ]:
-                if (candidate 
+                if (candidate
                     and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
                     and (candidate / "share" / "rocprofiler-systems" / "examples").is_dir()):
                     install_dir = candidate
@@ -360,7 +374,7 @@ def discover_build_config(
                 Path.cwd() / "build" / "debug",
                 Path.cwd() / "build" / "release",
                 Path.cwd() / "build",
-            ]: 
+            ]:
                 if candidate.exists() and (candidate / "bin").exists():
                     build_dir = candidate
                     break
@@ -371,7 +385,7 @@ def discover_build_config(
             "  - ROCPROFSYS_BUILD_DIR: Path to build directory\n"
             "  - ROCPROFSYS_INSTALL_DIR: Path to installation prefix"
         )
-    
+
     if source_dir is None:
         env_source = os.environ.get("ROCPROFSYS_SOURCE_DIR")
         if env_source:
@@ -385,7 +399,7 @@ def discover_build_config(
                 )
                 if match:
                     source_dir = Path(match.group(1))
-        
+
             if source_dir is None:
                 # Walk up from build_dir
                 source_dir = build_dir
@@ -398,14 +412,14 @@ def discover_build_config(
                         source_dir = parent
                     else:
                         break
-            
+
             # Validate that we found a valid source directory
             if not (source_dir / "CMakeLists.txt").exists():
                 raise FileNotFoundError(
                     f"Could not find source directory. Detected '{source_dir}' but it does not "
                     f"contain CMakeLists.txt. Set ROCPROFSYS_SOURCE_DIR environment variable."
                 )
-    
+
     source_dir = source_dir.resolve()
 
     rocm_path = _find_rocm_path()

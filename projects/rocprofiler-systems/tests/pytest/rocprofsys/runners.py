@@ -585,3 +585,154 @@ class SysRunRunner(BaseRunner):
             [str(self.config.rocprofsys_run), "--", str(self.target_exe)]
             + self.run_args
         )
+
+class SysBinaryRunner(BaseRunner):
+    """Run a rocprof-sys binary
+
+    A rocprof-sys binary is one of the following:
+        - rocprof-sys-instrument
+        - rocprof-sys-sample
+        - rocprof-sys-run
+        - rocprof-sys-avail
+
+    Args:
+        config: rocprofiler-systems configuration
+        target: Name of target binary (e.g., 'rocprof-sys-instrument')
+        output_dir: Directory for output files
+        args: Arguments to pass to the target binary
+        env: Custom environment variables. If None, uses default test environment
+        timeout: Test timeout in seconds
+        pass_regex: Patterns that must be found for success
+        fail_regex: Patterns that must NOT be found. If pass_regex is set,
+                    this must contain ABORT_FAIL_REGEX_MARKER placeholder
+        command: Optional full command to run instead of target
+        **kwargs: Additional arguments passed to BaseRunner
+    """
+    # Marker for abort fail regex replacement
+    ABORT_FAIL_REGEX_MARKER = "|ROCPROFSYS_ABORT_FAIL_REGEX"
+
+    def __init__(
+        self,
+        config: RocprofsysConfig,
+        target: str,
+        output_dir: Path,
+        args: Optional[list[str]] = None,
+        env: Optional[dict[str, str]] = None,
+        timeout: int = 300,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        command: Optional[list[str]] = None,
+        working_directory: Optional[Path] = None,
+    ):
+        # Regex validation
+        if pass_regex and fail_regex:
+            fail_regex_str = "|".join(fail_regex) if isinstance(fail_regex, list) else str(fail_regex)
+            if self.ABORT_FAIL_REGEX_MARKER not in fail_regex_str:
+                raise ValueError(
+                    f"Test has set pass and fail regexes but fail regex does not include "
+                    f"'{self.ABORT_FAIL_REGEX_MARKER}'"
+                )
+
+        # Replace marker with actual regex
+        processed_fail_regex = None
+        if fail_regex:
+            processed_fail_regex = []
+            for pattern in fail_regex:
+                if self.ABORT_FAIL_REGEX_MARKER in pattern:
+                    # Replace marker with actual abort fail patterns
+                    # Split on marker, add default patterns in between
+                    parts = pattern.split(self.ABORT_FAIL_REGEX_MARKER)
+                    for i, part in enumerate(parts):
+                        if part:
+                            processed_fail_regex.append(part)
+                        if i < len(parts) - 1:
+                            processed_fail_regex.extend(DEFAULT_FAIL_REGEX)
+                else:
+                    processed_fail_regex.append(pattern)
+
+        # Handle environment variables
+        base_env = config.get_base_binary_environment()
+        if env:
+            base_env.update(env)
+
+        # Initialize base runner
+        super().__init__(
+            config=config,
+            target=target,
+            output_dir=output_dir,
+            run_args=args or [],
+            env=base_env,
+            timeout=timeout,
+            pass_regex=pass_regex,
+            fail_regex=processed_fail_regex,
+        )
+
+        self.command = command
+        # This is only here for the basename-only library test
+        self.working_directory = working_directory or config.rocprofsys_root_dir
+
+    def build_command(self) -> list[str]:
+        """Build the command to execute.
+
+        If a custom command was provided, use it with args appended.
+        Otherwise, use target binary with args.
+
+        Returns:
+            List of command components
+        """
+
+        if self.command:
+            return self.command + self.run_args
+        return [str(self.target_exe)] + self.run_args
+
+    def run(self) -> TestResult:
+        """Execute the test.
+
+        Returns:
+            TestResult with execution results
+        """
+        import time
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        command = self.build_command()
+        full_env = os.environ.copy()
+        full_env.update(self.env)
+
+        start_time = time.time()
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                env=full_env,
+                cwd=self.working_directory,
+            )
+
+            duration = time.time() - start_time
+
+            return TestResult(
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+                pass_regex=self.pass_regex,
+                fail_regex=self.fail_regex,
+            )
+
+        except subprocess.TimeoutExpired as e:
+            duration = time.time() - start_time
+            return TestResult(
+                returncode=-1,
+                stdout=e.stdout or "",
+                stderr=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+                pass_regex=self.pass_regex,
+                fail_regex=self.fail_regex,
+            )

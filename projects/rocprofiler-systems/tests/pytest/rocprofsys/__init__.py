@@ -40,6 +40,7 @@ from .runners import (
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
+    SysBinaryRunner,
 )
 from .validators import (
     ValidationResult,
@@ -63,6 +64,7 @@ __all__ = [
     "BinaryRewriteRunner",
     "RuntimeInstrumentRunner",
     "SysRunRunner",
+    "SysBinaryRunner",
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
