@@ -22,17 +22,54 @@
 
 #pragma once
 
+#include <rocstorage/enum_definitions.h>
 #include <rocstorage/reader.hpp>
 #include <rocstorage/writer.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace rocm {
 
+/// Track data (value type, internally managed by storage)
+class track_view {
+public:
+  uint32_t id() const { return id_; }
+  rocstorage::track_category category() const { return category_; }
+  std::string_view category_string() const { return category_string_; }
+  uint64_t node_id() const { return node_id_; }
+  std::string_view process_name() const { return process_name_; }
+  std::string_view subprocess_name() const { return subprocess_name_; }
+  uint64_t num_records() const { return num_records_; }
+  uint64_t min_timestamp() const { return min_timestamp_; }
+  uint64_t max_timestamp() const { return max_timestamp_; }
+
+private:
+  friend class storage;
+
+  uint32_t id_ = 0;
+  rocstorage::track_category category_ = kRocProfVisDmNotATrack;
+  std::string category_string_;
+  uint64_t node_id_ = 0;
+  std::string process_name_;
+  std::string subprocess_name_;
+  uint64_t num_records_ = 0;
+  uint64_t min_timestamp_ = 0;
+  uint64_t max_timestamp_ = 0;
+};
+
+/// Unified storage facade for reading and writing profiling data
 class storage {
 public:
+  /// Create storage for writing (existing constructor)
   explicit storage(std::string database_path, std::string uuid);
+
+  /// Open existing database for reading
+  static std::unique_ptr<storage> open(const std::string &path);
+
   virtual ~storage();
 
   storage(const storage &) = delete;
@@ -40,12 +77,42 @@ public:
   storage &operator=(const storage &) = delete;
   storage &operator=(storage &&) = delete;
 
+  // ==================== OO API ====================
+
+  /// Load metadata from database
+  bool load();
+
+  /// Check if metadata has been loaded
+  bool is_loaded() const;
+
+  /// Get trace start time (nanoseconds)
+  uint64_t start_time() const;
+
+  /// Get trace end time (nanoseconds)
+  uint64_t end_time() const;
+
+  /// Get number of tracks
+  size_t num_tracks() const;
+
+  /// Get all tracks (range-based iteration)
+  const std::vector<track_view> &tracks() const;
+
+  /// Get track by index
+  const track_view &track(size_t index) const;
+
+  /// Get database path
+  std::string_view path() const;
+
+  // ==================== Low-level Access ====================
+
   std::shared_ptr<rocstorage::writer> get_writer() const;
   std::shared_ptr<rocstorage::reader> get_reader() const;
 
 private:
-  struct impl;
-  std::unique_ptr<impl> m_impl;
+  storage();
+
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace rocm

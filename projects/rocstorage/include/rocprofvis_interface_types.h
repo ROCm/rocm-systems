@@ -3,9 +3,11 @@
 
 
 /*
-* This interface header file cannot have any pre-compiler conditions to be successfully built by CFFI   
+* This interface header file cannot have any pre-compiler conditions to be successfully built by CFFI
 * Use CInterfaceTypes.h for C/C++ code
 */
+
+#include <rocstorage/enum_definitions.h>
 
 #define INVALID_INDEX 0xFFFFFFFF
 #define TABLE_QUERY_PACK_OP_TYPE(rocprofvis_dm_event_operation_t_op_type) (rocprofvis_dm_event_operation_t_op_type << 28)
@@ -75,60 +77,6 @@ typedef enum rocprofvis_dm_result_t
     // Operation failed due to busy status of resource
     kRocProfVisDmResultDbAbort = 10,
 } rocprofvis_dm_result_t;
-
-// Track category
-typedef enum rocprofvis_dm_track_category_t {
-    // Object is not track
-    kRocProfVisDmNotATrack = 0,
-    // Object is PMC track (performance counters track)
-    kRocProfVisDmPmcTrack = 1,
-    // Object is region track (HIP calls)
-    kRocProfVisDmRegionTrack = 2,
-    // Object is kernel track (kernel execution)
-    kRocProfVisDmKernelDispatchTrack = 3,
-    // Object is SQTT track
-    kRocProfVisDmSQTTTrack = 4,
-    // Object is NIC track
-    kRocProfVisDmNICTrack = 5,
-    // Object is memory allocation track
-    kRocProfVisDmMemoryAllocationTrack = 6,
-    // Object is memory copy track
-    kRocProfVisDmMemoryCopyTrack = 7,
-    // Object is stream track
-    kRocProfVisDmStreamTrack = 8,
-    // Object is region sample track
-    kRocProfVisDmRegionMainTrack = 9,
-    // Object is region sample track
-    kRocProfVisDmRegionSampleTrack = 10,
-} rocprofvis_dm_track_category_t;
-
-//Event operation
-typedef enum rocprofvis_dm_event_operation_t {
-    // Event of unknown operation type
-    kRocProfVisDmOperationNoOp = 0,
-    // Launch event
-    kRocProfVisDmOperationLaunch = 1,
-    // Dispatch event
-    kRocProfVisDmOperationDispatch = 2,
-    // Memory allocation event
-    kRocProfVisDmOperationMemoryAllocate = 3,
-    // Memory copy event
-    kRocProfVisDmOperationMemoryCopy = 4,
-    // Memory copy event
-    kRocProfVisDmOperationLaunchSample = 5,
-    // Number of operations
-    kRocProfVisDmNumOperation = kRocProfVisDmOperationLaunchSample + 1
-} rocprofvis_dm_event_operation_t;
-
-// Database type
-typedef enum rocprofvis_db_type_t {
-    // input file auto-detection
-    kAutodetect = 0, 
-    // old schema Rocpd database
-	kRocpdSqlite = 1,
-    // new schema Rocprof database
-	kRocprofSqlite = 2
-} rocprofvis_db_type_t;
 
 // Database query status, reported by database query progress callback
 typedef enum rocprofvis_db_status_t {
@@ -336,26 +284,6 @@ typedef enum rocprofvis_dm_table_row_property_t {
     // Row cell value by specified index
     kRPVDMExtTableRowCellValueCharPtrIndexed
 } rocprofvis_dm_table_row_property_t;
-
-// Type of data can be requested per event
-typedef enum rocprofvis_dm_event_property_type_t {
-    // Flow trace
-    kRPVDMEventFlowTrace,
-    // Stack trace
-    kRPVDMEventStackTrace,
-    // Extended data
-    kRPVDMEventExtData,
-    // Number of event property types
-    kRPVDMNumEventPropertyTypes,
-} rocprofvis_dm_event_property_type_t;
-
-// Type for sort order
-typedef enum rocprofvis_dm_sort_order_t {
-    // Ascending sort order
-    kRPVDMSortOrderAsc,
-    // Descending sort order
-    kRPVDMSortOrderDesc,
-} rocprofvis_dm_sort_order_t;
 
 // Event id structure
 typedef union { 

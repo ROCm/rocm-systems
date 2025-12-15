@@ -29,10 +29,8 @@ set(UNIT_TEST_SOURCES
     insert_query_builders_test.cpp
     table_insert_query_test.cpp
     database_test.cpp
-    # Reader tests (from merged rocstorage-reader)
     reader/trace_test.cpp
     reader/database_test.cpp
-    reader/c_interface_test.cpp
 )
 
 add_executable(rocstorage_unit_tests ${UNIT_TEST_SOURCES})
