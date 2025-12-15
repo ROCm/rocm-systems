@@ -1426,11 +1426,8 @@ def merge_counters_iteration_multiplex(
             for col in non_counter_column_index:
                 if col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
-                    merged_row["Median_Time"] = median_delta_time
-                    merged_row["Mean_Time"] = delta_time.mean()
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
                 if col == "Dispatch_ID":
                     # Assign new Dispatch_ID
                     merged_row[col] = dispatch_id_counter
@@ -1441,7 +1438,8 @@ def merge_counters_iteration_multiplex(
                     if pd.api.types.is_integer_dtype(group[col]):
                         merged_row[col] = merged_row[col].astype(int)
                 else:
-                    # For other non-counter columns, take the first occurrence (0th row)
+                    # For other non-counter non-numeric columns, take the first occurrence (0th row)
+                    # Only Kernel_Name should be non-numeric here
                     merged_row[col] = group.iloc[0][col]
 
             # Process counter columns (assumed to be all columns not in
@@ -1458,8 +1456,6 @@ def merge_counters_iteration_multiplex(
                     else None
                 )
                 merged_row[counter_col] = first_valid_value
-
-            merged_row["Count"] = group["Dispatch_ID"].nunique()
 
             # Append the merged row to the result list
             result_data.append(merged_row)
@@ -1542,9 +1538,8 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
                     merged_row[col] = group["Start_Timestamp"].median()
                 elif col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
                 else:
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]
