@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <hip/hip_runtime.h>
 #include <iostream>
+#include <vector>
 
 // Helper macro for HIP error checking
 #define HIP_CHECK(call)                                                        \
@@ -98,11 +99,32 @@ __global__ void jacobi_iteration(float *__restrict__ U_new,
 
 int main(int argc, char *argv[]) {
   int iter = 1000;
+  std::vector<int> launch_order;
 
   for (int i = 0; i < argc; i++) {
     if (std::string(argv[i]) == "-i" && i + 1 < argc) {
       iter = std::atoi(argv[i + 1]);
+    } else if (std::string(argv[i]) == "-o" && i + 1 < argc) {
+      int n_order = std::atoi(argv[i + 1]);
+      if ((i + n_order + 1) >= argc) {
+        std::cerr << "Insufficient arguments for -o option" << std::endl;
+        return EXIT_FAILURE;
+      } else {
+        for (int j = 0; j < n_order; j++) {
+          int kernel_id = std::atoi(argv[i + 2 + j]);
+          if (kernel_id < 0 || kernel_id > 2) {
+            std::cerr << "Invalid kernel ID: " << kernel_id << std::endl;
+            return EXIT_FAILURE;
+          }
+          launch_order.push_back(kernel_id);
+        }
+        i += n_order;
+      }
     }
+  }
+
+  if (launch_order.empty()) {
+    launch_order = {0, 1, 2};
   }
 
   // Problem size
@@ -156,44 +178,25 @@ int main(int argc, char *argv[]) {
                       n_large * n_large * sizeof(float),
                       hipMemcpyHostToDevice));
 
-  // Skip iteration for iteration multiplexing testing
-  int n_skip_iter = 10;
-  int next_skip = 0;
-  int num_kernels = 3;
+  std::vector<dim3> grid_sizes = {gridSize_small, gridSize_mid, gridSize_large};
+  std::vector<dim3> block_sizes = {blockSize_small, blockSize_mid,
+                                   blockSize_large};
+  std::vector<float *> d_U_news = {d_U_small_new, d_U_mid_new, d_U_large_new};
+  std::vector<float *> d_U_olds = {d_U_small_old, d_U_mid_old, d_U_large_old};
+  std::vector<int> n_sizes = {n_small, n_mid, n_large};
 
   // Perform Jacobi iterations
   for (int it = 0; it < iter; ++it) {
-    bool skip_iteration = ((it + 1) % n_skip_iter == 0);
-    if (not skip_iteration || (next_skip != 0)) {
-      jacobi_iteration<<<gridSize_small, blockSize_small,
-                         (blockSize_small.x + 2) * (blockSize_small.y + 2) *
-                             sizeof(float)>>>(d_U_small_new, d_U_small_old,
-                                              n_small);
-    }
-
-    if (not skip_iteration || (next_skip != 1)) {
-      jacobi_iteration<<<gridSize_mid, blockSize_mid,
-                         (blockSize_mid.x + 2) * (blockSize_mid.y + 2) *
-                             sizeof(float)>>>(d_U_mid_new, d_U_mid_old, n_mid);
-    }
-
-    if (not skip_iteration || (next_skip != 2)) {
-      jacobi_iteration<<<gridSize_large, blockSize_large,
-                         (blockSize_large.x + 2) * (blockSize_large.y + 2) *
-                             sizeof(float)>>>(d_U_large_new, d_U_large_old,
-                                              n_large);
-    }
-
-    if (skip_iteration) {
-      next_skip = (next_skip + 1) % num_kernels;
-    }
+    int i = launch_order[it % launch_order.size()];
+    jacobi_iteration<<<grid_sizes[i], block_sizes[i],
+                       (block_sizes[i].x + 2) * (block_sizes[i].y + 2) *
+                           sizeof(float)>>>(d_U_news[i], d_U_olds[i],
+                                            n_sizes[i]);
 
     HIP_CHECK(hipDeviceSynchronize());
 
     // Swap pointers
-    std::swap(d_U_small_new, d_U_small_old);
-    std::swap(d_U_mid_new, d_U_mid_old);
-    std::swap(d_U_large_new, d_U_large_old);
+    std::swap(d_U_news[i], d_U_olds[i]);
   }
 
   // Free device memory
