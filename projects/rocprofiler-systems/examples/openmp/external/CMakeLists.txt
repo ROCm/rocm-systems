@@ -88,8 +88,7 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
                 NUM_THREADS_DEVICE=${OMPVV_NUM_THREADS_DEVICE}
                 NUM_TEAMS_DEVICE=${OMPVV_NUM_TEAMS_DEVICE}
                 "FOFFLOADING=${FOFFLOADING_FLAGS}" "FFLAGS=${CUSTOM_FFLAGS}"
-                "FLINKFLAGS=${CUSTOM_FLINKFLAGS}" "SOURCES=${TEST}" compile >
-                ${CMAKE_CURRENT_BINARY_DIR}/ompvv-compile-${TARGET_NAME}.log 2>&1
+                "FLINKFLAGS=${CUSTOM_FLINKFLAGS}" "SOURCES=${TEST}" compile
             COMMAND
                 ${CMAKE_COMMAND} -E copy_if_different
                 "${ROCPROFSYS_OMPVV_SOURCE_DIR}/bin/${TEST_NAME}.F90.o"
