@@ -347,24 +347,26 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            # eval_result can be None if expression has None explicitly specified
-            # Do not give warning for this case and simply return "N/A"
-            if eval_result is None and "None" in expr:
-                return "N/A"
-
             # Only return "N/A" for scalar NA values
             # For vectors/Series, return as-is to preserve shape for
             # downstream operations
-            # Note: pd.NA is not detected as scalar by np.isscalar()
-            is_scalar_na = eval_result is pd.NA or (
-                np.isscalar(eval_result) and pd.isna(eval_result)
-            )
-
-            if is_scalar_na:
-                console_warning(
-                    f"Could not evaluate expression '{expr}' - likely due to missing "
-                    "counter data."
-                )
+            # Note: None and pd.NA are not detected as scalar by np.isscalar()
+            if (
+                eval_result is None
+                or eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            ):
+                # Do not give warning if None is explicitly specified in expression
+                if "None" not in expr:
+                    console_warning(
+                        f"Could not evaluate expression '{expr}' - likely "
+                        "due to missing counter data."
+                    )
+                else:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - likely "
+                        "explicitly specified."
+                    )
                 return "N/A"
             else:
                 return eval_result
@@ -1677,9 +1679,7 @@ def load_pc_sampling_data(
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
     if not csv_kernel_trace_file_path.exists():
-        console_error(
-            f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False
-        )
+        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
         return pd.DataFrame()
 
     if stochastic_path.exists():
@@ -1746,7 +1746,7 @@ def load_pc_sampling_data(
 
     elif len(workload.filter_kernel_ids) == 1:
         if not json_file_path.exists():
-            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
+            console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
             # NB:
