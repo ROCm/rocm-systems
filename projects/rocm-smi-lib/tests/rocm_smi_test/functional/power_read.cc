@@ -161,8 +161,11 @@ void TestPowerRead::Run(void) {
         CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Average Power Usage: ";
+          if (err == RSMI_STATUS_SUCCESS) {
+          ASSERT_TRUE(type == RSMI_AVERAGE_POWER || type == RSMI_CURRENT_POWER|| type == RSMI_INVALID_POWER);
           std::cout << static_cast<float>(val_ui64) / 1000 << " W" << std::endl;
         }
+      }  
         // Verify api support checking functionality is working
         err = rsmi_dev_power_ave_get(i, 0, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
