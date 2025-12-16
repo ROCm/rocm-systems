@@ -108,7 +108,8 @@
 #include <sys/wait.h>
 
 #if defined(CODECOV) && CODECOV > 0
-extern "C" {
+extern "C"
+{
 extern void
 __gcov_dump(void);
 }
@@ -118,7 +119,8 @@ namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 namespace fs     = ::rocprofiler::common::filesystem;
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
@@ -1869,6 +1871,10 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // Reset static state to prevent SIGSEGV on attach-twice scenarios
+    tool::reset_uuid_guid_state();
+    common::clear_string_entries();
+
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
@@ -2841,6 +2847,10 @@ tool_detach(void* /*tool_data*/)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
     generate_output(cleanup_mode::reset);
+
+    // Reset static state after cleanup to prepare for potential re-attach
+    tool::reset_uuid_guid_state();
+    common::clear_string_entries();
 }
 
 void
@@ -2975,7 +2985,8 @@ wait_pid(pid_t _pid, int _opts = 0)
     return _status;
 }
 
-extern "C" {
+extern "C"
+{
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 

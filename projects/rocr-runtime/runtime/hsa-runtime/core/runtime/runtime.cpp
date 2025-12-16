@@ -2454,7 +2454,7 @@ void Runtime::Unload() {
     for (auto agent: nodeAgent.second)
       agent->ReleaseResources();
   }
-
+  
   asyncSignals_.reset();
   asyncExceptions_.reset();
 
@@ -2472,9 +2472,6 @@ void Runtime::Unload() {
   core::InterruptSignal::DestroyEvent(hw_exception_event_);
   hw_exception_event_ = nullptr;
 
-  SharedSignalPool.clear();
-
-  EventPool.clear();
 
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
@@ -2483,6 +2480,10 @@ void Runtime::Unload() {
 
   CloseTools();
 
+  SharedSignalPool.clear();
+
+  EventPool.clear();
+  
   AMD::Unload();
 
   DestroyDrivers();

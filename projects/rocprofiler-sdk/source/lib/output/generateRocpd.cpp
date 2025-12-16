@@ -446,6 +446,14 @@ get_track_id_impl(sqlite3*         conn,
 #define get_track_id(...) get_track_id_impl(__VA_ARGS__, __LINE__)
 }  // namespace
 
+// Reset UUID/GUID state for attach/detach cycles
+void
+reset_uuid_guid_state()
+{
+    get_guid().clear();
+    get_uuid().clear();
+}
+
 size_t
 track_data::hash() const
 {
@@ -525,7 +533,7 @@ extract_flags_field(const Tp& _data)
 
 #define GENERATE_FIELD_ACCESSOR(FUNC_NAME, FIELD_NAME, DATA_TYPE, ...)                             \
     template <typename Tp, typename Up = Tp>                                                       \
-    auto FUNC_NAME(const Tp& _data, int)->decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})     \
+    auto FUNC_NAME(const Tp& _data, int) -> decltype(std::declval<Up>().FIELD_NAME, DATA_TYPE{})   \
     {                                                                                              \
         return _data.FIELD_NAME;                                                                   \
     }                                                                                              \

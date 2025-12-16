@@ -840,9 +840,6 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  lazy_ptr<AsyncEventsInfo> asyncSignals_;
-  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
-
   // System clock frequency.
   uint64_t sys_clock_freq_;
 
@@ -897,6 +894,8 @@ class Runtime {
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   KernelMutex ipc_sock_server_lock_;
 
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
  private:
   void CheckVirtualMemApiSupport();
   int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,

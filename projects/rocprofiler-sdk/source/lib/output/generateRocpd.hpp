@@ -51,6 +51,10 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen);
 
+// Reset UUID/GUID static state (for attach/detach)
+void
+reset_uuid_guid_state();
+
 // used in schema generation
 struct argument_info
 {
