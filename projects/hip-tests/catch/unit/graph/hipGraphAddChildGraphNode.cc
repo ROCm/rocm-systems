@@ -1216,12 +1216,8 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_streamCapture_graphs") {
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t mainGraph, childGraph;
   hipGraphExec_t graphExec;
-  int *A_d{nullptr};
-  int *B_d{nullptr};
-  int *C_d{nullptr};
-  int *C_h{nullptr};
-  int *A_h{nullptr};
-  int *B_h{nullptr};
+  int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
+  int *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   hipGraphNode_t childGraphNode;
@@ -1255,10 +1251,14 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_streamCapture_graphs") {
   // Verify kernals execution results
   HIP_CHECK(hipMemcpy(B_h, B_d, Nbytes, hipMemcpyDeviceToHost));
   for (size_t i = 0; i < N; i++) {
+    INFO("value mismatch at Index : "<<i);
+    INFO("Actual : " << B_h[i] << " Expected : " << A_h[i] * A_h[i]);    
     REQUIRE(B_h[i] == A_h[i] * A_h[i]);
   }
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
   for (size_t i = 0; i < N; i++) {
+    INFO("value mismatch at Index : "<<i);
+    INFO("Actual : " << C_h[i] << " Expected : " << A_h[i] * A_h[i] * A_h[i]);    
     REQUIRE(C_h[i] == A_h[i] * A_h[i] * A_h[i]);
   }
   HIP_CHECK(hipGraphExecDestroy(graphExec));
