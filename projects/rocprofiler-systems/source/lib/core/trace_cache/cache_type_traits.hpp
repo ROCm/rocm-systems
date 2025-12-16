@@ -22,7 +22,6 @@
 
 #pragma once
 #include "common/span.hpp"
-#include <array>
 #include <cstdint>
 #include <string_view>
 #include <tuple>
@@ -87,26 +86,31 @@ struct is_span : std::false_type
 {};
 
 template <typename T>
-struct is_span<common::span<T>> : std::true_type
+struct is_span<span<T>> : std::true_type
 {};
 
 template <typename T>
 inline constexpr bool is_span_v = is_span<T>::value;
 
-template <typename... Types>
-struct typelist
-{
-    template <typename T>
-    constexpr static bool is_supported =
-        is_span_v<T> || (std::is_same_v<std::decay_t<T>, Types> || ...);
-};
+template <typename T>
+struct is_vector : std::false_type
+{};
 
-using supported_types = typelist<std::string_view, uint64_t, int32_t, uint32_t,
-                                 std::vector<uint8_t>, uint8_t, int64_t, double>;
+template <typename T>
+struct is_vector<std::vector<T>> : std::true_type
+{};
+
+template <typename T>
+inline constexpr bool is_vector_v = is_vector<T>::value;
 
 template <typename T>
 static constexpr bool is_string_view_v =
     std::is_same_v<std::decay_t<T>, std::string_view>;
+
+template <typename T>
+inline constexpr bool is_supported_type_v =
+    is_span_v<T> || std::is_integral_v<T> || std::is_floating_point_v<T> ||
+    is_string_view_v<T> || is_vector_v<T>;
 
 template <typename T>
 struct is_enum_class
