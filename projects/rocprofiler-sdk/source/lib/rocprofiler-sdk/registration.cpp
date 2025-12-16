@@ -904,13 +904,13 @@ finalize()
         pc_sampling::service_fini();
 #endif
         code_object::finalize();
-        context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
         }
         if(num_clients > 0) internal_threading::finalize();
         set_fini_status(1);
+        context::correlation_id_finalize();
     });
 
 #if defined(CODECOV) && CODECOV > 0
