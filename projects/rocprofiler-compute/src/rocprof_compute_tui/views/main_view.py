@@ -28,8 +28,8 @@ Main View Module
 Contains the main view layout and organization for the application.
 """
 
-import traceback
 import threading
+import traceback
 from pathlib import Path
 from typing import Any, Optional
 
