@@ -14,9 +14,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added Node Power Management (NPM) support**.  
   - Added new Node Power Management APIs and CLI for node monitoring
-  - Added C API functions:
+  - Added C++ API functions:
     - `amdsmi_get_node_handle()`: Get handle for node devices
     - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
+  - Added C++ types to support NPM API:
+    - `amdsmi_npm_status_t`: whether NPM is enabled or disabled
+    - `amdsmi_npm_info_t`: a struct containing the status and the Node-level power limit in Watts
   - Added Python API wrappers for new node device functions
   - Added `amd-smi node` CLI command for Node Power Management operations
   - Currently supported for OAM_ID 0 only.
@@ -71,14 +74,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added support for PPT1 power limit information**.  
   - Support has been added for querying and setting the PPT (Package Power Tracking) limits
     - There are two PPT limits, PPT0 has lower limit and tracks a filtered version of the input power and PPT1 has higher limit but tracks the raw input power. This is to catch spikes in the raw data.  
-  - New API added:
+  - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
       - amdsmi_get_power_cap_info() 
       - amdsmi_set_power_cap()
+  - New C++ type added:
+    - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
 
 - **Added PTL Support to `amd-smi static` and `amd-smi set`**
+  - Performance TOPS Limiter (PTL) is a control system that, when in place, constrains the product to never deliver more than a specified TOPS / second.
+  - New C++ API added:
+    - `amdsmi_get_gpu_ptl_state()`: retrieves whether PTL (Peak Tops Limiter) is currently enabled or disabled for the specified processor
+    - `amdsmi_set_gpu_ptl_state()`: enables or disables PTL (Peak Tops Limiter) operation
+    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL formats for the specified processor
+    - `amdsmi_set_gpu_ptl_formats()`: Set PTL with specified preferred data formats
+  - New C++ type added:
+    - `amdsmi_ptl_data_format_t`: Valid PTL data formats: I8, F16, BF16, F32, F64
   - `amd-smi set` now support --ptl-status 0|1 and --ptl-format FORMAT1,FORMAT2
   - `amd-smi static -l` shows current state and format of PTL
 

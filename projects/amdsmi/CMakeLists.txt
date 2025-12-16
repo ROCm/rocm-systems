@@ -256,10 +256,10 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex                
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi 
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
 )
 

@@ -91,13 +91,13 @@ static const std::map<int, rsmi_temperature_type_t> system_temp_map = {
 static std::string createHexDump(const void* data, size_t size, const std::string& description) {
     std::ostringstream ss;
     const unsigned char* bytes = static_cast<const unsigned char*>(data);
-    
+
     ss << "=== " << description << " (size: " << size << " bytes) ===" << std::endl;
-    
+
     for (size_t i = 0; i < size; i += 16) {
         // Print offset
         ss << std::hex << std::setfill('0') << std::setw(8) << i << ": ";
-        
+
         // Print hex bytes
         for (size_t j = 0; j < 16; ++j) {
             if (i + j < size) {
@@ -106,18 +106,18 @@ static std::string createHexDump(const void* data, size_t size, const std::strin
                 ss << "   ";
             }
         }
-        
+
         ss << " | ";
-        
+
         // Print ASCII representation
         for (size_t j = 0; j < 16 && i + j < size; ++j) {
             unsigned char c = bytes[i + j];
             ss << (std::isprint(c) ? static_cast<char>(c) : '.');
         }
-        
+
         ss << std::endl;
     }
-    
+
     ss << "=== End " << description << " ===" << std::endl;
     return ss.str();
 }
@@ -154,7 +154,7 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename, amdgpu_gpuboard_t
 
     // Read the entire structure
     file.read(reinterpret_cast<char*>(&metrics), sizeof(metrics));
-    
+
     if (file.bad()) {
         std::ostringstream ess;
         ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -163,7 +163,7 @@ rsmi_status_t read_gpuboard_temp_metrics(const char* filename, amdgpu_gpuboard_t
         LOG_INFO(ess);
         return ErrnoToRsmiStatus(errno);
     }
-    
+
     // Always create hex dump for debugging, using the number of bytes actually read
     std::string hexDump = createHexDump(&metrics, file.gcount(), "GPU Board Temperature Metrics");
     LOG_DEBUG(hexDump);
@@ -223,7 +223,7 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename, amdgpu_baseboard
 
     // Read the entire structure
     file.read(reinterpret_cast<char*>(&metrics), sizeof(metrics));
-    
+
     if (file.bad()) {
         std::ostringstream ess;
         ess << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -232,7 +232,7 @@ rsmi_status_t read_baseboard_temp_metrics(const char* filename, amdgpu_baseboard
         LOG_INFO(ess);
         return ErrnoToRsmiStatus(errno);
     }
-    
+
     // Always create hex dump for debugging, using the number of bytes actually read
     std::string hexDump = createHexDump(&metrics, file.gcount(), "Baseboard Temperature Metrics");
     LOG_DEBUG(hexDump);
@@ -300,7 +300,7 @@ rsmi_status_t get_gpuboard_temp_value(const amdgpu_gpuboard_temp_metrics_v1_0& m
             auto it = vr_temp_map.find(i);
             if (it != vr_temp_map.end() && it->second == temperature_type) {
                 *value = decode_temperature_value(metrics.vr_temp[i]);
-                
+
                 std::ostringstream oss;
                 oss << __PRETTY_FUNCTION__ << " | ======= end ======= "
                     << " | Success | VR temp found at index: " << i
@@ -362,7 +362,7 @@ rsmi_status_t get_baseboard_temp_value(const amdgpu_baseboard_temp_metrics_v1_0&
             auto it = system_temp_map.find(i);
             if (it != system_temp_map.end() && it->second == temperature_type) {
                 *value = decode_temperature_value(metrics.system_temp[i]);
-                
+
                 std::ostringstream oss;
                 oss << __PRETTY_FUNCTION__ << " | ======= end ======= "
                     << " | Success | System temp found at index: " << i

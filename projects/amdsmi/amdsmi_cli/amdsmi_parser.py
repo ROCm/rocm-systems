@@ -611,7 +611,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if '%' in values:
                         try:
                             amdsmi_helpers.confirm_out_of_spec_warning()
-                            # Convert percentage to fan speed level 
+                            # Convert percentage to fan speed level
                             values = (int(values[:-1]) / 100) * 255
                             values = AMDSMIParser._custom_ceil(values) # Round up (Ceiling)
                             setattr(args, self.dest, values)
