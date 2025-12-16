@@ -35,7 +35,6 @@ install(
         ${CMAKE_CURRENT_LIST_DIR}/test_hip_stream.py
         ${CMAKE_CURRENT_LIST_DIR}/test_jpegdecode.py
         ${CMAKE_CURRENT_LIST_DIR}/test_openmp.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_openmp.py
         ${CMAKE_CURRENT_LIST_DIR}/test_roctx.py
         ${CMAKE_CURRENT_LIST_DIR}/test_time_window.py
         ${CMAKE_CURRENT_LIST_DIR}/test_transpose.py

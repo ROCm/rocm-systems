@@ -184,7 +184,7 @@ set(OMPVV_COMPILER
     CACHE FILEPATH
     "Fortran compiler used for OMPVV tests"
 )
-set(OMPVV_FC "amdflang")
+set(OMPVV_FC "${amdflang_EXECUTABLE}")
 
 execute_process(
     COMMAND ${amdflang_EXECUTABLE} --version
@@ -237,7 +237,7 @@ set(OMPVV_HOST_TESTS_TO_COMPILE
 # Set of offloading tests to be compiled (excluding reduction and simd_atomic
 # tests due to OMPVV test failure)
 set(OMPVV_OFFLOAD_TESTS_TO_COMPILE "")
-if(OMPVV_USE_OFFLOAD_TESTS)
+if(OMPVV_USE_OFFLOAD_TESTS AND AMDFLANG_VERSION_MAJOR GREATER_EQUAL 20)
     set(OMPVV_OFFLOAD_TESTS_TO_COMPILE
         "${OMPVV_TDIR}/target_simd/test_target_simd_if.F90"
         "${OMPVV_TDIR}/target_teams_distribute_parallel_for/test_target_teams_distribute_parallel_for_collapse.F90"
