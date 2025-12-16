@@ -156,7 +156,7 @@ void __hipRegisterManagedVar(
     return 0;
 #else
     char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
-    return var ? atoi(var) : 1;
+    return var ? atoi(var) : 0;
 #endif
   }()};
   hipError_t hip_error = hipSuccess;
