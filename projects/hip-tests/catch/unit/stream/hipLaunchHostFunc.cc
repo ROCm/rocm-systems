@@ -115,16 +115,13 @@ TEST_CASE("Unit_hipLaunchHostFunc_streamCapture") {
   HIP_CHECK(hipStreamCreate(&stream));
   BEGIN_CAPTURE(stream);
 
-  hipStream_t mystream;
-  HIP_CHECK(hipStreamCreate(&mystream));
   gusrptr = ptr0xff;
   gPassed = true;
-  HIP_CHECK(hipLaunchHostFunc(mystream, Fn_ChkUserdataPtr, gusrptr));
+  HIP_CHECK(hipLaunchHostFunc(stream, Fn_ChkUserdataPtr, gusrptr));
   REQUIRE(gPassed);
 
   END_CAPTURE(stream);
-  HIP_CHECK(hipStreamSynchronize(mystream));
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
