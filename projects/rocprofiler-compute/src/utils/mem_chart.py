@@ -1075,7 +1075,7 @@ class MemChart:
         wires_E_GLV.vl1_rd = metric_dict.get("VL1 Rd", "n/a")
         wires_E_GLV.vl1_wr = metric_dict.get("VL1 Wr", "n/a")
         wires_E_GLV.vl1_atomic = metric_dict.get("VL1 Atomic", "n/a")
-        wires_E_GLV.sl1_rd = metric_dict.get("VL1D Rd", "n/a")
+        wires_E_GLV.sl1_rd = metric_dict.get("sL1D Rd", "n/a")
 
         wires_E_GLV.draw(canvas)
 
@@ -1170,9 +1170,9 @@ class MemChart:
         wires_L1_L2.vl1_l2_rd = metric_dict.get("VL1_L2 Rd", "n/a")
         wires_L1_L2.vl1_l2_wr = metric_dict.get("VL1_L2 Wr", "n/a")
         wires_L1_L2.vl1_l2_atomic = metric_dict.get("VL1_L2 Atomic", "n/a")
-        wires_L1_L2.sl1_l2_rd = metric_dict.get("VL1D_L2 Rd", "n/a")
-        wires_L1_L2.sl1_l2_wr = metric_dict.get("VL1D_L2 Wr", "n/a")
-        wires_L1_L2.sl1_l2_atomic = metric_dict.get("VL1D_L2 Atomic", "n/a")
+        wires_L1_L2.sl1_l2_rd = metric_dict.get("sL1D_L2 Rd", "n/a")
+        wires_L1_L2.sl1_l2_wr = metric_dict.get("sL1D_L2 Wr", "n/a")
+        wires_L1_L2.sl1_l2_atomic = metric_dict.get("sL1D_L2 Atomic", "n/a")
         wires_L1_L2.il1_l2_req = metric_dict.get("IL1_L2 Rd", "n/a")
 
         wires_L1_L2.draw(canvas)

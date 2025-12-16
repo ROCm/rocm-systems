@@ -225,7 +225,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(
   }
 
   if (component == RDC_AMDSMI_COMPONENT) {
-    amdsmi_status_t ret;
+    amdsmi_status_t ret = AMDSMI_STATUS_UNKNOWN_ERROR;
     amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
     ret = amdsmi_get_lib_version(&ver);

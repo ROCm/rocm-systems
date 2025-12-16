@@ -58,7 +58,8 @@ bool KernelParameters::check() {
 
   for (size_t i = 0; i < signature_.numParameters(); ++i) {
     if (!test(i)) {
-      DevLogPrintfError("Kernel Parameter test failed for idx: %d \n", i);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+              "Kernel Parameter test failed for idx: %d \n", i);
       return false;
     }
   }
@@ -124,7 +125,6 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
       if (memArg != nullptr) {
         memArg->retain();
       }
-      desc.info_.rawPointer_ = true;
     } else if (desc.type_ == T_SAMPLER) {
       LogError("Cannot handle Sampler now");
       return false;
@@ -161,10 +161,7 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
         ::memcpy(param, value, desc.size_);
         break;
     }
-    desc.info_.defined_ = true;
   }
-
-  execInfoOffset_ = totalSize_;
   return true;
 }
 
@@ -308,8 +305,7 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
       }
     }
 
-    execInfoOffset_ = totalSize_;
-    address last = mem + execInfoOffset_;
+    address last = mem + totalSize_;
     if (0 != execInfoSize) {
       ::memcpy(last, &execSvmPtr_[0], execInfoSize);
     }
@@ -332,7 +328,8 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
 bool KernelParameters::boundToSvmPointer(const Device& device, const_address capturedParameter,
                                          size_t index) const {
   if (!device.info().svmCapabilities_) {
-    DevLogPrintfError("The device: 0x%x does not have SVM Capabilities \n", &device);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
+            "The device: 0x%x does not have SVM Capabilities \n", &device);
     return false;
   }
   //! Information about which arguments are SVM pointers is stored after

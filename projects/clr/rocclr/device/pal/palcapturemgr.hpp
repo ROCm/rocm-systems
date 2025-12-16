@@ -27,7 +27,7 @@ namespace amd::pal {
 
 class Device;
 class VirtualGPU;
-class HSAILKernel;
+class Kernel;
 
 // ================================================================================================
 // RgpSqttMarkerIdentifier - Identifiers for RGP SQ thread-tracing markers (Table 1)
@@ -256,7 +256,7 @@ class ICaptureMgr {
  public:
   virtual bool Update(Pal::IPlatform* platform) = 0;
 
-  virtual void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+  virtual void PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x, size_t y,
                            size_t z) = 0;
   virtual void PostDispatch(VirtualGPU* gpu) = 0;
 

@@ -1,9 +1,12 @@
 exclude: |
+  (?x)
     third_party/
+    # avoid checking build directories for any subproject
     build/
     build-.*/
     _build/
-    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile
+    # external source of truth
+    shared/amdgpu-windows-interop
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

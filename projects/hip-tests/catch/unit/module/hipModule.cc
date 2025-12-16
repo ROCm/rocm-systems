@@ -91,6 +91,7 @@ bool testCodeObjFile(const char* codeObjFile) {
   HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
                                   reinterpret_cast<void**>(&config)));
 
+  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
 
   HIP_CHECK(hipMemcpy(B, Bd, SIZE, hipMemcpyDeviceToHost));

@@ -591,7 +591,7 @@ bool PrintfDbgHSA::output(VirtualGPU& gpu, bool printfEnabled,
       return false;
     }
 
-    // Get memory pointer to the satged buffer
+    // Get memory pointer to the staged buffer
     uint32_t* dbgBufferPtr = reinterpret_cast<uint32_t*>(xferBufRead_->map(&gpu));
     if (nullptr == dbgBufferPtr) {
       return false;

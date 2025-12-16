@@ -16,5 +16,5 @@ sqlalchemy>=2.0.42
 tabulate
 textual
 textual_plotext
-textual-fspicker
+textual-fspicker>=0.4.3
 tqdm

@@ -369,36 +369,9 @@ bool Elf::setupShdr(ElfSections id, section* section, Elf64_Word shlink) const {
   return true;
 }
 
-bool Elf::getTarget(uint16_t& machine, ElfPlatform& platform) const {
-  Elf64_Half mach = _elfio.get_machine();
-  if ((mach >= CPU_FIRST) && (mach <= CPU_LAST)) {
-    platform = CPU_PLATFORM;
-    machine = mach - CPU_BASE;
-  } else if (mach == EM_386 || mach == EM_HSAIL || mach == EM_HSAIL_64 || mach == EM_AMDIL ||
-             mach == EM_AMDIL_64 || mach == EM_X86_64) {
-    platform = COMPLIB_PLATFORM;
-    machine = mach;
-  } else {
-    // Invalid machine
-    LogElfError("failed: Invalid machine=0x%04x(%d)", mach, mach);
-    return false;
-  }
-  LogElfInfo("succeeded: machine=0x%04x, platform=%d", machine, platform);
-  return true;
-}
-
-bool Elf::setTarget(uint16_t machine, ElfPlatform platform) {
-  Elf64_Half mach;
-  if (platform == CPU_PLATFORM)
-    mach = machine + CPU_BASE;
-  else if (platform == CAL_PLATFORM)
-    mach = machine + CAL_BASE;
-  else
-    mach = machine;
-
+bool Elf::setTarget(uint16_t machine) {
+  Elf64_Half mach = machine + CAL_BASE;
   _elfio.set_machine(mach);
-  LogElfInfo("succeeded: machine=0x%04x(%d), platform=%d", machine, machine, platform);
-
   return true;
 }
 

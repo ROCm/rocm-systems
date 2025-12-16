@@ -24,11 +24,12 @@ jobs:
       components: ${{ steps.configure.outputs.components }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
+          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -38,9 +39,10 @@ jobs:
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
       - name: "Checking out repository"
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
+          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
 
       - name: "Configuring CI options"
         env:
@@ -77,11 +79,12 @@ jobs:
       THEROCK_BIN_DIR: "./build/bin"
     steps:
       - name: "Fetch 'build_tools' from repository"
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
+          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -89,15 +92,16 @@ jobs:
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
+          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: ${{ matrix.components.fetch_artifact_args }}
@@ -113,7 +117,7 @@ jobs:
         run: |
           if [ "${{ inputs.PLATFORM }}" == "linux" ]; then source ${VENV_DIR}/bin/activate ; else . ${VENV_DIR}/Scripts/activate ; fi
           ${{ matrix.components.test_script }}
-      
+
       # GitHub's 'Complete job' step is unaware of launched executables
       # and will fail to clean up orphan processes.
       - name: Post-job cleanup processes on Windows

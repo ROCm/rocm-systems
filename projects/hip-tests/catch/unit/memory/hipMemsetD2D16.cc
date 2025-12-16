@@ -50,20 +50,20 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
   size_t width = numW * sizeof(uint16_t);
   size_t sizeElements = numW * numH;
 
-  uint16_t *A_d;
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH,
+  hipDeviceptr_t A_d;
+  HIP_CHECK(hipMemAllocPitch(&A_d, &pitch_A, width, numH,
                              2 * sizeof(uint16_t)));
   std::vector<uint16_t>A_h(sizeElements, 1);
 
   HIP_CHECK(hipMemsetD2D16(A_d, pitch_A, memsetval, width, numH));
-  HIP_CHECK(hipMemcpy2D(A_h.data(), width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(A_h.data(), width, reinterpret_cast<void *>(A_d), pitch_A, width, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < sizeElements; i++) {
     INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
                                        << " memsetval:" << memsetval);
     REQUIRE(A_h[i] == memsetval);
   }
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(reinterpret_cast<void *>(A_d)));
 }
 /**
  * Test Description
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
-  uint16_t *A_d;
+  hipDeviceptr_t A_d;
   constexpr uint16_t memsetVal = 5;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
@@ -89,11 +89,11 @@ TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
   size_t size = rows * cols;
   std::vector<uint16_t>B_h(size, 1);
 
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(uint16_t) * cols,
+  HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, sizeof(uint16_t) * cols,
                              rows, 2 * sizeof(uint16_t)));
 
   HIP_CHECK(hipMemsetD2D16(A_d, devPitch, memsetVal, sizeof(uint16_t) * cols, rows));
-  HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(uint16_t) * cols, A_d, devPitch, sizeof(uint16_t) * cols, rows,
+  HIP_CHECK(hipMemcpy2D(B_h.data(), sizeof(uint16_t) * cols, reinterpret_cast<void*>(A_d), devPitch, sizeof(uint16_t) * cols, rows,
                         hipMemcpyDeviceToHost));
 
   for (int i = 0; i < rows; i++) {
@@ -103,7 +103,7 @@ TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
       REQUIRE(B_h[i * cols + j] == memsetVal);
     }
   }
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
 }
 /**
  * Test Description
@@ -117,27 +117,27 @@ TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
  * - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemsetD2D16_NegTsts") {
-  uint16_t* A_d;
+  hipDeviceptr_t A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
   size_t width = numW * sizeof(uint16_t);
   size_t devPitch;
   constexpr uint16_t memsetval = static_cast<uint16_t>(0x26);
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, width, numH,
+  HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH,
                              2 * sizeof(uint16_t)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D16(nullptr, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D16(NULL, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
     void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1};
-    HIP_CHECK_ERROR(hipMemsetD2D16(outOfBoundsDst, devPitch, memsetval, numW, numH),
+    HIP_CHECK_ERROR(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(outOfBoundsDst), devPitch, memsetval, numW, numH),
                     hipErrorInvalidValue);
   }
   SECTION("Dst pointer points to Source Memory") {
-    uint16_t* B_d;
+    hipDeviceptr_t B_d;
     std::unique_ptr<uint16_t[]> hostPtr;
     hostPtr.reset(new uint16_t[numH * width]);
-    B_d = hostPtr.get();
+    B_d = reinterpret_cast<hipDeviceptr_t>(hostPtr.get());
     HIP_CHECK_ERROR(hipMemsetD2D16(B_d, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("Invalid Pitch") {
@@ -148,7 +148,7 @@ TEST_CASE("Unit_hipMemsetD2D16_NegTsts") {
     HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
   }
-  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
 }
 /**
  * End doxygen group MemoryTest.

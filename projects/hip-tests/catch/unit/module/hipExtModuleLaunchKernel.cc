@@ -277,7 +277,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters") {
+TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters", "[multigpu]") {
   ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
 /**

@@ -34,12 +34,44 @@ class KFDMemoryTest :  public KFDBaseComponentTest {
  public:
     KFDMemoryTest(void) {}
     ~KFDMemoryTest(void) {}
+
+    void MMapLarge(int gpuNode);
+    void MapUnmapToNodes(int gpuNode);
+    void MapMemoryToGPU(int gpuNode);
+    void MemoryAllocAll(int gpuNode);
+    void AccessPPRMem(int gpuNode);
+    void MemoryRegister(int gpuNode);
+    void MemoryRegisterSamePtr(int gpuNode);
+    void FlatScratchAccess(int gpuNode);
+    void GetTileConfigTest(int gpuNode);
+    void LargestSysBufferTest(int gpuNode);
+    void LargestVramBufferTest(int gpuNode);
+    void BigSysBufferStressTest(int gpuNode);
+    void MMBench(int gpuNode);
+    void QueryPointerInfo(int gpuNode);
+    void PtraceAccess(int gpuNode);
+    void PtraceAccessInvisibleVram(int gpuNode);
+    void SignalHandling(int gpuNode);
+    void CheckZeroInitializationSysMem(int gpuNode);
+    void MMBandWidth(int gpuNode);
+    void HostHdpFlush(int gpuNode);
+    void DeviceHdpFlush(int gpuNode);
+    void CacheInvalidateOnSdmaWrite(int gpuNode);
+    void CacheInvalidateOnCPUWrite(int gpuNode);
+    void CacheInvalidateOnRemoteWrite(int gpuNode);
+    void VramCacheCoherenceWithRemoteGPU(int gpuNode);
+    void VramCacheCoherenceWithCPU(int gpuNode);
+    void SramCacheCoherenceWithGPU(int gpuNode);
+    void ExportDMABufTest(int gpuNode);
+    void VA_VRAM_Only_AllocTest(int gpuNode);
+      
+
  protected:
     virtual void SetUp();
     virtual void TearDown();
 
  protected:
-    friend void SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
+    void SearchLargestBuffer(int allocNode, const HsaMemFlags &memFlags,
                                             HSAuint64 highMB, int nodeToMap,
                                             HSAuint64 *lastSizeMB);
     void AcquireReleaseTestRunCPU(HSAuint32 acquireNode, bool scalar);

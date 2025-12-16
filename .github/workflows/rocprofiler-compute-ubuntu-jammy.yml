@@ -7,6 +7,7 @@ on:
     branches:
       - develop
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -14,6 +15,7 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-compute-ubuntu-jammy.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/.github/**/*.md'
@@ -30,9 +32,10 @@ concurrency:
 jobs:
   build:
     # The type of runner that the job will run on
+    # https://hub.docker.com/r/rocm/dev-ubuntu-22.04/tags
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+      image: rocm/dev-ubuntu-22.04:7.1
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Install baseline OS dependencies

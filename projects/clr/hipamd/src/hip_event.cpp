@@ -297,14 +297,14 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
         e = new hip::Event(flags);
       }
     }
+    if (e == nullptr) {
+      return hipErrorOutOfMemory;
+    }
     // App might have used combination of flags i.e. hipEventInterprocess|hipEventDisableTiming
     // However based on hipEventInterprocess flag, IPCEvent creates even with
     // JUST hipEventInterprocess and hence, Actual hipEventInterprocess|hipEventDisableTiming
     // flag is getting supressed with hipEventInterprocess
     e->flags_ = flags;
-    if (e == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     *event = reinterpret_cast<hipEvent_t>(e);
     std::unique_lock lock(hip::eventSetLock);
     hip::eventSet.insert(*event);
@@ -346,7 +346,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    return hipErrorContextIsDestroyed;
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
@@ -396,6 +396,13 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, unsigned 
   hip::Event* e = reinterpret_cast<hip::Event*>(event);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hip::Stream* hip_stream = hip::getStream(stream);
+  if (hipStream_t lastCaptureStream = e->GetCaptureStream()) {
+    if (hip::isValid(lastCaptureStream)) {
+      if ((lastCaptureStream != nullptr) && (lastCaptureStream != hipStreamLegacy)) {
+        reinterpret_cast<hip::Stream*>(e->GetCaptureStream())->EraseCaptureEvent(event);
+      }
+    }
+  }
   e->SetCaptureStream(stream);
   if ((stream != nullptr && stream != hipStreamLegacy) &&
       (s->GetCaptureStatus() == hipStreamCaptureStatusActive)) {

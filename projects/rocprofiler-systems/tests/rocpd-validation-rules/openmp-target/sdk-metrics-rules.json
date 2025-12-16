@@ -1,0 +1,99 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for rocm_ompt_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_ompt_api' appears in category at least 100 times in table regions",
+                    "error_message": "'rocm_ompt_api' category entries are fewer than expected in regions",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_ompt_api",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_ompt_api' string is present in the table",
+                    "error_message": "'rocm_ompt_api' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_ompt_api%';"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for hsa_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hsa_api' appears in category at least 500 times in table regions",
+                    "error_message": "'rocm_hsa_api' category entries are fewer than expected in regions",
+                    "expected_result": 500,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hsa_api';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Ensure there are no HSA API calls that last 0 seconds",
+                    "error_message": "Found HSA API captures where duration is 0",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_hsa_api' AND duration = 0;"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for any NULL values in the 'name' column of regions",
+                    "error_message": "NULL entries found in the name column of regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name IS NULL;"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rule for hsa_api",
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify that 'rocm_hsa_api' string is present in the table",
+                    "error_message": "'rocm_hsa_api' string not found in the table rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_hsa_api%';"
+                }
+            ]
+        }
+    ]
+}

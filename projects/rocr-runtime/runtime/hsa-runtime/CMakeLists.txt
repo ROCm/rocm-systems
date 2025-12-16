@@ -60,7 +60,7 @@ set ( CORE_RUNTIME_TARGET "${CORE_RUNTIME_NAME}" )
 set ( CORE_RUNTIME_LIBRARY "lib${CORE_RUNTIME_TARGET}" )
 
 ## Set project name
-project( ${CORE_RUNTIME_TARGET} )
+project( hsa-rocr )
 
 ## Utilty functions
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
@@ -111,14 +111,14 @@ set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_
 if (UNIX)
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE "${HSA_COMMON_DEFS}" __linux__ HSA_EXPORT=1 HSA_EXPORT_FINALIZER=1 HSA_EXPORT_IMAGES=1 HSA_DEPRECATED=
   ROCR_BUILD_ID="${PACKAGE_VERSION_STRING}-${VERSION_JOB}-${VERSION_HASH}" )
-  
+
   ## Check for memfd_create syscall
   include(CheckSymbolExists)
   CHECK_SYMBOL_EXISTS ( "__NR_memfd_create" "sys/syscall.h" HAVE_MEMFD_CREATE )
   if ( HAVE_MEMFD_CREATE )
     target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
   endif()
-  
+
   ## Check for _GNU_SOURCE pthread extensions
   set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
   CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
@@ -223,19 +223,20 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
            libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp
-           libamdhsacode/amd_core_dump.cpp )
+           libamdhsacode/amd_hsa_code.cpp)
 
 if(UNIX)
-  set(SRC_OS core/util/lnx/os_linux.cpp)
+  set(SRC_OS core/util/lnx/os_linux.cpp
+	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
                core/runtime/amd_aie_aql_queue.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
-  set(SRC_OS core/util/win/os_win.cpp)
+  set(SRC_OS core/util/win/os_win.cpp
+	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
-         
+
 if ( BUILD_THUNK_VIRTIO )
   list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
   target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
@@ -261,15 +262,10 @@ if (${PC_SAMPLING_SUPPORT})
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
 endif()
 
-if (UNIX)
-  if ( NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64" )
-    set ( IMAGE_SUPPORT ON )
-  endif()
-set ( IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise)." )
-else()
-  # Force IMAGE_SUPPORT to be OFF
-  set(IMAGE_SUPPORT OFF CACHE BOOL "Build with image support (forced to OFF)" FORCE)
+if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
+  set (IMAGE_SUPPORT ON)
 endif()
+set (IMAGE_SUPPORT ${IMAGE_SUPPORT} CACHE BOOL "Build with image support (default: ON for x86, OFF elsewise).")
 
 ## Optional image module defintions.
 if(${IMAGE_SUPPORT})
@@ -416,7 +412,7 @@ install ( TARGETS ${CORE_RUNTIME_TARGET}
 
 # Install license
 if(ENABLE_ASAN_PACKAGING)
-   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
 

@@ -562,6 +562,8 @@ typedef enum hipDeviceAttribute_t {
                                             ///< hipHostRegister
   hipDeviceAttributeMemoryPoolSupportedHandleTypes,  ///< Supported handle mask for HIP Stream
                                                      ///< Ordered Memory Allocator
+  hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
+                                            ///< or -1 when NUMA isn't supported
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -606,6 +608,19 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeVendorSpecificBegin = 20000,
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
+
+// Flags that can be used with hipGetProcAddress.
+/** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
+ *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
+ * defined.*/
+#define HIP_GET_PROC_ADDRESS_DEFAULT 0x0
+
+/** Search for all symbols except the corresponding per-thread versions.*/
+#define HIP_GET_PROC_ADDRESS_LEGACY_STREAM 0x1
+
+/** Search for all symbols including the per-thread versions. If a per-thread version cannot be
+ * found, returns the legacy version.*/
+#define HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM 0x2
 
 typedef enum hipDriverProcAddressQueryResult {
   HIP_GET_PROC_ADDRESS_SUCCESS = 0,
@@ -904,7 +919,10 @@ enum hipLimit_t {
  * can be obtained with #hipHostGetDevicePointer.*/
 #define hipHostRegisterMapped 0x2
 
-/** Not supported.*/
+/** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * contiguous.
+ * */
 #define hipHostRegisterIoMemory 0x4
 
 /** This flag is ignored On AMD devices.*/
@@ -4639,6 +4657,8 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
 /**
  *  @brief Memory copy on the stream.
  *  It allows single or multiple devices to do memory copy on single or multiple streams.
+ *  The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
+ *  Since it is a sync API, it is not allowed during graph capture.
  *
  *  @param[out]  dst Data being copy to
  *  @param[in]  src Data being copy from
@@ -6425,6 +6445,18 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 
 /**
+ * @brief Retrieve kernel handles within a library
+ *
+ * @param [out] kernels Buffer for kernel handles
+ * @param [in] numKernels Maximum number of kernel handles to return to buffer
+ * @oaram [in] library Library handle to query from
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+                                      hipLibrary_t library);
+
+
+/**
  * @brief Function gets the current module load mode
  *
  * @param [out] module  mode of current module load
@@ -6432,7 +6464,38 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
  * #hipErrorNotFound,
  */
-hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);                                      
+
+/**
+ * @brief Returns a Library Handle
+ *
+ * @param [out] library Returned Library handle
+ * @param [in] kernel Kernel to retrieve library Handle
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+
+/**
+ * @brief Returns a Kernel Name
+ *
+ * @param [out] name Returned Kernel Name
+ * @param [in] kernel Kernel handle to retrieve name
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+
+/**
+ * @brief Returns the offset and size of a kernel parameter
+ *
+ * @param [in] kernel       Kernel handle to retrieve parameter info
+ * @param [in] paramIndex   Index of the parameter
+ * @param [out] paramOffset returns the offset of the parameter
+ * @param [out] paramSize   Optionally returns the size of the parameter
+ *
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+                                 size_t* paramSize);
 
 /**
  * @brief Find out attributes for a given function.
@@ -6902,6 +6965,23 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  */
 hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit);
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+                                                    int numBlocks, int blockSize);
 // doxygen end Occupancy
 /**
  * @}
@@ -9841,6 +9921,28 @@ template <typename F> inline hipError_t hipOccupancyMaxPotentialBlockSize(int* g
                                                                           uint32_t blockSizeLimit) {
   return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, (hipFunction_t)kernel,
                                            dynSharedMemPerBlk, blockSizeLimit);
+}
+
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+template <typename F>
+inline hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, F f,
+                                                           int numBlocks, int blockSize) {
+    return hipOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize, reinterpret_cast<const void*>(f),
+                                                    numBlocks, blockSize);
 }
 /**
  * @brief Launches a device function

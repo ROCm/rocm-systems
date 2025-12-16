@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool") {
+TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool", "[multigpu]") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {

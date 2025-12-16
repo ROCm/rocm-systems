@@ -339,8 +339,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ float __amd_cvt_fp8_to_float_scale(
 #else
   using namespace fcbx;
   return interpret == __AMD_OCP_E4M3
-             ? to_float<float, Encoding::E4M3, true>(static_cast<uint32_t>(val), scale)
-             : to_float<float, Encoding::E5M2, true>(static_cast<uint32_t>(val), scale);
+             ? to_float<float, Encoding::E4M3Mx, true>(static_cast<uint32_t>(val), scale)
+             : to_float<float, Encoding::E5M2Mx, true>(static_cast<uint32_t>(val), scale);
 #endif
 }
 
@@ -378,8 +378,8 @@ __amd_cvt_float_to_fp8_sr_scale(const float val, const __amd_fp8_interpretation_
   } u{0};
   using namespace fcbx;
   u.ui32t = interpret == __AMD_OCP_E4M3
-                ? from_float_sr<float, Encoding::E4M3, true>(val, seed, scale)
-                : from_float_sr<float, Encoding::E5M2, true>(val, seed, scale);
+                ? from_float_sr<float, Encoding::E4M3Mx, true>(val, seed, scale)
+                : from_float_sr<float, Encoding::E5M2Mx, true>(val, seed, scale);
   return u.fp8[0];
 #endif
 }
@@ -528,9 +528,9 @@ __amd_cvt_floatx2_to_fp4x2_scale(const __amd_floatx2_storage_t val,
   return u.fp4x2[0];
 #else
   using namespace fcbx;
-  auto l = from_float<float, Encoding::E2M1, true>(val[1], scale);
-  auto r = from_float<float, Encoding::E2M1, true>(val[0], scale);
-  __amd_fp4x2_storage_t ret(l << 4 | r);
+  auto l = from_float<float, Encoding::E2M1, true>(val[0], scale);
+  auto r = from_float<float, Encoding::E2M1, true>(val[1], scale);
+  __amd_fp4x2_storage_t ret(r << 4 | l);
   return ret;
 #endif
 }
@@ -554,11 +554,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx2_storage_t __amd_cvt_fp8x2_to_floatx2
   using namespace fcbx;
   __amd_floatx2_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<float, Encoding::E4M3, true>(val >> 8, scale);
-    ret[1] = to_float<float, Encoding::E4M3, true>((val << 8) >> 8, scale);
+    ret[0] = to_float<float, Encoding::E4M3Mx, true>(val & 0xFFu, scale);
+    ret[1] = to_float<float, Encoding::E4M3Mx, true>(val >> 8, scale);
   } else {
-    ret[0] = to_float<float, Encoding::E5M2, true>(val >> 8, scale);
-    ret[1] = to_float<float, Encoding::E5M2, true>((val << 8) >> 8, scale);
+    ret[0] = to_float<float, Encoding::E5M2Mx, true>(val & 0xFFu, scale);
+    ret[1] = to_float<float, Encoding::E5M2Mx, true>(val >> 8, scale);
   }
   return ret;
 #endif
@@ -591,13 +591,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_floatx2_to_fp8x2_s
   using namespace fcbx;
   uint8_t l, r;
   if (interpret == __AMD_OCP_E4M3) {
-    l = from_float<float, Encoding::E4M3, true>(val[0], scale);
-    r = from_float<float, Encoding::E4M3, true>(val[1], scale);
+    l = from_float<float, Encoding::E4M3Mx, true>(val[0], scale);
+    r = from_float<float, Encoding::E4M3Mx, true>(val[1], scale);
   } else {
-    l = from_float<float, Encoding::E5M2, true>(val[0], scale);
-    r = from_float<float, Encoding::E5M2, true>(val[1], scale);
+    l = from_float<float, Encoding::E5M2Mx, true>(val[0], scale);
+    r = from_float<float, Encoding::E5M2Mx, true>(val[1], scale);
   }
-  __amd_fp8x2_storage_t ret(l << 8 | r);
+  __amd_fp8x2_storage_t ret(r << 8 | l);
   return ret;
 #endif
 }
@@ -685,11 +685,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t __amd_cvt_fp8x2_to_fp16x2_s
   using namespace fcbx;
   __amd_fp16x2_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val & 0xFF, scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val >> 8, scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val & 0xFF, scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val >> 8, scale);
   } else {
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val & 0xFF, scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val >> 8, scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val & 0xFF, scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val >> 8, scale);
   }
   return ret;
 #endif
@@ -746,23 +746,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x8_storage_t __amd_cvt_fp8x8_to_fp16x8_s
   using namespace fcbx;
   __amd_fp16x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif
@@ -794,11 +794,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t __amd_cvt_fp8x2_to_bf16x2_s
   using namespace fcbx;
   __amd_bf16x2_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in & 0xFF, scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in >> 8, scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in & 0xFF, scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in >> 8, scale);
   } else {
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in & 0xFF, scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in >> 8, scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in & 0xFF, scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in >> 8, scale);
   }
   return ret;
 #endif
@@ -856,23 +856,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x8_storage_t __amd_cvt_fp8x8_to_bf16x8_s
   using namespace fcbx;
   __amd_bf16x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif
@@ -1214,13 +1214,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_fp16x2_to_fp8x2_sc
     __amd_fp8x2_storage_t fp8x2[2];
   } u{0};
   if (interpret == __AMD_OCP_E4M3) {
-    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(in[1], scale);
+    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(in[0], scale);
   } else {
-    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(in[1], scale);
+    u.ui32 = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(in[0], scale);
   }
   return u.fp8x2[0];
 #endif
@@ -1255,13 +1255,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x2_storage_t __amd_cvt_bf16x2_to_fp8x2_sc
     __amd_fp8x2_storage_t fp8x2[2];
   } u{0};
   if (interpret == __AMD_OCP_E4M3) {
-    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in[1], scale);
+    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(in[0], scale);
   } else {
-    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in[1], scale);
+    u.ui32 = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in[1], scale);
     u.ui32 <<= 8;
-    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(in[0], scale);
+    u.ui32 |= from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(in[0], scale);
   }
   return u.fp8x2[0];
 #endif
@@ -1323,23 +1323,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_bf16x8_to_fp8x8_sc
   using namespace fcbx;
   __amd_fp8x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = from_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = from_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = from_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = from_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif
@@ -1396,23 +1396,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx8_storage_t __amd_cvt_fp8x8_to_floatx8
   using namespace fcbx;
   __amd_floatx8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = to_float<float, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = to_float<float, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = to_float<float, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = to_float<float, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = to_float<float, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = to_float<float, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = to_float<float, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = to_float<float, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = to_float<float, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = to_float<float, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = to_float<float, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = to_float<float, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = to_float<float, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = to_float<float, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = to_float<float, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = to_float<float, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = to_float<float, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = to_float<float, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = to_float<float, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = to_float<float, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = to_float<float, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = to_float<float, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = to_float<float, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = to_float<float, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = to_float<float, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = to_float<float, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = to_float<float, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = to_float<float, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = to_float<float, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = to_float<float, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = to_float<float, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = to_float<float, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif
@@ -1439,9 +1439,9 @@ __amd_cvt_fp8_to_fp16_scale(const __amd_fp8_storage_t val,
 #else
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    return to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val, scale);
+    return to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val, scale);
   } else {
-    return to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val, scale);
+    return to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val, scale);
   }
 #endif
 }
@@ -1474,9 +1474,9 @@ __amd_cvt_fp8_to_bf16_scale(const __amd_fp8_storage_t val,
 #else
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    return to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(val, scale);
+    return to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val, scale);
   } else {
-    return to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(val, scale);
+    return to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val, scale);
   }
 #endif
 }
@@ -1500,10 +1500,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx16_floatx16
 #else
   __amd_floatx32_storage_t tmp;
   for (size_t i = 0; i < 16; i++) {
-    tmp[i] = in1[i];
-  }
-  for (size_t i = 0; i < 16; i++) {
-    tmp[i + 16] = in2[i];
+    tmp[i * 2] = in1[i];
+    tmp[i * 2 + 1] = in2[i];
   }
   using namespace fcbx;
   return interpret == __AMD_OCP_E2M3
@@ -1527,11 +1525,12 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
     const __amd_floatx32_storage_t val, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_floatx16_storage_t in1{val[0],  val[1],  val[2],  val[3], val[4],  val[5],
-                               val[6],  val[7],  val[8],  val[9], val[10], val[11],
-                               val[12], val[13], val[14], val[15]},
-      in2 = {val[16], val[17], val[18], val[19], val[20], val[21], val[22], val[23],
-             val[24], val[25], val[26], val[27], val[28], val[29], val[30], val[31]};
+  // The API exepcts interleaved inputs
+  __amd_floatx16_storage_t in1{val[0],  val[2],  val[4],  val[6],  val[8],  val[10],
+                               val[12], val[14], val[16], val[18], val[20], val[22],
+                               val[24], val[26], val[28], val[30]},
+      in2 = {val[1],  val[3],  val[5],  val[7],  val[9],  val[11], val[13], val[15],
+             val[17], val[19], val[21], val[23], val[25], val[27], val[29], val[31]};
   return interpret == __AMD_OCP_E2M3
              ? __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, __amd_scale_to_float(scale))
              : __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, __amd_scale_to_float(scale));
@@ -1557,7 +1556,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x32_sr_scale(
     const __amd_floatx32_storage_t val, const __amd_fp6_interpretation_t interpret,
     const unsigned int round, const __amd_scale_t scale) {
-#if __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32) and                               \
+#if __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32) &&                                \
     __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk32_bf6_f32)
   return interpret == __AMD_OCP_E2M3 ? __builtin_amdgcn_cvt_scalef32_sr_pk32_fp6_f32(
                                            val, round, __amd_scale_to_float(scale))
@@ -2217,23 +2216,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_floatx8_to_fp8x8_s
   using namespace fcbx;
   __amd_fp8x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float_sr<float, Encoding::E4M3, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<float, Encoding::E4M3, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<float, Encoding::E4M3, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<float, Encoding::E4M3, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<float, Encoding::E4M3, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<float, Encoding::E4M3, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<float, Encoding::E4M3, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<float, Encoding::E4M3, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<float, Encoding::E4M3Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<float, Encoding::E4M3Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<float, Encoding::E4M3Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<float, Encoding::E4M3Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<float, Encoding::E4M3Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<float, Encoding::E4M3Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<float, Encoding::E4M3Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<float, Encoding::E4M3Mx, true>(val[7], seed, scale);
   } else {
-    ret[0] = from_float_sr<float, Encoding::E5M2, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<float, Encoding::E5M2, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<float, Encoding::E5M2, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<float, Encoding::E5M2, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<float, Encoding::E5M2, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<float, Encoding::E5M2, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<float, Encoding::E5M2, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<float, Encoding::E5M2, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<float, Encoding::E5M2Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<float, Encoding::E5M2Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<float, Encoding::E5M2Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<float, Encoding::E5M2Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<float, Encoding::E5M2Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<float, Encoding::E5M2Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<float, Encoding::E5M2Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<float, Encoding::E5M2Mx, true>(val[7], seed, scale);
   }
   return ret;
 #endif
@@ -2268,9 +2267,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_fp16_to_fp8_sr_scale
 #else
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    return from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val, seed, scale);
+    return from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val, seed, scale);
   } else {
-    return from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val, seed, scale);
+    return from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val, seed, scale);
   }
 #endif
 }
@@ -2350,23 +2349,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_fp16x8_to_fp8x8_sr
   using namespace fcbx;
   __amd_fp8x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[7], seed, scale);
   } else {
-    ret[0] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[7], seed, scale);
   }
   return ret;
 #endif
@@ -2401,9 +2400,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_bf16_to_fp8_sr_scale
 #else
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    return from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val, seed, scale);
+    return from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val, seed, scale);
   } else {
-    return from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val, seed, scale);
+    return from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val, seed, scale);
   }
 #endif
 }
@@ -2483,23 +2482,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_bf16x8_to_fp8x8_sr
   using namespace fcbx;
   __amd_fp8x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(val[7], seed, scale);
   } else {
-    ret[0] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[0], seed, scale);
-    ret[1] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[1], seed, scale);
-    ret[2] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[2], seed, scale);
-    ret[3] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[3], seed, scale);
-    ret[4] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[4], seed, scale);
-    ret[5] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[5], seed, scale);
-    ret[6] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[6], seed, scale);
-    ret[7] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2, true>(val[7], seed, scale);
+    ret[0] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[0], seed, scale);
+    ret[1] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[1], seed, scale);
+    ret[2] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[2], seed, scale);
+    ret[3] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[3], seed, scale);
+    ret[4] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[4], seed, scale);
+    ret[5] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[5], seed, scale);
+    ret[6] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[6], seed, scale);
+    ret[7] = from_float_sr<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(val[7], seed, scale);
   }
   return ret;
 #endif
@@ -2668,23 +2667,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_fp16x8_to_fp8x8_sc
   __amd_fp8x8_storage_t ret;
   using namespace fcbx;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = from_float<__amd_fp16_storage_t, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = from_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = from_float<__amd_fp16_storage_t, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = from_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif
@@ -2744,23 +2743,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_floatx8_to_fp8x8_s
   using namespace fcbx;
   __amd_fp8x8_storage_t ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret[0] = from_float<float, Encoding::E4M3, true>(val[0], scale);
-    ret[1] = from_float<float, Encoding::E4M3, true>(val[1], scale);
-    ret[2] = from_float<float, Encoding::E4M3, true>(val[2], scale);
-    ret[3] = from_float<float, Encoding::E4M3, true>(val[3], scale);
-    ret[4] = from_float<float, Encoding::E4M3, true>(val[4], scale);
-    ret[5] = from_float<float, Encoding::E4M3, true>(val[5], scale);
-    ret[6] = from_float<float, Encoding::E4M3, true>(val[6], scale);
-    ret[7] = from_float<float, Encoding::E4M3, true>(val[7], scale);
+    ret[0] = from_float<float, Encoding::E4M3Mx, true>(val[0], scale);
+    ret[1] = from_float<float, Encoding::E4M3Mx, true>(val[1], scale);
+    ret[2] = from_float<float, Encoding::E4M3Mx, true>(val[2], scale);
+    ret[3] = from_float<float, Encoding::E4M3Mx, true>(val[3], scale);
+    ret[4] = from_float<float, Encoding::E4M3Mx, true>(val[4], scale);
+    ret[5] = from_float<float, Encoding::E4M3Mx, true>(val[5], scale);
+    ret[6] = from_float<float, Encoding::E4M3Mx, true>(val[6], scale);
+    ret[7] = from_float<float, Encoding::E4M3Mx, true>(val[7], scale);
   } else {
-    ret[0] = from_float<float, Encoding::E5M2, true>(val[0], scale);
-    ret[1] = from_float<float, Encoding::E5M2, true>(val[1], scale);
-    ret[2] = from_float<float, Encoding::E5M2, true>(val[2], scale);
-    ret[3] = from_float<float, Encoding::E5M2, true>(val[3], scale);
-    ret[4] = from_float<float, Encoding::E5M2, true>(val[4], scale);
-    ret[5] = from_float<float, Encoding::E5M2, true>(val[5], scale);
-    ret[6] = from_float<float, Encoding::E5M2, true>(val[6], scale);
-    ret[7] = from_float<float, Encoding::E5M2, true>(val[7], scale);
+    ret[0] = from_float<float, Encoding::E5M2Mx, true>(val[0], scale);
+    ret[1] = from_float<float, Encoding::E5M2Mx, true>(val[1], scale);
+    ret[2] = from_float<float, Encoding::E5M2Mx, true>(val[2], scale);
+    ret[3] = from_float<float, Encoding::E5M2Mx, true>(val[3], scale);
+    ret[4] = from_float<float, Encoding::E5M2Mx, true>(val[4], scale);
+    ret[5] = from_float<float, Encoding::E5M2Mx, true>(val[5], scale);
+    ret[6] = from_float<float, Encoding::E5M2Mx, true>(val[6], scale);
+    ret[7] = from_float<float, Encoding::E5M2Mx, true>(val[7], scale);
   }
   return ret;
 #endif

@@ -49,7 +49,7 @@ extern void __amd_scheduler_pal(__global void*, __global void*, uint);
  * The trap handler source is copied from the above URL, with the following
  * modifications:
  *  - Add the following directive to declare the trap_entry symbol (this is
- *    later used by LightningProgram::GetTrapHandlerAddress to locate the load
+ *    later used by pal::Program::GetTrapHandlerAddress to locate the load
  *    address of the trap handler):
  *
  *     .globl      trap_entry

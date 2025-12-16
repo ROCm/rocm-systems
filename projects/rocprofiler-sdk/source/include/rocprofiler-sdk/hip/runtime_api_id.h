@@ -563,5 +563,19 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamCopyAttributes,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetLoadingMode,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryEnumerateKernels,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetLibrary,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetName,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 18
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipOccupancyAvailableDynamicSMemPerBlock,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 19
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGetProcAddress_spt,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 20
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

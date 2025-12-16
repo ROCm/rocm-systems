@@ -47,6 +47,8 @@
 #define KCYN "\x1B[36m"
 #define KWHT "\x1B[37m"
 
+template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
+
 namespace hip{
   extern std::once_flag g_ihipInitialized;
 }
@@ -256,8 +258,6 @@ const char* ihipGetErrorName(hipError_t hip_error);
              reinterpret_cast<hip::Stream*>(stream)->GetCaptureStatus() ==                         \
                  hipStreamCaptureStatusInvalidated) {                                              \
     return hipErrorStreamCaptureInvalidated;                                                       \
-  } else if (stream == nullptr || stream == hipStreamLegacy) {                                     \
-    CHECK_STREAM_CAPTURING()                                                                       \
   }
 
 #define PER_THREAD_DEFAULT_STREAM(stream)                                                         \
@@ -500,7 +500,7 @@ public:
     std::list<int> userEnabledPeers;
 
     /// True if this device is active
-    bool isActive_;
+    std::atomic<bool>  isActive_;
 
 
     MemoryPool* default_mem_pool_;  //!< Default memory pool for this device
