@@ -1806,6 +1806,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   while (!async_events_control_.exit) {
+    // Update hsa_signals pointer at start of each iteration since PushBack
+    // at the end of the previous iteration may have reallocated the vector.
+    hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+
     // Wait for a signal
     std::vector<hsa_signal_value_t> value(1);
     value[0] = 0;
@@ -1824,8 +1828,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Skip wake-up signal logic
       index = 1;
       wait_any = false;
-      // The new events can reallocate the signals, hence update the pointer
-      hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
      }
     }
 
