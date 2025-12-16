@@ -68,7 +68,7 @@ class TestJPEGDecode:
             rules_dir / "sdk-metrics-rules.json",
         ]
 
-    def test_jpeg_decode_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -124,7 +124,7 @@ class TestJPEGDecode:
             )
             assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
-    def test_jpeg_decode_sys_run(
+    def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,

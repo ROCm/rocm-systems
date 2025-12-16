@@ -38,7 +38,8 @@
 *.pyc
 
 # Python virtual environments
-/venv*
+venv/
+.venv/
 
 # Documentation artifacts
 /_build

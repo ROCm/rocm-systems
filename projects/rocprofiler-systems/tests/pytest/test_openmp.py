@@ -107,7 +107,7 @@ def openmp_target_env(ompt_env: dict[str, str]) -> dict[str, str]:
 # Test Class: OpenMP CG Tests
 # ============================================================================
 
-
+@pytest.mark.libomp
 class TestOpenMPCG:
     """Tests for OpenMP Conjugate Gradient example."""
 
@@ -178,7 +178,7 @@ class TestOpenMPCG:
 # Test Class: OpenMP LU Tests
 # ============================================================================
 
-
+@pytest.mark.libomp
 class TestOpenMPLU:
     """Tests for OpenMP LU decomposition example."""
 
@@ -227,6 +227,7 @@ class TestOpenMPLU:
 
 
 @pytest.mark.gpu
+@pytest.mark.libomp
 class TestOpenMPTarget:
     """Tests for OpenMP target offload (GPU) example."""
 
@@ -341,6 +342,7 @@ class TestOpenMPTarget:
     ],
     ids=["parallel-for-simd-atomic", "team-default-shared"],
 )
+@pytest.mark.libomp
 class TestOpenMPVVHost:
     """Tests for OpenMP VV host programs."""
 
@@ -501,6 +503,7 @@ class TestOpenMPVVHost:
     ],
     ids=["target-simd-if", "target-teams-distribute-parallel-for-collapse"],
 )
+@pytest.mark.libomp
 class TestOpenMPVVOffload:
     """Tests for OpenMP VV offload programs."""
 
@@ -620,6 +623,7 @@ class TestOpenMPVVOffload:
 # ============================================================================
 
 
+@pytest.mark.libomp
 class TestSamplingDuration:
     """Tests for sampling duration functionality."""
 

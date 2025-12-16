@@ -42,7 +42,7 @@ from rocprofsys import (
 class TestTransposeGroupByQueue:
     """Tests for transpose with group by queue"""
 
-    def test_transpose_group_by_queue_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -61,7 +61,7 @@ class TestTransposeGroupByQueue:
         result = runner.run()
         assert result.success, f"Sampling failed: {result.stderr}"
 
-    def test_transpose_group_by_queue_sys_run(
+    def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -85,7 +85,7 @@ class TestTransposeGroupByQueue:
 class TestTransposeGroupByStream:
     """Tests for transpose with group by stream"""
 
-    def test_transpose_group_by_stream_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -104,7 +104,7 @@ class TestTransposeGroupByStream:
         result = runner.run()
         assert result.success, f"Sampling failed: {result.stderr}"
 
-    def test_transpose_group_by_stream_sys_run(
+    def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,

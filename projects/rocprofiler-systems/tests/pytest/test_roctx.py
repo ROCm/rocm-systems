@@ -81,7 +81,7 @@ class TestRoctx:
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    def test_roctx_baseline(
+    def test_baseline(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -101,7 +101,7 @@ class TestRoctx:
         result = runner.run()
         assert result.success, f"rocTX baseline failed: {result.stderr}"
 
-    def test_roctx_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -142,7 +142,7 @@ class TestRoctx:
             )
             assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
-    def test_roctx_binary_rewrite(
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -163,7 +163,7 @@ class TestRoctx:
         rewrite_result = runner.rewrite()
         assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
 
-    def test_roctx_sys_run(
+    def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,

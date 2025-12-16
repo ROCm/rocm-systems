@@ -61,7 +61,7 @@ class TestInstrumentBinary:
     """Tests for rocprof-sys-instrument binary."""
     target = "rocprof-sys-instrument"
 
-    def test_instrument_help(
+    def test_help(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -92,7 +92,7 @@ class TestInstrumentBinary:
         result = runner.run()
         assert result.success, f"Instrument help failed: {result.failure_reason}"
 
-    def test_instrument_simulate_ls(
+    def test_simulate_ls(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -144,7 +144,7 @@ class TestInstrumentBinary:
         for file in expected_files:
             result.assert_file_exists(f"instrumentation/{file}")
 
-    def test_instrument_simulate_lib(
+    def test_simulate_lib(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -174,7 +174,7 @@ class TestInstrumentBinary:
         assert result.success, f"Instrument simulate lib failed: {result.failure_reason}"
 
     # TOCHECK
-    def test_instrument_simulate_lib_basename(
+    def test_simulate_lib_basename(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -208,7 +208,7 @@ class TestInstrumentBinary:
         result = runner.run()
         assert result.success, f"Instrument simulate lib basename failed: {result.failure_reason}"
 
-    def test_instrument_write_log(
+    def test_write_log(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -250,7 +250,7 @@ class TestAvailBinary:
     """Tests for rocprof-sys-avail binary."""
     target = "rocprof-sys-avail"
 
-    def test_avail_help(
+    def test_help(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -280,7 +280,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail help failed: {result.failure_reason}"
 
-    def test_avail_all(
+    def test_all(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -299,7 +299,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail all failed: {result.failure_reason}"
 
-    def test_avail_all_expand_keys(
+    def test_all_expand_keys(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -321,7 +321,7 @@ class TestAvailBinary:
         assert result.success, f"Avail all expand keys failed: {result.failure_reason}"
 
     # TOCHECK everything below this point
-    def test_avail_all_only_available_alphabetical(
+    def test_all_only_available_alphabetical(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -348,7 +348,7 @@ class TestAvailBinary:
         # Verify log file was created (ATTACHED_FILES in CMake)
         assert log_file.exists(), f"Log file not created: {log_file}"
 
-    def test_avail_all_csv(
+    def test_all_csv(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -374,7 +374,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail all csv failed: {result.failure_reason}"
 
-    def test_avail_filter_wall_clock_available(
+    def test_filter_wall_clock_available(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -398,7 +398,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail filter wall_clock available failed: {result.failure_reason}"
 
-    def test_avail_category_filter_rocprofiler_systems(
+    def test_category_filter_rocprofiler_systems(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -425,7 +425,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail category filter rocprofiler-systems failed: {result.failure_reason}"
 
-    def test_avail_category_filter_timemory(
+    def test_category_filter_timemory(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -452,7 +452,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail category filter timemory failed: {result.failure_reason}"
 
-    def test_avail_regex_negation(
+    def test_regex_negation(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -483,7 +483,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail regex negation failed: {result.failure_reason}"
 
-    def test_avail_write_config(
+    def test_write_config(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -513,7 +513,7 @@ class TestAvailBinary:
             config_file = test_output_dir / f"rocprof-sys-test.{ext}"
             assert config_file.exists(), f"Config file not created: {config_file}"
 
-    def test_avail_write_config_tweak(
+    def test_write_config_tweak(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -549,7 +549,7 @@ class TestAvailBinary:
             config_file = test_output_dir / f"rocprof-sys-tweak.{ext}"
             assert config_file.exists(), f"Config file not created: {config_file}"
 
-    def test_avail_list_keys(
+    def test_list_keys(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -571,7 +571,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail list keys failed: {result.failure_reason}"
 
-    def test_avail_list_keys_markdown(
+    def test_list_keys_markdown(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -593,7 +593,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail list keys markdown failed: {result.failure_reason}"
 
-    def test_avail_list_categories(
+    def test_list_categories(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -615,7 +615,7 @@ class TestAvailBinary:
         result = runner.run()
         assert result.success, f"Avail list categories failed: {result.failure_reason}"
 
-    def test_avail_core_categories(
+    def test_core_categories(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -649,7 +649,7 @@ class TestRunBinary:
     """Tests for rocprof-sys-run binary."""
     target = "rocprof-sys-run"
 
-    def test_run_help(
+    def test_help(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -669,7 +669,7 @@ class TestRunBinary:
         result = runner.run()
         assert result.success, f"Run help failed: {result.failure_reason}"
 
-    def test_run_args(
+    def test_args(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,

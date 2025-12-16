@@ -83,7 +83,12 @@ class TestTraceTimeWindow:
     REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    def test_binary_rewrite(self, rocprof_config: RocprofsysConfig, test_output_dir: Path, time_window_env: dict[str, str]):
+    def test_binary_rewrite(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        time_window_env: dict[str, str],
+    ):
         """Test trace time window with binary rewrite instrumentation."""
 
         env = time_window_env.copy()
@@ -137,7 +142,12 @@ class TestTraceTimeWindow:
             assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
             assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
 
-    def test_runtime_instrument(self, rocprof_config: RocprofsysConfig, test_output_dir: Path, time_window_env: dict[str, str]):
+    def test_runtime_instrument(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        time_window_env: dict[str, str],
+    ):
         """Test trace time window with runtime instrumentation."""
 
         env = time_window_env.copy()
@@ -199,7 +209,12 @@ class TestTraceTimeWindowDelay:
     REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    def test_binary_rewrite(self, rocprof_config: RocprofsysConfig, test_output_dir: Path, time_window_env: dict[str, str]):
+    def test_binary_rewrite(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        time_window_env: dict[str, str],
+    ):
         """Test trace time window delay with binary rewrite instrumentation."""
         env = time_window_env.copy()
         env.update({
@@ -253,7 +268,12 @@ class TestTraceTimeWindowDelay:
             )
             assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
 
-    def test_runtime_instrument(self, rocprof_config: RocprofsysConfig, test_output_dir: Path, time_window_env: dict[str, str]):
+    def test_runtime_instrument(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        time_window_env: dict[str, str],
+    ):
         """Test trace time window delay with runtime instrumentation."""
         env = time_window_env.copy()
         env.update({

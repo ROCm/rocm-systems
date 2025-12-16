@@ -68,15 +68,31 @@ class RocprofsysConfig:
     mpiexec: Path
     is_installed: bool = False
 
+    def get_llvm_lib_paths(self) -> list[Path]:
+        """Get list of found ROCm LLVM lib paths.
+
+        Returns:
+            List of existing LLVM lib paths found, empty list if none found.
+        """
+        found_paths = []
+        if self.rocm_path:
+            # Match discover_llvm_libdir_for_ompt() logic
+            candidates = [
+                self.rocm_path / "llvm" / "lib",
+                self.rocm_path / "lib" / "llvm" / "lib",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    found_paths.append(candidate)
+        return found_paths
+
     def get_library_path(self) -> str:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries."""
         paths = [str(self.rocprofsys_lib_dir)]
 
         # Add ROCm LLVM lib if available
-        if self.rocm_path:
-            llvm_lib = self.rocm_path / "lib" / "llvm" / "lib"
-            if llvm_lib.exists():
-                paths.append(str(llvm_lib))
+        for llvm_path in self.get_llvm_lib_paths():
+            paths.append(str(llvm_path))
 
         # Append existing LD_LIBRARY_PATH
         existing = os.environ.get("LD_LIBRARY_PATH", "")

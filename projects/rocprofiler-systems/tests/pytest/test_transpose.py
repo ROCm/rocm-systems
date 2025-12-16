@@ -240,7 +240,7 @@ class TestTransposeTwoKernels:
 
     RUN_ARGS = ["1", "2", "2"]
 
-    def test_sampling_two_kernels(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -260,7 +260,7 @@ class TestTransposeTwoKernels:
 
         assert result.success, f"Two kernels test failed: {result.stderr}"
 
-    def test_sys_run_two_kernels(
+    def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -302,7 +302,27 @@ class TestTransposeLoops:
 
     RUN_ARGS = ["2", "100", "50"]
 
-    def test_binary_rewrite_loops(
+    def test_sampling(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        transpose_env: dict[str, str],
+    ):
+        """Test transpose loops configuration with sampling."""
+        runner = SamplingRunner(
+            config=rocprof_config,
+            target="transpose",
+            output_dir=test_output_dir,
+            run_args=self.RUN_ARGS,
+            env=transpose_env,
+            timeout=120,
+        )
+
+        result = runner.run()
+
+        assert result.success, f"Sampling loops failed: {result.stderr}"
+
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -331,26 +351,6 @@ class TestTransposeLoops:
         result = runner.run()
         assert result.success, f"Run failed: {result.stderr}"
 
-    def test_sampling_loops(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        transpose_env: dict[str, str],
-    ):
-        """Test transpose loops configuration with sampling."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-
-        assert result.success, f"Sampling loops failed: {result.stderr}"
-
 
 # ============================================================================
 # Test Class: ROCProfiler Counter Collection
@@ -377,7 +377,7 @@ class TestTransposeROCProfiler:
         env["ROCPROFSYS_ROCM_EVENTS"] = gpu_info.rocm_events_for_test
         return env
 
-    def test_sampling_rocprofiler(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -401,7 +401,7 @@ class TestTransposeROCProfiler:
             file_path = result.output_dir / expected_file
             assert file_path.exists(), f"Counter file not found: {expected_file}"
 
-    def test_binary_rewrite_rocprofiler(
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,

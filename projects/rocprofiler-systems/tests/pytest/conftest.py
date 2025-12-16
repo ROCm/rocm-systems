@@ -77,6 +77,23 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')"
     )
+    config.addinivalue_line(
+        "markers", "libomp: mark test as requiring libomp.so"
+    )
+
+def _check_libomp_available() -> bool:
+    """Check if libomp.so is available in ROCm LLVM lib paths."""
+    rocm_path = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
+    if not rocm_path.exists():
+        return False
+    candidates = [
+        rocm_path / "llvm" / "lib",
+        rocm_path / "lib" / "llvm" / "lib",
+    ]
+    for candidate in candidates:
+        if (candidate / "libomp.so").exists():
+            return True
+    return False
 
 
 def pytest_collection_modifyitems(
@@ -88,9 +105,10 @@ def pytest_collection_modifyitems(
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
+    skip_libomp = pytest.mark.skip(reason="libomp.so not available")
 
     mpi_available = shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
-
+    libomp_available = _check_libomp_available()
 
     for item in items:
         if "gpu" in item.keywords and not gpu_info.available:
@@ -98,6 +116,9 @@ def pytest_collection_modifyitems(
 
         if "mpi" in item.keywords and not mpi_available:
             item.add_marker(skip_mpi)
+
+        if "libomp" in item.keywords and not libomp_available:
+            item.add_marker(skip_libomp)
 
         # Check rocm_min_version marker
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
@@ -175,38 +196,51 @@ def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to validation rules directory."""
     return rocprof_config.rocpd_validation_rules
 
-# Debug helper, use -s to see
-@pytest.fixture(scope="session", autouse=True)
-def print_test_information(rocprof_config: RocprofsysConfig) -> None:
-    """Print test information at the start of the session."""
+# Debug helper
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Add test configuration to pytest header output."""
+    try:
+        rocprof_config = discover_build_config()
+    except Exception as e:
+        return [f"rocprofiler-systems: Configuration error - {e}"]
+
     rocm_ver = _get_rocm_version()
     rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
+    llvm_lib_paths = rocprof_config.get_llvm_lib_paths()
+    llvm_lib_str = ", ".join(str(p) for p in llvm_lib_paths) if llvm_lib_paths else "Not found"
 
-    print("\n" + "=" * 70)
-    print("Test Configuration:")
-    print("=" * 70)
-    print(f"  ROCm version:   {rocm_ver_str}")
-    print(f"  ROCm path:      {rocprof_config.rocm_path}")
-    print(f"  Is installed:   {rocprof_config.is_installed}")
-    print("-" * 70)
-    print("Directories:")
-    print(f"  Root dir:       {rocprof_config.rocprofsys_root_dir}")
-    print(f"  Build dir:      {rocprof_config.rocprofsys_build_dir}")
-    print(f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}")
-    print(f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}")
-    print(f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}")
-    print(f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}")
-    print(f"  Output dir:     {rocprof_config.test_output_dir}")
-    print(f"  Validation dir: {rocprof_config.rocpd_validation_rules}")
-    print("-" * 70)
-    print("Executables:")
-    print(f"  Instrument:     {rocprof_config.rocprofsys_instrument}")
-    print(f"  Run:            {rocprof_config.rocprofsys_run}")
-    print(f"  Sample:         {rocprof_config.rocprofsys_sample}")
-    print(f"  Avail:          {rocprof_config.rocprofsys_avail}")
-    print(f"  Causal:         {rocprof_config.rocprofsys_causal}")
-    print(f"  MPI exec:       {rocprof_config.mpiexec}")
-    print("=" * 70 + "\n")
+    lines = [
+        "",
+        "=" * 70,
+        "Test Configuration:",
+        "=" * 70,
+        f"  ROCm version:   {rocm_ver_str}",
+        f"  ROCm path:      {rocprof_config.rocm_path}",
+        f"  Is installed:   {rocprof_config.is_installed}",
+        f"  LLVM lib paths: {llvm_lib_str}",
+        f"  libomp.so:      {'Found' if _check_libomp_available() else 'Not found'}",
+        "-" * 70,
+        "Directories:",
+        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
+        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
+        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
+        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
+        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
+        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
+        f"  Output dir:     {rocprof_config.test_output_dir}",
+        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
+        "-" * 70,
+        "Executables:",
+        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
+        f"  Run:            {rocprof_config.rocprofsys_run}",
+        f"  Sample:         {rocprof_config.rocprofsys_sample}",
+        f"  Avail:          {rocprof_config.rocprofsys_avail}",
+        f"  Causal:         {rocprof_config.rocprofsys_causal}",
+        f"  MPI exec:       {rocprof_config.mpiexec}",
+        "=" * 70,
+        "",
+    ]
+    return lines
 
 # ============================================================================
 # Module-scoped Fixtures
