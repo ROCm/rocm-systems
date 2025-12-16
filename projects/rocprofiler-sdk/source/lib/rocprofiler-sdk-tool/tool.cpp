@@ -108,8 +108,7 @@
 #include <sys/wait.h>
 
 #if defined(CODECOV) && CODECOV > 0
-extern "C"
-{
+extern "C" {
 extern void
 __gcov_dump(void);
 }
@@ -119,8 +118,7 @@ namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 namespace fs     = ::rocprofiler::common::filesystem;
 
-extern "C"
-{
+extern "C" {
 void
 rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 }
@@ -2985,8 +2983,7 @@ wait_pid(pid_t _pid, int _opts = 0)
     return _status;
 }
 
-extern "C"
-{
+extern "C" {
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 
