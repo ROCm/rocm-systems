@@ -130,6 +130,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
         max_msg_size = args.max_msg_size / args.num_wgs;
+        break;
       case TeamBroadcastTestType:
       case TeamReductionTestType:
       case TeamFCollectTestType:
