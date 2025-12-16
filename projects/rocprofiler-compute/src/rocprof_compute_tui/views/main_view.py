@@ -166,7 +166,6 @@ class MainView(Horizontal):
             sysinfo_path = selected / "sysinfo.csv"
             if not sysinfo_path.exists():
                 # Let the UI thread handle the error and reset state
-
                 error = FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
                 tb = traceback.format_exc()
 
@@ -213,7 +212,6 @@ class MainView(Horizontal):
             )
 
         except Exception as e:  # noqa: BLE001
-
             tb = traceback.format_exc()
             error_msg = f"Analysis failed: {str(e)}"
 
