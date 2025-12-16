@@ -40,6 +40,7 @@ THE SOFTWARE.
  * - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
+  CTX_CREATE();
   hipModule_t Module;
   SECTION("fatCubin as nullptr") {
     HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, nullptr),
@@ -51,6 +52,7 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
     REQUIRE(Module != nullptr);
     HIP_CHECK(hipModuleUnload(Module));
   }
+  CTX_DESTROY();
 }
 #if HT_AMD
 void loadKernelData(hipFunction_t kernel) {

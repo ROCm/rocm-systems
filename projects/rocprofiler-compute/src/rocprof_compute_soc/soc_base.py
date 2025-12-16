@@ -46,16 +46,14 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.roofline_calc import validate_roofline_csv
 from utils.specs import MachineSpecs
 from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
-    detect_rocprof,
     get_panel_alias,
-    get_submodules,
     is_tcc_channel_counter,
-    mibench,
     parse_sets_yaml,
 )
 
@@ -346,10 +344,6 @@ class OmniSoC_Base:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
 
-        # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
-        if self.__arch in ("gfx940", "gfx941", "gfx942"):
-            counters = counters - {"TCP_TCP_LATENCY_sum"}
-
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
 
@@ -409,55 +403,50 @@ class OmniSoC_Base:
 
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
-        rocprof_cmd = detect_rocprof(args)
-
-        if rocprof_cmd != "rocprofiler-sdk":
-            console_warning(
-                "rocprofv3 interface is deprecated and will be removed "
-                "in a future release."
-            )
-
         rocprof_counters: set[str] = set()
 
-        if not (
-            str(rocprof_cmd).endswith("rocprofv3")
-            or str(rocprof_cmd) == "rocprofiler-sdk"
-        ):
-            console_error(
-                f"Incompatible profiler: {rocprof_cmd}. "
-                "Supported profilers include: "
-                f"{get_submodules('rocprof_compute_profile')}"
-            )
+        # Point to counter definition
+        old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+        os.environ["ROCPROFILER_METRICS_PATH"] = str(
+            config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
+        )
 
-            # Point to counter definition
-            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
-            os.environ["ROCPROFILER_METRICS_PATH"] = str(
-                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
-            )
-            sys.path.append(
-                str(
-                    Path(self.get_args().rocprofiler_sdk_library_path).parent
-                    / "python3/site-packages"
-                )
-            )
+        # Backward compatibility support for sdk avail module moved from
+        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
+        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
+        new_path = str(
+            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
+        )
+        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
+        try:
+            sys.path.append(new_path)
             from rocprofv3 import avail
-
-            avail.loadLibrary.libname = str(
-                Path(args.rocprofiler_sdk_library_path).parent
-                / "rocprofiler-sdk"
-                / "librocprofv3-list-avail.so"
+        except ImportError:
+            console_debug(
+                f"Could not import rocprofiler-sdk avail module from {new_path}, "
+                f"trying {old_path}"
             )
-            counters = avail.get_counters()
-            rocprof_counters = {
-                counter.name
-                for counter in counters[list(counters.keys())[0]]
-                if hasattr(counter, "block") or hasattr(counter, "expression")
-            }
-            # Reset env. var.
-            if old_rocprofiler_metrics_path is None:
-                del os.environ["ROCPROFILER_METRICS_PATH"]
-            else:
-                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
+            try:
+                sys.path.remove(new_path)
+                sys.path.append(old_path)
+                from rocprofv3_avail_module import avail
+            except ImportError:
+                console_error("Failed to import rocprofiler-sdk avail module.")
+
+        avail.loadLibrary.libname = str(
+            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        )
+        counters = avail.get_counters()
+        rocprof_counters = {
+            counter.name
+            for counter in counters[list(counters.keys())[0]]
+            if hasattr(counter, "block") or hasattr(counter, "expression")
+        }
+        # Reset env. var.
+        if old_rocprofiler_metrics_path is None:
+            del os.environ["ROCPROFILER_METRICS_PATH"]
+        else:
+            os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         return rocprof_counters
 
@@ -662,7 +651,6 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
@@ -677,17 +665,42 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
+            # Dynamic import to isolate hip dependency during profile time only
+            from utils import benchmark
+
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
-                console_warning(
-                    "Incomplete or missing profiling data. Skipping roofline."
+                console_error(
+                    "roofline",
+                    "Incomplete or missing profiling data. Skipping roofline.",
+                    exit=False,
                 )
                 return
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                mibench(self.get_args(), self._mspec)
+                try:
+                    result = benchmark.run_on_devices([self.get_args().device])
+                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                except Exception as e:
+                    console_error(
+                        "roofline",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
+                        exit=False,
+                    )
+                    return
+
+            # Validate roofline.csv before post-processing
+            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            if not is_valid:
+                console_error(
+                    "roofline",
+                    f"Roofline post-processing skipped: {error_msg}",
+                    exit=False,
+                )
+                return
+
             self.roofline_obj.post_processing()
 
     @abstractmethod

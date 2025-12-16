@@ -24,9 +24,11 @@
 
 #include "core/config.hpp"
 #include "core/defines.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
@@ -55,9 +57,9 @@ cache_region(uint64_t thread_id, const std::string& name, uint64_t start_ts,
     constexpr const char* CALLSTACK         = "";
     constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
-        rocprofsys::trace_cache::entry_type::region, thread_id, name.c_str(),
-        NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts, end_ts, CALLSTACK, ARGUMENTS,
-        category.c_str());
+        rocprofsys::trace_cache::region_sample{
+            thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
+            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
 }
 
 struct entry_key
@@ -144,6 +146,10 @@ using tim::type_list;
 
 // these categories increment push/pop counts, which are used for sanity checks since
 // they should ALWAYS be popped if they were pushed
+// Note: There is a known imbalance in the push/pop counts for category::host when using
+//       OpenMP Tools (OMPT).
+//       In general, for known imbalances, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the
+//       ctest environment to avoid the CI_THROW check.
 using tracing_count_categories_t =
     type_list<category::host, category::mpi, category::pthread, category::rocm_hip_api,
               category::rocm_hsa_api, category::rocm_rccl>;
@@ -398,7 +404,8 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }
@@ -426,7 +433,8 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }

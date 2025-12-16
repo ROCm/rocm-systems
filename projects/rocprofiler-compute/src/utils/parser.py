@@ -166,7 +166,7 @@ def to_avg(
         else:
             return float(a)
     elif isinstance(a, str):
-        if not a:
+        if not a or a == "N/A":
             return np.nan
         return float(a)
     else:
@@ -315,33 +315,13 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        self._prepare_df_cache()
-
-    def _prepare_df_cache(self) -> None:
-        """Prepare cached dataframe access for performance."""
-        if isinstance(self.raw_pmc_df, dict):
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key]
-                for key in self.raw_pmc_df.keys()
-            }
-        elif isinstance(self.raw_pmc_df, pd.DataFrame):
-            raw_pmc_df_keys = set(self.raw_pmc_df.columns.get_level_values(0))
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
-            }
-        else:
-            raise ValueError(f'Unknown `raw_pmc_df` type: "{type(self.raw_pmc_df)}".')
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
-            # Optimize dataframe access by replacing dict notation with dir_path
-            # variable access
-            opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
-
             # Create comprehensive local context
             local_expr_context = {}
-            local_expr_context.update(self.df_cache)
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
@@ -361,31 +341,37 @@ class MetricEvaluator:
             })
 
             eval_result = eval(
-                compile(opt_expr, "<string>", "eval"),
+                compile(expr, "<string>", "eval"),
                 {},
                 local_expr_context,
             )
 
-            if np.isnan(eval_result):
-                return ""
+            if eval_result is None or np.isnan(eval_result).any():
+                return "N/A"
             else:
                 return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(
-                    f"Missing empirical peak data: {exception}. Using empty value."
-                )
-                return ""
+                console_warning(f"Missing empirical peak data: {exception}.")
+                return "N/A"
             else:
-                return ""
+                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                return "N/A"
 
         except AttributeError as attribute_error:
             if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                return ""
+                console_warning(
+                    f"Failed to evaluate expression '{expr}': {attribute_error}."
+                )
+                return "N/A"
             else:
                 console_error("analysis", str(attribute_error))
-                return ""
+                return "N/A"
+
+        except pd.errors.IntCastingNaNError as exception:
+            console_warning(f"Missing data: {exception}. Using empty value.")
+            return ""
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -477,8 +463,17 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
             equation_string,
         )
     else:
+        # Use pmc_perf.csv for all counters
         equation_string = re.sub(
-            r"raw_pmc_df", f"raw_pmc_df['{coll_level}']", equation_string
+            r"raw_pmc_df",
+            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+            equation_string,
+        )
+        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
+        equation_string = re.sub(
+            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
+            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
+            equation_string,
         )
     return equation_string
 
@@ -911,7 +906,9 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict], config: dict
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    config: dict,
+    sys_vars: dict[str, Union[int, float]],
 ) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
@@ -929,7 +926,8 @@ def calc_builtin_vars(
         )
         try:
             # Create temporary evaluator for this calculation
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+            # Pass sys_vars so that $num_xcd and other system variables are available
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -944,9 +942,9 @@ def calc_builtin_vars(
             variable_value, schema.PMC_PERF_FILE_PREFIX, config
         )
         try:
-            temporary_evaluator = MetricEvaluator(
-                raw_pmc_df, builtin_vars_collection, {}
-            )
+            # Merge sys_vars with builtin_vars_collection for second pass
+            combined_vars = {**sys_vars, **builtin_vars_collection}
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
@@ -981,7 +979,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Create metric evaluator
@@ -1015,6 +1013,93 @@ def eval_metric(
     for df_id, row_id, col, expr in exprs_to_eval:
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
+    # Check for metrics exceeding theoretical peak due to dual-issue
+    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def validate_dual_issue_metrics(
+    dfs: dict,
+    dfs_type: dict,
+    sys_info: pd.Series,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+) -> None:
+    """
+    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
+    Warns about dual-issue behavior.
+    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
+    """
+    gpu_arch = sys_info.get("gpu_arch", "")
+
+    # Metrics to check for dual-issue warnings
+    valu_utilization_metrics = ["VALU Utilization"]
+    valu_flops_metrics = ["VALU FLOPs (F64)"]
+
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+        if "Metric" not in df.columns or "Value" not in df.columns:
+            continue
+
+        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
+        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
+
+        if not has_peak_column:
+            continue
+
+        for _, row in df.iterrows():
+            metric_name = row.get("Metric", "")
+
+            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
+                continue
+
+            try:
+                value = float(row.get("Value", 0))
+                peak = float(row.get(peak_col, 0))
+
+                if peak > 0 and value > peak:
+                    (value / peak) * 100
+                    dual_issue_confirmed = False
+                    if gpu_arch == "gfx950":
+                        if isinstance(raw_pmc_df, dict) and "pmc_perf" in raw_pmc_df:
+                            pmc_df = raw_pmc_df["pmc_perf"]
+                            if "SQ_ACTIVE_INST_VALU2" in pmc_df.columns:
+                                valu2_sum = pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
+                                if valu2_sum > 0:
+                                    dual_issue_confirmed = True
+
+                    # Determine warning message based on metric type
+                    faq_url = (
+                        "https://rocm.docs.amd.com/projects/"
+                        "rocprofiler-compute/en/latest/reference/"
+                        "faq.html#why-does-valu-utilization-exceed-"
+                        "the-theoretical-peak"
+                    )
+
+                    if metric_name in valu_utilization_metrics:
+                        warning_msg = (
+                            "VALU Utilization can go up to 200% "
+                            "because CU can dual-issue instructions. "
+                            f"See {faq_url} for more information."
+                        )
+                    else:  # VALU FLOPs metrics
+                        warning_msg = (
+                            "VALU FLOPs can exceed the peak value "
+                            "because these instructions can be "
+                            "dual-issued in specific circumstances. "
+                            f"See {faq_url} for more information."
+                        )
+
+                    if gpu_arch == "gfx950" and dual_issue_confirmed:
+                        warning_msg += (
+                            " (Dual-issue activity detected "
+                            "via SQ_ACTIVE_INST_VALU2 counter)"
+                        )
+
+                    console_warning(warning_msg)
+
+            except (ValueError, TypeError):
+                # Skip if the value or peak cannot be converted to a float
+                continue
 
 
 def debug_evaluate_metrics(
@@ -1323,7 +1408,7 @@ def search_pc_sampling_record(
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
-    # Prepare sorted output list
+    # Convert to sorted list of tuples:
     sorted_counts = sorted(
         [
             (

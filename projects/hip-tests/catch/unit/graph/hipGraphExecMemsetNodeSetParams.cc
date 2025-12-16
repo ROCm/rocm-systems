@@ -129,7 +129,8 @@ TEMPLATE_TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic", "", ui
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters") {
+TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters",
+          "[multigpu]") {
   // FIXME: this test tests 1D/2D/3D stuff in one single go, need to decouple it so that it can run
   // on devices with no image support
   CHECK_IMAGE_SUPPORT

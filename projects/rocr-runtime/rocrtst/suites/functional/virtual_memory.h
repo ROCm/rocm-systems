@@ -80,6 +80,7 @@ class VirtMemoryTestBasic : public TestBase {
   void GPUAccessToCPUMemoryTest(void);
   void CPUAccessToGPUMemoryTest(void);
   void GPUAccessToGPUMemoryTest(void);
+  void MemoryAccountingTest(void);
 
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
@@ -94,6 +95,7 @@ class VirtMemoryTestBasic : public TestBase {
                                 hsa_amd_memory_pool_t pool);
   void GPUAccessToGPUMemoryTest(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                                 hsa_amd_memory_pool_t pool);
+  void MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 };
 
 struct SharedVirtMem {

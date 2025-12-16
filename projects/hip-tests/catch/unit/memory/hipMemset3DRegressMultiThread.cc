@@ -186,7 +186,7 @@ bool loopRegression(bool bAsync) {
  * Perform regression of hipMemset3D api with device memory allocated
  * on different gpus.
  */
-TEST_CASE("Unit_hipMemset3D_RegressInLoop") {
+TEST_CASE("Unit_hipMemset3D_RegressInLoop", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
@@ -199,7 +199,7 @@ TEST_CASE("Unit_hipMemset3D_RegressInLoop") {
  * Perform regression of hipMemset3DAsync api with device memory allocated
  * on different gpus.
  */
-TEST_CASE("Unit_hipMemset3DAsync_RegressInLoop") {
+TEST_CASE("Unit_hipMemset3DAsync_RegressInLoop", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;

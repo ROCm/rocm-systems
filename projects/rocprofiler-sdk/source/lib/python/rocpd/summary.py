@@ -30,7 +30,19 @@ import math
 from typing import Any, List, Tuple
 from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
-from . import output_config
+
+__all__ = [
+    "generate_all_summaries",
+    "generate_summary_query",
+    "generate_domain_query",
+    "create_domain_query",
+    "create_summary_queries",
+    "create_summary_region_queries",
+    "export_query",
+    "add_args",
+    "execute",
+    "main",
+]
 
 
 def check_function_availability(connection, function_name):
@@ -351,12 +363,32 @@ def create_summary_region_queries(
     query = "SELECT DISTINCT(category) FROM regions_and_samples"
     categories = execute_statement(connection, query).fetchall()
 
-    if region_categories is None:
+    category_prefixes = ["rocm_"]
+
+    # Convert all categories and prefixes to lowercase for correct comparison
+    categories = [(cat[0].lower(),) for cat in categories]
+    category_prefixes = [prefix.lower() for prefix in category_prefixes]
+
+    if region_categories is not None:
+        region_categories = [cat.lower() for cat in region_categories]
+    else:
         # Automatically retrieve region categories from the database
-        region_categories = set([cat[0].split("_")[0] for cat in categories])
+        region_categories = set()
+        for cat in categories:
+            category_name = cat[0]
+            matching_prefix = next(
+                (
+                    prefix
+                    for prefix in category_prefixes
+                    if category_name.startswith(prefix)
+                ),
+                "",
+            )
+            first_part = category_name[len(matching_prefix) :].split("_")[0]
+            region_categories.add(f"{matching_prefix}{first_part}")
 
     category_map = {
-        cat.lower(): [c[0] for c in categories if c[0].startswith(cat + "_")]
+        cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
         for cat in region_categories
         if "MARKER" not in cat.upper()
     }
@@ -471,12 +503,10 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 #
 # Command-line interface functions
 #
+def add_args(parser):
+    """Add arguments for summary."""
 
-
-def add_io_args(parser):
-    """Add input/output arguments for summary."""
     io_options = parser.add_argument_group("I/O options")
-
     io_options.add_argument(
         "-f",
         "--format",
@@ -486,28 +516,7 @@ def add_io_args(parser):
         type=str,
         required=False,
     )
-    io_options.add_argument(
-        "-o",
-        "--output-file",
-        help="Sets the base output file name",
-        default=os.environ.get("ROCPD_OUTPUT_NAME", ""),
-        type=str,
-        required=False,
-    )
-    io_options.add_argument(
-        "-d",
-        "--output-path",
-        help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
-        default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
-        type=str,
-        required=False,
-    )
 
-    return ["format", "output_file", "output_path"]
-
-
-def add_args(parser):
-    """Add arguments for summary."""
     summary_options = parser.add_argument_group("Summary options")
     summary_options.add_argument(
         "--domain-summary",
@@ -528,40 +537,33 @@ def add_args(parser):
         help="Specify region categories to include in the summary (example: HIP, HSA, RCCL, ROCDECODE, ROCJPEG, MARKER). If not specified, categories will be automatically retrieved from the database.",
     )
 
-    return ["domain_summary", "summary_by_rank", "region_categories"]
+    def process_args(input, args):
+        valid_args = ["format", "domain_summary", "summary_by_rank", "region_categories"]
+
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
+        return ret
+
+    return process_args
 
 
-def process_args(args, valid_args):
+def execute(input, **kwargs: Any) -> RocpdImportData:
 
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    generate_all_summaries(input, **kwargs)
 
-
-def execute(input, window_args=None, **kwargs: Any) -> RocpdImportData:
-    from .time_window import apply_time_window
-
-    importData = RocpdImportData(input)
-
-    apply_time_window(importData, **window_args)
-
-    generate_all_summaries(importData, **kwargs)
-
-    return importData
+    return input
 
 
 def main(argv=None) -> int:
     """Main entry point for command line execution."""
-    from .time_window import add_args as add_args_time_window
-    from .time_window import process_args as process_args_time_window
+    from . import time_window
+    from . import output_config
 
-    parser = argparse.ArgumentParser(
-        description="Create ROCpd database summary region views"
-    )
+    parser = argparse.ArgumentParser(description="Generate summary views from rocPD data")
     required_params = parser.add_argument_group("Required options")
 
     required_params.add_argument(
@@ -573,21 +575,24 @@ def main(argv=None) -> int:
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    valid_io_args = add_io_args(parser)
-    valid_summary_args = add_args(parser)
-    valid_time_window_args = add_args_time_window(parser)
+    process_outcfg_args = output_config.add_args(parser)
+    process_summary_args = add_args(parser)
+    process_time_window_args = time_window.add_args(parser)
 
     args = parser.parse_args(argv)
 
-    summary_args = process_args(args, valid_summary_args)
-    io_args = output_config.process_args(args, valid_io_args)
-    window_args = process_args_time_window(args, valid_time_window_args)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
+
+    summary_args = process_summary_args(input, args)
+    io_args = process_outcfg_args(input, args)
+    process_time_window_args(input, args)
 
     all_args = {**summary_args, **io_args}
 
     execute(
-        args.input,
-        window_args=window_args,
+        input,
         **all_args,
     )
 

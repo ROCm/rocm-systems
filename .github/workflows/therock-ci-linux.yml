@@ -19,7 +19,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:044b113562629f4bd2ec5d2e64b32eee11562d48fb1a75d7493daec9dd8d8292
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:583d473f263a289222c48d4b493e2956b2354a45796f09dee6f2c8ecd4504ab6
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -31,14 +31,14 @@ jobs:
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-systems"
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
       - name: Checkout TheRock repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 83b25f87ea8f163ef37295f28204a9b4ab86f168 # 2025-09-30 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       - name: Install python deps
         run: |
@@ -60,16 +60,19 @@ jobs:
       - name: Runner health status
         run: |
           ./TheRock/build_tools/health_status.py
-      
+
       - name: Fetch sources
         timeout-minutes: 30
         run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0002-Revert-hsakmt-bump-vgpr-count-for-gfx1151-1807.patch
+
 
 
       - name: Patch rocm-systems
         run: |
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0007-Rollup-of-build-changes-needed-for-compat-with-TheRo.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Configure Projects
@@ -108,14 +111,14 @@ jobs:
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
       - name: Post Build Upload
         if: always()
         run: |
           python TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
             --upload
 

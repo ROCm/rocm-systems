@@ -26,12 +26,38 @@
 #include "node_info.hpp"
 
 #include <config.hpp>
-#include <fstream>
 #include <regex>
 #include <string>
 #include <timemory/environment/types.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <unistd.h>
+
+#if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
+#    include <rocprofiler-sdk-rocpd/rocpd.h>
+#    include <rocprofiler-sdk-rocpd/types.h>
+#else
+#    include "core/rocpd/data_storage/schema/data_views.hpp"
+#    include "core/rocpd/data_storage/schema/marker_views.hpp"
+#    include "core/rocpd/data_storage/schema/rocpd_tables.hpp"
+#    include "core/rocpd/data_storage/schema/rocpd_views.hpp"
+#    include "core/rocpd/data_storage/schema/summary_views.hpp"
+
+namespace
+{
+enum rocpd_sql_schema_kind_t
+{
+    ROCPD_SQL_SCHEMA_NONE = 0,
+    ROCPD_SQL_SCHEMA_ROCPD_TABLES,
+    ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
+    ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+    ROCPD_SQL_SCHEMA_LAST,
+};
+}  // namespace
+
+#endif
 
 namespace
 {
@@ -44,7 +70,89 @@ create_directory_for_database_file(const std::string& db_file)
         tim::filepath::makedir(_db_dirname);
     }
 }
+
+std::string
+process_schema_template(std::string_view schema_content, const std::string& upid)
+{
+    std::string query = std::string(schema_content);
+
+    std::regex upid_pattern("\\{\\{uuid\\}\\}");
+    std::regex guid_pattern("\\{\\{guid\\}\\}");
+    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
+
+    query = std::regex_replace(query, upid_pattern, "_" + upid);
+    query = std::regex_replace(query, guid_pattern, upid);
+    query = std::regex_replace(query, view_upid_pattern, "");
+
+    return query;
+}
+
+#if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
+void
+load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
+               const rocpd_sql_schema_jinja_variables_t*, const char*,
+               const char* schema_content, void* user_data)
+{
+    if(user_data == nullptr || schema_content == nullptr)
+    {
+        ROCPROFSYS_WARNING(1, "Invalid user data or schema content pointer");
+        return;
+    }
+    auto* query = static_cast<std::string*>(user_data);
+    if(query == nullptr)
+    {
+        ROCPROFSYS_WARNING(1, "Invalid query pointer");
+        return;
+    }
+    *query = std::string(schema_content);
+}
+#endif
+
+std::string
+get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
+{
+#if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
+    const auto                         jinja_size = 2 * upid.size();
+    rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
+
+    std::string query;
+    auto        status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, schema_kind,
+                                               ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb,
+                                               nullptr, 0, &query);
+    if(status != ROCPD_STATUS_SUCCESS)
+    {
+        ROCPROFSYS_WARNING(0, "Unable to load rocpd schema. Error code: %d", status);
+    }
+    return query;
+#else
+    std::string_view schema_content;
+
+    switch(schema_kind)
+    {
+        case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
+            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_TABLES_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::ROCPD_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::DATA_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::MARKER_VIEWS_SQL;
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
+            schema_content = rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
+            break;
+        default: ROCPROFSYS_WARNING(0, "Unknown schema kind: %d", schema_kind); return "";
+    }
+
+    return process_schema_template(schema_content, upid);
+#endif
+}
+
 }  // namespace
+
 namespace rocprofsys
 {
 namespace rocpd
@@ -75,57 +183,28 @@ database::~database()
 void
 database::initialize_schema()
 {
-    auto get_file_path = [](const std::string_view filename) {
-        auto _rocprofsys_root = tim::get_env<std::string>(
-            "rocprofiler_systems_ROOT", tim::get_env<std::string>("ROCPROFSYS_ROOT", ""));
-        if(!_rocprofsys_root.empty() &&
-           tim::filepath::direxists(std::string(_rocprofsys_root)))
-        {
-            auto new_file_path = std::string(_rocprofsys_root)
-                                     .append("/share/rocprofiler-systems/")
-                                     .append(filename);
-            if(tim::filepath::exists(new_file_path))
-            {
-                return new_file_path;
-            }
-        }
-        // TODO:  Update to look for the system's rocpd schema
-        return std::string("source/lib/core/rocpd/data_storage/schema/").append(filename);
+    const auto upid = get_upid();
+
+    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
 
-    std::vector<std::string_view> schema_files = { "rocpd_tables.sql", "rocpd_views.sql",
-                                                   "data_views.sql", "marker_views.sql",
-                                                   "summary_views.sql" };
-
-    // Process each schema file
-    for(const auto& schema_file : schema_files)
+    for(const auto& schema_kind : schema_kinds)
     {
-        auto          file_path = get_file_path(schema_file);
-        std::ifstream file(file_path);
-        if(!file.is_open())
+        const std::string query = get_schema_query(schema_kind, upid);
+
+        if(query.empty())
         {
-            throw std::runtime_error(
-                std::string("Failed to open schema file ").append(file_path));
+            ROCPROFSYS_WARNING(0, "Failed to get schema query for schema kind: %d",
+                               schema_kind);
+            continue;
         }
 
-        std::stringstream ss_query;
-        ss_query << file.rdbuf();
-        std::string query = ss_query.str();
-
-        std::regex upid_pattern("\\{\\{uuid\\}\\}");
-        std::regex guid_pattern("\\{\\{guid\\}\\}");
-        std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
-
-        auto upid = get_upid();
-
-        query = std::regex_replace(query, upid_pattern, "_" + upid);
-        query = std::regex_replace(query, guid_pattern, upid);
-        query = std::regex_replace(query, view_upid_pattern, "");
-
-        validate_sqlite3_result(
-            sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0), query.c_str(),
-            std::string("Invalid schema file, init database failed!").append(file_path));
-        file.close();
+        validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
+                                query.c_str(),
+                                std::string("Invalid schema, init database failed!"));
     }
 }
 

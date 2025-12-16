@@ -51,6 +51,8 @@ install(
           ${PROJECT_SOURCE_DIR}/cmake/Modules/Findlibdw.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocDecode.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocJPEG.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/Findrocprofiler_sdk_pytest.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler_sdk_PytestAddTests.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules
     COMPONENT development)
 
@@ -91,15 +93,17 @@ configure_package_config_file(
 write_basic_package_version_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMinorVersion)
+    COMPATIBILITY SameMajorVersion)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/rocprofiler_config_nolink_target.cmake
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-nolink-target.cmake
     COPYONLY)
 
-foreach(_FILE rocprofiler-sdk-custom-compilation.cmake rocprofiler-sdk-utilities.cmake
-              Findlibdw.cmake)
+foreach(
+    _FILE
+    rocprofiler-sdk-custom-compilation.cmake rocprofiler-sdk-utilities.cmake
+    Findlibdw.cmake Findrocprofiler_sdk_pytest.cmake rocprofiler_sdk_PytestAddTests.cmake)
     configure_file(
         ${PROJECT_SOURCE_DIR}/cmake/Modules/${_FILE}
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules/${_FILE}

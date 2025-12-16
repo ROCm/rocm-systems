@@ -466,7 +466,9 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelGetLibrary = 446,
   HIP_API_ID_hipLibraryEnumerateKernels = 447,
   HIP_API_ID_hipKernelGetName = 448,
-  HIP_API_ID_LAST = 448,
+  HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock = 449,
+  HIP_API_ID_hipKernelGetParamInfo = 450,
+  HIP_API_ID_LAST = 450,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -732,6 +734,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipIpcOpenMemHandle: return "hipIpcOpenMemHandle";
     case HIP_API_ID_hipKernelGetLibrary: return "hipKernelGetLibrary";
     case HIP_API_ID_hipKernelGetName: return "hipKernelGetName";
+    case HIP_API_ID_hipKernelGetParamInfo: return "hipKernelGetParamInfo";
     case HIP_API_ID_hipLaunchByPtr: return "hipLaunchByPtr";
     case HIP_API_ID_hipLaunchCooperativeKernel: return "hipLaunchCooperativeKernel";
     case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: return "hipLaunchCooperativeKernelMultiDevice";
@@ -872,6 +875,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSize: return "hipModuleOccupancyMaxPotentialBlockSize";
     case HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSizeWithFlags: return "hipModuleOccupancyMaxPotentialBlockSizeWithFlags";
     case HIP_API_ID_hipModuleUnload: return "hipModuleUnload";
+    case HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock: return "hipOccupancyAvailableDynamicSMemPerBlock";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor: return "hipOccupancyMaxActiveBlocksPerMultiprocessor";
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags: return "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags";
     case HIP_API_ID_hipOccupancyMaxPotentialBlockSize: return "hipOccupancyMaxPotentialBlockSize";
@@ -1174,6 +1178,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipIpcOpenMemHandle", name) == 0) return HIP_API_ID_hipIpcOpenMemHandle;
   if (strcmp("hipKernelGetLibrary", name) == 0) return HIP_API_ID_hipKernelGetLibrary;
   if (strcmp("hipKernelGetName", name) == 0) return HIP_API_ID_hipKernelGetName;
+  if (strcmp("hipKernelGetParamInfo", name) == 0) return HIP_API_ID_hipKernelGetParamInfo;
   if (strcmp("hipLaunchByPtr", name) == 0) return HIP_API_ID_hipLaunchByPtr;
   if (strcmp("hipLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernel;
   if (strcmp("hipLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernelMultiDevice;
@@ -1314,6 +1319,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipModuleOccupancyMaxPotentialBlockSize", name) == 0) return HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSize;
   if (strcmp("hipModuleOccupancyMaxPotentialBlockSizeWithFlags", name) == 0) return HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSizeWithFlags;
   if (strcmp("hipModuleUnload", name) == 0) return HIP_API_ID_hipModuleUnload;
+  if (strcmp("hipOccupancyAvailableDynamicSMemPerBlock", name) == 0) return HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessor", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor;
   if (strcmp("hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", name) == 0) return HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
   if (strcmp("hipOccupancyMaxPotentialBlockSize", name) == 0) return HIP_API_ID_hipOccupancyMaxPotentialBlockSize;
@@ -2692,6 +2698,14 @@ typedef struct hip_api_data_s {
       hipKernel_t kernel;
     } hipKernelGetName;
     struct {
+      hipKernel_t kernel;
+      size_t paramIndex;
+      size_t* paramOffset;
+      size_t paramOffset__val;
+      size_t* paramSize;
+      size_t paramSize__val;
+    } hipKernelGetParamInfo;
+    struct {
       const void* hostFunction;
     } hipLaunchByPtr;
     struct {
@@ -3659,6 +3673,13 @@ typedef struct hip_api_data_s {
     struct {
       hipModule_t module;
     } hipModuleUnload;
+    struct {
+      size_t* dynamicSmemSize;
+      size_t dynamicSmemSize__val;
+      const void* f;
+      int numBlocks;
+      int blockSize;
+    } hipOccupancyAvailableDynamicSMemPerBlock;
     struct {
       int* numBlocks;
       int numBlocks__val;
@@ -5342,6 +5363,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipKernelGetName.name = (const char**)name; \
   cb_data.args.hipKernelGetName.kernel = (hipKernel_t)kernel; \
 };
+// hipKernelGetParamInfo[('hipKernel_t', 'kernel'), ('size_t', 'paramIndex'), ('size_t*', 'paramOffset'), ('size_t*', 'paramSize')]
+#define INIT_hipKernelGetParamInfo_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelGetParamInfo.kernel = (hipKernel_t)kernel; \
+  cb_data.args.hipKernelGetParamInfo.paramIndex = (size_t)paramIndex; \
+  cb_data.args.hipKernelGetParamInfo.paramOffset = (size_t*)paramOffset; \
+  cb_data.args.hipKernelGetParamInfo.paramSize = (size_t*)paramSize; \
+};
 // hipLaunchByPtr[('const void*', 'hostFunction')]
 #define INIT_hipLaunchByPtr_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLaunchByPtr.hostFunction = (const void*)hostFunction; \
@@ -6330,6 +6358,13 @@ typedef struct hip_api_data_s {
 // hipModuleUnload[('hipModule_t', 'module')]
 #define INIT_hipModuleUnload_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleUnload.module = (hipModule_t)hmod; \
+};
+// hipOccupancyAvailableDynamicSMemPerBlock[('size_t*', 'dynamicSmemSize'), ('const void*', 'f'), ('int', 'numBlocks'), ('int', 'blockSize')]
+#define INIT_hipOccupancyAvailableDynamicSMemPerBlock_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize = (size_t*)dynamicSmemSize; \
+  cb_data.args.hipOccupancyAvailableDynamicSMemPerBlock.f = (const void*)f; \
+  cb_data.args.hipOccupancyAvailableDynamicSMemPerBlock.numBlocks = (int)numBlocks; \
+  cb_data.args.hipOccupancyAvailableDynamicSMemPerBlock.blockSize = (int)blockSize; \
 };
 // hipOccupancyMaxActiveBlocksPerMultiprocessor[('int*', 'numBlocks'), ('const void*', 'f'), ('int', 'blockSize'), ('size_t', 'dynamicSMemSize')]
 #define INIT_hipOccupancyMaxActiveBlocksPerMultiprocessor_CB_ARGS_DATA(cb_data) { \
@@ -7681,6 +7716,11 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipKernelGetName:
       if (data->args.hipKernelGetName.name) data->args.hipKernelGetName.name__val = *(data->args.hipKernelGetName.name);
       break;
+// hipKernelGetParamInfo[('hipKernel_t', 'kernel'), ('size_t', 'paramIndex'), ('size_t*', 'paramOffset'), ('size_t*', 'paramSize')]
+    case HIP_API_ID_hipKernelGetParamInfo:
+      if (data->args.hipKernelGetParamInfo.paramOffset) data->args.hipKernelGetParamInfo.paramOffset__val = *(data->args.hipKernelGetParamInfo.paramOffset);
+      if (data->args.hipKernelGetParamInfo.paramSize) data->args.hipKernelGetParamInfo.paramSize__val = *(data->args.hipKernelGetParamInfo.paramSize);
+      break;
 // hipLaunchByPtr[('const void*', 'hostFunction')]
     case HIP_API_ID_hipLaunchByPtr:
       break;
@@ -8219,6 +8259,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
 // hipModuleUnload[('hipModule_t', 'module')]
     case HIP_API_ID_hipModuleUnload:
+      break;
+// hipOccupancyAvailableDynamicSMemPerBlock[('size_t*', 'dynamicSmemSize'), ('const void*', 'f'), ('int', 'numBlocks'), ('int', 'blockSize')]
+    case HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock:
+      if (data->args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize) data->args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize__val = *(data->args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize);
       break;
 // hipOccupancyMaxActiveBlocksPerMultiprocessor[('int*', 'numBlocks'), ('const void*', 'f'), ('int', 'blockSize'), ('size_t', 'dynamicSMemSize')]
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor:
@@ -10268,6 +10312,16 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetName.kernel);
       oss << ")";
     break;
+    case HIP_API_ID_hipKernelGetParamInfo:
+      oss << "hipKernelGetParamInfo(";
+      oss << "kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.kernel);
+      oss << ", paramIndex="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.paramIndex);
+      if (data->args.hipKernelGetParamInfo.paramOffset == NULL) oss << ", paramOffset=NULL";
+      else { oss << ", paramOffset="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.paramOffset__val); }
+      if (data->args.hipKernelGetParamInfo.paramSize == NULL) oss << ", paramSize=NULL";
+      else { oss << ", paramSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.paramSize__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipLaunchByPtr:
       oss << "hipLaunchByPtr(";
       oss << "hostFunction="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLaunchByPtr.hostFunction);
@@ -11514,6 +11568,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
     case HIP_API_ID_hipModuleUnload:
       oss << "hipModuleUnload(";
       oss << "module="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleUnload.module);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipOccupancyAvailableDynamicSMemPerBlock:
+      oss << "hipOccupancyAvailableDynamicSMemPerBlock(";
+      if (data->args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize == NULL) oss << "dynamicSmemSize=NULL";
+      else { oss << "dynamicSmemSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyAvailableDynamicSMemPerBlock.dynamicSmemSize__val); }
+      oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyAvailableDynamicSMemPerBlock.f);
+      oss << ", numBlocks="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyAvailableDynamicSMemPerBlock.numBlocks);
+      oss << ", blockSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipOccupancyAvailableDynamicSMemPerBlock.blockSize);
       oss << ")";
     break;
     case HIP_API_ID_hipOccupancyMaxActiveBlocksPerMultiprocessor:

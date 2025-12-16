@@ -688,7 +688,7 @@ __global__ void __hiloint2double_kernel(double* const ys, const size_t num_xs, i
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     ys[i] = __hiloint2double(x1s[i], x2s[i]);
   }
 }

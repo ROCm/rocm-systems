@@ -642,6 +642,9 @@ global:
     hipLibraryEnumerateKernels;
     hipKernelGetLibrary;
     hipKernelGetName;
+    hipOccupancyAvailableDynamicSMemPerBlock;
+    hipGetProcAddress_spt;
+    hipKernelGetParamInfo;
 local:
     *;
 } hip_7.1;

@@ -33,7 +33,7 @@ Panel Config:
           value: ROUND(AVG((SQ_INSTS_GDS / $denom)), 0)
         BR:
           value: ROUND(AVG((SQ_INSTS_BRANCH / $denom)), 0)
-        Active CUs:
+        Active CUs (deprecated):
           value: $numActiveCUs
         Num CUs:
           value: $cu_per_gpu
@@ -70,9 +70,6 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None )), 0)
-        VL1 Lat:
-          value: ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum
-            != 0) else None)), 0)
         VL1 Coalesce:
           value: ROUND(AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
             * 4)) if (TCP_TOTAL_ACCESSES_sum != None) else 0)), 0)
@@ -159,18 +156,18 @@ Panel Config:
     GWS: Total number of GDS (global data sync) instructions issued per normalization
       unit.
     BR: Total number of BRANCH instructions issued per normalization unit.
-    Active CUs: Total number of active compute units (CUs) on the accelerator during
-      the kernel execution.
+    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
+      the kernel execution. (Deprecated - See CU Utilization instead)
     Num CUs: Total number of compute units (CUs) on the accelerator.
-    VGPR: |-
+    VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
       requested by the compiler due to allocation granularity.
-    SGPR: |-
+    SGPR: >-
       The number of scalar general-purpose registers allocated for the kernel,
       see SALU. Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
-    LDS Allocation: |-
+    LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated for
       this kernel. Note: This may also be larger than what was requested at compile
       time due to both allocation granularity and dynamic per-dispatch LDS allocations.
@@ -197,8 +194,6 @@ Panel Config:
       unit after coalescing per normalization unit
     VL1 Hit: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    VL1 Lat: Calculated as the average number of cycles that a vL1D cache line request
-      spent in the vL1D cache pipeline.
     VL1 Coalesce: Indicates how well memory instructions were coalesced by the address
       processing unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated
       as the average number of thread-requests generated per instruction divided by
@@ -252,7 +247,7 @@ Panel Config:
       or data (atomic with return value) was returned to the L2.
     HBM Rd: The total number of L2 requests to Infinity Fabric to read 32B or 64B
       of data from the accelerator's local HBM, per normalization unit.
-    HBM Wr: |-
+    HBM Wr: >-
       The total number of L2 requests to Infinity Fabric to write or atomically
       update 32B or 64B of data in the accelerator's local HBM, per normalization
       unit.

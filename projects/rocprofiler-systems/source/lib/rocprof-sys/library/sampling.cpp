@@ -25,6 +25,7 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
@@ -32,6 +33,7 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
+#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
@@ -171,7 +173,7 @@ generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
 {
     nlohmann::json call_stack;
 
-    call_stack["name"] = std::string(demangle(stack_entry.name));
+    call_stack["name"] = std::string(rocprofsys::utility::demangle(stack_entry.name));
     call_stack["pc"]   = as_hex(stack_entry.address);
     call_stack["file"] = std::string(stack_entry.location);
 
@@ -183,7 +185,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
 {
     nlohmann::json line_info;
     line_info["line_address"] = as_hex(line_info_entry.line_address);
-    line_info["name"]         = std::string(demangle(line_info_entry.name));
+    line_info["name"] = std::string(rocprofsys::utility::demangle(line_info_entry.name));
 
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
@@ -192,7 +194,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
         for(const auto& line : _lines)
         {
             nlohmann::json inlined;
-            inlined["name"]      = std::string(demangle(line.name));
+            inlined["name"]      = std::string(rocprofsys::utility::demangle(line.name));
             inlined["location"]  = std::string(line.location);
             inlined["line"]      = std::to_string(line.line);
             line_info["inlined"] = inlined;
@@ -310,18 +312,17 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(demangle(iitr.name));
+            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
             auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
 
-            trace_cache::get_buffer_storage().store(
-                trace_cache::entry_type::backtrace_region_sample,
+            trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 static_cast<uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}");
+                _line_info.c_str(), "{}" });
         }
     }
 
@@ -343,18 +344,17 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(demangle(iitr.name));
+            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
             auto _track_name = get_track_name<category::overflow_sampling>(*_thread_info);
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
 
-            trace_cache::get_buffer_storage().store(
-                trace_cache::entry_type::backtrace_region_sample,
+            trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
                 static_cast<uint64_t>(_thread_info->index_data->system_value),
                 _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
                 trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}");
+                _line_info.c_str(), "{}" });
         }
     }
 }
@@ -1385,7 +1385,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
             for(const auto& iitr : itr.m_stack)
             {
                 const auto* _name =
-                    static_strings.emplace(demangle(iitr.name)).first->c_str();
+                    static_strings.emplace(rocprofsys::utility::demangle(iitr.name))
+                        .first->c_str();
                 tracing::push_perfetto_track(
                     category::overflow_sampling{}, _name, _track, _beg,
                     [&](::perfetto::EventContext ctx) {
@@ -1406,7 +1407,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                     auto _label = JOIN('-', "lineinfo", _n++);
                                     tracing::add_perfetto_annotation(
                                         ctx, _label.c_str(),
-                                        JOIN('@', demangle(line.name),
+                                        JOIN('@',
+                                             rocprofsys::utility::demangle(line.name),
                                              JOIN(':', line.location, line.line)));
                                 }
                             }
@@ -1497,7 +1499,9 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                     for(const auto& line : _lines)
                     {
                         const auto* _name =
-                            static_strings.emplace(demangle(line.name)).first->c_str();
+                            static_strings
+                                .emplace(rocprofsys::utility::demangle(line.name))
+                                .first->c_str();
                         auto _info = JOIN(':', line.location, line.line);
                         tracing::push_perfetto_track(
                             category::timer_sampling{}, _name, _track, _beg,
@@ -1543,7 +1547,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                         auto _label = JOIN('-', "lineinfo", _n++);
                                         tracing::add_perfetto_annotation(
                                             ctx, _label.c_str(),
-                                            JOIN('@', demangle(line.name),
+                                            JOIN('@',
+                                                 rocprofsys::utility::demangle(line.name),
                                                  JOIN(':', line.location, line.line)));
                                     }
                                 }
@@ -1837,6 +1842,19 @@ struct sampling_initialization
     }
 };
 }  // namespace
+void
+postfork_parent_reinit()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_parent_reinit();
+}
+
+void
+postfork_child_cleanup()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::postfork_child_cleanup();
+}
 }  // namespace sampling
 }  // namespace rocprofsys
 

@@ -145,7 +145,7 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
+TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   assert(deviceCount > 0);
@@ -219,7 +219,8 @@ TEST_CASE("Unit_hipDeviceGetUuid_From_RocmInfo") {
  */
 // Guarding it against NVIDIA as this test is faling on it.
 #if HT_AMD
-TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties") {
+TEST_CASE("Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties",
+          "[multigpu]") {
   int deviceCount = 0;
   hipDevice_t device;
   hipDeviceProp_t prop;

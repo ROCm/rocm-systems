@@ -28,69 +28,13 @@ THE SOFTWARE.
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
 #include "amd_hsa_elf.hpp"
+#include "hip_comgr_helper.hpp"
+
 namespace hip {
-namespace comgr_helper {
-
-template <typename comgr_T> class ComgrUniqueHandle {
- public:
-  ComgrUniqueHandle() = default;
-  // constructor which takes ownership of a correctly initialzed handle
-  ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
-
-  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
-                                                       std::is_same_v<T, amd_comgr_action_info_t>,
-                                                   bool> = true>
-  [[nodiscard]] amd_comgr_status_t Create() {
-    if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
-      return amd::Comgr::create_data_set(&comgr_obj_);
-    } else if constexpr (std::is_same_v<T, amd_comgr_action_info_t>) {
-      return amd::Comgr::create_action_info(&comgr_obj_);
-    }
-
-    // Unreachable code
-    return AMD_COMGR_STATUS_SUCCESS;
-  }
-
-  template <typename T = comgr_T,
-            std::enable_if_t<std::is_same_v<T, amd_comgr_data_t>, bool> = true>
-  [[nodiscard]] amd_comgr_status_t Create(amd_comgr_data_kind_t kind) {
-    return amd::Comgr::create_data(kind, &comgr_obj_);
-  }
-
-  ~ComgrUniqueHandle() {
-    if (comgr_obj_.handle != 0) {
-      if constexpr (std::is_same_v<comgr_T, amd_comgr_data_set_t>) {
-        amd::Comgr::destroy_data_set(comgr_obj_);
-      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_action_info_t>) {
-        amd::Comgr::destroy_action_info(comgr_obj_);
-      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_data_t>) {
-        amd::Comgr::release_data(comgr_obj_);
-      }
-    }
-  }
-
-  // Delete all copy and move operators
-  ComgrUniqueHandle(ComgrUniqueHandle&) = delete;
-  ComgrUniqueHandle(ComgrUniqueHandle&&) = delete;
-  ComgrUniqueHandle& operator=(ComgrUniqueHandle&) = delete;
-  ComgrUniqueHandle& operator=(ComgrUniqueHandle&&) = delete;
-
-  // Method to access data
-  comgr_T get() const {
-    assert(comgr_obj_.handle != 0);
-    return comgr_obj_;
-  }
-
- private:
-  comgr_T comgr_obj_{0};
-};
-
-
-typedef ComgrUniqueHandle<amd_comgr_data_set_t> ComgrDataSetUniqueHandle;
-typedef ComgrUniqueHandle<amd_comgr_action_info_t> ComgrActionInfoUniqueHandle;
-typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
-
-}  // namespace comgr_helper
+// Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
+using comgr_helper::ComgrDataSetUniqueHandle;
+using comgr_helper::ComgrActionInfoUniqueHandle;
+using comgr_helper::ComgrDataUniqueHandle;
 
 FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
     : foffset_(0), image_(image), image_mapped_(false), uri_(std::string()) {
@@ -349,9 +293,10 @@ static bool UncompressAndPopulateCodeObject(
         LogError("Failed to get data unbundled code object");
         break;
       }
+      comgr_helper::ComgrDataUniqueHandle item_handle(item);
 
       size_t item_name_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data_name(item, &item_name_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -359,14 +304,14 @@ static bool UncompressAndPopulateCodeObject(
 
       std::string item_bundle_id(item_name_size, 0);
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item, &item_name_size, item_bundle_id.data());
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
         break;
       }
 
       size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item, &item_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -374,7 +319,7 @@ static bool UncompressAndPopulateCodeObject(
 
       if (item_size > 0) {
         char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item, &item_size, item_data);
+        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get data");
           break;

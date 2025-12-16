@@ -31,7 +31,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(xs[i]);                                                                    \
     }                                                                                              \
   }
@@ -42,7 +42,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i]);                                                           \
     }                                                                                              \
   }
@@ -93,7 +93,10 @@ void CastUnaryHalfPrecisionBruteForceTest(kernel_sig<T, Float16> kernel,
                                           ref_sig<RT, RTArg> ref_func,
                                           const ValidatorBuilder& validator_builder) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
-  uint64_t stop = std::numeric_limits<uint16_t>::max() + 1ul;
+  const auto reduction_factor = GetTestReductionFactor();
+  const auto inv_reduction_factor = 1 / reduction_factor;
+  const auto stop = static_cast<uint64_t>(
+      std::ceil((std::numeric_limits<uint16_t>::max() + 1ul) * reduction_factor));
   const auto max_batch_size =
       std::min(GetMaxAllowedDeviceMemoryUsage() / (sizeof(Float16) + sizeof(T)), stop);
   LinearAllocGuard<Float16> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(Float16)};
@@ -114,10 +117,11 @@ void CastUnaryHalfPrecisionBruteForceTest(kernel_sig<T, Float16> kernel,
       const auto sub_batch_size = min_sub_batch_size + (i < tail);
 
       thread_pool.Post([=, &values] {
-        auto t = v;
+        auto t = v * inv_reduction_factor;
         uint16_t val;
         for (auto j = 0u; j < sub_batch_size; ++j) {
-          val = static_cast<uint16_t>(t++);
+          val = static_cast<uint16_t>(std::floor(t));
+          t += inv_reduction_factor;
           values.ptr()[base_idx + j] = *reinterpret_cast<Float16*>(&val);
           if (std::isnan(values.ptr()[base_idx + j]) || std::isinf(values.ptr()[base_idx + j])) {
             values.ptr()[base_idx + j] = 0;
@@ -178,15 +182,24 @@ void CastIntRangeTest(kernel_sig<T, TArg> kernel, ref_sig<RT, RTArg> ref_func,
                       const TArg a = std::numeric_limits<TArg>::lowest(),
                       const TArg b = std::numeric_limits<TArg>::max()) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
+  const auto reduction_factor = GetTestReductionFactor();
+  const auto inv_reduction_factor = 1 / reduction_factor;
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(T) + sizeof(TArg));
   LinearAllocGuard<TArg> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(TArg)};
 
   MathTest math_test(kernel, max_batch_size);
 
+  bool running = true;
   size_t inserted = 0u;
-  for (TArg v = a; v <= b; v++) {
-    values.ptr()[inserted++] = v;
-    if (inserted < max_batch_size) continue;
+  auto v = static_cast<double>(a);
+  while (running) {
+    if (std::floor(v) > b) {
+      running = false;
+    } else {
+      values.ptr()[inserted++] = static_cast<TArg>(std::floor(v));
+      v += inv_reduction_factor;
+      if (inserted < max_batch_size) continue;
+    }
 
     math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, values.ptr());
     inserted = 0u;
@@ -240,17 +253,27 @@ void CastBinaryIntRangeTest(kernel_sig<T1, T2, T2> kernel, ref_sig<T1, T2, T2> r
                             const T2 a = std::numeric_limits<T2>::lowest(),
                             const T2 b = std::numeric_limits<T2>::max()) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
+  const auto reduction_factor = GetTestReductionFactor();
+  const auto inv_reduction_factor = 1 / reduction_factor;
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(T1) + 2 * sizeof(T2));
   LinearAllocGuard<T2> values1{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(T2)};
   LinearAllocGuard<T2> values2{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(T2)};
 
   MathTest math_test(kernel, max_batch_size);
 
+  bool running = true;
   size_t inserted = 0u;
-  for (T2 v = a; v <= b; v++) {
-    values1.ptr()[inserted] = v;
-    values2.ptr()[inserted++] = b - v;
-    if (inserted < max_batch_size) continue;
+  auto v = static_cast<double>(a);
+  while (running) {
+    if (std::floor(v) > b) {
+      running = false;
+    } else {
+      const auto t = static_cast<T2>(std::floor(v));
+      values1.ptr()[inserted] = t;
+      values2.ptr()[inserted++] = b - t;
+      v += inv_reduction_factor;
+      if (inserted < max_batch_size) continue;
+    }
 
     math_test.Run(validator_builder, grid_size, block_size, ref_func, inserted, values1.ptr(),
                   values2.ptr());

@@ -45,10 +45,12 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
     get_panel_alias,
     get_uuid,
     is_workload_empty,
+    merge_counters_iteration_multiplex,
     merge_counters_spatial_multiplex,
 )
 
@@ -101,6 +103,12 @@ class OmniAnalyze_Base:
     @demarcate
     def spatial_multiplex_merge_counters(self, df: pd.DataFrame) -> pd.DataFrame:
         return merge_counters_spatial_multiplex(df)
+
+    @demarcate
+    def iteration_multiplex_merge_counters(
+        self, df: pd.DataFrame, policy: str
+    ) -> pd.DataFrame:
+        return merge_counters_iteration_multiplex(df, policy)
 
     @demarcate
     def generate_configs(
@@ -269,11 +277,27 @@ class OmniAnalyze_Base:
             if sysinfo_path:
                 w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
-                    try:
-                        roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
-                        w.roofline_peaks = roofline_df
-                    except FileNotFoundError:
-                        console_warning("roofline.csv not found.")
+                    # Validate roofline CSV before loading
+
+                    is_valid, error_msg = validate_roofline_csv(sysinfo_path)
+
+                    if is_valid:
+                        try:
+                            roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
+                            w.roofline_peaks = roofline_df
+                        except Exception as e:
+                            console_error(
+                                "roofline",
+                                f"Failed to load roofline.csv: {e}",
+                                exit=False,
+                            )
+                            w.roofline_peaks = pd.DataFrame()
+                    else:
+                        console_error(
+                            "roofline",
+                            f"Roofline analysis skipped: {error_msg}",
+                            exit=False,
+                        )
                         w.roofline_peaks = pd.DataFrame()
                 else:
                     w.roofline_peaks = pd.DataFrame()
@@ -395,6 +419,17 @@ class OmniAnalyze_Base:
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(args.path[0][0])
 
+        # Check dispatch filtering isn't used with iteration multiplexing
+        if (
+            self._profiling_config.get("iteration_multiplexing") is not None
+            and args.gpu_dispatch_id
+        ):
+            console_error(
+                "analysis",
+                "Dispatch filtering (-d/--dispatch) cannot be used "
+                "with profiling data collected with iteration multiplexing.",
+            )
+
         # initalize runs
         self._runs = self.initalize_runs()
 
@@ -422,3 +457,12 @@ class OmniAnalyze_Base:
     def run_analysis(self) -> None:
         """Run analysis."""
         console_debug("analysis", "generating analysis")
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            console_log(
+                "analysis",
+                (
+                    "Profiling data was collected using iteration multiplexing. "
+                    "Some metrics may represent aggregated values "
+                    "across multiple iterations."
+                ),
+            )

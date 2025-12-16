@@ -1,7 +1,7 @@
 .. meta::
    :description: How to use ROCm Compute Profiler's analyze mode
    :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
-              Grafana, analysis, analyze mode
+              analysis, analyze mode
 
 ************
 Analyze mode
@@ -12,15 +12,10 @@ profiling. Your level of familiarity with the profiled application, computing
 environment, and experience with ROCm Compute Profiler should inform the analysis method you
 choose.
 
-While analyzing with the CLI offers quick and straightforward access to ROCm Compute Profiler
-metrics from the terminal, Grafana's dashboard GUI adds an extra layer of
-readability and interactivity you might prefer.
-
 See the following sections to explore ROCm Compute Profiler's analysis and visualization
 options.
 
 * :doc:`cli`
-* :doc:`grafana-gui`
 * :doc:`standalone-gui`
 * :doc:`tui`
 

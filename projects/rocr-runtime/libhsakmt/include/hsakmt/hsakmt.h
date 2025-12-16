@@ -548,6 +548,18 @@ hsaKmtExportDMABufHandle(
     );
 
 /**
+  Export GPU Memory handle
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetMemoryHandle(
+    void* va,                     // IN
+    void* MemoryAddress,          // IN
+    HSAuint64 SizeInBytes,        // IN
+    uint64_t* SharedMemoryHandle  // OUT
+);
+
+/**
  Export a memory buffer for sharing with other processes
 
  NOTE: for the current revision of the thunk spec, SizeInBytes
