@@ -4,10 +4,8 @@
  * See file LICENSE for terms.
  */
 
-
 #ifndef UCP_COMPAT_H_
 #define UCP_COMPAT_H_
-
 
 #include <ucp/api/ucp_def.h>
 #include <ucs/sys/compiler_def.h>
@@ -20,40 +18,40 @@ BEGIN_C_DECLS
  * @ingroup UCP_WORKER
  * @deprecated Replaced by @ref ucp_listener_conn_handler_t.
  */
-typedef struct ucp_listener_accept_handler {
-   ucp_listener_accept_callback_t  cb;       /**< Endpoint creation callback */
-   void                            *arg;     /**< User defined argument for the
-                                                  callback */
+typedef struct ucp_listener_accept_handler
+{
+    ucp_listener_accept_callback_t cb;  /**< Endpoint creation callback */
+    void*                          arg; /**< User defined argument for the
+                                             callback */
 } ucp_listener_accept_handler_t;
-
 
 /**
  * @ingroup UCP_COMM
  * @deprecated Replaced by @ref ucp_request_test.
  */
-int ucp_request_is_completed(void *request);
-
+int
+ucp_request_is_completed(void* request);
 
 /**
  * @ingroup UCP_ENDPOINT
  * @deprecated Replaced by @ref ucp_request_free.
  */
-void ucp_request_release(void *request);
-
-
-/**
- * @ingroup UCP_ENDPOINT
- * @deprecated Replaced by @ref ucp_ep_close_nb.
- */
-void ucp_ep_destroy(ucp_ep_h ep);
-
+void
+ucp_request_release(void* request);
 
 /**
  * @ingroup UCP_ENDPOINT
  * @deprecated Replaced by @ref ucp_ep_close_nb.
  */
-ucs_status_ptr_t ucp_disconnect_nb(ucp_ep_h ep);
+void
+ucp_ep_destroy(ucp_ep_h ep);
 
+/**
+ * @ingroup UCP_ENDPOINT
+ * @deprecated Replaced by @ref ucp_ep_close_nb.
+ */
+ucs_status_ptr_t
+ucp_disconnect_nb(ucp_ep_h ep);
 
 /**
  * @ingroup UCP_COMM
@@ -64,8 +62,8 @@ ucs_status_ptr_t ucp_disconnect_nb(ucp_ep_h ep);
  *
  * @return This function is not implemented and always returns NULL.
  */
-void *ucp_request_alloc(ucp_worker_h worker);
-
+void*
+ucp_request_alloc(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -80,8 +78,8 @@ void *ucp_request_alloc(ucp_worker_h worker);
  *       @ref ucp_tag_recv_nbr) for which additional information
  *       (returned via the @a info pointer) is needed.
  */
-ucs_status_t ucp_request_test(void *request, ucp_tag_recv_info_t *info);
-
+ucs_status_t
+ucp_request_test(void* request, ucp_tag_recv_info_t* info);
 
 /**
  * @ingroup UCP_MEM
@@ -114,9 +112,9 @@ ucs_status_t ucp_request_test(void *request, ucp_tag_recv_info_t *info);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh,
-                           void **rkey_buffer_p, size_t *size_p);
-
+ucs_status_t
+ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh, void** rkey_buffer_p,
+              size_t* size_p);
 
 /**
  * @ingroup UCP_MEM
@@ -136,14 +134,15 @@ ucs_status_t ucp_rkey_pack(ucp_context_h context, ucp_mem_h memh,
  *
  * @param [in]  rkey_buffer   Buffer to release.
  */
-void ucp_rkey_buffer_release(void *rkey_buffer);
-
+void
+ucp_rkey_buffer_release(void* rkey_buffer);
 
 /**
  * @ingroup UCP_ENDPOINT
  * @deprecated Replaced by @ref ucp_ep_flush_nb.
  */
-ucs_status_t ucp_ep_flush(ucp_ep_h ep);
+ucs_status_t
+ucp_ep_flush(ucp_ep_h ep);
 
 /**
  * @ingroup UCP_WORKER
@@ -186,8 +185,8 @@ ucs_status_t ucp_ep_flush(ucp_ep_h ep);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_flush(ucp_worker_h worker);
-
+ucs_status_t
+ucp_worker_flush(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_COMM
@@ -236,9 +235,9 @@ ucs_status_t ucp_worker_flush(ucp_worker_h worker);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_put(ucp_ep_h ep, const void *buffer, size_t length,
-                     uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_put(ucp_ep_h ep, const void* buffer, size_t length, uint64_t remote_addr,
+        ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -263,9 +262,8 @@ ucs_status_t ucp_put(ucp_ep_h ep, const void *buffer, size_t length,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_get(ucp_ep_h ep, void *buffer, size_t length,
-                     uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_get(ucp_ep_h ep, void* buffer, size_t length, uint64_t remote_addr, ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -293,9 +291,8 @@ ucs_status_t ucp_get(ucp_ep_h ep, void *buffer, size_t length,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_add32(ucp_ep_h ep, uint32_t add,
-                              uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_atomic_add32(ucp_ep_h ep, uint32_t add, uint64_t remote_addr, ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -323,9 +320,8 @@ ucs_status_t ucp_atomic_add32(ucp_ep_h ep, uint32_t add,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_add64(ucp_ep_h ep, uint64_t add,
-                              uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_atomic_add64(ucp_ep_h ep, uint64_t add, uint64_t remote_addr, ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -357,9 +353,9 @@ ucs_status_t ucp_atomic_add64(ucp_ep_h ep, uint64_t add,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_fadd32(ucp_ep_h ep, uint32_t add, uint64_t remote_addr,
-                               ucp_rkey_h rkey, uint32_t *result);
-
+ucs_status_t
+ucp_atomic_fadd32(ucp_ep_h ep, uint32_t add, uint64_t remote_addr, ucp_rkey_h rkey,
+                  uint32_t* result);
 
 /**
  * @ingroup UCP_COMM
@@ -391,9 +387,9 @@ ucs_status_t ucp_atomic_fadd32(ucp_ep_h ep, uint32_t add, uint64_t remote_addr,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_fadd64(ucp_ep_h ep, uint64_t add, uint64_t remote_addr,
-                               ucp_rkey_h rkey, uint64_t *result);
-
+ucs_status_t
+ucp_atomic_fadd64(ucp_ep_h ep, uint64_t add, uint64_t remote_addr, ucp_rkey_h rkey,
+                  uint64_t* result);
 
 /**
  * @ingroup UCP_COMM
@@ -424,9 +420,9 @@ ucs_status_t ucp_atomic_fadd64(ucp_ep_h ep, uint64_t add, uint64_t remote_addr,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_swap32(ucp_ep_h ep, uint32_t swap, uint64_t remote_addr,
-                               ucp_rkey_h rkey, uint32_t *result);
-
+ucs_status_t
+ucp_atomic_swap32(ucp_ep_h ep, uint32_t swap, uint64_t remote_addr, ucp_rkey_h rkey,
+                  uint32_t* result);
 
 /**
  * @ingroup UCP_COMM
@@ -457,9 +453,9 @@ ucs_status_t ucp_atomic_swap32(ucp_ep_h ep, uint32_t swap, uint64_t remote_addr,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_swap64(ucp_ep_h ep, uint64_t swap, uint64_t remote_addr,
-                               ucp_rkey_h rkey, uint64_t *result);
-
+ucs_status_t
+ucp_atomic_swap64(ucp_ep_h ep, uint64_t swap, uint64_t remote_addr, ucp_rkey_h rkey,
+                  uint64_t* result);
 
 /**
  * @ingroup UCP_COMM
@@ -491,10 +487,9 @@ ucs_status_t ucp_atomic_swap64(ucp_ep_h ep, uint64_t swap, uint64_t remote_addr,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_cswap32(ucp_ep_h ep, uint32_t compare, uint32_t swap,
-                                uint64_t remote_addr, ucp_rkey_h rkey,
-                                uint32_t *result);
-
+ucs_status_t
+ucp_atomic_cswap32(ucp_ep_h ep, uint32_t compare, uint32_t swap, uint64_t remote_addr,
+                   ucp_rkey_h rkey, uint32_t* result);
 
 /**
  * @ingroup UCP_COMM
@@ -526,10 +521,9 @@ ucs_status_t ucp_atomic_cswap32(ucp_ep_h ep, uint32_t compare, uint32_t swap,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_cswap64(ucp_ep_h ep, uint64_t compare, uint64_t swap,
-                                uint64_t remote_addr, ucp_rkey_h rkey,
-                                uint64_t *result);
-
+ucs_status_t
+ucp_atomic_cswap64(ucp_ep_h ep, uint64_t compare, uint64_t swap, uint64_t remote_addr,
+                   ucp_rkey_h rkey, uint64_t* result);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -564,8 +558,8 @@ ucs_status_t ucp_atomic_cswap64(ucp_ep_h ep, uint64_t compare, uint64_t swap,
  * @note See the documentation of @ref ucp_ep_params_t for details, only some of
  *       the parameters can be modified.
  */
-ucs_status_ptr_t ucp_ep_modify_nb(ucp_ep_h ep, const ucp_ep_params_t *params);
-
+ucs_status_ptr_t
+ucp_ep_modify_nb(ucp_ep_h ep, const ucp_ep_params_t* params);
 
 /**
  * @ingroup UCP_WORKER
@@ -587,10 +581,9 @@ ucs_status_ptr_t ucp_ep_modify_nb(ucp_ep_h ep, const ucp_ep_params_t *params);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_get_address(ucp_worker_h worker,
-                                    ucp_address_t **address_p,
-                                    size_t *address_length_p);
-
+ucs_status_t
+ucp_worker_get_address(ucp_worker_h worker, ucp_address_t** address_p,
+                       size_t* address_length_p);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -620,8 +613,8 @@ ucs_status_t ucp_worker_get_address(ucp_worker_h worker,
  * @note @ref ucp_ep_close_nb replaces deprecated @ref ucp_disconnect_nb and
  *       @ref ucp_ep_destroy
  */
-ucs_status_ptr_t ucp_ep_close_nb(ucp_ep_h ep, unsigned mode);
-
+ucs_status_ptr_t
+ucp_ep_close_nb(ucp_ep_h ep, unsigned mode);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -650,9 +643,8 @@ ucs_status_ptr_t ucp_ep_close_nb(ucp_ep_h ep, unsigned mode);
  *                          using @ref ucp_request_free "ucp_request_free()"
  *                          routine.
  */
-ucs_status_ptr_t ucp_ep_flush_nb(ucp_ep_h ep, unsigned flags,
-                                 ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_ep_flush_nb(ucp_ep_h ep, unsigned flags, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_WORKER
@@ -681,10 +673,9 @@ ucs_status_ptr_t ucp_ep_flush_nb(ucp_ep_h ep, unsigned flags,
  * @return error code if the worker does not support Active Messages or
  *         requested callback flags.
  */
-ucs_status_t ucp_worker_set_am_handler(ucp_worker_h worker, uint16_t id,
-                                       ucp_am_callback_t cb, void *arg,
-                                       uint32_t flags);
-
+ucs_status_t
+ucp_worker_set_am_handler(ucp_worker_h worker, uint16_t id, ucp_am_callback_t cb,
+                          void* arg, uint32_t flags);
 
 /**
  * @ingroup UCP_COMM
@@ -711,11 +702,9 @@ ucs_status_t ucp_worker_set_am_handler(ucp_worker_h worker, uint16_t id,
  * @return otherwise        Pointer to request, and Active Message is known
  *                          to be completed after cb is run.
  */
-ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
-                                const void *buffer, size_t count,
-                                ucp_datatype_t datatype,
-                                ucp_send_callback_t cb, unsigned flags);
-
+ucs_status_ptr_t
+ucp_am_send_nb(ucp_ep_h ep, uint16_t id, const void* buffer, size_t count,
+               ucp_datatype_t datatype, ucp_send_callback_t cb, unsigned flags);
 
 /**
  * @ingroup UCP_COMM
@@ -757,10 +746,9 @@ ucs_status_ptr_t ucp_am_send_nb(ucp_ep_h ep, uint16_t id,
  *                          responsible for releasing the handle using
  *                          @ref ucp_request_free routine.
  */
-ucs_status_ptr_t ucp_stream_send_nb(ucp_ep_h ep, const void *buffer, size_t count,
-                                    ucp_datatype_t datatype, ucp_send_callback_t cb,
-                                    unsigned flags);
-
+ucs_status_ptr_t
+ucp_stream_send_nb(ucp_ep_h ep, const void* buffer, size_t count, ucp_datatype_t datatype,
+                   ucp_send_callback_t cb, unsigned flags);
 
 /**
  * @ingroup UCP_COMM
@@ -805,11 +793,9 @@ ucs_status_ptr_t ucp_stream_send_nb(ucp_ep_h ep, const void *buffer, size_t coun
  *                                the handle by calling the
  *                                @ref ucp_request_free routine.
  */
-ucs_status_ptr_t ucp_stream_recv_nb(ucp_ep_h ep, void *buffer, size_t count,
-                                    ucp_datatype_t datatype,
-                                    ucp_stream_recv_callback_t cb,
-                                    size_t *length, unsigned flags);
-
+ucs_status_ptr_t
+ucp_stream_recv_nb(ucp_ep_h ep, void* buffer, size_t count, ucp_datatype_t datatype,
+                   ucp_stream_recv_callback_t cb, size_t* length, unsigned flags);
 
 /**
  * @ingroup UCP_COMM
@@ -853,10 +839,9 @@ ucs_status_ptr_t ucp_stream_recv_nb(ucp_ep_h ep, void *buffer, size_t count,
  *                          responsible for releasing the handle using
  *                          @ref ucp_request_free "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_send_nb(ucp_ep_h ep, const void *buffer, size_t count,
-                                 ucp_datatype_t datatype, ucp_tag_t tag,
-                                 ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_tag_send_nb(ucp_ep_h ep, const void* buffer, size_t count, ucp_datatype_t datatype,
+                ucp_tag_t tag, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -939,9 +924,9 @@ ucs_status_ptr_t ucp_tag_send_nb(ucp_ep_h ep, const void *buffer, size_t count,
  *                            monitor @a req status.
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_tag_send_nbr(ucp_ep_h ep, const void *buffer, size_t count,
-                              ucp_datatype_t datatype, ucp_tag_t tag, void *req);
-
+ucs_status_t
+ucp_tag_send_nbr(ucp_ep_h ep, const void* buffer, size_t count, ucp_datatype_t datatype,
+                 ucp_tag_t tag, void* req);
 
 /**
  * @ingroup UCP_COMM
@@ -976,10 +961,9 @@ ucs_status_t ucp_tag_send_nbr(ucp_ep_h ep, const void *buffer, size_t count,
  *                          responsible for releasing the handle using
  *                          @ref ucp_request_free "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_send_sync_nb(ucp_ep_h ep, const void *buffer, size_t count,
-                                      ucp_datatype_t datatype, ucp_tag_t tag,
-                                      ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_tag_send_sync_nb(ucp_ep_h ep, const void* buffer, size_t count,
+                     ucp_datatype_t datatype, ucp_tag_t tag, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -1021,10 +1005,9 @@ ucs_status_ptr_t ucp_tag_send_sync_nb(ucp_ep_h ep, const void *buffer, size_t co
  *                              handle using @ref ucp_request_free
  *                              "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_recv_nb(ucp_worker_h worker, void *buffer, size_t count,
-                                 ucp_datatype_t datatype, ucp_tag_t tag,
-                                 ucp_tag_t tag_mask, ucp_tag_recv_callback_t cb);
-
+ucs_status_ptr_t
+ucp_tag_recv_nb(ucp_worker_h worker, void* buffer, size_t count, ucp_datatype_t datatype,
+                ucp_tag_t tag, ucp_tag_t tag_mask, ucp_tag_recv_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -1058,10 +1041,9 @@ ucs_status_ptr_t ucp_tag_recv_nb(ucp_worker_h worker, void *buffer, size_t count
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_tag_recv_nbr(ucp_worker_h worker, void *buffer, size_t count,
-                              ucp_datatype_t datatype, ucp_tag_t tag,
-                              ucp_tag_t tag_mask, void *req);
-
+ucs_status_t
+ucp_tag_recv_nbr(ucp_worker_h worker, void* buffer, size_t count, ucp_datatype_t datatype,
+                 ucp_tag_t tag, ucp_tag_t tag_mask, void* req);
 
 /**
  * @ingroup UCP_COMM
@@ -1098,11 +1080,10 @@ ucs_status_t ucp_tag_recv_nbr(ucp_worker_h worker, void *buffer, size_t count,
  *                              handle using @ref ucp_request_free
  *                              "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_msg_recv_nb(ucp_worker_h worker, void *buffer,
-                                     size_t count, ucp_datatype_t datatype,
-                                     ucp_tag_message_h message,
-                                     ucp_tag_recv_callback_t cb);
-
+ucs_status_ptr_t
+ucp_tag_msg_recv_nb(ucp_worker_h worker, void* buffer, size_t count,
+                    ucp_datatype_t datatype, ucp_tag_message_h message,
+                    ucp_tag_recv_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -1134,9 +1115,9 @@ ucs_status_ptr_t ucp_tag_msg_recv_nb(ucp_worker_h worker, void *buffer,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_put_nbi(ucp_ep_h ep, const void *buffer, size_t length,
-                         uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_put_nbi(ucp_ep_h ep, const void* buffer, size_t length, uint64_t remote_addr,
+            ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -1183,10 +1164,9 @@ ucs_status_t ucp_put_nbi(ucp_ep_h ep, const void *buffer, size_t length,
  *                              responsible for releasing the handle using
  *                              @ref ucp_request_free "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_put_nb(ucp_ep_h ep, const void *buffer, size_t length,
-                            uint64_t remote_addr, ucp_rkey_h rkey,
-                            ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_put_nb(ucp_ep_h ep, const void* buffer, size_t length, uint64_t remote_addr,
+           ucp_rkey_h rkey, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -1217,9 +1197,9 @@ ucs_status_ptr_t ucp_put_nb(ucp_ep_h ep, const void *buffer, size_t length,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_get_nbi(ucp_ep_h ep, void *buffer, size_t length,
-                         uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_get_nbi(ucp_ep_h ep, void* buffer, size_t length, uint64_t remote_addr,
+            ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -1265,10 +1245,9 @@ ucs_status_t ucp_get_nbi(ucp_ep_h ep, void *buffer, size_t length,
  *                              responsible for releasing the handle using
  *                              @ref ucp_request_free "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_get_nb(ucp_ep_h ep, void *buffer, size_t length,
-                            uint64_t remote_addr, ucp_rkey_h rkey,
-                            ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_get_nb(ucp_ep_h ep, void* buffer, size_t length, uint64_t remote_addr,
+           ucp_rkey_h rkey, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_COMM
@@ -1280,14 +1259,14 @@ ucs_status_ptr_t ucp_get_nb(ucp_ep_h ep, void *buffer, size_t length,
  * performed by the ucp_atomic_post family of functions. All of these are
  * non-fetching atomics and will not result in a request handle.
  */
-typedef enum {
+typedef enum
+{
     UCP_ATOMIC_POST_OP_ADD, /**< Atomic add */
     UCP_ATOMIC_POST_OP_AND, /**< Atomic and */
     UCP_ATOMIC_POST_OP_OR,  /**< Atomic or  */
     UCP_ATOMIC_POST_OP_XOR, /**< Atomic xor */
     UCP_ATOMIC_POST_OP_LAST
 } ucp_atomic_post_op_t;
-
 
 /**
  * @ingroup UCP_COMM
@@ -1313,9 +1292,9 @@ typedef enum {
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_atomic_post(ucp_ep_h ep, ucp_atomic_post_op_t opcode, uint64_t value,
-                             size_t op_size, uint64_t remote_addr, ucp_rkey_h rkey);
-
+ucs_status_t
+ucp_atomic_post(ucp_ep_h ep, ucp_atomic_post_op_t opcode, uint64_t value, size_t op_size,
+                uint64_t remote_addr, ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_COMM
@@ -1327,7 +1306,8 @@ ucs_status_t ucp_atomic_post(ucp_ep_h ep, ucp_atomic_post_op_t opcode, uint64_t 
  * by the ucp_atomic_fetch family of functions. All of these functions
  * will fetch data from the remote node.
  */
-typedef enum {
+typedef enum
+{
     UCP_ATOMIC_FETCH_OP_FADD,  /**< Atomic Fetch and add    */
     UCP_ATOMIC_FETCH_OP_SWAP,  /**< Atomic swap             */
     UCP_ATOMIC_FETCH_OP_CSWAP, /**< Atomic conditional swap */
@@ -1336,7 +1316,6 @@ typedef enum {
     UCP_ATOMIC_FETCH_OP_FXOR,  /**< Atomic Fetch and xor    */
     UCP_ATOMIC_FETCH_OP_LAST
 } ucp_atomic_fetch_op_t;
-
 
 /**
  * @ingroup UCP_COMM
@@ -1356,7 +1335,8 @@ typedef enum {
  * @a cb is @b not invoked. If the operation is @b not completed immediately and no
  * error is reported, then the UCP library will schedule invocation of the call-back
  * routine @a cb upon completion of the atomic operation. In other words, the completion
- * of an atomic operation can be signaled by the return code or execution of the call-back.
+ * of an atomic operation can be signaled by the return code or execution of the
+ * call-back.
  *
  * @note The user should not modify any part of the @a result after this
  *       operation is called, until the operation completes.
@@ -1388,11 +1368,9 @@ typedef enum {
  *                              @ref ucp_request_free "ucp_request_free()" routine.
  */
 ucs_status_ptr_t
-ucp_atomic_fetch_nb(ucp_ep_h ep, ucp_atomic_fetch_op_t opcode,
-                    uint64_t value, void *result, size_t op_size,
-                    uint64_t remote_addr, ucp_rkey_h rkey,
+ucp_atomic_fetch_nb(ucp_ep_h ep, ucp_atomic_fetch_op_t opcode, uint64_t value,
+                    void* result, size_t op_size, uint64_t remote_addr, ucp_rkey_h rkey,
                     ucp_send_callback_t cb);
-
 
 /**
  * @ingroup UCP_WORKER
@@ -1425,37 +1403,36 @@ ucp_atomic_fetch_nb(ucp_ep_h ep, ucp_atomic_fetch_op_t opcode,
  *                          using @ref ucp_request_free "ucp_request_free()"
  *                          routine.
  */
-ucs_status_ptr_t ucp_worker_flush_nb(ucp_worker_h worker, unsigned flags,
-                                     ucp_send_callback_t cb);
-
+ucs_status_ptr_t
+ucp_worker_flush_nb(ucp_worker_h worker, unsigned flags, ucp_send_callback_t cb);
 
 /**
  * @ingroup UCP_ENDPOINT
  * @brief Close UCP endpoint modes.
- * 
+ *
  * @deprecated Use @ref ucp_ep_close_nbx and @ref ucp_ep_close_flags_t instead.
  *
  * The enumeration is used to specify the behavior of @ref ucp_ep_close_nb.
  */
-enum ucp_ep_close_mode {
-    UCP_EP_CLOSE_MODE_FORCE         = 0, /**< @ref ucp_ep_close_nb releases
-                                              the endpoint without any
-                                              confirmation from the peer. All
-                                              outstanding requests will be
-                                              completed with
-                                              @ref UCS_ERR_CANCELED error.
-                                              @note This mode may cause
-                                              transport level errors on remote
-                                              side, so it requires set
-                                              @ref UCP_ERR_HANDLING_MODE_PEER
-                                              for all endpoints created on
-                                              both (local and remote) sides to
-                                              avoid undefined behavior. */
-    UCP_EP_CLOSE_MODE_FLUSH         = 1  /**< @ref ucp_ep_close_nb schedules
-                                              flushes on all outstanding
-                                              operations. */
+enum ucp_ep_close_mode
+{
+    UCP_EP_CLOSE_MODE_FORCE = 0, /**< @ref ucp_ep_close_nb releases
+                                      the endpoint without any
+                                      confirmation from the peer. All
+                                      outstanding requests will be
+                                      completed with
+                                      @ref UCS_ERR_CANCELED error.
+                                      @note This mode may cause
+                                      transport level errors on remote
+                                      side, so it requires set
+                                      @ref UCP_ERR_HANDLING_MODE_PEER
+                                      for all endpoints created on
+                                      both (local and remote) sides to
+                                      avoid undefined behavior. */
+    UCP_EP_CLOSE_MODE_FLUSH = 1  /**< @ref ucp_ep_close_nb schedules
+                                      flushes on all outstanding
+                                      operations. */
 };
-
 
 END_C_DECLS
 

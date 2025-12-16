@@ -960,10 +960,7 @@ target_include_directories(
 )
 
 find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-target_include_directories(
-    rocprofiler-systems-ucx
-    INTERFACE ${UCX_HEADERS_INCLUDE_DIR}
-)
+target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------------------#
 #

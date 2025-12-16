@@ -14,7 +14,9 @@ include(FindPackageHandleStandardArgs)
 
 set(UCX_HEADERS_INCLUDE_DIR_INTERNAL
     "${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/tpls/ucx"
-    CACHE PATH "Path to internal UCX headers")
+    CACHE PATH
+    "Path to internal UCX headers"
+)
 
 # ----------------------------------------------------------------------------------------#
 # Find UCX headers (ucp.h and uct.h are under ucx/ subdirectory)
@@ -31,7 +33,10 @@ if(NOT EXISTS "${UCX_HEADERS_INCLUDE_DIR}")
     )
     set(UCX_HEADERS_INCLUDE_DIR
         "${UCX_HEADERS_INCLUDE_DIR_INTERNAL}"
-        CACHE PATH "Path to UCX headers" FORCE)
+        CACHE PATH
+        "Path to UCX headers"
+        FORCE
+    )
 else()
     rocprofiler_systems_message(STATUS "UCX headers found: ${UCX_HEADERS_INCLUDE_DIR}")
 endif()
@@ -48,7 +53,8 @@ if(UCX_FOUND)
     add_library(roc::ucx-headers INTERFACE IMPORTED)
     target_include_directories(
         roc::ucx-headers
-        SYSTEM INTERFACE ${UCX_HEADERS_INCLUDE_DIR}
+        SYSTEM
+        INTERFACE ${UCX_HEADERS_INCLUDE_DIR}
     )
 endif()
 
