@@ -1233,7 +1233,6 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
-  ptrDispatchTable->hipModuleGetLoadingMode_fn = hip::hipModuleGetLoadingMode;
   ptrDispatchTable->hipModuleGetGlobal_fn = hip::hipModuleGetGlobal;
   ptrDispatchTable->hipModuleGetTexRef_fn = hip::hipModuleGetTexRef;
   ptrDispatchTable->hipModuleLaunchCooperativeKernel_fn = hip::hipModuleLaunchCooperativeKernel;
@@ -1434,6 +1433,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetName_fn = hip::hipKernelGetName;
   ptrDispatchTable->hipOccupancyAvailableDynamicSMemPerBlock_fn = hip::hipOccupancyAvailableDynamicSMemPerBlock;
   ptrDispatchTable->hipKernelGetParamInfo_fn = hip::hipKernelGetParamInfo;
+  ptrDispatchTable->hipModuleGetLoadingMode_fn = hip::hipModuleGetLoadingMode;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2126,7 +2126,7 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipModuleGetLoadingMode_fn, 508);
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
 HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 509)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 20,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 21,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
