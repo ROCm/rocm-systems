@@ -2478,10 +2478,12 @@ void Runtime::Unload() {
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
 
-  DestroyAgents();
-
+  // Clear signal and event pools before destroying agents, since the pools
+  // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
   EventPool.clear();
+
+  DestroyAgents();
 
   CloseTools();
   
