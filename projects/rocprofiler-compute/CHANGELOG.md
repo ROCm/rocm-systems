@@ -19,7 +19,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * kernel: Counters are collected in a round robin fashion for unique kernels.
     * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
 
-* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+* Runtime compilation of Roofline benchmarking:
+  * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
+  * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed from the project, as Roofline runtime compilation performs the same work as the Roofline binaries.
+  * You can collect standalone Roofline empirical peaks without running the entire ROCm Compute Profiler's profile mode, through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Running the `benchmark.py` Python file replaces calling standalone Roofline binary.
 
 ### Changed
 
@@ -38,6 +41,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
+* Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
+  * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
+
+### Removed
+
+* Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added
@@ -51,6 +61,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Adds support for dispatch timeline analysis.
   * Shows duration as median in addition to mean in kernel view.
 
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
+
 ### Changed
 
 * `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
@@ -62,6 +76,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Empty cells replaced with `N/A` for unavailable metrics in analysis.
 
 
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
+
 ### Removed
 
 * Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
@@ -72,7 +90,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
+
 ### Known issues
+
+#### Negative Values in Analyze Mode
+
+Negative counter values occur due to timing mismatches in asynchronous hardware performance counters during multi-pass profiling, which is required due to hardware limitations (e.g., perfmon_config constraints).
+
+An initial fix was implemented to clamp all negative values to zero using MAX(difference, 0), eliminating invalid results but potentially masking significant anomalies.
+
+Negative values, when clamped, typically align with expected results and do not interfere with the overall accuracy or general average output in hardware counter profiling. This is because the variance caused by timing mismatches is typically minimal and does not significantly impact the profiling data.
+
+A proposed long-term solution uses threshold-based clamping, distinguishing between minor noise and significant deviations, with warnings for larger issues.
 
 ### Upcoming changes
 

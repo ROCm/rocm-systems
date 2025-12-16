@@ -260,7 +260,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
     fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
     std::ifstream file(fullpath.c_str(), std::ifstream::in);
     if (!file.is_open()) {
-        return AMDSMI_STATUS_API_FAILED;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     file.getline(val, DATA_SIZE);
@@ -616,12 +616,9 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
     std::strncpy(version, empty.c_str(), len-1);
     openFileAndModifyBuffer("/sys/module/amdgpu/version",
                                       version, static_cast<size_t>(len));
-    if (version[0] == '\0') {
-        openFileAndModifyBuffer("/proc/version", version, static_cast<size_t>(len));
-        if (version[0] == '\0') {
-            return AMDSMI_STATUS_IO;
-        }
-    }
+    if (version[0] == '\0')
+        return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+
     return status;
 }
 
@@ -791,6 +788,25 @@ std::string smi_amdgpu_split_string(std::string str, char delim) {
     return token;  // return 1st match
   }
   return "";
+}
+
+// Split string at delimiter and return strings in vector
+std::vector<std::string> split_string(const std::string& line, char delim) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+
+  while (start < line.size()) {
+    auto pos = line.find(delim, start);
+    if (pos == std::string::npos) {
+        pos = line.size();
+    }
+    std::string token = trim(line.substr(start, pos - start));
+    if (!token.empty()) {
+        out.push_back(token);
+    }
+    start = pos + 1;
+  }
+  return out;
 }
 
 // wrapper to return string expression of a rsmi_status_t return
@@ -1012,8 +1028,8 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
     amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << 
-            "Failed to retrieve product serial number! error: " << 
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            "Failed to retrieve product serial number! error: " <<
             static_cast<int>(status);
         LOG_DEBUG(ss);
         return serial_number;

@@ -32,10 +32,8 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
@@ -82,36 +80,65 @@ def check_file_pattern(pattern, file_path):
     return len(re.findall(pattern, content)) != 0
 
 
-def get_output_dir(suffix="_output", clean_existing=True):
+def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     """
     Provides a unique output directory based on the name of the calling test function
-    with a suffix applied.
+    with a suffix applied. For parametrized tests, pass param_id to ensure unique
+    directory names and avoid NFS conflicts.
 
     Args:
         suffix (str, optional): suffix to append to output_dir.
             Defaults to "_output".
         clean_existing (bool, optional): Whether to remove existing directory if exists.
             Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    param_suffix = ""
+    if param_id:
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
 
 
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True):
-    """Provides a unique input workoad directory with contents of input_dir
-    based on the name of the calling test function.
+def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
+    """Provides a unique input workload directory with contents of input_dir
+    based on the name of the calling test function. For parametrized tests,
+    pass param_id to ensure unique directory names and avoid NFS conflicts.
 
     Setup is a NOOP when tests run serially.
+
+    Args:
+        input_dir (str): Source directory to copy from.
+        suffix (str, optional): suffix to append to output_dir.
+            Defaults to "_tmp".
+        clean_existing (bool, optional): Whether to remove existing directory if exists.
+            Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
     if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
         return input_dir
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    # Include param_id in directory name if provided
+    param_suffix = ""
+    if param_id:
+        # Sanitize param_id: replace special chars that may not be valid in paths
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
@@ -4429,877 +4456,6 @@ def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch
         utils_mod.process_hip_trace_output(workload_dir, fbase)
 
 
-# ==============================================================================
-# ROOFLINE DETECTION TESTS
-# ==============================================================================
-
-
-def test_ubuntu_detection(monkeypatch):
-    """
-    Test Ubuntu detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies Ubuntu and
-        returns the appropriate distro
-    """
-    mock_os_release = "ID=ubuntu\nID_LIKE=debian"
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "ID_LIKE" in pattern:
-            return "debian"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    # Create an object with attribute value = 1
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-def test_debian_detection(monkeypatch):
-    """
-    Test Debian detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies Debian
-        and returns the appropriate distro
-    """
-    mock_os_release = "ID=debian"
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "ID" in pattern:
-            return "debian"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    # Create an object with attribute value = 1
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-def test_rhel_detection(monkeypatch):
-    """
-    Test RHEL distro detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies RHEL
-        and returns the appropriate distro
-    """
-    mock_os_release = 'ID_LIKE="rhel fedora"\nID="rhel"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    def mock_search(pattern, text):
-        if "ID_LIKE" in pattern:
-            return "rhel fedora"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="7.x.x"))
-
-    assert result["rocm_ver"] == 7
-
-
-def test_azl_detection(monkeypatch):
-    """
-    Test Azure Linux distro detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies AZL
-        and returns the appropriate distro
-    """
-    mock_os_release = "ID=azurelinux"
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    def mock_search(pattern, text):
-        if "ID" in pattern:
-            return "azurelinux"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="7.x.x"))
-
-    assert result["rocm_ver"] == 7
-
-
-def test_sles_detection(monkeypatch):
-    """
-    Test SLES detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies SLES
-        and returns the appropriate distro
-    """
-    mock_os_release = 'ID="opensuse-leap"\nID_LIKE="suse opensuse"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "ID_LIKE" in pattern:
-            return "suse openuse"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-# =============================================================================
-# TESTS FOR MIBENCH OUTPUT
-# =============================================================================
-
-
-def test_mibench_override_distro_success(tmp_path, monkeypatch):
-    """
-    Test mibench with override distro that successfully finds and executes binary.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that override path is used and subprocess is called correctly.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "custom_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    expected_args = [  # noqa
-        str(override_binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "0",
-    ]
-    assert subprocess_calls[0][1] is True
-
-
-def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
-    """
-    Test mibench with standard distro where first potential path exists.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that first path is used when it exists.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 1
-        quiet = True
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-ubuntu22_04"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "22.04", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-
-
-def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
-    """
-    Test mibench with standard distro where second potential path exists.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that second path is used when first doesn't exist.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 2
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    second_path = install_root / "bin"
-    second_path.mkdir(parents=True)
-    binary_path = second_path / "roofline-rhel8"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "platform:el8", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    expected_args = [  # noqa: F841
-        str(binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "2",
-    ]
-
-
-def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
-    """
-    Test mibench when no binary paths exist, should call console_error.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that console_error is called when no binaries are found.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "15.6", "rocm_ver": "0.x.x"}
-
-    console_error_calls = []
-
-    def mock_console_error(category, msg):
-        console_error_calls.append((category, msg))
-        raise RuntimeError("console_error called")
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(RuntimeError, match="console_error called"):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(console_error_calls) == 1
-    assert console_error_calls[0][0] == "roofline"
-    assert "Unable to locate expected binary" in console_error_calls[0][1]
-
-
-def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
-    """
-    Test mibench quiet flag handling demonstrates the bug where += splits the string.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that the bug exists and characters are split.
-    """
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-ubuntu22_04"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "22.04", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    class MockArgsQuiet:
-        path = str(tmp_path)
-        device = 0
-        quiet = True
-
-    class MockMspecQuiet:
-        pass
-
-    utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
-
-    expected_base_args = [
-        str(binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "0",
-    ]
-    expected_full_args = expected_base_args + [  # noqa: F841
-        "-",
-        "-",
-        "q",
-        "u",
-        "i",
-        "e",
-        "t",
-    ]
-
-    subprocess_calls.clear()
-
-    class MockArgsNotQuiet:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspecNotQuiet:
-        pass
-
-    utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
-
-    expected_args = [  # noqa: F841
-        str(binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "0",
-    ]
-
-
-def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
-    """
-    Test mibench with SLES distro mapping.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that SLES distro is correctly mapped.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 3
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-sles15sp6"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "15.6", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-
-
-def test_mibench_subprocess_run_failure(tmp_path, monkeypatch):
-    """
-    Test mibench when subprocess.run raises an exception.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that subprocess exceptions are properly propagated.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "failing_roofline"
-    override_binary_path.write_text("#!/bin/bash\nexit 1")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    def mock_subprocess_run(args, check=True):
-        raise subprocess.CalledProcessError(1, args)
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(subprocess.CalledProcessError):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-
-def test_mibench_device_string_conversion(tmp_path, monkeypatch):
-    """
-    Test mibench correctly converts device ID to string.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that device ID is converted to string in subprocess args.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 42
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "test_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'success'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append(args)
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    device_arg_index = subprocess_calls[0].index("-d") + 1
-    assert subprocess_calls[0][device_arg_index] == "42"
-    assert isinstance(subprocess_calls[0][device_arg_index], str)
-
-
-def test_mibench_unknown_distro_mapping(tmp_path, monkeypatch):
-    """
-    Test mibench behavior with unknown distro (should cause KeyError).
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that KeyError is raised for unknown distro.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "unknown_distro", "rocm_ver": "0.x.x"}  # Not in distro_map
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(KeyError):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-
-def test_mibench_console_log_called(tmp_path, monkeypatch):
-    """
-    Test mibench calls console_log with correct message.
-
-    Args:
-        tmp_path (Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that console_log is called with expected message.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "test_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'success'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    console_log_calls = []
-
-    def mock_console_log(category, message):
-        console_log_calls.append((category, message))
-
-    def mock_subprocess_run(args, check=True):
-        pass
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", mock_console_log)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(console_log_calls) == 1
-    assert console_log_calls[0][0] == "roofline"
-    assert console_log_calls[0][1] == "No roofline data found. Generating..."
-
-
 """
 Normal Functionality:
 
@@ -8552,7 +7708,9 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
 
 
 def test_amdsmi_ctx():
-    from utils.amdsmi_interface import amdsmi_ctx
+    from utils.amdsmi_interface import amdsmi_ctx, import_amdsmi_module
+
+    _ = import_amdsmi_module()
 
     with mock.patch("amdsmi.amdsmi_init") as amdsmi_init_mock:
         with mock.patch("amdsmi.amdsmi_shut_down") as amdsmi_shutdown_mock:
@@ -8561,37 +7719,50 @@ def test_amdsmi_ctx():
             amdsmi_shutdown_mock.assert_called_once()
 
 
-def test_get_device_handle():
-    from utils.amdsmi_interface import get_device_handle
+def test_amdsmi_get_device_handles():
+    from utils.amdsmi_interface import get_device_handles, import_amdsmi_module
+
+    _ = import_amdsmi_module()
 
     with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
-        get_device_handle()
+        handles = get_device_handles()
+        assert handles[0] == 12345
         device_handles_mock.assert_called_once()
 
     with mock.patch(
         "amdsmi.amdsmi_get_processor_handles", side_effect=Exception("Mock exception")
     ) as device_handles_mock:
-        handle = get_device_handle()
-        assert handle is None
+        handle = get_device_handles()
+        assert len(handle) == 0
 
 
-def test_get_mem_max_clock():
-    from utils.amdsmi_interface import get_mem_max_clock
+def test_amdsmi_get_mem_max_clock():
+    from utils.amdsmi_interface import get_mem_max_clock, import_amdsmi_module
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
-        device_handles_mock.return_value = [12345]
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [0, 4567]
         with mock.patch("amdsmi.amdsmi_get_clock_info") as mem_max_clock_mock:
-            mem_max_clock_mock.return_value = {"max_clk": 100}
+
+            def side_effect(handle, *args, **kwargs):
+                if handle == 0:
+                    raise Exception("Invalid handle: 0")
+                return {"max_clk": 100}
+
+            mem_max_clock_mock.side_effect = side_effect
             clk = get_mem_max_clock()
-            mem_max_clock_mock.assert_called_once()
+            assert mem_max_clock_mock.call_count == 2
             assert clk == 100
 
 
-def test_get_gpu_model():
-    from utils.amdsmi_interface import get_gpu_model
+def test_amdsmi_get_gpu_model():
+    from utils.amdsmi_interface import get_gpu_model, import_amdsmi_module
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_board_info") as device_name_mock:
             with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as asic_name_mock:
@@ -8607,13 +7778,15 @@ def test_get_gpu_model():
             "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")
         ):
             model = get_gpu_model()
-            assert model == "N/A"
+            assert model == ("N/A", "N/A", "N/A")
 
 
-def test_get_gpu_vbios_part_number():
-    from utils.amdsmi_interface import get_gpu_vbios_part_number
+def test_amdsmi_get_gpu_vbios_part_number():
+    from utils.amdsmi_interface import get_gpu_vbios_part_number, import_amdsmi_module
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_part_number_mock:
             vbios_part_number_mock.return_value = {
@@ -8630,10 +7803,12 @@ def test_get_gpu_vbios_part_number():
             assert part_number == "N/A"
 
 
-def test_get_gpu_compute_partition():
-    from utils.amdsmi_interface import get_gpu_compute_partition
+def test_amdsmi_get_gpu_compute_partition():
+    from utils.amdsmi_interface import get_gpu_compute_partition, import_amdsmi_module
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_compute_partition"
@@ -8651,10 +7826,12 @@ def test_get_gpu_compute_partition():
             assert partition == "N/A"
 
 
-def test_get_gpu_memory_partition():
-    from utils.amdsmi_interface import get_gpu_memory_partition
+def test_amdsmi_get_gpu_memory_partition():
+    from utils.amdsmi_interface import get_gpu_memory_partition, import_amdsmi_module
 
-    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
         device_handles_mock.return_value = [12345]
         with mock.patch(
             "amdsmi.amdsmi_get_gpu_memory_partition"
@@ -8790,3 +7967,48 @@ def test_merge_counters_iteration_multiplex():
     assert "Mean_Time" in column_headers
     assert "Median_Time" in column_headers
     assert len(result) == 3
+
+
+# =============================================================================
+# validate_roofline_csv TESTS
+# =============================================================================
+
+
+def test_validate_roofline_csv_valid():
+    """
+    Test validate_roofline_csv returns True for a valid roofline.csv file.
+    Creates a temporary directory with a properly formatted CSV.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n"
+            "0,1000.0,2000.0,3000.0,4000.0,5000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is True
+        assert error_msg == ""
+
+
+def test_validate_roofline_csv_invalid_inconsistent_columns():
+    """
+    Test validate_roofline_csv returns False for a CSV with inconsistent row lengths.
+    This simulates corrupted or incomplete benchmark data.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n0,1000.0,2000.0,3000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is False
+        assert "Inconsistent row length" in error_msg
+        assert "row 2" in error_msg

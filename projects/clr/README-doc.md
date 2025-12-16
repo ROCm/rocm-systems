@@ -4,9 +4,9 @@ AMD CLR (Compute Language Runtime) contains source codes for AMD's compute langu
 
 ## Project Organisation
 
-- `hipamd` - contains implementation of `HIP` language on AMD platform. It is hosted at [ROCm/clr/hipamd](https://github.com/ROCm/clr/tree/develop/hipamd)
-- `opencl` - contains implementation of [OpenCL™](https://www.khronos.org/opencl/) on AMD platform. Now it is hosted at [ROCm/clr/opencl](https://github.com/ROCm/clr/tree/develop/opencl)
-- `rocclr` - contains compute runtime used in `HIP` and `OpenCL™`. This is hosted at [ROCm/clr/rocclr](https://github.com/ROCm/clr/tree/develop/rocclr)
+- `hipamd` - contains implementation of `HIP` language on AMD platform. It is hosted at [hipamd](./hipamd)
+- `opencl` - contains implementation of [OpenCL™](https://www.khronos.org/opencl/) on AMD platform. Now it is hosted at [opencl](./opencl)
+- `rocclr` - contains compute runtime used in `HIP` and `OpenCL™`. This is hosted at [rocclr](./rocclr)
 
 ## How to build/install
 
@@ -27,7 +27,7 @@ If you need to build static clr library, `rocm-llvm-dev` package should be insta
 
     - `cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR -DHIPCC_BIN_DIR=$HIPCC_BIN_DIR`
 
-        - `HIP_COMMON_DIR` points to [HIP](https://github.com/ROCm/HIP)
+        - `HIP_COMMON_DIR` points to [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip)
 
         - `HIPCC_BIN_DIR` points to hipcc directory, if you have ROCm installed you can point it to `$ROCM_PATH/bin`
 
@@ -51,7 +51,7 @@ For detail instructions, please refer to [how to build HIP](https://rocm.docs.am
 
 ## Tests
 
-`hip-tests` is a separate repository hosted at [hip-tests](https://github.com/ROCm/hip-tests).
+`hip-tests` is a separate project hosted at [hip-tests](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip-tests).
 
 To run `hip-tests` please go to the repository and follow the steps.
 

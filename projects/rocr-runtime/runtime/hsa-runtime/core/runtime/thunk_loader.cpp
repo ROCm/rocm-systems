@@ -390,6 +390,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)dlsym(thunk_handle, "hsaKmtAisReadWriteFile");
       if (HSAKMT_PFN(hsaKmtAisReadWriteFile) == NULL) goto ERROR;
 
+      HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
+      if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == NULL) goto ERROR;
+
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(thunk_handle, "amdgpu_device_deinitialize");
       if (DRM_PFN(amdgpu_device_deinitialize) == NULL) goto ERROR;
 
@@ -410,6 +413,12 @@ namespace core {
 
       DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)dlsym(thunk_handle, "amdgpu_bo_va_op");
       if (DRM_PFN(amdgpu_bo_va_op) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_query_info) = (DRM_DEF(amdgpu_bo_query_info)*)dlsym(thunk_handle, "amdgpu_bo_query_info");
+      if (DRM_PFN(amdgpu_bo_query_info) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)dlsym(thunk_handle, "amdgpu_bo_set_metadata");
+      if (DRM_PFN(amdgpu_bo_set_metadata) == NULL) goto ERROR;
 
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(thunk_handle, "drmCommandWriteRead");
       if (DRM_PFN(drmCommandWriteRead) == NULL) goto ERROR;
@@ -515,6 +524,7 @@ ERROR:
 #endif
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
+      HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)(&hsaKmtGetMemoryHandle);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);
@@ -524,6 +534,8 @@ ERROR:
       DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);
       DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)(&amdgpu_bo_import);
       DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)(&amdgpu_bo_va_op);
+      DRM_PFN(amdgpu_bo_query_info) = (DRM_DEF(amdgpu_bo_query_info)*)(&amdgpu_bo_query_info);
+      DRM_PFN(amdgpu_bo_set_metadata) = (DRM_DEF(amdgpu_bo_set_metadata)*)(&amdgpu_bo_set_metadata);
 #if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif

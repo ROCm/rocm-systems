@@ -3,7 +3,7 @@ Upstream-Name: amdsmi
 Source: https://github.com/ROCm/amdsmi.git
 
 Files: *
-Copyright: @CURRENT_YEAR@ Advanced Micro Devices, Inc.
+Copyright: @CURRENT_YEAR@ Advanced Micro Devices, Inc. All rights reserved.
 License: MIT
 
 License: MIT

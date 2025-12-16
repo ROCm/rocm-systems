@@ -27,6 +27,7 @@
 #include "common/defines.h"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
@@ -127,7 +128,7 @@ experiment::sample::serialize(ArchiveT& ar, const unsigned)
 
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
     {
-        ar(cereal::make_nvp("dfunc", demangle(name)),
+        ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(name)),
            cereal::make_nvp("dwarf_info", std::vector<binary::dwarf_entry>{}));
     }
     ar(cereal::make_nvp("inlines", inlines));
@@ -140,7 +141,7 @@ std::string
 experiment::sample::get_identifier() const
 {
     return (lineno > 0 && !location.empty()) ? join(":", location, lineno)
-                                             : demangle(name);
+                                             : rocprofsys::utility::demangle(name);
 }
 
 template <typename ArchiveT>
@@ -391,7 +392,7 @@ experiment::as_string() const
         }
         return _v;
     };
-    auto _func = _patch(demangle(selection.symbol.func));
+    auto _func = _patch(rocprofsys::utility::demangle(selection.symbol.func));
     _ss << "['" << _func << "']";
 
     return _ss.str();
@@ -620,7 +621,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 as_hex(_line_info.address).c_str(), _line_info.file.c_str(),
                 _line_info.line, _line_info.func.c_str());
 
-            ofs << "experiment\tselected=" << demangle(_name)
+            ofs << "experiment\tselected=" << rocprofsys::utility::demangle(_name)
                 << "\tspeedup=" << std::setprecision(2)
                 << static_cast<double>(itr.virtual_speedup / 100.0)
                 << "\tduration=" << itr.duration << "\tselected-samples=" << itr.selected
@@ -637,7 +638,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 if(pitr.second.is_throughput_point() && pitr.second.get_delta() != 0)
                 {
                     ofs << "throughput-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tdelta=" << pitr.second.get_delta() << "\n";
                     if(get_causal_end_to_end()) break;
                 }
@@ -646,7 +648,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                     if(get_causal_end_to_end()) continue;
                     auto _delta = std::max<int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
-                        << tim::demangle(tim::get_hash_identifier(pitr.first))
+                        << rocprofsys::utility::demangle(
+                               tim::get_hash_identifier(pitr.first))
                         << "\tarrivals=" << pitr.second.get_arrival()
                         << "\tdepartures=" << pitr.second.get_departure()
                         << "\tdifference=" << _delta << "\n";

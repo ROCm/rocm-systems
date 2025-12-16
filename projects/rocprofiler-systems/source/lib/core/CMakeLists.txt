@@ -48,22 +48,23 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
 )
 
 set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/debug.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
@@ -79,9 +80,6 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
 )
 
 add_library(rocprofiler-systems-core-library STATIC)
@@ -139,3 +137,7 @@ set_target_properties(
     rocprofiler-systems-core-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

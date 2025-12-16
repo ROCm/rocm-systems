@@ -72,7 +72,7 @@ config["METRIC_LOGGING"] = False
 num_kernels = 3
 num_devices = 1
 
-attach_detach_interval_msec_no_delay = 10000
+attach_detach_interval_msec_no_delay = 1000
 attach_detach_interval_msec_with_delay = 60000
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
@@ -1032,49 +1032,59 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
 
 
 @pytest.mark.roofline_2
-def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
+@pytest.mark.parametrize(
+    "options,expected_files,test_id",
+    [
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
+            ["empirRoof_gpu-0_FP32.pdf"],
+            "FP32_datatype",
+        ),
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
+            ["empirRoof_gpu-0_FP16.pdf"],
+            "FP16_datatype",
+        ),
+        (
+            ["--device", "0", "--roof-only", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
+            ["EXPECTED_FILE_PLACEHOLDER"],
+            "kernel_filter",
+        ),
+    ],
+    ids=["FP32_datatype", "FP16_datatype", "kernel_filter"],
+)
+def test_roof_plot_modes(
+    binary_handler_profile_rocprof_compute, options, expected_files, test_id
+):
     if soc in ("MI100"):
-        assert True
+        pytest.skip("Skipping roofline test for MI100")
         return
 
+    # Handle dynamic kernel name substitution for the kernel_filter test case
+    options = [
+        config["kernel_name_1"] if opt == "KERNEL_NAME_PLACEHOLDER" else opt
+        for opt in options
+    ]
     # Test `--kernel` filtering outputs are present and labelled correctly
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
-
-    plot_configurations = [
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            "expected_files": ["empirRoof_gpu-0_FP32.pdf"],
-        },
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
-        },
-        {
-            "options": [
-                "--device",
-                "0",
-                "--roof-only",
-                "--kernel",
-                config["kernel_name_1"],
-            ],
-            "expected_files": [filter_empirRoof],
-        },
+    expected_files = [
+        filter_empirRoof if f == "EXPECTED_FILE_PLACEHOLDER" else f
+        for f in expected_files
     ]
 
-    for config_test in plot_configurations:
-        workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id=test_id)
 
-        returncode = binary_handler_profile_rocprof_compute(
-            config, workload_dir, config_test["options"], check_success=False, roof=True
-        )
-        assert returncode == 0
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+    assert returncode == 0
 
-        for expected_file in config_test["expected_files"]:
-            expected_path = os.path.join(workload_dir, expected_file)
-            if os.path.exists(expected_path):
-                assert os.path.getsize(expected_path) > 0
+    for expected_file in expected_files:
+        expected_path = os.path.join(workload_dir, expected_file)
+        if os.path.exists(expected_path):
+            assert os.path.getsize(expected_path) > 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.roofline_2
@@ -2072,52 +2082,43 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
+
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+    try:
+        # Start workload
+        process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_no_delay,
+        }
 
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+        # Run profiler (might fail / timeout / throw)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
         )
-        process_workload.kill()
-        process_workload.wait()
 
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate results
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    assert test_utils.check_file_pattern(
-        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2129,38 +2130,43 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
 def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
+
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(
-        [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
-    )
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_with_delay
-
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
-
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+    try:
+        # Start workload with sleep mode enabled
+        process_workload = subprocess.Popen(
+            [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
         )
-        process_workload.kill()
-        process_workload.wait()
 
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_with_delay,
+        }
+
+        # Main profiling call (can fail or hang)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
+        )
+
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate output
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
         inspect.stack()[0][3],
@@ -2168,15 +2174,11 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
         file_dict,
     )
 
-    assert test_utils.check_file_pattern(
-        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
+    # Check profiling_config.yaml block entries
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    assert test_utils.check_file_pattern("- 3.1.1", config_file)
+    assert test_utils.check_file_pattern("- 4.1.1", config_file)
+    assert test_utils.check_file_pattern("- 5.1.1", config_file)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2192,31 +2194,35 @@ def test_live_attach_detach_singlepath_launch_stats(
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+    try:
+        # Start workload
+        process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_no_delay,
+        }
 
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+        # Profiling step (may fail)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
         )
-        process_workload.kill()
-        process_workload.wait()
 
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate CSVs & output correctness
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
         inspect.stack()[0][3],
@@ -2224,30 +2230,20 @@ def test_live_attach_detach_singlepath_launch_stats(
         file_dict,
     )
 
-    assert test_utils.check_file_pattern(
-        "- 7.1.0", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.2", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.5", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.6", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.7", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.8", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.9", f"{workload_dir}/profiling_config.yaml"
-    )
+    # Check that launch-stat sets were applied
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    for tag in [
+        "7.1.0",
+        "7.1.1",
+        "7.1.2",
+        "7.1.5",
+        "7.1.6",
+        "7.1.7",
+        "7.1.8",
+        "7.1.9",
+    ]:
+        assert test_utils.check_file_pattern(f"- {tag}", config_file)
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
