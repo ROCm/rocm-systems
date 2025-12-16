@@ -125,7 +125,78 @@ TEST_CASE("Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device") 
     HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
   }
 }
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case will verify the functionality of hipIpcOpenMemHandle and
+ *  hipIpcGetMemHandle APIs using stream capture apis, mode of capture stream
+ *  is hipStreamCaptureModeRelaxed, hipStreamCaptureModeThreadLocal,
+ *  hipStreamCaptureModeGlobal.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipIpcOpenMemHandle.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific (LINUX)
+ *  - HIP_VERSION >= 6.5
+ */
+TEST_CASE("Unit_hipIpcOpenMemHandle_streamCapture") {
+  int fd[2];
+  REQUIRE(pipe(fd) == 0);
+  hipStreamCaptureMode mode = GENERATE(
+        hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+  auto pid = fork();
+  REQUIRE(pid >= 0);
+  if (pid == 0) {  // child
+    REQUIRE(close(fd[1]) == 0);
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, mode));
 
+    hipIpcMemHandle_t handle;
+    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[0]) == 0);
+
+    hipDeviceptr_t ptr_child;
+    HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void **>(&ptr_child), handle,
+                                  hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcCloseMemHandle(reinterpret_cast<void *>(ptr_child)));
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    exit(0);
+  } else {  // parent
+    REQUIRE(close(fd[0]) == 0);
+    hipDeviceptr_t ptr;
+    hipIpcMemHandle_t handle;
+    HIP_CHECK(hipMalloc(reinterpret_cast<void **>(&ptr), 1024));
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipStreamBeginCapture(stream, mode));
+
+    HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void *>(ptr)));
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+
+    REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[1]) == 0);
+
+    REQUIRE(wait(NULL) >= 0);
+
+    HIP_CHECK(hipFree(reinterpret_cast<void *>(ptr)));
+  }
+}
 /**
  * End doxygen group DeviceTest.
  * @}
