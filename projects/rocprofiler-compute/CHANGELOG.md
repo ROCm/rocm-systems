@@ -41,7 +41,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
 
 * Analysis mode bugfixes
-  * Improved warnings when metrics could not be calculated due to missing couter data
+  * Improved warnings when metrics could not be calculated due to missing counter data
   * Fix the check to prevent showing table where a column is full of N/A
   * Improve detection of empty values when metric evalulation fails due to counter data missing
 

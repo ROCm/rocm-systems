@@ -196,7 +196,7 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, pd.Series, None]:
+) -> Union[int, float, pd.Series, None]:
     if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, (int, float, np.integer)):
