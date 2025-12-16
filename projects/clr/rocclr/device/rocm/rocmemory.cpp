@@ -202,14 +202,16 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 }
 
 // ================================================================================================
-hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
+hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_handle_type_t handleType) {
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
   void* metadata;
   auto fd = fdn;
-  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, 0, &size, &interop_deviceMemory_,
-                                                &metadata_size, (const void**)&metadata);
+  hsa_resource_handle_t resourceHandle = {.type = handleType, .handle = fd};
+  hsa_status_t status =
+      Hsa::interop_map_buffer(1, &agent, resourceHandle, &size, &interop_deviceMemory_,
+                              &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
@@ -234,8 +236,8 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   hsa_handle_t handle;
   int offset;
 
-  if (!GlInterop::glExport(owner(), targetType, miplevel, &handle, &offset)) return false;
-  if (interopMapBuffer(handle) != HSA_STATUS_SUCCESS) return false;
+  if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &offset)) return false;
+  if (interopMapBuffer(handle, HSA_HANDLE_TYPE_KMT) != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   return true;
@@ -287,9 +289,9 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
       return false;
   }
 
-  if (interopMapBuffer(out.dmabuf_fd) != HSA_STATUS_SUCCESS) return false;
-
+  hsa_status_t status = interopMapBuffer(out.dmabuf_fd, HSA_HANDLE_TYPE_FD);
   close(out.dmabuf_fd);
+  if (status != HSA_STATUS_SUCCESS) return false;
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + out.buf_offset;
 
   return true;
@@ -904,9 +906,7 @@ bool Buffer::create(bool alloc_local) {
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      hsa_status_t status = interopMapBuffer(ext_memory->Handle());
-      if (status != HSA_STATUS_SUCCESS) return false;
-      return true;
+      return interopMapBuffer(ext_memory->Handle(), HSA_HANDLE_TYPE_NT) == HSA_STATUS_SUCCESS;
     } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }

@@ -126,7 +126,9 @@ class Memory : public device::Memory {
 
   // Free / deregister device memory.
   virtual void destroy() = 0;
-  hsa_status_t interopMapBuffer(amd::Os::FileDesc fdn);
+
+  // Map interop buffer
+  hsa_status_t interopMapBuffer(hsa_handle_t fdn, hsa_handle_type_t handleType);
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);

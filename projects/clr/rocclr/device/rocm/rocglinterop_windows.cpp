@@ -23,6 +23,7 @@
 #include "utils/flags.hpp"
 #include "device/rocm/rocglinterop.hpp"
 #include "GL/gl_interop.h"
+#include "platform/interop_gl.hpp"
 
 namespace amd::roc {
 namespace GlInterop {
@@ -157,8 +158,7 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool glExport(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,
-              int* offset) {
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset) {
   const auto* obj = mem->getInteropObj()->asGLObject();
   const auto GLContext = mem->getContext().info().hCtx_;
   const auto name = static_cast<uint>(obj->getGLName());
@@ -170,7 +170,7 @@ bool glExport(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* h
   const GLResource hRes = {.type = type, .name = name};
   GLResourceData hData = {.version = GL_RESOURCE_DATA_VERSION};
 
-  if (!wglResourceAttachAMD(hRC, &hRes, &hData)) return false;
+  if (!wglResourceAttachAMD(hRC, const_cast<GLvoid*>(static_cast<const GLvoid*>(&hRes)), &hData)) return false;
 
   *handle = reinterpret_cast<hsa_handle_t>(hData.handle);
   *offset = static_cast<size_t>(hData.offset);
