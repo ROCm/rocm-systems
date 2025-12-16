@@ -588,7 +588,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
                                            kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
   {"rsmi_dev_vbios_version_get",         {{kDevVBiosVerFName}, {}}},
-  {"rsmi_dev_vbios_build_number_get",    {{kDevVBiosBuildFName}, {}}}, 
+  {"rsmi_dev_vbios_build_number_get",    {{kDevVBiosBuildFName}, {}}},
   {"rsmi_dev_od_volt_info_get",          {{kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_od_volt_info_set",          {{kDevPowerODVoltageFName,
                                            kDevPerfLevelFName},  {}}},
@@ -1245,7 +1245,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   if (type == DevInfoTypes::kDevGpuMetrics &&
       kGpuMetricsCacheDuration > std::chrono::milliseconds::zero()) {
     auto now = std::chrono::steady_clock::now();
-    
+
     std::lock_guard<std::mutex> lock(cache_ptr->mtx);
     cache_ptr->data.assign(
         reinterpret_cast<uint8_t*>(p_binary_data),
