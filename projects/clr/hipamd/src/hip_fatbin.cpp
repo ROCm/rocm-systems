@@ -376,10 +376,9 @@ static bool PopulateCodeObjectMap(
 
     for (const auto& item : query_list_array) {
       if (item.size > 0) {
-        char* d = new char[item.size];
-        std::memcpy(reinterpret_cast<void*>(d), reinterpret_cast<const char*>(image) + item.offset,
-                    item.size);
-        code_obj_map[item.isa] = std::make_pair(d, item.size);
+        // Map the offset pointer and size from the image
+        auto loc = reinterpret_cast<const char*>(image) + item.offset;
+        code_obj_map[item.isa] = std::make_pair(loc, item.size);
       }
     }
 
@@ -640,9 +639,13 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   } while (0);
 
-  // release code objects
-  for (const auto& co : code_obj_map) {
-    delete[] reinterpret_cast<const char*>(co.second.first);
+  // release code objects, only in case of compressed code object
+  // When code object is compressed we extract and copy the memory, but when it static code object,
+  // we use image pointer and its offset
+  if (is_compressed) {
+    for (const auto& co : code_obj_map) {
+      delete[] reinterpret_cast<const char*>(co.second.first);
+    }
   }
 
   return hip_status;
