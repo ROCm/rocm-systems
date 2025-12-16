@@ -61,6 +61,22 @@ typedef enum rocprofiler_pc_sampling_record_version_t
 } rocprofiler_pc_sampling_record_version_t;
 
 /**
+ * @brief (experimental) Flags for configuring PC sampling service behavior
+ */
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configure_flags_t
+{
+    ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION = 1 << 0,
+
+    /// @var ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION
+    /// @brief Allow overriding a previously configured valid record version (VERSION_1-6).
+    /// Without this flag, attempting to configure a different valid version after one has
+    /// already been configured will return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED.
+    /// With this flag, the new version will replace the existing valid version configuration.
+    /// This flag has no effect on VERSION_0 (invalid samples) configuration.
+} rocprofiler_pc_sampling_configure_flags_t;
+
+/**
  * @brief (experimental) Function used to configure the PC sampling service on the GPU agent with @p
  * agent_id.
  *
@@ -84,7 +100,7 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * The client must specify which record format to receive by providing @p record_version and
  * @p record_size parameters. Different versions are optimized for different hardware architectures
  * and sampling methods:
- * - VERSION_0: Invalid record
+ * - VERSION_0: Invalid sample (error indicator, contains no meaningful data)
  * - VERSION_1: Basic host-trap sampling for GFX9 and Navi4x (96 bytes)
  * - VERSION_2: Stochastic sampling for MI300/MI350 with snapshot information (104 bytes)
  * - VERSION_3: Host-Trap sampling on FUTURE_GEN_1_2. (112 bytes)
@@ -92,16 +108,131 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * - VERSION_5: Host-Trap sampling on FUTURE_GEN_3/FUTURE_GEN_4 (112 bytes)
  * - VERSION_6: Stochastic sampling on FUTURE_GEN_3/FUTURE_GEN_4 (136 bytes)
  *
- * Example:
+ * Multiple Configuration Calls:
+ * This function can be called multiple times for the same agent, but with important restrictions:
+ * - At most ONE valid version (VERSION_1 through VERSION_6) can be configured per agent
+ * - Once a valid version is configured, attempting to configure a different valid version
+ *   will return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED (unless the
+ *   ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION flag is used)
+ * - VERSION_0 (invalid samples) can be configured independently, either alone or alongside
+ *   one valid version
+ * - Attempting to configure the same version multiple times will return
+ *   ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED
+ *
+ * Overriding Valid Versions:
+ * The ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION flag allows replacing
+ * a previously configured valid version with a different one. This is useful when you need
+ * to switch between different sampling record formats without restarting the context.
+ *
+ * Valid use cases for multiple calls:
+ * - Enabling one valid sample version (VERSION_1-6) and invalid samples (VERSION_0)
+ * - Configuring VERSION_0 alone to receive only invalid/error samples for debugging
+ * - Overriding a previously configured valid version with a different one using the OVERRIDE flag
+ *
+ * The order of configuration calls does not matter - VERSION_0 can be configured before or after
+ * the valid version.
+ *
+ * Example 1 - Configure only valid samples:
  * @code
+ * // Configure to receive only valid samples in v1 format
+ * // Invalid samples will be silently discarded
  * rocprofiler_configure_pc_sampling_service(
  *     context_id, agent_id, method, unit, interval, buffer_id,
  *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,
  *     sizeof(rocprofiler_pc_sampling_record_v1_t),
- *     0);
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
  * @endcode
  *
- * Rocprofiler-SDK checks whether the requsted configuration is actually supported
+ * Example 2 - Configure valid samples AND invalid samples:
+ * @code
+ * // Step 1: Configure valid samples (VERSION_2)
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2,
+ *     sizeof(rocprofiler_pc_sampling_record_v2_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ *
+ * // Step 2: Enable invalid sample delivery
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
+ *     sizeof(rocprofiler_pc_sampling_record_v0_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ *
+ * // Now buffer receives both:
+ * // - Valid samples as rocprofiler_pc_sampling_record_v2_t
+ * // - Invalid samples as rocprofiler_pc_sampling_record_v0_t
+ * @endcode
+ *
+ * Example 3 - Configure ONLY invalid samples:
+ * @code
+ * // Configure only VERSION_0 to receive only invalid/error samples
+ * // Useful for debugging sampling failures
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_0,
+ *     sizeof(rocprofiler_pc_sampling_record_v0_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ * @endcode
+ *
+ * Example 4 - INVALID: Duplicate version configuration:
+ * @code
+ * // Step 1: Configure VERSION_1
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,
+ *     sizeof(rocprofiler_pc_sampling_record_v1_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ *
+ * // Step 2: Try to configure VERSION_1 again - REJECTED
+ * // Returns ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,  // ERROR: Already configured
+ *     sizeof(rocprofiler_pc_sampling_record_v1_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ * @endcode
+ *
+ * Example 5 - INVALID: Configuring different valid versions:
+ * @code
+ * // Step 1: Configure VERSION_1
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,
+ *     sizeof(rocprofiler_pc_sampling_record_v1_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ *
+ * // Step 2: Try to configure VERSION_2 - REJECTED
+ * // Returns ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED
+ * // Only ONE valid version can be configured per agent
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2,  // ERROR: Different valid version
+ *     sizeof(rocprofiler_pc_sampling_record_v2_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ * @endcode
+ *
+ * Example 6 - Overriding a valid version with the OVERRIDE flag:
+ * @code
+ * // Step 1: Configure VERSION_1
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_1,
+ *     sizeof(rocprofiler_pc_sampling_record_v1_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE);
+ *
+ * // Step 2: Override with VERSION_2 using the OVERRIDE flag - ACCEPTED
+ * rocprofiler_configure_pc_sampling_service(
+ *     context_id, agent_id, method, unit, interval, buffer_id,
+ *     ROCPROFILER_PC_SAMPLING_RECORD_VERSION_2,
+ *     sizeof(rocprofiler_pc_sampling_record_v2_t),
+ *     ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION);
+ *
+ * // Now VERSION_1 is replaced with VERSION_2
+ * // Buffer will receive samples in v2 format instead of v1
+ * @endcode
+ *
+ * Rocprofiler-SDK checks whether the requested configuration is actually supported
  * at the moment of calling this function. If the answer is yes, it returns
  * the @see ROCPROFILER_STATUS_SUCCESS. Otherwise, it notifies the client about the
  * rejection reason via the returned status code. For more information
@@ -131,10 +262,8 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * Both TA and TB receives samples generated by the kernels launched by the
  * corresponding processes PA and PB, respectively.
  *
- * Constraint3: Rocprofiler-SDK allows only one context to contain the configured PC sampling
- * service within the process, that implies that at most one of the loaded tools can use PC
- * sampling. One context can contains multiple PC sampling services configured for different GPU
- * agents.
+ * Constraint3: One context per agent can be configured for PC sampling, but multiple contexts
+ * for different agents can be configured within the same process.
  *
  * Constraint4: PC sampling feature is not available within the ROCgdb.
  *
@@ -147,9 +276,13 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * @param [in] unit       - The unit appropriate to the PC sampling type/method.
  * @param [in] interval   - frequency at which PC samples are generated
  * @param [in] buffer_id  - id of the buffer used for delivering PC samples
- * @param [in] record_version - enum specifying which PC sampling record format to use
+ * @param [in] record_version - enum specifying which PC sampling record format to use.
+ *                              Each version can only be configured once per agent.
  * @param [in] record_size - should be set to sizeof(rocprofiler_pc_sampling_record_vN_t) where N matches the version
- * @param [in] flags      - for future use
+ * @param [in] flags      - configuration flags from rocprofiler_pc_sampling_configure_flags_t.
+ *                          Use ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_NONE for default behavior,
+ *                          or ROCPROFILER_PC_SAMPLING_CONFIGURE_FLAGS_OVERRIDE_RECORD_VERSION
+ *                          to replace a previously configured valid version
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling service configured successfully
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
@@ -166,6 +299,8 @@ typedef enum rocprofiler_pc_sampling_record_version_t
  * setup in the context
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with an invalid argument,
  * invalid record_version value, or record_size mismatch
+ * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED Attempting to configure the same
+ * record version more than once for the same agent
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
