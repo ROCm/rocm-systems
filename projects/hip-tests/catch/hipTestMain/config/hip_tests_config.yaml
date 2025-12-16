@@ -65,7 +65,7 @@ unit:
     Unit_Assert_Positive_Basic_KernelFail:
       <<: *level_2
       # fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
-      <<: *disabled_all
+      disabled: [amd_windows, amd_wsl, nvidia_windows]
   atomics:
     Unit_atomicAnd_Positive_SameAddress: *level_2
     Unit_atomicAnd_Positive_Adjacent_Addresses: *level_2
@@ -210,6 +210,8 @@ unit:
     Unit_atomicAdd_system_Positive_Peer_GPUs:
       <<: *level_2
       tags: [multigpu]
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_atomicAdd_system_Positive_Host_And_GPU:
       <<: *level_2
       tags: [multigpu]
@@ -370,8 +372,14 @@ unit:
     Unit_test_compressed_codeobject: *level_2
     Unit_test_generic_target_in_compressed_fatbin: *level_2
     Unit_test_generic_target_in_regular_fatbin: *level_2
-    Unit_test_generic_target_only_in_compressed_fatbin: *level_2
-    Unit_test_generic_target_only_in_regular_fatbin: *level_2
+    Unit_test_generic_target_only_in_compressed_fatbin:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
+    Unit_test_generic_target_only_in_regular_fatbin:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
   complex:
     Unit_Device_Complex_Unary_Device_Sanity_Positive: *level_2
     Unit_Device_Complex_Unary_Host_Sanity_Positive: *level_2
@@ -610,8 +618,14 @@ unit:
     Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
       <<: *level_2
       tags: [multigpu]
-    Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES: *level_2
-    Unit_UUID_setEnv_Thread: *level_2
+    Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_UUID_setEnv_Thread:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipDeviceAPUCheck: *level_2
     Unit_hipDeviceGetDefaultMemPool_Positive_Basic: *level_2
     Unit_hipDeviceGetDefaultMemPool_Negative_Parameters: *level_2
@@ -744,7 +758,10 @@ unit:
       # Note: Windows disabled
       disabled: [amd_wsl]
   device_memory:
-    Unit_Device_memcpy_Positive: *level_2
+    Unit_Device_memcpy_Positive:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_Device_memcpy_Negative_Parameters_RTC: *level_2
     Unit_Device_memset_Positive: *level_2
     Unit_Device_memset_Negative_Parameters_RTC: *level_2
@@ -904,10 +921,7 @@ unit:
     Unit_mbcnt: *level_2
     Unit_bitExtract: *level_2
     Unit_bitInsert: *level_2
-    Unit_floatTM:
-      <<: *level_2
-      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      disabled: [amd_linux]
+    Unit_floatTM: *level_2
     Unit_abs_int64_Verification: *level_2
     Unit_pown_Verification: *level_2
     Unit_hmax_hmin_Tsts: *level_2
@@ -920,13 +934,13 @@ unit:
       # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
       disabled: [amd_windows, amd_wsl]
     Unit_hipTestHalf: *level_2
-    Unit_TestMathFuncComplex:
-      <<: *level_2
-      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      disabled: [amd_linux]
+    Unit_TestMathFuncComplex: *level_2
     Unit_hipTestFMA: *level_2
     Unit_hipTestNativeHalf: *level_2
-    Unit_Test_makechar_functionality: *level_2
+    Unit_Test_makechar_functionality:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_bf16_basic: *level_2
     Unit_bf16_conversion_to_integral_type: *level_2
     Unit_bf162_basic: *level_2
@@ -989,7 +1003,10 @@ unit:
     Unit_BuiltInAtomicAdd_CoherentGlobalMem: *level_2
     Unit_BuiltInAtomicAdd_NonCoherentGlobalMem: *level_2
     Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc: *level_2
-    Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc: *level_2
+    Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
     Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag: *level_2
     Unit_unsafeAtomicAdd_CoherentRTCwithoutflag: *level_2
@@ -1011,7 +1028,10 @@ unit:
     Unit_fp8_fnuz_correctness_device: *level_2
     Dynamic_Alloca: *level_2
   dynamicLoading:
-    Unit_dynamic_loading_device_kernels_from_library: *level_2
+    Unit_dynamic_loading_device_kernels_from_library:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipApiDynamicLoad_hipGetProcAddress: *level_2
     Unit_hipApiDynamicLoad: *level_2
   errorHandling:
@@ -1450,10 +1470,7 @@ unit:
     Unit_hipGraphAddMemcpyNodeToSymbol_MemcpyToSymbolNodeWithKernel:
       <<: *level_2
       tags: [multigpu]
-    Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic:
-      <<: *level_2
-      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      disabled: [amd_linux]
+    Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic: *level_2
     Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters: *level_2
     Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic: *level_2
     Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
@@ -1622,10 +1639,7 @@ unit:
     Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction: *level_2
     Unit_hipGraphExecMemcpyNodeSetParams_Negative: *level_2
     Unit_hipGraphExecMemcpyNodeSetParams_Functional: *level_2
-    Unit_hipStreamBeginCapture_Positive_Functional:
-      <<: *level_2
-      # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      disabled: [amd_linux]
+    Unit_hipStreamBeginCapture_Positive_Functional: *level_2
     Unit_hipStreamBeginCapture_Negative_Parameters: *level_2
     Unit_hipStreamBeginCapture_Positive_Basic: *level_2
     Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags: *level_2
@@ -1702,7 +1716,10 @@ unit:
     Unit_hipStreamIsCapturing_CheckCaptureStatus_FromThread: *level_2
     Unit_hipStreamIsCapturing_ChkNullStrmStatus: *level_2
     Unit_hipGraphMemFreeNodeGetParams_ValidArgs: *level_2
-    Unit_hipGraphMemFreeNodeGetParams_InvalidArgs: *level_2
+    Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipGraphUserObj_Int_float_Objects: *level_2
     Unit_hipGraphUserObj_HostRegister: *level_2
     Unit_hipGraphUserObj_Struct_Class_Ojects: *level_2
@@ -2032,8 +2049,9 @@ unit:
       disabled: [amd_windows]
     Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
       <<: *level_2
-      # SWDEV-430116:Below tests failed in stress test on 27/10/23
-      disabled: [amd_wsl]
+      # (amd_linux) Rock_Linux_Failures_on_gfx94X
+      # (amd_wsl) SWDEV-430116:Below tests failed in stress test on 27/10/23
+      disabled: [amd_linux, amd_wsl]
     Unit_hipGraphAddMemAllocNode_Negative_Params: *level_2
     Unit_hipGraphAddMemAllocNode_Negative_NotSupported: *level_2
     Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
@@ -2175,14 +2193,12 @@ unit:
     Unit_Kernel_Launch_bounds_Positive_Basic: *level_2
     Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
       <<: *level_2
-      # (amd_linux) SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      # (amd_windows) Below tests are failing PSDB
-      disabled: [amd_linux, amd_windows]
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
     Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
       <<: *level_2
-      # (amd_linux) SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
-      # (amd_windows) Below tests are failing PSDB
-      disabled: [amd_linux, amd_windows]
+      # Below tests are failing PSDB
+      disabled: [amd_windows]
   library:
     Unit_library_negative: *level_2
     Unit_hip_library_load_co: *level_2
@@ -2439,7 +2455,10 @@ unit:
     Unit_Device___brev_Sanity_Positive: *level_2
     Unit_Device___brevll_Sanity_Positive: *level_2
     Unit_Device___clz_Sanity_Positive: *level_2
-    Unit_Device___clzll_Sanity_Positive: *level_2
+    Unit_Device___clzll_Sanity_Positive:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_Device___ffs_Sanity_Positive: *level_2
     Unit_Device___ffsll_Sanity_Positive: *level_2
     Unit_Device___popc_Sanity_Positive: *level_2
@@ -3671,7 +3690,10 @@ unit:
     Unit_hipMemcpyHtoA_Capture: *level_2
     Unit_hipMemcpyHtoAAsync_Basic: *level_2
     Unit_hipMemcpyHtoAAsync_Negative: *level_2
-    Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams: *level_2
+    Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipMemcpyHtoAAsync_MultiDevice:
       <<: *level_2
       tags: [multigpu]
@@ -3698,6 +3720,8 @@ unit:
     Unit_hipHostRegister_DirectReferenceMultGpu:
       <<: *level_2
       tags: [multigpu]
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipHostRegister_SameChunkRepeat: *level_2
     Unit_hipHostRegister_Chunks_SingleAttempt: *level_2
     Unit_hipHostRegister_Chunks_RoundRobin: *level_2
@@ -3916,7 +3940,10 @@ unit:
     Unit_hipMemsetD2D32Async_NegTsts: *level_2
     Unit_hipMemcpy3DPeer_BasicFunctional: *level_2
     Unit_hipMemcpy3DPeer_NegativeTsts: *level_2
-    Unit_hipMemcpy3DPeerAsync_BasicFunctional: *level_2
+    Unit_hipMemcpy3DPeerAsync_BasicFunctional:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipMemcpy3DPeerAsync_NegativeTsts: *level_2
     Unit_hipMemPoolExportPointer_Negative: *level_2
     Unit_hipMemPoolExportToShareableHandle_SameProc: *level_2
@@ -3963,7 +3990,10 @@ unit:
       <<: *level_2
       # SWDEV-396616 hipMemMap returns invalid error
       disabled: [amd_windows, amd_wsl]
-    Unit_hipMemVmm_Uncached: *level_2
+    Unit_hipMemVmm_Uncached:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipArray_Valid: *level_2
     Unit_hipArray_Invalid: *level_2
     Unit_hipArray_Nullptr: *level_2
@@ -4066,7 +4096,10 @@ unit:
     Unit_hipMemPoolSetGetAttribute_Positive_Default: *level_2
     Unit_hipMemPoolSetGetAttribute_Positive_MemBasic: *level_2
     Unit_hipMemPoolSetAttribute_Opportunistic: *level_2
-    Unit_hipMemPoolSetAttribute_EventDependencies: *level_2
+    Unit_hipMemPoolSetAttribute_EventDependencies:
+      <<: *level_2
+      # mlsejenkins_Window_Failures_on_gfx1201
+      disabled: [amd_windows]
     Unit_hipMemPoolSetAttribute_Negative_Parameters:
       <<: *level_2
       # Below tests are failing PSDB
@@ -4308,7 +4341,10 @@ unit:
     Unit_hipMalloc_Positive_Zero_Size: *level_2
     Unit_hipMalloc_Positive_Alignment: *level_2
     Unit_hipMalloc_Negative_Parameters: *level_2
-    Unit_hipMalloc_Allocate90PercentOfDeviceMemory: *level_2
+    Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipMalloc3D_ValidatePitch:
       <<: *level_2
       # Note: Windows disabled
@@ -4536,7 +4572,10 @@ unit:
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMemAdvise_TstAlignedAllocMem: *level_2
-    Unit_hipMemAdvise_TstAlignedAllocMem_XNACK: *level_2
+    Unit_hipMemAdvise_TstAlignedAllocMem_XNACK:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipMemAdvise_TstMemAdvisePrefrdLoc:
       <<: *level_2
       # Note: Windows disabled
@@ -4581,7 +4620,10 @@ unit:
       <<: *level_2
       # Below tests are failing PSDB
       disabled: [amd_windows]
-    Unit_hipFreeAsync_capturehipFreeAsync: *level_2
+    Unit_hipFreeAsync_capturehipFreeAsync:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipFreeHost_InvalidMemory: *level_2
     Unit_hipFreeHost_DoubleFree: *level_2
     Unit_hipFreeHost_Multithreading: *level_2
@@ -4778,18 +4820,36 @@ unit:
       <<: *level_2
       tags: [multigpu]
   module:
-    Unit_hipModuleLaunchCooperativeKernel_Positive_Basic: *level_2
-    Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters: *level_2
-    Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters: *level_2
+    Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernel_Verify_Capture: *level_2
-    Unit_hipModuleLaunchKernel_Positive_Basic: *level_2
-    Unit_hipModuleLaunchKernel_Positive_Parameters: *level_2
+    Unit_hipModuleLaunchKernel_Positive_Basic:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipModuleLaunchKernel_Positive_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipModuleLaunchKernel_Negative_Parameters:
       <<: *level_2
       # Below tests are failing PSDB
       disabled: [amd_windows]
     Unit_hipModuleLaunchKernel_Fntl: *level_2
-    Unit_hipModuleLaunchKernel_Verify_Capture: *level_2
+    Unit_hipModuleLaunchKernel_Verify_Capture:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipExtLaunchKernelGGL_Functional: *level_2
     Unit_hipModuleLoadDataEx_Positive_Basic:
       <<: *level_2
@@ -4825,7 +4885,10 @@ unit:
     Unit_hipDrvLaunchKernelEx_NegTsts: *level_2
     Unit_hipDrvLaunchKernelEx_Functional: *level_2
     Unit_hipDrvLaunchKernelEx_With_Different_Kernels: *level_2
-    Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs: *level_2
+    Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipDrvLaunchKernelEx_With_MaxBlockDims: *level_2
     Unit_hipExtLaunchMultiKernelMultiDevice_Functional: *level_2
     Unit_hipModuleLoadData_Positive_Basic:
@@ -4860,19 +4923,34 @@ unit:
       # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
       <<: *disabled_nvidia
     Unit_hipModuleLoad_basic: *level_2
-    Unit_hipModuleGetFunctionCount_Functional: *level_2
+    Unit_hipModuleGetFunctionCount_Functional:
+      <<: *level_2
+      # (amd_linux) Rock_Linux_Failures_on_gfx94X
+      # (amd_windows) Rock_Window_Failures_on_gfx1151
+      disabled: [amd_linux, amd_windows]
     Unit_hipModuleGetFunctionCount_NegativeTsts: *level_2
     Unit_hipModuleGetGlobal_Functional: *level_2
     Unit_hipModuleLoad_MultProcess_MultGPU: *level_2
-    Unit_hip_linker_spirv_input: *level_2
+    Unit_hip_linker_spirv_input:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipLinkCreate_Negative: *level_2
     Unit_hipLinkCreate_AddLinker_CUDA_only_options: *level_2
     Unit_hipLinkAddFile_Negative: *level_2
-    Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic: *level_2
-    Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters: *level_2
+    Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
       <<: *level_2
       tags: [multigpu]
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipModuleGetGlobal_Positive_Basic: *level_2
     Unit_hipModuleGetGlobal_Positive_Parameters: *level_2
     Unit_hipModuleGetGlobal_Negative_Parameters: *level_2
@@ -4895,7 +4973,10 @@ unit:
       # (amd_windows) Below tests are failing PSDB
       # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
       <<: *disabled_windows
-    Unit_hipModuleGetTexRef_Negative_Parameters: *level_2
+    Unit_hipModuleGetTexRef_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr:
       <<: *level_2
       # Note: Test disabled due to defect - EXSWHTEC-166
@@ -4911,7 +4992,10 @@ unit:
       # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
       disabled: [amd_windows, amd_wsl]
     Unit_hipExtModuleLaunchKernel_UniformWorkGroup: *level_2
-    Unit_hipExtModuleLaunchKernel_Positive_Parameters: *level_2
+    Unit_hipExtModuleLaunchKernel_Positive_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipExtModuleLaunchKernel_Negative_Parameters:
       <<: *level_2
       # Below tests are failing PSDB
@@ -4924,7 +5008,10 @@ unit:
   multiThread:
     Unit_hipMemsetAsync_QueueJobsMultithreaded: *level_2
     Unit_hipMultiThreadDevice_Streams: *level_2
-    Unit_hipMultiThreadDevice_SerialPyramid: *level_2
+    Unit_hipMultiThreadDevice_SerialPyramid:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipMultiThreadDevice_ParallelPyramid: *level_2
     Unit_hipMultiThreadDevice_NearZero:
       <<: *level_2
@@ -5051,7 +5138,10 @@ unit:
     Unit_RTC_LinkAddFile_Default: *level_2
     Unit_hiprtc_half_shuffle: *level_2
     Unit_hiprtc_half_shuffle_sync: *level_2
-    Unit_Rtc_ReduceRandom: *level_2
+    Unit_Rtc_ReduceRandom:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hiprtc_stdheaders:
       <<: *level_2
       # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
@@ -5264,11 +5354,14 @@ unit:
     Unit_hipStreamWaitValue_Default: *level_2
     Unit_hipStreamSynchronize_EmptyStream: *level_2
     Unit_hipStreamSynchronize_FinishWork:
+      <<: *level_2
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamSynchronize_NullStreamSynchronization:
-      # Note: TDR (pass)
-      disabled: [amd_wsl]
+      <<: *level_2
+      # (amd_windows) mlsejenkins_Window_Failures_on_gfx1201
+      # (amd_wsl) Note: TDR (pass)
+      disabled: [amd_windows, amd_wsl]
     Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream: *level_2
     Unit_hipStreamSynchronize_NullStreamAndStreamPerThread:
       <<: *level_2
@@ -5280,14 +5373,18 @@ unit:
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
+      <<: *level_2
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamQuery_NullStreamQuery:
+      <<: *level_2
       # Note: TDR (pass)
       disabled: [amd_wsl]
     Unit_hipStreamQuery_WithPendingWork:
-      # Note: TDR (pass)
-      disabled: [amd_wsl]
+      <<: *level_2
+      # (amd_linux) Rock_Linux_Failures_on_gfx94X
+      # (amd_wsl) Note: TDR (pass)
+      disabled: [amd_linux, amd_wsl]
     Unit_hipDeviceGetStreamPriorityRange_Default: *level_2
     Unit_hipStreamAddCallback_StrmSyncTiming:
       <<: *level_2
@@ -5296,7 +5393,10 @@ unit:
       disabled: [amd_windows, amd_wsl]
     Unit_hipLaunchHostFunc_basic: *level_2
     Unit_hipLaunchHostFunc_Negative: *level_2
-    Unit_hipLaunchHostFunc_streams: *level_2
+    Unit_hipLaunchHostFunc_streams:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipLaunchHostFunc_multistreams:
       <<: *level_2
       # SWDEV-430116:Below tests failed in stress test on 27/10/23
@@ -5360,7 +5460,10 @@ unit:
     Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc: *level_2
     Unit_hipExtStreamCreateWithCUMask_Functionality: *level_2
     Unit_hipExtStreamCreateWithCUMask_AllCUsMasked: *level_2
-    Unit_hipExtStreamCreateWithCUMask_NegTst: *level_2
+    Unit_hipExtStreamCreateWithCUMask_NegTst:
+      <<: *level_2
+      # Rock_Linux_Failures_on_gfx94X
+      disabled: [amd_linux]
     Unit_hipStreamAddCallback_MultipleThreads: *level_2
     Unit_hipStreamWaitEvent_Negative: *level_2
     Unit_hipStreamWaitEvent_Default: *level_2
@@ -5544,24 +5647,78 @@ unit:
     Unit_hipGetTextureReference_Positive: *level_2
     Unit_hipGetTextureReference_Negative: *level_2
     Unit_hipTexObjPitch_texture2D: *level_2
-    Unit_hipTexRefSetArray_Positive: *level_2
-    Unit_hipTexRefSetArray_CheckData: *level_2
-    Unit_hipTexRefSetArray_Negative: *level_2
-    Unit_hipTexRefGetArray_Positive: *level_2
-    Unit_hipTexRefGetArray_Negative: *level_2
-    Unit_hipTexRefGetBorderColor_Negative: *level_2
-    Unit_hipTexRefSetBorderColor_Negative: *level_2
-    Unit_hipTexRefGetAddress_Positive: *level_2
-    Unit_hipTexRefGetAddress_Negative: *level_2
-    Unit_hipTexRefGetAddress_AdressNotSet: *level_2
-    Unit_hipTexRefSetAddress_Basic: *level_2
-    Unit_hipTexRefSetAddress_Positive: *level_2
-    Unit_hipTexRefSetAddress_Negative: *level_2
-    Unit_hipTexRefGetFormat_Basic: *level_2
-    Unit_hipTexRefGetFormat_Positive: *level_2
-    Unit_hipTexRefGetFormat_Negative: *level_2
-    Unit_hipTexRefSetFormat_Positive: *level_2
-    Unit_hipTexRefSetFormat_Negative: *level_2
+    Unit_hipTexRefSetArray_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetArray_CheckData:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetArray_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetArray_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetArray_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetBorderColor_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetBorderColor_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetAddress_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetAddress_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetAddress_AdressNotSet:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddress_Basic:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddress_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddress_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetFormat_Basic:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetFormat_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetFormat_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetFormat_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetFormat_Negative:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipCreateTextureObject_tex1DfetchVerification: *level_2
     Unit_hipTextureObj1DCheckModes: *level_2
     Unit_hipTextureObj2DCheckModes: *level_2
@@ -5597,28 +5754,70 @@ unit:
     Unit_hipGetTextureObjectTextureDesc_positive: *level_2
     Unit_hipGetTextureObjectTextureDesc_Negative_Parameters: *level_2
     Unit_hipDestroyTextureObject_positive: *level_2
-    Unit_hipTexRefSetAddress2D_Negative_Parameters: *level_2
-    Unit_hipTexRefSetAddress2D_Positive: *level_2
-    Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters: *level_2
-    Unit_hipTexRefSetMaxAnisotropy_Positive: *level_2
-    Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters: *level_2
-    Unit_hipTexRefGetMaxAnisotropy_Positive: *level_2
+    Unit_hipTexRefSetAddress2D_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddress2D_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetMaxAnisotropy_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetMaxAnisotropy_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipUnbindTexture_Null_Texture: *level_2
     Unit_hipUnbindTexture_Positive_1D: *level_2
     Unit_hipUnbindTexture_Positive_2D: *level_2
     Unit_hipUnbindTexture_Positive_3D: *level_2
-    Unit_hipTexRefSetFlags_Negative_Parameters: *level_2
-    Unit_hipTexRefSetFlags_Positive: *level_2
+    Unit_hipTexRefSetFlags_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetFlags_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipBindTextureToArray_Negative_Parameters: *level_2
     Unit_hipBindTextureToArray_Positive_1D: *level_2
     Unit_hipBindTextureToArray_Positive_2D: *level_2
     Unit_hipBindTextureToArray_Positive_3D: *level_2
-    Unit_hipTexRefGetFlags_Negative_Parameters: *level_2
-    Unit_hipTexRefGetFlags_Positive: *level_2
-    Unit_hipTexRefSetAddressMode_Negative_Parameters: *level_2
-    Unit_hipTexRefSetAddressMode_Positive: *level_2
-    Unit_hipTexRefGetAddressMode_Negative_Parameters: *level_2
-    Unit_hipTexRefGetAddressMode_Positive: *level_2
+    Unit_hipTexRefGetFlags_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetFlags_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddressMode_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefSetAddressMode_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetAddressMode_Negative_Parameters:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipTexRefGetAddressMode_Positive:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipTexRefSetGetFilterMode: *level_2
     Unit_hipTexRefSetGetMipmapFilterMode: *level_2
     Unit_hipTexRefSetGetMipmapLevelBias: *level_2
