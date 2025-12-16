@@ -592,9 +592,6 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
       prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
       prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
       prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
-  } else {
-    // TILED mode: forbid linear swizzle to force tiled modes
-    prefSettingsInput.forbiddenBlock.linear = 1;
   }
 
   prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
