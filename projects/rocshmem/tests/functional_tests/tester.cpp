@@ -754,8 +754,8 @@ void Tester::print(uint64_t size) {
   /**
    * Calculate total amount of data transfered
    */
-  size_t total_size = size * num_timed_msgs;
-  size_t volume = (bw_factor * total_size) / num_loops;
+  size_t total_size = size_factor * size * num_timed_msgs;
+  size_t volume = total_size / num_loops;
 
   double timer_avg = timerAvgInMicroseconds();
   double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
