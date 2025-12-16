@@ -938,3 +938,69 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_CheckDefaultValues") {
     REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseAllowInternalDependencies, dev));
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Validate basic functionality of hipMemPoolSetAttribute and
+ *    hipMemPoolGetAttribute APis while capturing the stream.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolSetGetAttribute.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.5
+ */
+TEST_CASE("Unit_hipMemPool_Set_Get_Attribute_streamCapture") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  for (int dev = 0; dev < numDevices; dev++) {
+    checkMempoolSupported(dev)
+    uint64_t ui64_setValue = 0;
+    int i32_setValue = 0;
+    hipMemPool_t mem_pool;
+    hipMemPoolProps pool_props{};
+    pool_props.allocType = hipMemAllocationTypePinned;
+    pool_props.location.id = dev;
+    pool_props.location.type = hipMemLocationTypeDevice;
+    HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
+    uint64_t val = UINT64_MAX;
+    hipError_t error_capture  = hipSuccess;
+#if HT_NVIDIA  // This will be removed once ticket SWDEV-529875 is resolved.
+    BEGIN_CAPTURE_SYNC(error_capture, true);
+#endif
+    HIP_CHECK_ERROR(hipMemPoolSetAttribute(mem_pool,
+                    hipMemPoolAttrReleaseThreshold, &val), error_capture);
+    HIP_CHECK_ERROR(hipMemPoolGetAttribute(mem_pool,
+                    hipMemPoolAttrReleaseThreshold, &ui64_setValue),
+                    error_capture);
+    if (error_capture == hipSuccess)
+      REQUIRE(ui64_setValue == val);
+    val = 0;
+    HIP_CHECK_ERROR(hipMemPoolSetAttribute(mem_pool,
+                    hipMemPoolReuseFollowEventDependencies, &val),
+                    error_capture);
+    HIP_CHECK_ERROR(hipMemPoolGetAttribute(mem_pool,
+                    hipMemPoolReuseFollowEventDependencies, &i32_setValue),
+                    error_capture);
+    if (error_capture == hipSuccess)
+      REQUIRE(i32_setValue == val);
+    val = 1;
+    HIP_CHECK_ERROR(hipMemPoolSetAttribute(mem_pool,
+                    hipMemPoolReuseAllowInternalDependencies, &val),
+                    error_capture);
+    HIP_CHECK_ERROR(hipMemPoolGetAttribute(mem_pool,
+                    hipMemPoolReuseAllowInternalDependencies, &i32_setValue),
+                    error_capture);
+    if (error_capture == hipSuccess)
+      REQUIRE(i32_setValue == val);
+#if HT_NVIDIA  // This will be removed once ticket SWDEV-529875 is resolved.
+    END_CAPTURE_SYNC(error_capture);
+#endif
+    HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  }
+}
+
+/**
+* End doxygen group MemoryTest.
+* @}
+*/

@@ -202,6 +202,41 @@ TEST_CASE("Unit_hipMemPoolCreate_DeviceTest", "[multigpu]") {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - This test validates the basic functionality of hipMemPoolCreate
+ *  - and hipMemPoolDestroy apis during stream capture.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolCreate.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.5
+*/
+TEST_CASE("Unit_hipMemPool_Create_Destroy_streamCapture") {
+  checkMempoolSupported(0)
+  int num_devices = 0;
+  HIP_CHECK(hipGetDeviceCount(&num_devices));
+  checkIfMultiDev(num_devices)
+  for (int dev = 0; dev < num_devices; dev++) {
+    hipMemPool_t mem_pool;
+    hipMemPoolProps prop{};
+    prop.allocType = hipMemAllocationTypePinned;
+    prop.location.id = dev;
+    prop.location.type = hipMemLocationTypeDevice;
+    hipError_t error_capture  = hipSuccess;
+#if HT_NVIDIA  // This will be removed once ticket SWDEV-529875 is resolved.
+    BEGIN_CAPTURE_SYNC(error_capture, true);
+#endif
+    HIP_CHECK_ERROR(hipMemPoolCreate(&mem_pool, &prop), error_capture);
+    HIP_CHECK_ERROR(hipMemPoolDestroy(mem_pool), error_capture);
+#if HT_NVIDIA  // This will be removed once ticket SWDEV-529875 is resolved.
+    END_CAPTURE_SYNC(error_capture);
+#endif
+  }
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */

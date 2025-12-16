@@ -280,7 +280,63 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
     HIP_CHECK(hipStreamDestroy(stream[idx]));
   }
 }
+/**
+ * Test Description
+ * ------------------------
+ *  - This test validates the basic functionality of hipMemPoolTrimTo
+ *  - api during stream capture.
+ * Test source
+ * ------------------------
+ *  - catch\unit\memory\hipMemPoolTrimTo.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.5
+ */
+TEST_CASE("Unit_hipMemPoolTrimTo_streamCapture") {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  const size_t allocation_size1 = kPageSize * kPageSize * 128;
+  hipMemPool_t mempool_;
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&mempool_, device_id));
+  int* alloc_mem1;
+  hipStream_t stream_ = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream_));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&alloc_mem1),
+                       allocation_size1, mempool_, stream_));
+  std::uint64_t res_start= 0;
+  hipMemPoolAttr att;
+  att = hipMemPoolAttrReservedMemCurrent;
+  HIP_CHECK(hipMemPoolGetAttribute(mempool_, att, &res_start));
 
+  int blocks = 2;
+  int clk_rate;
+  if (IsGfx11()) {
+    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
+    kernel_500ms_gfx11<<<32, blocks, 0, stream_>>>(alloc_mem1, clk_rate);
+  } else {
+    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
+    kernel_500ms<<<32, blocks, 0, stream_>>>(alloc_mem1, clk_rate);
+  }
+
+  hipMemPoolAttr attr;
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream_));
+  attr = hipMemPoolAttrReservedMemCurrent;
+  std::uint64_t res_before_trim = 0;
+  HIP_CHECK(hipMemPoolGetAttribute(mempool_, attr, &res_before_trim));
+  hipError_t error_capture  = hipSuccess;
+#if HT_NVIDIA // This will be removed once ticket SWDEV-529875 is resolved.
+  BEGIN_CAPTURE_SYNC(error_capture, true);
+#endif
+  HIP_CHECK_ERROR(hipMemPoolTrimTo(mempool_, 0),
+                error_capture);
+#if HT_NVIDIA // This will be removed once ticket SWDEV-529875 is resolved.
+  END_CAPTURE_SYNC(error_capture);
+#endif
+  HIP_CHECK(hipStreamSynchronize(stream_));
+  std::uint64_t res_after_trim = 0;
+  HIP_CHECK(hipMemPoolGetAttribute(mempool_, attr, &res_after_trim));
+  REQUIRE(res_after_trim == 0);
+}
 /**
  * End doxygen group StreamOTest.
  * @}
