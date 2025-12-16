@@ -537,7 +537,7 @@ rsmi_status_t GpuMetricsBaseDynamic_t::populate_metrics_dynamic_tbl() {
   LOG_TRACE(ss);
 
   auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
-  
+
   auto emit = [&](AMDGpuMetricsClassId_t cls, AMDGpuMetricsUnitType_t unit,
                   const char* label,
                   const details::AMDGpuMetricAttributeData_t& row) {

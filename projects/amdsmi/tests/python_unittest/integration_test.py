@@ -192,7 +192,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 vram_info['vram_bit_width']))
             print("  vram_info['vram_max_bandwidth'] is: {} GB/s".format(
                 vram_info['vram_max_bandwidth']))
-    
+
     # amdsmi_get_gpu_xcd_counter should be supported on all ASICs
     def test_get_xcd_counter(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -359,7 +359,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  DF clock_frequency['frequency']: {}".format(
                 clock_frequency['frequency']))
         print("\n")
-        
+
 
     # amdsmi_get_clk_freq with AmdSmiClkType.DCEF is not supported in MI210, MI300A
     def test_clock_frequency_DCEF(self):
@@ -382,7 +382,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  DCEF clock_frequency['frequency']: {}".format(
                 clock_frequency['frequency']))
         print("\n")
-        
+
 
     def test_clock_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -421,7 +421,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Is MEM clock in deep sleep: {}".format(
                 clock_measure['clk_deep_sleep']))
         print("\n")
-        
+
 
     # AmdSmiClkType.VCLK0 and DCLK0 are not supported in MI210
     def test_clock_info_vclk0_dclk0(self):
@@ -459,7 +459,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Is DCLK0 clock in deep sleep: {}".format(
                 clock_measure['clk_deep_sleep']))
         print("\n")
-        
+
 
     # AmdSmiClkType.VCLK1 and DCLK1 are not supported in MI210, MI300A, MI300X
     def test_clock_info_vclk1_dclk1(self):
@@ -497,7 +497,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Is DCLK1 clock in deep sleep: {}".format(
                 clock_measure['clk_deep_sleep']))
         print("\n")
-        
+
 
     def test_driver_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -514,7 +514,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print("Driver info:  {}".format(driver_info))
         print("\n")
-        
+
 
     # amdsmi_get_gpu_ecc_count is not supported in Navi2x, Navi3x, MI210, MI300A
     def test_ecc_count_block(self):
@@ -565,7 +565,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self.assertGreaterEqual(ecc_count['deferred_count'], 0)
             print("\n")
         print("\n")
-        
+
 
     def test_ecc_count_total(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -590,7 +590,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             self.assertGreaterEqual(ecc_info['correctable_count'], 0)
             self.assertGreaterEqual(ecc_info['deferred_count'], 0)
         print("\n")
-        
+
 
     def test_fw_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -638,7 +638,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  engine_usage['mm_activity'] is: {} %".format(
                 engine_usage['mm_activity']))
         print("\n")
-        
+
 
     def test_memory_usage(self):
 
@@ -660,7 +660,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
         print("\n")
-        
+
 
     def test_pcie_info(self):
 
@@ -703,7 +703,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  pcie_info['pcie_metric']['pcie_lc_perf_other_end_recovery_count'] is: {}".format(
                 pcie_info['pcie_metric']['pcie_lc_perf_other_end_recovery_count']))
         print("\n")
-        
+
 
     def test_power_info(self):
 
@@ -750,7 +750,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Power management enabled: {}".format(
                 is_power_management_enabled))
         print("\n")
-        
+
 
     def test_process_list(self):
 
@@ -807,7 +807,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             for j in range(0, len(ras_enabled)):
                 print("  RAS status for {} is: {}".format(ras_enabled[j]['block'], ras_enabled[j]['status']))
         print("\n")
-        
+
 
     # amdsmi_get_gpu_ras_feature_info is not supported in Navi2x, Navi3x
     def test_ras_feature_info(self):
@@ -831,7 +831,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 print("RAS double bit schema: {}".format(ras_feature['double_bit_schema']))
                 print("Poisoning supported: {}".format(ras_feature['poison_schema']))
         print("\n")
-        
+
 
     def test_socket_info(self):
 
@@ -840,7 +840,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             sockets = amdsmi.amdsmi_get_socket_handles()
         except amdsmi.AmdSmiLibraryException as e:
             self._check_exception(e)
-            
+
         for i in range(0, len(sockets)):
             print("\n\n###Test Socket {}".format(i))
             try:
@@ -851,7 +851,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print("  Socket: {}".format(socket_name))
         print("\n")
-        
+
 
     def test_temperature_metric(self):
 
@@ -893,7 +893,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
         print("\n")
-        
+
 
     # AmdSmiTemperatureType.EDGE is not supported in MI300A, MI300X
     def test_temperature_metric_edge(self):
@@ -922,7 +922,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
         print("\n")
-        
+
 
     def test_temperature_metric_plx(self):
 
@@ -950,7 +950,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
         print("\n")
-        
+
 
     # AmdSmiTemperatureType.HBM_0, HBM_1, HBM_2, HBM_3 are not supported in Navi2x, Navi3x, MI210, MI300A
     def test_temperature_metric_hbm(self):
@@ -986,7 +986,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                     self._check_exception(e)
                     continue
         print("\n")
-        
+
 
     def test_utilization_count(self):
 
@@ -1097,7 +1097,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  num_resources: {}".format(
                 accelerator_partition['partition_profile']['num_resources']))
         print("\n")
-        
+
 
     # Requires sudo (to see full resource/config detail).
     # Should only be supported on MI300+ ASICs
@@ -1130,7 +1130,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                     print("\t\t\t  num_partitions_share_resource: {}".format(
                         p['resources'][r]['num_partitions_share_resource']))
         print("\n")
-        
+
 
     # amdsmi_get_violation_status is only supported on MI300+ ASICs
     # We should expect a not supported status for Navi / MI100 / MI2x ASICs
@@ -1192,8 +1192,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print(" GFX CLK Below Host Limit Violation (bool): {}".format(
                 violation_status['active_gfx_clk_below_host_limit']))
         print("\n")
-        
-    
+
+
     # Add test for amdsmi_get_gpu_reg_table_info
     def test_gpu_reg_table_info(self):
 
@@ -1210,8 +1210,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  reg_table_info['reg_table'] is: {}".format(
                 reg_table_info))
         print("\n")
-        
-    
+
+
     def test_get_gpu_revision(self):
 
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -1228,8 +1228,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print(f"  GPU revision is: {revision}")
         print("\n")
-        
-    
+
+
     # Add test for amdsmi_get_gpu_pm_metrics_info
     def test_gpu_pm_metrics_info(self):
 
@@ -1246,7 +1246,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  pm_metrics_info['pm_metrics'] is: {}".format(
                 pm_metrics_info))
         print("\n")
-        
+
 
     def test_walkthrough(self):
         print("\n\n#######################################################################")
@@ -1367,7 +1367,7 @@ if __name__ == '__main__':
     elif '-v' in sys.argv or '--verbose' in sys.argv:
         verbose=2
     has_info_printed = False
-    
+
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
         loader = unittest.TestLoader()
@@ -1381,7 +1381,7 @@ if __name__ == '__main__':
     print("Legend: . = pass, s = skipped, F = fail, E = error")
     print("==============================================================")
     print("Running tests...\n")
-    
+
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
         print("Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n")
