@@ -50,14 +50,13 @@ jobs:
           yum clean all
           yum makecache
           yum -y install git
-          # RHEL 8 defaults to Python 3.6, but CMake requires Python 3.9+.
-          # Enable the python39 module stream to make python3 resolve to Python 3.9.
-          # RHEL 9 already has Python 3.9 as the default.
           if [ ${{ matrix.os-release }} == "8.10" ]; then
-            yum module enable python39 -y
+            yum -y install python39
+            yum -y install python39-devel
+            alternatives --set python3 /usr/bin/python3.9
+          else
+            yum -y install python3-devel
           fi
-          yum -y install python3
-          yum -y install python3-devel
           yum -y install cmake3
           yum -y install which
           yum -y install glibc-langpack-en
