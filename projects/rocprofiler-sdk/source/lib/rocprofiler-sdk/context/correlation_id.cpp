@@ -124,8 +124,10 @@ correlation_id::sub_ref_count()
 
     // Ref count was already 0
     ROCP_CI_LOG_IF(WARNING, registration::get_fini_status() <= 0) << fmt::format(
-        "attempt to decrement correlation id {} reference count but reference count is zero",
-        internal);
+        "attempt to decrement correlation id {} reference count but reference count is zero "
+        "(fini_status={})",
+        internal,
+        registration::get_fini_status());
     return 0;
 }
 
