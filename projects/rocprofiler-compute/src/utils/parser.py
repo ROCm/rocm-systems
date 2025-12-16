@@ -118,7 +118,7 @@ PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_R
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args: Any) -> Union[float, None]:
+def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -127,7 +127,7 @@ def to_min(*args: Any) -> Union[float, None]:
         return min(args)
 
 
-def to_max(*args: Any) -> Union[float, np.ndarray, None]:
+def to_max(*args: Any) -> Union[float, np.ndarray]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -142,7 +142,9 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating, None]:
+) -> Union[float, np.floating]:
+    if a is None:
+        return np.nan
     if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
@@ -173,9 +175,9 @@ def to_avg(
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_median(a: Union[pd.Series, None]) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -196,7 +198,9 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, float, pd.Series, None]:
+) -> Union[int, float, pd.Series]:
+    if a is None:
+        return np.nan
     if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, (int, float, np.integer)):
@@ -210,7 +214,7 @@ def to_int(
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_sum(a: Union[pd.Series, None]) -> float:
     if a is None:
         return np.nan
     elif np.isnan(a).all():
@@ -230,9 +234,9 @@ def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
         return round(a, b)
 
 
-def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
