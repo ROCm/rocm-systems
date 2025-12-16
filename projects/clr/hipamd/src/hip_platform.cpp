@@ -710,10 +710,9 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
 
   switch (hip_error) {
-  case hipErrorInvalidImage:
-    return hip_error;
   case hipErrorInvalidKernelFile:
-    return hipErrorInvalidDeviceFunction;
+  case hipErrorInvalidDeviceFunction:
+    return hip_error;
   case hipSuccess:
     if (func)
       break;
