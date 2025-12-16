@@ -1438,7 +1438,8 @@ def merge_counters_iteration_multiplex(
                     if pd.api.types.is_integer_dtype(group[col]):
                         merged_row[col] = merged_row[col].astype(int)
                 else:
-                    # For other non-counter non-numeric columns, take the first occurrence (0th row)
+                    # For other non-counter non-numeric columns,
+                    # take the first occurrence (0th row)
                     # Only Kernel_Name should be non-numeric here
                     merged_row[col] = group.iloc[0][col]
 
@@ -1448,14 +1449,19 @@ def merge_counters_iteration_multiplex(
                 col for col in group.columns if col not in non_counter_column_index
             ]
             for counter_col in counter_columns:
-                # for counter columns, take the first non-none (or non-nan) value
-                current_valid_counter_group = group[group[counter_col].notna()]
-                first_valid_value = (
-                    current_valid_counter_group.iloc[0][counter_col]
-                    if len(current_valid_counter_group) > 0
-                    else None
-                )
-                merged_row[counter_col] = first_valid_value
+                # For counter columns, calculate median only across non-NaN values
+                # Preserve original data type
+                valid_values = group[counter_col].dropna()
+                if not valid_values.empty:
+                    median_value = valid_values.median()
+                    # Preserve original data type - check if all
+                    # non-null values are integers
+                    if (valid_values == valid_values.astype(int)).all():
+                        merged_row[counter_col] = int(median_value)
+                    else:
+                        merged_row[counter_col] = median_value
+                else:
+                    merged_row[counter_col] = None
 
             # Append the merged row to the result list
             result_data.append(merged_row)
