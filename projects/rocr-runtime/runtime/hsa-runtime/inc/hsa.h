@@ -5692,6 +5692,25 @@ typedef int hsa_handle_t;
 #endif
 
 /**
+ * @brief Enumeration of handle types.
+ */
+typedef enum {
+  HSA_HANDLE_TYPE_NONE = 0,
+  HSA_HANDLE_TYPE_FD,
+  HSA_HANDLE_TYPE_NT,
+  HSA_HANDLE_TYPE_KMT,
+  HSA_HANDLE_TYPE_MAX
+} hsa_handle_type_t;
+
+/**
+ * @brief Container for a system dependent resource handle.
+ */
+typedef struct hsa_resource_handle_s {
+  hsa_handle_type_t type;  //!< Type of the handle
+  hsa_handle_t handle;     //!< Platform dependent handle
+} hsa_resource_handle_t;
+
+/**
  * @brief Platform-independent container for a Windows LUID.
  */
 typedef struct hsa_luid_s {

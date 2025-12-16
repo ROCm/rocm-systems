@@ -219,8 +219,7 @@ hsa_status_t
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle,
-                                        uint32_t flags,
+                                        hsa_resource_handle_t interop_handle,
                                         size_t* size,
                                         void** ptr,
                                         size_t* metadata_size,

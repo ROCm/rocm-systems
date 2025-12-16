@@ -868,23 +868,21 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
-                                 hsa_handle_t interop_handle,
-                                 uint32_t flags,
-                                 size_t* size, void** ptr,
+                                 hsa_resource_handle_t interop_handle, size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
-  static const int tinyArraySize=8;
+  constexpr int tinyArraySize = 8;
   HsaGraphicsResourceInfo info;
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
 
-  static_assert(sizeof(HSAint64) >= sizeof(interop_handle),
+  static_assert(sizeof(HSAint64) >= sizeof(interop_handle.handle),
                 "HSAint64 too small for interop_handle");
   HSAint64 resource_handle =
 #ifdef _WIN32
-      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle));
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle.handle));
 #else
-      static_cast<HSAint64>(interop_handle);
+      static_cast<HSAint64>(interop_handle.handle);
 #endif
 
   if (num_agents > tinyArraySize) {
@@ -902,9 +900,12 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
   }
 
-  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(resource_handle, &info, num_agents,
-                                          nodes)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  const HSA_REGISTER_MEM_FLAGS regFlags = {
+      .ui32 = {.kmtHandle = (interop_handle.type == HSA_HANDLE_TYPE_KMT) ? 1u : 0u}};
+
+  auto status =
+      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, regFlags);
+  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
   auto& driver = agents[0]->driver();

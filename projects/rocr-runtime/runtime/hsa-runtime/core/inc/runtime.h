@@ -346,11 +346,8 @@ class Runtime {
                                      hsa_signal_value_t value,
                                      hsa_amd_signal_handler handler, void* arg);
 
-  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents,
-                          hsa_handle_t interop_handle,
-                          uint32_t flags, size_t* size,
-                          void** ptr, size_t* metadata_size,
-                          const void** metadata);
+  hsa_status_t InteropMap(uint32_t num_agents, Agent** agents, hsa_resource_handle_t interop_handle,
+                          size_t* size, void** ptr, size_t* metadata_size, const void** metadata);
 
   hsa_status_t InteropUnmap(void* ptr);
 
