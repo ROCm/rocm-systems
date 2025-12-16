@@ -5018,8 +5018,14 @@ unit:
       # Note: Windows disabled
       disabled: [amd_windows, amd_wsl]
     Unit_hipMultiThreadStreams1_AsyncSync: *level_2
-    Unit_hipMultiThreadStreams1_AsyncAsync: *level_2
-    Unit_hipMultiThreadStreams1_AsyncSame: *level_2
+    Unit_hipMultiThreadStreams1_AsyncAsync:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
+    Unit_hipMultiThreadStreams1_AsyncSame:
+      <<: *level_2
+      # Rock_Window_Failures_on_gfx1151
+      disabled: [amd_windows]
     Unit_hipMultiThreadStreams2: *level_2
   occupancy:
     Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
