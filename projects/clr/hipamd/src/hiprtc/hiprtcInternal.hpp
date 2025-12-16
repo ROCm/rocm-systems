@@ -77,8 +77,6 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
 }  // namespace internal
 }  // namespace hiprtc
 
-// hiprtcInit lock
-static amd::Monitor g_hiprtcInitlock{};
 static std::once_flag g_initAmdFlags;
 static bool g_initFailed{false};
 
