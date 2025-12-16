@@ -69,7 +69,7 @@
 - 1.16 -  hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 17
+#define HSA_AMD_INTERFACE_VERSION_MINOR 16
 
 #ifdef __cplusplus
 extern "C" {
