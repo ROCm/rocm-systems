@@ -29,6 +29,7 @@
 #include "lib/common/units.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sqlite3.h>
 
 #include <chrono>
