@@ -24,6 +24,7 @@
 
 #include "core/config.hpp"
 #include "core/defines.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -403,7 +404,8 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }
@@ -431,7 +433,8 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }

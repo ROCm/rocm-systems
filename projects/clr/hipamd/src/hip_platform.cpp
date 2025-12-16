@@ -701,6 +701,12 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
 
   hipError_t hip_error =
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
+
+  // Handle Invalid Image
+  if(hip_error == hipErrorInvalidImage) {
+    return hip_error;
+  }
+
   if ((hip_error != hipSuccess) || (func == nullptr)) {
     // assume its hip function type if we did not get a valid output from static
     // func lookup
