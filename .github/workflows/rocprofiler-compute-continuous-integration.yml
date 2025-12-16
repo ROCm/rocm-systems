@@ -5,6 +5,15 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode'
+        required: false
+        default: 'continuous'
+        type: choice
+        options:
+          - continuous
+          - nightly
   push:
     branches: [ develop ]
     paths:
@@ -49,7 +58,7 @@ jobs:
         id: generate_matrix
         working-directory: projects/rocprofiler-compute/.github
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
           else
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
@@ -88,17 +97,20 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
             EXCLUDED_TESTS=""
+            ADD_COVERAGE="--coverage"
           else
             MODE=Continuous
             EXCLUDED_TESTS="test_profile_live_attach_detach"
+            ADD_COVERAGE=""
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "excluded_tests=${EXCLUDED_TESTS}" >> $GITHUB_OUTPUT
+          echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
-          if [ '${{ matrix.system.os-release }}' = '24.04']; then
+          if [ '${{ matrix.system.os-release }}' = '24.04' ]; then
             CODE_NAME=noble
           else
             CODE_NAME=jammy
@@ -129,13 +141,21 @@ jobs:
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |
-          pip install -r requirements.txt --break-system-packages --ignore-installed
-          pip install -r requirements-test.txt --break-system-packages --ignore-installed
+          for i in 1 2 3; do
+            pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
+          for i in 1 2 3; do
+            pip install -r requirements-test.txt --break-system-packages --ignore-installed --timeout 60 && break
+            echo "⚠️ pip install attempt $i failed, retrying..."
+            sleep 10
+          done
           echo "✅ pip requirements installed!"
       
       - name: Configure, Build, and Test
         id: test
-        timeout-minutes: 90
+        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
         working-directory: projects/rocprofiler-compute
         run: |
           set -e
@@ -145,9 +165,11 @@ jobs:
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${{ env.ROCM_PATH }}/lib/rocm_sysdeps/lib:$LD_LIBRARY_PATH \
           python3 ./tools/run-ci.py \
             --name "ROCm/rocprofiler-compute-${{ github.ref_name }}-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.gpu }}" \
+            --actor "${{ github.actor }}" \
             --site ${{ matrix.system.runner }} \
             --mode ${{ steps.setup_env.outputs.mode }} \
             --build-jobs 16 \
+            ${{ steps.setup_env.outputs.add_coverage }} \
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
@@ -158,8 +180,14 @@ jobs:
             -E "${{ steps.setup_env.outputs.excluded_tests }}"
       
       - name: Output Logs
-        if: failure() && steps.test.outcome == 'failure'
+        if: failure()
         working-directory: projects/rocprofiler-compute
         run: |
-          echo "❌ Run Failed: Now outputting LastTest.log files for detailed logs..."
-          cat build/Testing/Temporary/LastTest*.log
+          echo "❌ Run Failed: Outputting available log files..."
+          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
+            if [ -f "$log" ]; then
+              echo "=== $log ==="
+              cat "$log"
+            fi
+          done
+
