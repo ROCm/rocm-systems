@@ -5,12 +5,16 @@ on:
     branches:
       - develop
     paths:
-      - 'projects/rocprofiler-compute/**'
-  pull_request:
-    paths:
+      - '.github/workflows/rocprofiler-compute-tarball.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/docker/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-compute-tarball.yml'
+      - 'projects/rocprofiler-compute/**'
+      - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
