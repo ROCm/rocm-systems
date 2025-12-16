@@ -79,11 +79,12 @@ template <typename T, typename... Args> inline std::string ToString(T first, Arg
 
 // hiprtcInit lock
 static amd::Monitor g_hiprtcInitlock{};
+static std::once_flag g_initAmdFlags;
+static bool g_initFailed{false};
+
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
-  amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
-  if (!amd::Flag::init()) {                                                                        \
-    HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
-  }
+  std::call_once(g_initAmdFlags, [](){ g_initFailed = !amd::Flag::init(); });                      \
+  if (g_initFailed) { HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR); }                                            
 
 #define HIPRTC_INIT_API(...)                                                                       \
   HIPRTC_INIT_API_INTERNAL(0, __VA_ARGS__)                                                         \

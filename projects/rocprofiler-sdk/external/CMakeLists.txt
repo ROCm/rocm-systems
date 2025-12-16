@@ -108,7 +108,7 @@ if(ROCPROFILER_BUILD_FMT)
 
     target_link_libraries(rocprofiler-sdk-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)
     target_include_directories(
-        rocprofiler-sdk-fmt SYSTEM
+        rocprofiler-sdk-fmt
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/fmt/include>)
 else()
     find_package(fmt REQUIRED)
