@@ -20,7 +20,7 @@ target_link_libraries(
             rocprofiler-sdk::counter-test-constants)
 
 set(_ROCPROFILER_SHARE_DIR
-    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}")
 
 rocprofiler_add_unit_test(
     TARGET thread-trace-packet-test
