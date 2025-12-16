@@ -157,7 +157,11 @@ endif()
 # For build-time checks, use ${Python3_EXECUTABLE} (absolute path from find_package)
 # For runtime tests (add_test), use portable command that resolves from PATH
 # This allows tests to work when build/install folders are moved to different machines
-set(PYTHON_TEST_COMMAND "python3" CACHE STRING "Python command for running tests (portable)")
+set(PYTHON_TEST_COMMAND
+    "python3"
+    CACHE STRING
+    "Python command for running tests (portable)"
+)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
