@@ -38,6 +38,17 @@ rocprofiler_context_id_t agent_ctx   = {};
 rocprofiler_context_id_t tracing_ctx = {};
 
 void
+tool_fini(void* tool_data)
+{
+    // Stop contexts to ensure no more callbacks are dispatched before static destruction
+    rocprofiler_stop_context(tracing_ctx);
+    rocprofiler_stop_context(agent_ctx);
+
+    // Call the shared finalize logic
+    Callbacks::finalize(tool_data);
+}
+
+void
 dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
                           rocprofiler_user_data_t* /* user_data */,
                           void* /* userdata */)
@@ -217,7 +228,7 @@ rocprofiler_configure(uint32_t /* version */,
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &ATTTest::Agent::tool_init,
-                                            &Callbacks::finalize,
+                                            &ATTTest::Agent::tool_fini,
                                             nullptr};
 
     // return pointer to configure data
