@@ -1,24 +1,24 @@
 /*
-* Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2020. ALL RIGHTS RESERVED.
-* Copyright (C) UT-Battelle, LLC. 2014-2017. ALL RIGHTS RESERVED.
-* Copyright (C) ARM Ltd. 2016-2017.  ALL RIGHTS RESERVED.
-* Copyright (C) Los Alamos National Security, LLC. 2018 ALL RIGHTS RESERVED.
-* See file LICENSE for terms.
-*/
+ * Copyright (c) NVIDIA CORPORATION & AFFILIATES, 2001-2020. ALL RIGHTS RESERVED.
+ * Copyright (C) UT-Battelle, LLC. 2014-2017. ALL RIGHTS RESERVED.
+ * Copyright (C) ARM Ltd. 2016-2017.  ALL RIGHTS RESERVED.
+ * Copyright (C) Los Alamos National Security, LLC. 2018 ALL RIGHTS RESERVED.
+ * See file LICENSE for terms.
+ */
 
 #ifndef UCP_H_
 #define UCP_H_
 
-#include <ucp/api/ucp_def.h>
-#include <ucp/api/ucp_compat.h>
-#include <ucp/api/ucp_version.h>
-#include <ucs/type/thread_mode.h>
-#include <ucs/type/cpu_set.h>
-#include <ucs/config/types.h>
-#include <ucs/sys/compiler_def.h>
-#include <ucs/memory/memory_type.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <ucp/api/ucp_compat.h>
+#include <ucp/api/ucp_def.h>
+#include <ucp/api/ucp_version.h>
+#include <ucs/config/types.h>
+#include <ucs/memory/memory_type.h>
+#include <ucs/sys/compiler_def.h>
+#include <ucs/type/cpu_set.h>
+#include <ucs/type/thread_mode.h>
 
 BEGIN_C_DECLS
 
@@ -44,8 +44,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_WORKER UCP Worker
  * @ingroup UCP_API
  * @{
@@ -53,8 +52,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_MEM UCP Memory routines
  * @ingroup UCP_API
  * @{
@@ -62,8 +60,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_WAKEUP UCP Wake-up routines
  * @ingroup UCP_API
  * @{
@@ -71,8 +68,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_ENDPOINT UCP Endpoint
  * @ingroup UCP_API
  * @{
@@ -80,8 +76,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_COMM UCP Communication routines
  * @ingroup UCP_API
  * @{
@@ -89,8 +84,7 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_CONFIG UCP Configuration
  * @ingroup UCP_API
  * @{
@@ -99,15 +93,13 @@ BEGIN_C_DECLS
  * @}
  */
 
-
- /**
+/**
  * @defgroup UCP_DATATYPE UCP Data type routines
  * @ingroup UCP_API
  * @{
  * UCP Data type routines
  * @}
  */
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -116,7 +108,8 @@ BEGIN_C_DECLS
  * The enumeration allows specifying which fields in @ref ucp_params_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_params_field {
+enum ucp_params_field
+{
     UCP_PARAM_FIELD_FEATURES          = UCS_BIT(0), /**< features */
     UCP_PARAM_FIELD_REQUEST_SIZE      = UCS_BIT(1), /**< request_size */
     UCP_PARAM_FIELD_REQUEST_INIT      = UCS_BIT(2), /**< request_init */
@@ -129,7 +122,6 @@ enum ucp_params_field {
     UCP_PARAM_FIELD_NODE_LOCAL_ID     = UCS_BIT(9)
 };
 
-
 /**
  * @ingroup UCP_CONTEXT
  * @brief UCP configuration features
@@ -138,27 +130,28 @@ enum ucp_params_field {
  * application can request the features using @ref ucp_params_t "UCP parameters"
  * during @ref ucp_init "UCP initialization" process.
  */
-enum ucp_feature {
+enum ucp_feature
+{
     /** Request tag matching support */
-    UCP_FEATURE_TAG           = UCS_BIT(0),
+    UCP_FEATURE_TAG = UCS_BIT(0),
 
     /** Request remote memory access support */
-    UCP_FEATURE_RMA           = UCS_BIT(1),
+    UCP_FEATURE_RMA = UCS_BIT(1),
 
     /** Request 32-bit atomic operations support */
-    UCP_FEATURE_AMO32         = UCS_BIT(2),
+    UCP_FEATURE_AMO32 = UCS_BIT(2),
 
     /** Request 64-bit atomic operations support */
-    UCP_FEATURE_AMO64         = UCS_BIT(3),
+    UCP_FEATURE_AMO64 = UCS_BIT(3),
 
     /** Request interrupt notification support */
-    UCP_FEATURE_WAKEUP        = UCS_BIT(4),
+    UCP_FEATURE_WAKEUP = UCS_BIT(4),
 
     /** Request stream support */
-    UCP_FEATURE_STREAM        = UCS_BIT(5),
+    UCP_FEATURE_STREAM = UCS_BIT(5),
 
     /** Request Active Message support */
-    UCP_FEATURE_AM            = UCS_BIT(6),
+    UCP_FEATURE_AM = UCS_BIT(6),
 
     /**
      * Request support mapping a peer's memory handle that was created by
@@ -168,9 +161,8 @@ enum ucp_feature {
     UCP_FEATURE_EXPORTED_MEMH = UCS_BIT(7),
 
     /** Request device-based communication features */
-    UCP_FEATURE_DEVICE        = UCS_BIT(8)
+    UCP_FEATURE_DEVICE = UCS_BIT(8)
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -179,20 +171,20 @@ enum ucp_feature {
  * The enumeration allows specifying which fields in @ref ucp_worker_params_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_worker_params_field {
-    UCP_WORKER_PARAM_FIELD_THREAD_MODE  = UCS_BIT(0), /**< UCP thread mode */
-    UCP_WORKER_PARAM_FIELD_CPU_MASK     = UCS_BIT(1), /**< Worker's CPU bitmap */
-    UCP_WORKER_PARAM_FIELD_EVENTS       = UCS_BIT(2), /**< Worker's events bitmap */
-    UCP_WORKER_PARAM_FIELD_USER_DATA    = UCS_BIT(3), /**< User data */
-    UCP_WORKER_PARAM_FIELD_EVENT_FD     = UCS_BIT(4), /**< External event file
+enum ucp_worker_params_field
+{
+    UCP_WORKER_PARAM_FIELD_THREAD_MODE = UCS_BIT(0),  /**< UCP thread mode */
+    UCP_WORKER_PARAM_FIELD_CPU_MASK    = UCS_BIT(1),  /**< Worker's CPU bitmap */
+    UCP_WORKER_PARAM_FIELD_EVENTS      = UCS_BIT(2),  /**< Worker's events bitmap */
+    UCP_WORKER_PARAM_FIELD_USER_DATA   = UCS_BIT(3),  /**< User data */
+    UCP_WORKER_PARAM_FIELD_EVENT_FD    = UCS_BIT(4),  /**< External event file
                                                            descriptor */
     UCP_WORKER_PARAM_FIELD_FLAGS        = UCS_BIT(5), /**< Worker flags */
     UCP_WORKER_PARAM_FIELD_NAME         = UCS_BIT(6), /**< Worker name */
     UCP_WORKER_PARAM_FIELD_AM_ALIGNMENT = UCS_BIT(7), /**< Alignment of active
                                                            messages on the receiver */
-    UCP_WORKER_PARAM_FIELD_CLIENT_ID    = UCS_BIT(8)  /**< Client id */
+    UCP_WORKER_PARAM_FIELD_CLIENT_ID = UCS_BIT(8)     /**< Client id */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -201,11 +193,11 @@ enum ucp_worker_params_field {
  * This enumeration allows specifying flags for @ref ucp_worker_params_t.flags,
  * which is used as parameter for @ref ucp_worker_create.
  */
-typedef enum {
+typedef enum
+{
     UCP_WORKER_FLAG_IGNORE_REQUEST_LEAK = UCS_BIT(0) /**< Do not print warnings
                                                           about request leaks */
 } ucp_worker_flags_t;
-
 
 /**
  * @ingroup UCP_WORKER
@@ -214,22 +206,22 @@ typedef enum {
  * The enumeration allows specifying which fields in @ref ucp_listener_params_t
  * are present. It is used to enable backward compatibility support.
  */
-enum ucp_listener_params_field {
+enum ucp_listener_params_field
+{
     /**
      * Sock address and length.
      */
-    UCP_LISTENER_PARAM_FIELD_SOCK_ADDR           = UCS_BIT(0),
+    UCP_LISTENER_PARAM_FIELD_SOCK_ADDR = UCS_BIT(0),
 
     /**
      * User's callback and argument for handling the creation of an endpoint.
      * */
-    UCP_LISTENER_PARAM_FIELD_ACCEPT_HANDLER      = UCS_BIT(1),
+    UCP_LISTENER_PARAM_FIELD_ACCEPT_HANDLER = UCS_BIT(1),
 
     /**< User's callback and argument for handling the incoming connection
      *   request. */
-    UCP_LISTENER_PARAM_FIELD_CONN_HANDLER        = UCS_BIT(2)
+    UCP_LISTENER_PARAM_FIELD_CONN_HANDLER = UCS_BIT(2)
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -239,14 +231,14 @@ enum ucp_listener_params_field {
  * what needs to be included to the worker address returned by
  * @ref ucp_worker_query "ucp_worker_query()" routine.
  */
-typedef enum {
+typedef enum
+{
 
     /**< Pack addresses of network devices only. Using such shortened addresses
      *   for the remote node peers will reduce the amount of wireup data being
      *   exchanged during connection establishment phase. */
     UCP_WORKER_ADDRESS_FLAG_NET_ONLY = UCS_BIT(0)
 } ucp_worker_address_flags_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -255,22 +247,23 @@ typedef enum {
  * The enumeration allows specifying which fields in @ref ucp_ep_params_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_ep_params_field {
-    UCP_EP_PARAM_FIELD_REMOTE_ADDRESS    = UCS_BIT(0), /**< Address of remote
-                                                            peer */
-    UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE = UCS_BIT(1), /**< Error handling mode.
-                                                            @ref ucp_err_handling_mode_t */
-    UCP_EP_PARAM_FIELD_ERR_HANDLER       = UCS_BIT(2), /**< Handler to process
-                                                            transport level errors */
-    UCP_EP_PARAM_FIELD_USER_DATA         = UCS_BIT(3), /**< User data pointer */
-    UCP_EP_PARAM_FIELD_SOCK_ADDR         = UCS_BIT(4), /**< Socket address field */
-    UCP_EP_PARAM_FIELD_FLAGS             = UCS_BIT(5), /**< Endpoint flags */
+enum ucp_ep_params_field
+{
+    UCP_EP_PARAM_FIELD_REMOTE_ADDRESS = UCS_BIT(0), /**< Address of remote
+                                                         peer */
+    UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE =
+        UCS_BIT(1),                              /**< Error handling mode.
+                                                      @ref ucp_err_handling_mode_t */
+    UCP_EP_PARAM_FIELD_ERR_HANDLER = UCS_BIT(2), /**< Handler to process
+                                                      transport level errors */
+    UCP_EP_PARAM_FIELD_USER_DATA = UCS_BIT(3),   /**< User data pointer */
+    UCP_EP_PARAM_FIELD_SOCK_ADDR = UCS_BIT(4),   /**< Socket address field */
+    UCP_EP_PARAM_FIELD_FLAGS     = UCS_BIT(5),   /**< Endpoint flags */
     /**< Connection request field */
-    UCP_EP_PARAM_FIELD_CONN_REQUEST      = UCS_BIT(6),
-    UCP_EP_PARAM_FIELD_NAME              = UCS_BIT(7), /**< Endpoint name */
-    UCP_EP_PARAM_FIELD_LOCAL_SOCK_ADDR   = UCS_BIT(8)  /**< Local socket Address */
+    UCP_EP_PARAM_FIELD_CONN_REQUEST    = UCS_BIT(6),
+    UCP_EP_PARAM_FIELD_NAME            = UCS_BIT(7), /**< Endpoint name */
+    UCP_EP_PARAM_FIELD_LOCAL_SOCK_ADDR = UCS_BIT(8)  /**< Local socket Address */
 };
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -279,34 +272,34 @@ enum ucp_ep_params_field {
  * The enumeration list describes the endpoint's parameters flags supported by
  * @ref ucp_ep_create() function.
  */
-enum ucp_ep_params_flags_field {
-    UCP_EP_PARAMS_FLAGS_CLIENT_SERVER  = UCS_BIT(0),  /**< Using a client-server
-                                                           connection establishment
-                                                           mechanism.
-                                                           @ref ucs_sock_addr_t
-                                                           sockaddr field
-                                                           must be provided and
-                                                           contain the address
-                                                           of the remote peer */
-    UCP_EP_PARAMS_FLAGS_NO_LOOPBACK    = UCS_BIT(1),  /**< Avoid connecting the
-                                                           endpoint to itself when
-                                                           connecting the endpoint
-                                                           to the same worker it
-                                                           was created on.
-                                                           Affects protocols which
-                                                           send to a particular
-                                                           remote endpoint, for
-                                                           example stream */
-    UCP_EP_PARAMS_FLAGS_SEND_CLIENT_ID = UCS_BIT(2)   /**< Send client id
-                                                           when connecting to remote
-                                                           socket address as part of the
-                                                           connection request payload.
-                                                           On the remote side value
-                                                           can be obtained from
-                                                           @ref ucp_conn_request_h using
-                                                           @ref ucp_conn_request_query */
+enum ucp_ep_params_flags_field
+{
+    UCP_EP_PARAMS_FLAGS_CLIENT_SERVER = UCS_BIT(0), /**< Using a client-server
+                                                         connection establishment
+                                                         mechanism.
+                                                         @ref ucs_sock_addr_t
+                                                         sockaddr field
+                                                         must be provided and
+                                                         contain the address
+                                                         of the remote peer */
+    UCP_EP_PARAMS_FLAGS_NO_LOOPBACK = UCS_BIT(1),   /**< Avoid connecting the
+                                                         endpoint to itself when
+                                                         connecting the endpoint
+                                                         to the same worker it
+                                                         was created on.
+                                                         Affects protocols which
+                                                         send to a particular
+                                                         remote endpoint, for
+                                                         example stream */
+    UCP_EP_PARAMS_FLAGS_SEND_CLIENT_ID = UCS_BIT(2) /**< Send client id
+                                                         when connecting to remote
+                                                         socket address as part of the
+                                                         connection request payload.
+                                                         On the remote side value
+                                                         can be obtained from
+                                                         @ref ucp_conn_request_h using
+                                                         @ref ucp_conn_request_query */
 };
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -314,7 +307,8 @@ enum ucp_ep_params_flags_field {
  *
  * The enumeration is used to specify the behavior of @ref ucp_ep_close_nbx.
  */
-typedef enum {
+typedef enum
+{
     UCP_EP_CLOSE_FLAG_FORCE = UCS_BIT(0) /**< @ref ucp_ep_close_nbx releases
                                               the endpoint without any
                                               confirmation from the peer. All
@@ -338,7 +332,6 @@ typedef enum {
                                               */
 } ucp_ep_close_flags_t;
 
-
 /**
  * @ingroup UCP_ENDPOINT
  * @brief UCP performance fields and flags
@@ -347,11 +340,11 @@ typedef enum {
  * present and operation flags are used. It is used to enable backward
  * compatibility support.
  */
-typedef enum ucp_ep_perf_param_field {
+typedef enum ucp_ep_perf_param_field
+{
     /** Enables @ref ucp_ep_evaluate_perf_param_t::message_size */
-    UCP_EP_PERF_PARAM_FIELD_MESSAGE_SIZE       = UCS_BIT(0)
+    UCP_EP_PERF_PARAM_FIELD_MESSAGE_SIZE = UCS_BIT(0)
 } ucp_ep_perf_param_field_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -361,11 +354,11 @@ typedef enum ucp_ep_perf_param_field {
  * present and operation flags are used. It is used to enable backward
  * compatibility support.
  */
-typedef enum ucp_ep_perf_attr_field {
+typedef enum ucp_ep_perf_attr_field
+{
     /** Enables @ref ucp_ep_evaluate_perf_attr_t::estimated_time */
     UCP_EP_PERF_ATTR_FIELD_ESTIMATED_TIME = UCS_BIT(0)
 } ucp_ep_perf_attr_field_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -374,26 +367,27 @@ typedef enum ucp_ep_perf_attr_field {
  * The enumeration allows specifying which fields in @ref ucp_mem_map_params_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_mem_map_params_field {
+enum ucp_mem_map_params_field
+{
     /**
      * Address of the memory that will be used in the @ref ucp_mem_map routine.
      */
-    UCP_MEM_MAP_PARAM_FIELD_ADDRESS              = UCS_BIT(0),
+    UCP_MEM_MAP_PARAM_FIELD_ADDRESS = UCS_BIT(0),
 
     /**
      * The size of memory that will be allocated or registered in the
      * @ref ucp_mem_map routine.
      */
-    UCP_MEM_MAP_PARAM_FIELD_LENGTH               = UCS_BIT(1),
+    UCP_MEM_MAP_PARAM_FIELD_LENGTH = UCS_BIT(1),
 
     /** Allocation flags. */
-    UCP_MEM_MAP_PARAM_FIELD_FLAGS                = UCS_BIT(2),
+    UCP_MEM_MAP_PARAM_FIELD_FLAGS = UCS_BIT(2),
 
     /** Memory protection mode. */
-    UCP_MEM_MAP_PARAM_FIELD_PROT                 = UCS_BIT(3),
+    UCP_MEM_MAP_PARAM_FIELD_PROT = UCS_BIT(3),
 
     /** Memory type. */
-    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE          = UCS_BIT(4),
+    UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE = UCS_BIT(4),
 
     /** Exported memory handle buffer. */
     UCP_MEM_MAP_PARAM_FIELD_EXPORTED_MEMH_BUFFER = UCS_BIT(5)
@@ -406,12 +400,12 @@ enum ucp_mem_map_params_field {
  * The enumeration allows specifying which fields in @ref ucp_mem_advise_params_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_mem_advise_params_field {
+enum ucp_mem_advise_params_field
+{
     UCP_MEM_ADVISE_PARAM_FIELD_ADDRESS = UCS_BIT(0), /**< Address of the memory */
     UCP_MEM_ADVISE_PARAM_FIELD_LENGTH  = UCS_BIT(1), /**< The size of memory */
     UCP_MEM_ADVISE_PARAM_FIELD_ADVICE  = UCS_BIT(2)  /**< Advice on memory usage */
 };
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -420,11 +414,11 @@ enum ucp_mem_advise_params_field {
  * The enumeration allows specifying which fields in @ref ucp_lib_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_lib_attr_field {
+enum ucp_lib_attr_field
+{
     /**< UCP library maximum supported thread level flag */
     UCP_LIB_ATTR_FIELD_MAX_THREAD_LEVEL = UCS_BIT(0)
 };
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -433,14 +427,14 @@ enum ucp_lib_attr_field {
  * The enumeration allows specifying which fields in @ref ucp_context_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_context_attr_field {
+enum ucp_context_attr_field
+{
     UCP_ATTR_FIELD_REQUEST_SIZE        = UCS_BIT(0), /**< UCP request size */
     UCP_ATTR_FIELD_THREAD_MODE         = UCS_BIT(1), /**< UCP context thread flag */
     UCP_ATTR_FIELD_MEMORY_TYPES        = UCS_BIT(2), /**< UCP supported memory types */
     UCP_ATTR_FIELD_NAME                = UCS_BIT(3), /**< UCP context name */
     UCP_ATTR_FIELD_DEVICE_COUNTER_SIZE = UCS_BIT(4)  /**< UCP Device API counter size */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -449,17 +443,17 @@ enum ucp_context_attr_field {
  * The enumeration allows specifying which fields in @ref ucp_worker_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_worker_attr_field {
-    UCP_WORKER_ATTR_FIELD_THREAD_MODE     = UCS_BIT(0), /**< UCP thread mode */
-    UCP_WORKER_ATTR_FIELD_ADDRESS         = UCS_BIT(1), /**< UCP address */
-    UCP_WORKER_ATTR_FIELD_ADDRESS_FLAGS   = UCS_BIT(2), /**< UCP address flags */
-    UCP_WORKER_ATTR_FIELD_MAX_AM_HEADER   = UCS_BIT(3), /**< Maximum header size
+enum ucp_worker_attr_field
+{
+    UCP_WORKER_ATTR_FIELD_THREAD_MODE   = UCS_BIT(0),   /**< UCP thread mode */
+    UCP_WORKER_ATTR_FIELD_ADDRESS       = UCS_BIT(1),   /**< UCP address */
+    UCP_WORKER_ATTR_FIELD_ADDRESS_FLAGS = UCS_BIT(2),   /**< UCP address flags */
+    UCP_WORKER_ATTR_FIELD_MAX_AM_HEADER = UCS_BIT(3),   /**< Maximum header size
                                                              used by UCP AM API */
     UCP_WORKER_ATTR_FIELD_NAME            = UCS_BIT(4), /**< UCP worker name */
     UCP_WORKER_ATTR_FIELD_MAX_INFO_STRING = UCS_BIT(5)  /**< Maximum size of
                                                              info string */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -469,10 +463,10 @@ enum ucp_worker_attr_field {
  * @ref ucp_worker_address_attr_t are present. It is used to enable backward
  * compatibility support.
  */
-enum ucp_worker_address_attr_field {
+enum ucp_worker_address_attr_field
+{
     UCP_WORKER_ADDRESS_ATTR_FIELD_UID = UCS_BIT(0) /**< Unique id of the worker */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -481,10 +475,10 @@ enum ucp_worker_address_attr_field {
  * The enumeration allows specifying which fields in @ref ucp_listener_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_listener_attr_field {
+enum ucp_listener_attr_field
+{
     UCP_LISTENER_ATTR_FIELD_SOCKADDR = UCS_BIT(0) /**< Sockaddr used for listening */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -493,11 +487,11 @@ enum ucp_listener_attr_field {
  * The enumeration allows specifying which fields in @ref ucp_conn_request_attr_t
  * are present. It is used to enable backward compatibility support.
  */
-enum ucp_conn_request_attr_field {
+enum ucp_conn_request_attr_field
+{
     UCP_CONN_REQUEST_ATTR_FIELD_CLIENT_ADDR = UCS_BIT(0), /**< Client's address */
     UCP_CONN_REQUEST_ATTR_FIELD_CLIENT_ID   = UCS_BIT(1)  /**< Remote client id */
 };
-
 
 /**
  * @ingroup UCP_DATATYPE
@@ -505,18 +499,18 @@ enum ucp_conn_request_attr_field {
  *
  * The enumeration list describes the datatypes supported by UCP.
  */
-enum ucp_dt_type {
-    UCP_DATATYPE_CONTIG  = 0,      /**< Contiguous datatype */
-    UCP_DATATYPE_STRIDED = 1,      /**< Strided datatype */
-    UCP_DATATYPE_IOV     = 2,      /**< Scatter-gather list with multiple pointers */
-    UCP_DATATYPE_GENERIC = 7,      /**< Generic datatype with
-                                        user-defined pack/unpack routines */
-    UCP_DATATYPE_SHIFT   = 3,      /**< Number of bits defining
-                                        the datatype classification */
+enum ucp_dt_type
+{
+    UCP_DATATYPE_CONTIG  = 0, /**< Contiguous datatype */
+    UCP_DATATYPE_STRIDED = 1, /**< Strided datatype */
+    UCP_DATATYPE_IOV     = 2, /**< Scatter-gather list with multiple pointers */
+    UCP_DATATYPE_GENERIC = 7, /**< Generic datatype with
+                                   user-defined pack/unpack routines */
+    UCP_DATATYPE_SHIFT = 3,   /**< Number of bits defining
+                                   the datatype classification */
     UCP_DATATYPE_CLASS_MASK = UCS_MASK(UCP_DATATYPE_SHIFT) /**< Data-type class
                                                                 mask */
 };
-
 
 /**
  * @ingroup UCP_DATATYPE
@@ -525,17 +519,17 @@ enum ucp_dt_type {
  * The enumeration allows specifying which fields in @ref ucp_datatype_attr_t
  * are present and which datatype attributes are queried.
  */
-enum ucp_datatype_attr_field {
+enum ucp_datatype_attr_field
+{
     /** @ref ucp_datatype_attr_t::packed_size field is queried. */
     UCP_DATATYPE_ATTR_FIELD_PACKED_SIZE = UCS_BIT(0),
 
     /** @ref ucp_datatype_attr_t::buffer field is set. */
-    UCP_DATATYPE_ATTR_FIELD_BUFFER      = UCS_BIT(1),
+    UCP_DATATYPE_ATTR_FIELD_BUFFER = UCS_BIT(1),
 
     /** @ref ucp_datatype_attr_t::count field is set. */
-    UCP_DATATYPE_ATTR_FIELD_COUNT       = UCS_BIT(2)
+    UCP_DATATYPE_ATTR_FIELD_COUNT = UCS_BIT(2)
 };
-
 
 /**
  * @ingroup UCP_MEM
@@ -544,26 +538,27 @@ enum ucp_datatype_attr_field {
  * The enumeration list describes the memory mapping flags supported by @ref
  * ucp_mem_map() function.
  */
-enum {
+enum
+{
     /**
      * Complete the mapping faster, possibly by not populating the pages in the
      * mapping up-front, and mapping them later when they are accessed by
      * communication routines.
      */
-    UCP_MEM_MAP_NONBLOCK       = UCS_BIT(0),
+    UCP_MEM_MAP_NONBLOCK = UCS_BIT(0),
 
     /**
      * Identify requirement for allocation, if passed address is not a
      * null-pointer, then it will be used as a hint or direct address for
      * allocation.
      */
-    UCP_MEM_MAP_ALLOCATE       = UCS_BIT(1),
+    UCP_MEM_MAP_ALLOCATE = UCS_BIT(1),
 
     /**
      * Don't interpret address as a hint: place the mapping at exactly that
      * address. The address must be a multiple of the page size.
      */
-    UCP_MEM_MAP_FIXED          = UCS_BIT(2),
+    UCP_MEM_MAP_FIXED = UCS_BIT(2),
 
     /**
      * Register the memory region so its remote access key would likely be
@@ -578,9 +573,8 @@ enum {
      * Enforce pinning of the memory pages in the mapping and populate them up-front.
      * This flag is mutually exclusive with UCP_MEM_MAP_NONBLOCK.
      */
-    UCP_MEM_MAP_LOCK           = UCS_BIT(4)
+    UCP_MEM_MAP_LOCK = UCS_BIT(4)
 };
-
 
 /**
  * @ingroup UCP_MEM
@@ -589,13 +583,13 @@ enum {
  * The enumeration list describes the memory mapping protections supported by the @ref
  * ucp_mem_map() function.
  */
-enum {
-    UCP_MEM_MAP_PROT_LOCAL_READ   = UCS_BIT(0),  /**< Enable local read access. */
-    UCP_MEM_MAP_PROT_LOCAL_WRITE  = UCS_BIT(1),  /**< Enable local write access. */
-    UCP_MEM_MAP_PROT_REMOTE_READ  = UCS_BIT(8),  /**< Enable remote read access. */
-    UCP_MEM_MAP_PROT_REMOTE_WRITE = UCS_BIT(9)   /**< Enable remote write access. */
+enum
+{
+    UCP_MEM_MAP_PROT_LOCAL_READ   = UCS_BIT(0), /**< Enable local read access. */
+    UCP_MEM_MAP_PROT_LOCAL_WRITE  = UCS_BIT(1), /**< Enable local write access. */
+    UCP_MEM_MAP_PROT_REMOTE_READ  = UCS_BIT(8), /**< Enable remote read access. */
+    UCP_MEM_MAP_PROT_REMOTE_WRITE = UCS_BIT(9)  /**< Enable remote write access. */
 };
-
 
 /**
  * @ingroup UCP_WORKER
@@ -603,11 +597,12 @@ enum {
  *
  * Flags that indicate how to handle UCP Active Messages.
  */
-enum ucp_am_cb_flags {
+enum ucp_am_cb_flags
+{
     /**
      * Indicates that the entire message will be handled in one callback.
      */
-    UCP_AM_FLAG_WHOLE_MSG       = UCS_BIT(0),
+    UCP_AM_FLAG_WHOLE_MSG = UCS_BIT(0),
 
     /**
      * Guarantees that the specified @ref ucp_am_recv_callback_t callback,
@@ -618,7 +613,6 @@ enum ucp_am_cb_flags {
     UCP_AM_FLAG_PERSISTENT_DATA = UCS_BIT(1)
 };
 
-
 /**
  * @ingroup UCP_WORKER
  * @brief Flags for sending a UCP Active Message.
@@ -626,21 +620,22 @@ enum ucp_am_cb_flags {
  * Flags dictate the behavior of @ref ucp_am_send_nb and @ref ucp_am_send_nbx
  * routines.
  */
-enum ucp_send_am_flags {
+enum ucp_send_am_flags
+{
     /**
      * Force relevant reply endpoint to be passed to the data callback on the receiver.
      */
-    UCP_AM_SEND_FLAG_REPLY       = UCS_BIT(0),
+    UCP_AM_SEND_FLAG_REPLY = UCS_BIT(0),
 
     /**
      * Force UCP to use only eager protocol for AM sends.
      */
-    UCP_AM_SEND_FLAG_EAGER       = UCS_BIT(1),
+    UCP_AM_SEND_FLAG_EAGER = UCS_BIT(1),
 
     /**
      * Force UCP to use only rendezvous protocol for AM sends.
      */
-    UCP_AM_SEND_FLAG_RNDV        = UCS_BIT(2),
+    UCP_AM_SEND_FLAG_RNDV = UCS_BIT(2),
 
     /**
      * The flag indicates that the header should be copied to an internal buffer
@@ -653,9 +648,8 @@ enum ucp_send_am_flags {
     /**
      * Backward compatibility.
      */
-    UCP_AM_SEND_REPLY            = UCP_AM_SEND_FLAG_REPLY
+    UCP_AM_SEND_REPLY = UCP_AM_SEND_FLAG_REPLY
 };
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -667,10 +661,10 @@ enum ucp_send_am_flags {
  * and the user has to call @ref ucp_am_data_release when data is
  * no longer needed.
  */
-enum ucp_cb_param_flags {
+enum ucp_cb_param_flags
+{
     UCP_CB_PARAM_FLAG_DATA = UCS_BIT(0)
 };
-
 
 /**
  * @ingroup UCP_COMM
@@ -679,7 +673,8 @@ enum ucp_cb_param_flags {
  * This enumeration defines which atomic memory operation should be
  * performed by the @ref ucp_atomic_op_nbx routine.
  */
-typedef enum {
+typedef enum
+{
     UCP_ATOMIC_OP_ADD,   /**< Atomic add  */
     UCP_ATOMIC_OP_SWAP,  /**< Atomic swap */
     UCP_ATOMIC_OP_CSWAP, /**< Atomic conditional swap */
@@ -689,22 +684,21 @@ typedef enum {
     UCP_ATOMIC_OP_LAST
 } ucp_atomic_op_t;
 
-
 /**
  * @ingroup UCP_COMM
  * @brief Flags to define behavior of @ref ucp_stream_recv_nb function
  *
  * This enumeration defines behavior of @ref ucp_stream_recv_nb function.
  */
-typedef enum {
-    UCP_STREAM_RECV_FLAG_WAITALL = UCS_BIT(0)  /**< This flag requests that
-                                                    the operation will not be
-                                                    completed until all
-                                                    requested data is received
-                                                    and placed in the user
-                                                    buffer. */
+typedef enum
+{
+    UCP_STREAM_RECV_FLAG_WAITALL = UCS_BIT(0) /**< This flag requests that
+                                                   the operation will not be
+                                                   completed until all
+                                                   requested data is received
+                                                   and placed in the user
+                                                   buffer. */
 } ucp_stream_recv_flags_t;
-
 
 /**
  * @ingroup UCP_COMM
@@ -714,24 +708,25 @@ typedef enum {
  * present and operation flags are used. It is used to enable backward
  * compatibility support.
  */
-typedef enum {
-    UCP_OP_ATTR_FIELD_REQUEST       = UCS_BIT(0),  /**< request field */
-    UCP_OP_ATTR_FIELD_CALLBACK      = UCS_BIT(1),  /**< cb field */
-    UCP_OP_ATTR_FIELD_USER_DATA     = UCS_BIT(2),  /**< user_data field */
-    UCP_OP_ATTR_FIELD_DATATYPE      = UCS_BIT(3),  /**< datatype field */
-    UCP_OP_ATTR_FIELD_FLAGS         = UCS_BIT(4),  /**< operation-specific flags */
-    UCP_OP_ATTR_FIELD_REPLY_BUFFER  = UCS_BIT(5),  /**< reply_buffer field */
-    UCP_OP_ATTR_FIELD_MEMORY_TYPE   = UCS_BIT(6),  /**< memory type field */
-    UCP_OP_ATTR_FIELD_RECV_INFO     = UCS_BIT(7),  /**< recv_info field */
-    UCP_OP_ATTR_FIELD_MEMH          = UCS_BIT(8),  /**< memory handle field */
+typedef enum
+{
+    UCP_OP_ATTR_FIELD_REQUEST      = UCS_BIT(0), /**< request field */
+    UCP_OP_ATTR_FIELD_CALLBACK     = UCS_BIT(1), /**< cb field */
+    UCP_OP_ATTR_FIELD_USER_DATA    = UCS_BIT(2), /**< user_data field */
+    UCP_OP_ATTR_FIELD_DATATYPE     = UCS_BIT(3), /**< datatype field */
+    UCP_OP_ATTR_FIELD_FLAGS        = UCS_BIT(4), /**< operation-specific flags */
+    UCP_OP_ATTR_FIELD_REPLY_BUFFER = UCS_BIT(5), /**< reply_buffer field */
+    UCP_OP_ATTR_FIELD_MEMORY_TYPE  = UCS_BIT(6), /**< memory type field */
+    UCP_OP_ATTR_FIELD_RECV_INFO    = UCS_BIT(7), /**< recv_info field */
+    UCP_OP_ATTR_FIELD_MEMH         = UCS_BIT(8), /**< memory handle field */
 
-    UCP_OP_ATTR_FLAG_NO_IMM_CMPL    = UCS_BIT(16), /**< Deny immediate completion,
+    UCP_OP_ATTR_FLAG_NO_IMM_CMPL = UCS_BIT(16),    /**< Deny immediate completion,
                                                         i.e NULL cannot be returned.
                                                         If a completion callback is
                                                         provided, it can be called
                                                         before the function
                                                         returns. */
-    UCP_OP_ATTR_FLAG_FAST_CMPL      = UCS_BIT(17), /**< expedite local completion,
+    UCP_OP_ATTR_FLAG_FAST_CMPL = UCS_BIT(17),      /**< expedite local completion,
                                                         even if it delays remote
                                                         data delivery. Note for
                                                         implementer: this option
@@ -745,14 +740,14 @@ typedef enum {
                                                         operation, fail if the
                                                         operation cannot be
                                                         completed immediately */
-    UCP_OP_ATTR_FLAG_MULTI_SEND     = UCS_BIT(19)  /**< optimize for bandwidth of
-                                                        multiple in-flight operations,
-                                                        rather than for the latency
-                                                        of a single operation.
-                                                        This flag and UCP_OP_ATTR_FLAG_FAST_CMPL
-                                                        are mutually exclusive. */
+    UCP_OP_ATTR_FLAG_MULTI_SEND =
+        UCS_BIT(19) /**< optimize for bandwidth of
+                         multiple in-flight operations,
+                         rather than for the latency
+                         of a single operation.
+                         This flag and UCP_OP_ATTR_FLAG_FAST_CMPL
+                         are mutually exclusive. */
 } ucp_op_attr_t;
-
 
 /**
  * @ingroup UCP_COMM
@@ -761,13 +756,13 @@ typedef enum {
  * The enumeration allows specifying which fields in @ref ucp_request_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-typedef enum {
+typedef enum
+{
     UCP_REQUEST_ATTR_FIELD_INFO_STRING      = UCS_BIT(0),
     UCP_REQUEST_ATTR_FIELD_INFO_STRING_SIZE = UCS_BIT(1),
     UCP_REQUEST_ATTR_FIELD_STATUS           = UCS_BIT(2),
     UCP_REQUEST_ATTR_FIELD_MEM_TYPE         = UCS_BIT(3)
 } ucp_req_attr_field;
-
 
 /**
  * @ingroup UCP_COMM
@@ -777,8 +772,9 @@ typedef enum {
  * are present and receive operation flags are used. It is used to enable
  * backward compatibility support.
  */
-typedef enum {
-    UCP_AM_RECV_ATTR_FIELD_REPLY_EP    = UCS_BIT(0),  /**< reply_ep field */
+typedef enum
+{
+    UCP_AM_RECV_ATTR_FIELD_REPLY_EP = UCS_BIT(0), /**< reply_ep field */
 
     /**
      * Indicates that the data provided in @ref ucp_am_recv_callback_t callback
@@ -787,7 +783,7 @@ typedef enum {
      * @ref ucp_am_data_release when data is no longer needed. This flag is
      * mutually exclusive with @a UCP_AM_RECV_ATTR_FLAG_RNDV.
      */
-    UCP_AM_RECV_ATTR_FLAG_DATA         = UCS_BIT(16),
+    UCP_AM_RECV_ATTR_FLAG_DATA = UCS_BIT(16),
 
     /**
      * Indicates that the arriving data was sent using rendezvous protocol.
@@ -796,9 +792,8 @@ typedef enum {
      * data by calling @ref ucp_am_recv_data_nbx routine. This flag is mutually
      * exclusive with @a UCP_AM_RECV_ATTR_FLAG_DATA.
      */
-    UCP_AM_RECV_ATTR_FLAG_RNDV         = UCS_BIT(17)
+    UCP_AM_RECV_ATTR_FLAG_RNDV = UCS_BIT(17)
 } ucp_am_recv_attr_t;
-
 
 /**
  * @ingroup UCP_COMM
@@ -807,25 +802,25 @@ typedef enum {
  * The enumeration allows specifying which fields in @ref ucp_am_handler_param_t
  * are present. It is used to enable backward compatibility support.
  */
-enum ucp_am_handler_param_field {
+enum ucp_am_handler_param_field
+{
     /**
      * Indicates that @ref ucp_am_handler_param_t.id field is valid.
      */
-    UCP_AM_HANDLER_PARAM_FIELD_ID      = UCS_BIT(0),
+    UCP_AM_HANDLER_PARAM_FIELD_ID = UCS_BIT(0),
     /**
      * Indicates that @ref ucp_am_handler_param_t.flags field is valid.
      */
-    UCP_AM_HANDLER_PARAM_FIELD_FLAGS   = UCS_BIT(1),
+    UCP_AM_HANDLER_PARAM_FIELD_FLAGS = UCS_BIT(1),
     /**
      * Indicates that @ref ucp_am_handler_param_t.cb field is valid.
      */
-    UCP_AM_HANDLER_PARAM_FIELD_CB      = UCS_BIT(2),
+    UCP_AM_HANDLER_PARAM_FIELD_CB = UCS_BIT(2),
     /**
      * Indicates that @ref ucp_am_handler_param_t.arg field is valid.
      */
-    UCP_AM_HANDLER_PARAM_FIELD_ARG     = UCS_BIT(3)
+    UCP_AM_HANDLER_PARAM_FIELD_ARG = UCS_BIT(3)
 };
-
 
 /**
  * @ingroup UCP_DATATYPE
@@ -841,9 +836,8 @@ enum ucp_am_handler_param_field {
  * @note In case of partial receive, the buffer will be filled with integral
  *       count of elements.
  */
-#define ucp_dt_make_contig(_elem_size) \
-    (((ucp_datatype_t)(_elem_size) << UCP_DATATYPE_SHIFT) | UCP_DATATYPE_CONTIG)
-
+#define ucp_dt_make_contig(_elem_size)                                                   \
+    (((ucp_datatype_t) (_elem_size) << UCP_DATATYPE_SHIFT) | UCP_DATATYPE_CONTIG)
 
 /**
  * @ingroup UCP_DATATYPE
@@ -858,8 +852,7 @@ enum ucp_am_handler_param_field {
  *       filled with any number of bytes according to its
  *       @ref ucp_dt_iov_t::length.
  */
-#define ucp_dt_make_iov() ((ucp_datatype_t)UCP_DATATYPE_IOV)
-
+#define ucp_dt_make_iov() ((ucp_datatype_t) UCP_DATATYPE_IOV)
 
 /**
  * @ingroup UCP_DATATYPE
@@ -872,11 +865,11 @@ enum ucp_am_handler_param_field {
  * @note If @a length is zero, the memory pointed to by @a buffer
  *       will not be accessed. Otherwise, @a buffer must point to valid memory.
  */
-typedef struct ucp_dt_iov {
-    void   *buffer;   /**< Pointer to a data buffer */
-    size_t  length;   /**< Length of the @a buffer in bytes */
+typedef struct ucp_dt_iov
+{
+    void*  buffer; /**< Pointer to a data buffer */
+    size_t length; /**< Length of the @a buffer in bytes */
 } ucp_dt_iov_t;
-
 
 /**
  * @ingroup UCP_DATATYPE
@@ -891,8 +884,8 @@ typedef struct ucp_dt_iov {
  * @note In case of partial receive, any amount of received data is acceptable
  *       which matches buffer size.
  */
-typedef struct ucp_generic_dt_ops {
-
+typedef struct ucp_generic_dt_ops
+{
     /**
      * @ingroup UCP_DATATYPE
      * @brief Start a packing request.
@@ -907,7 +900,7 @@ typedef struct ucp_generic_dt_ops {
      * @return  A custom state that is passed to the following
      *          @ref ucp_generic_dt_ops::pack "pack()" routine.
      */
-    void* (*start_pack)(void *context, const void *buffer, size_t count);
+    void* (*start_pack)(void* context, const void* buffer, size_t count);
 
     /**
      * @ingroup UCP_DATATYPE
@@ -923,7 +916,7 @@ typedef struct ucp_generic_dt_ops {
      * @return  A custom state that is passed later to the following
      *          @ref ucp_generic_dt_ops::unpack "unpack()" routine.
      */
-    void* (*start_unpack)(void *context, void *buffer, size_t count);
+    void* (*start_unpack)(void* context, void* buffer, size_t count);
 
     /**
      * @ingroup UCP_DATATYPE
@@ -938,7 +931,7 @@ typedef struct ucp_generic_dt_ops {
      *
      * @return  The size of the data in a packed form.
      */
-    size_t (*packed_size)(void *state);
+    size_t (*packed_size)(void* state);
 
     /**
      * @ingroup UCP_DATATYPE
@@ -956,7 +949,7 @@ typedef struct ucp_generic_dt_ops {
      * @return The size of the data that was written to the destination buffer.
      *         Must be less than or equal to @e max_length.
      */
-    size_t (*pack) (void *state, size_t offset, void *dest, size_t max_length);
+    size_t (*pack)(void* state, size_t offset, void* dest, size_t max_length);
 
     /**
      * @ingroup UCP_DATATYPE
@@ -973,7 +966,7 @@ typedef struct ucp_generic_dt_ops {
      *
      * @return UCS_OK or an error if unpacking failed.
      */
-    ucs_status_t (*unpack)(void *state, size_t offset, const void *src, size_t length);
+    ucs_status_t (*unpack)(void* state, size_t offset, const void* src, size_t length);
 
     /**
      * @ingroup UCP_DATATYPE
@@ -989,9 +982,8 @@ typedef struct ucp_generic_dt_ops {
      *                             "start_unpack()"
      *                             routines.
      */
-    void (*finish)(void *state);
+    void (*finish)(void* state);
 } ucp_generic_dt_ops_t;
-
 
 /**
  * @ingroup UCP_DATATYPE
@@ -999,18 +991,19 @@ typedef struct ucp_generic_dt_ops {
  *
  * This structure provides attributes of a UCP datatype.
  */
-typedef struct ucp_datatype_attr {
+typedef struct ucp_datatype_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from @ref
      * ucp_datatype_attr_field. Fields not specified in this mask will be
      * ignored. Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t   field_mask;
+    uint64_t field_mask;
 
     /**
      * Packed size of the given datatype. (output parameter)
      */
-    size_t     packed_size;
+    size_t packed_size;
 
     /**
      * Pointer to a data buffer of the associated data type.
@@ -1018,7 +1011,7 @@ typedef struct ucp_datatype_attr {
      * If @ref UCP_DATATYPE_ATTR_FIELD_BUFFER is not set in @ref field_mask,
      * this field defaults to @e NULL.
      */
-    const void *buffer;
+    const void* buffer;
 
     /**
      * Number of elements in @a buffer.
@@ -1026,9 +1019,8 @@ typedef struct ucp_datatype_attr {
      * If @ref UCP_DATATYPE_ATTR_FIELD_COUNT is not set in @ref field_mask, the
      * value of this field defaults to 1.
      */
-    size_t     count;
+    size_t count;
 } ucp_datatype_attr_t;
-
 
 /**
  * @ingroup UCP_CONFIG
@@ -1043,13 +1035,14 @@ typedef struct ucp_datatype_attr {
  * semantics UCP library may avoid allocation of expensive resources associated with
  * send/receive queues.
  */
-typedef struct ucp_params {
+typedef struct ucp_params
+{
     /**
      * Mask of valid fields in this structure, using bits from @ref ucp_params_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                           field_mask;
+    uint64_t field_mask;
 
     /**
      * UCP @ref ucp_feature "features" that are used for library
@@ -1057,7 +1050,7 @@ typedef struct ucp_params {
      * the features that are required for an optimal functionality
      * This field must be specified.
      */
-    uint64_t                           features;
+    uint64_t features;
 
     /**
      * The size of a reserved space in a non-blocking requests. Typically
@@ -1067,7 +1060,7 @@ typedef struct ucp_params {
      * descriptors
      * This field defaults to 0 if not specified.
      */
-    size_t                             request_size;
+    size_t request_size;
 
     /**
      * Pointer to a routine that is used for the request initialization.
@@ -1079,7 +1072,7 @@ typedef struct ucp_params {
      * @e NULL can be used if no such is function required, which is also the
      * default if this field is not specified by @ref field_mask.
      */
-    ucp_request_init_callback_t        request_init;
+    ucp_request_init_callback_t request_init;
 
     /**
      * Pointer to a routine that is responsible for final cleanup of the memory
@@ -1090,14 +1083,14 @@ typedef struct ucp_params {
      * @e NULL can be used if no such function is required, which is also the
      * default if this field is not specified by @ref field_mask.
      */
-    ucp_request_cleanup_callback_t     request_cleanup;
+    ucp_request_cleanup_callback_t request_cleanup;
 
     /**
      * Mask which specifies particular bits of the tag which can uniquely
      * identify the sender (UCP endpoint) in tagged operations.
      * This field defaults to 0 if not specified.
      */
-    uint64_t                           tag_sender_mask;
+    uint64_t tag_sender_mask;
 
     /**
      * This flag indicates if this context is shared by multiple workers
@@ -1113,7 +1106,7 @@ typedef struct ucp_params {
      * to @ref ucp_init. To get actual thread mode use
      * @ref ucp_context_query.
      */
-    int                                mt_workers_shared;
+    int mt_workers_shared;
 
     /**
      * An optimization hint of how many endpoints will be created on this context.
@@ -1124,7 +1117,7 @@ typedef struct ucp_params {
      * The value can be also set by UCX_NUM_EPS environment variable. In such case
      * it will override the number of endpoints set by @e estimated_num_eps
      */
-    size_t                             estimated_num_eps;
+    size_t estimated_num_eps;
 
     /**
      * An optimization hint for a single node. For example, when used from MPI or
@@ -1134,7 +1127,7 @@ typedef struct ucp_params {
      * The value can be also set by the UCX_NUM_PPN environment variable, which
      * will override the number of endpoints set by @e estimated_num_ppn
      */
-    size_t                             estimated_num_ppn;
+    size_t estimated_num_ppn;
 
     /**
      * Tracing and analysis tools can identify the context using this name.
@@ -1144,7 +1137,7 @@ typedef struct ucp_params {
      * @ref UCP_PARAM_FIELD_NAME in the field mask. If not, then a default
      * unique name will be created for you.
      */
-    const char                         *name;
+    const char* name;
 
     /**
      * An optimization hint for a single node. For example, when used from MPI or
@@ -1154,9 +1147,8 @@ typedef struct ucp_params {
      * The value can be also set by the UCX_LOCAL_NODE_ID environment variable,
      * which will override the id set by @e node_local_id
      */
-    size_t                             node_local_id;
+    size_t node_local_id;
 } ucp_params_t;
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -1164,14 +1156,15 @@ typedef struct ucp_params {
  *
  * The structure defines the attributes that characterize the Library.
  */
-typedef struct ucp_lib_attr {
+typedef struct ucp_lib_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_lib_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t          field_mask;
+    uint64_t field_mask;
 
     /**
      * Maximum level of thread support of the library, which is permanent
@@ -1183,7 +1176,6 @@ typedef struct ucp_lib_attr {
     ucs_thread_mode_t max_thread_level;
 } ucp_lib_attr_t;
 
-
 /**
  * @ingroup UCP_CONTEXT
  * @brief Context attributes.
@@ -1191,45 +1183,45 @@ typedef struct ucp_lib_attr {
  * The structure defines the attributes that characterize
  * the particular context.
  */
-typedef struct ucp_context_attr {
+typedef struct ucp_context_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_context_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t              field_mask;
+    uint64_t field_mask;
 
     /**
      * Size of UCP non-blocking request. When pre-allocated request is used
      * (e.g. in @ref ucp_tag_recv_nbr) it should have enough space to fit
      * UCP request data, which is defined by this value.
      */
-    size_t                request_size;
+    size_t request_size;
 
     /**
      * Thread safe level of the context. For supported thread levels please
      * see @ref ucs_thread_mode_t.
      */
-    ucs_thread_mode_t     thread_mode;
+    ucs_thread_mode_t thread_mode;
 
     /**
      * Mask of which memory types are supported, for supported memory types
      * please see @ref ucs_memory_type_t.
      */
-    uint64_t              memory_types;
+    uint64_t memory_types;
 
     /**
      * Tracing and analysis tools can use name to identify this UCX context.
      */
-    char                  name[UCP_ENTITY_NAME_MAX];
+    char name[UCP_ENTITY_NAME_MAX];
 
     /**
      * Size usable to allocate a counter memory for UCP Device API usage.
      */
-    size_t                device_counter_size;
+    size_t device_counter_size;
 } ucp_context_attr_t;
-
 
 /**
  * @ingroup UCP_WORKER
@@ -1238,19 +1230,20 @@ typedef struct ucp_context_attr {
  * The structure defines the attributes which characterize
  * the particular worker.
  */
-typedef struct ucp_worker_attr {
+typedef struct ucp_worker_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_worker_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t              field_mask;
+    uint64_t field_mask;
 
     /**
      * Thread safe level of the worker.
      */
-    ucs_thread_mode_t     thread_mode;
+    ucs_thread_mode_t thread_mode;
 
     /**
      * Flags indicating requested details of the worker address.
@@ -1258,7 +1251,7 @@ typedef struct ucp_worker_attr {
      * this value should be set as well. Possible flags are specified
      * in @ref ucp_worker_address_flags_t. @note This is an input attribute.
      */
-    uint32_t              address_flags;
+    uint32_t address_flags;
 
     /**
      * Worker address, which can be passed to remote instances of the UCP library
@@ -1267,29 +1260,28 @@ typedef struct ucp_worker_attr {
      * must be released by using @ref ucp_worker_release_address
      * "ucp_worker_release_address()" routine.
      */
-    ucp_address_t         *address;
+    ucp_address_t* address;
 
     /**
      * Size of worker address in bytes.
      */
-    size_t                address_length;
+    size_t address_length;
 
     /**
      * Maximum allowed header size for @ref ucp_am_send_nbx routine.
      */
-    size_t                max_am_header;
+    size_t max_am_header;
 
     /**
      * Tracing and analysis tools can identify the worker using this name.
      */
-    char                  name[UCP_ENTITY_NAME_MAX];
+    char name[UCP_ENTITY_NAME_MAX];
 
     /**
      * Maximum debug string size that can be filled with @ref ucp_request_query.
      */
-    size_t                max_debug_string;
+    size_t max_debug_string;
 } ucp_worker_attr_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -1299,15 +1291,15 @@ typedef struct ucp_worker_attr {
  * keys comparison using @ref ucp_rkey_compare routine.
  *
  */
-typedef struct ucp_rkey_compare_params {
+typedef struct ucp_rkey_compare_params
+{
     /**
      * Mask of valid fields in this structure, must currently be zero. Fields
      * not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 } ucp_rkey_compare_params_t;
-
 
 /**
  * @ingroup UCP_WORKER
@@ -1316,13 +1308,14 @@ typedef struct ucp_rkey_compare_params {
  * The structure defines the parameters that are used for the
  * UCP worker tuning during the UCP worker @ref ucp_worker_create "creation".
  */
-typedef struct ucp_worker_params {
+typedef struct ucp_worker_params
+{
     /**
-     * Mask of valid fields in this structure, using bits from @ref ucp_worker_params_field.
-     * Fields not specified in this mask will be ignored.
+     * Mask of valid fields in this structure, using bits from @ref
+     * ucp_worker_params_field. Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * The parameter thread_mode suggests the thread safety mode which worker
@@ -1336,7 +1329,7 @@ typedef struct ucp_worker_params {
      * suggested mode. The actual thread mode of the worker should be obtained
      * using the query interface @ref ucp_worker_query.
      */
-    ucs_thread_mode_t       thread_mode;
+    ucs_thread_mode_t thread_mode;
 
     /**
      * Mask of which CPUs worker resources should preferably be allocated on.
@@ -1345,7 +1338,7 @@ typedef struct ucp_worker_params {
      * UCP_WORKER_PARAM_FIELD_CPU_MASK), resources are allocated according to
      * system's default policy.
      */
-    ucs_cpu_set_t           cpu_mask;
+    ucs_cpu_set_t cpu_mask;
 
     /**
      * Mask of events (@ref ucp_wakeup_event_t) which are expected on wakeup.
@@ -1354,7 +1347,7 @@ typedef struct ucp_worker_params {
      * UCP_WORKER_PARAM_FIELD_EVENTS), all types of events will trigger on
      * wakeup.
      */
-    unsigned                events;
+    unsigned events;
 
     /**
      * User data associated with the current worker.
@@ -1362,7 +1355,7 @@ typedef struct ucp_worker_params {
      * If it's not set (along with its corresponding bit in the field_mask -
      * UCP_WORKER_PARAM_FIELD_USER_DATA), it will default to NULL.
      */
-    void                    *user_data;
+    void* user_data;
 
     /**
      * External event file descriptor.
@@ -1379,7 +1372,7 @@ typedef struct ucp_worker_params {
      * Otherwise, events will be reported to the event file descriptor returned
      * from @ref ucp_worker_get_efd().
      */
-    int                     event_fd;
+    int event_fd;
 
     /**
      * Worker flags.
@@ -1387,7 +1380,7 @@ typedef struct ucp_worker_params {
      * If @ref UCP_WORKER_PARAM_FIELD_FLAGS is not set in the field_mask, the
      * value of this field will default to 0.
      */
-    uint64_t                flags;
+    uint64_t flags;
 
     /**
      * Tracing and analysis tools can identify the worker using this name. To
@@ -1397,24 +1390,23 @@ typedef struct ucp_worker_params {
      * @ref UCP_WORKER_PARAM_FIELD_NAME in the field mask. If not, then a
      * default unique name will be created for you.
      */
-    const char              *name;
+    const char* name;
 
     /**
      * Minimal address alignment of the active message data pointer as passed
      * in argument @a data to the active message handler, defined as
      * @a ucp_am_recv_callback_t.
      */
-    size_t                  am_alignment;
+    size_t am_alignment;
 
     /**
-    * Client id that is sent as part of the connection request payload
-    * when connecting to a remote socket address. On the remote side,
-    * this value can be obtained from @ref ucp_conn_request_h
-    * using @ref ucp_conn_request_query.
-    */
-    uint64_t                client_id;
+     * Client id that is sent as part of the connection request payload
+     * when connecting to a remote socket address. On the remote side,
+     * this value can be obtained from @ref ucp_conn_request_h
+     * using @ref ucp_conn_request_query.
+     */
+    uint64_t client_id;
 } ucp_worker_params_t;
-
 
 /**
  * @ingroup UCP_WORKER
@@ -1422,21 +1414,21 @@ typedef struct ucp_worker_params {
  *
  * The structure defines the attributes of the particular worker address.
  */
-typedef struct ucp_worker_address_attr {
+typedef struct ucp_worker_address_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_worker_address_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t              field_mask;
+    uint64_t field_mask;
 
     /**
      * Unique id of the worker this address belongs to.
      */
-    uint64_t              worker_uid;
+    uint64_t worker_uid;
 } ucp_worker_address_attr_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -1445,22 +1437,22 @@ typedef struct ucp_worker_address_attr {
  * The structure defines the attributes which characterize
  * the request for performance estimation of a particular endpoint.
  */
-typedef struct {
+typedef struct
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_ep_perf_param_field_t.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t          field_mask;
+    uint64_t field_mask;
 
     /**
      * Message size to use for determining performance.
      * This field must be initialized by the caller.
      */
-    size_t            message_size;
+    size_t message_size;
 } ucp_ep_evaluate_perf_param_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -1469,21 +1461,22 @@ typedef struct {
  * The structure defines the attributes which characterize
  * the result of performance estimation of a particular endpoint.
  */
-typedef struct {
+typedef struct
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_ep_perf_attr_field_t.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t          field_mask;
+    uint64_t field_mask;
 
     /**
      * Estimated time (in seconds) required to send a message of a given size
      * on this endpoint.
      * This field is set by the @ref ucp_ep_evaluate_perf function.
      */
-    double            estimated_time;
+    double estimated_time;
 } ucp_ep_evaluate_perf_attr_t;
 
 /**
@@ -1493,14 +1486,15 @@ typedef struct {
  * The structure defines the attributes which characterize
  * the particular listener.
  */
-typedef struct ucp_listener_attr {
+typedef struct ucp_listener_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_listener_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * Sockaddr on which this listener is listening for incoming connection
@@ -1509,7 +1503,6 @@ typedef struct ucp_listener_attr {
     struct sockaddr_storage sockaddr;
 } ucp_listener_attr_t;
 
-
 /**
  * @ingroup UCP_WORKER
  * @brief UCP listener's connection request attributes.
@@ -1517,14 +1510,15 @@ typedef struct ucp_listener_attr {
  * The structure defines the attributes that characterize
  * the particular connection request received on the server side.
  */
-typedef struct ucp_conn_request_attr {
+typedef struct ucp_conn_request_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_conn_request_attr_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * The address of the remote client that sent the connection request to the
@@ -1536,9 +1530,8 @@ typedef struct ucp_conn_request_attr {
      * Remote client id if remote endpoint's flag
      * @ref UCP_EP_PARAMS_FLAGS_SEND_CLIENT_ID is set.
      */
-    uint64_t                client_id;
+    uint64_t client_id;
 } ucp_conn_request_attr_t;
-
 
 /**
  * @ingroup UCP_WORKER
@@ -1547,14 +1540,15 @@ typedef struct ucp_conn_request_attr {
  * This structure defines parameters for @ref ucp_listener_create, which is used to
  * listen for incoming client/server connections.
  */
-typedef struct ucp_listener_params {
+typedef struct ucp_listener_params
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_listener_params_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                            field_mask;
+    uint64_t field_mask;
 
     /**
      * An address in the form of a sockaddr.
@@ -1563,7 +1557,7 @@ typedef struct ucp_listener_params {
      * The @ref ucp_listener_create routine will return with an error if sockaddr
      * is not specified.
      */
-    ucs_sock_addr_t                     sockaddr;
+    ucs_sock_addr_t sockaddr;
 
     /**
      * Handler to endpoint creation in a client-server connection flow.
@@ -1571,7 +1565,7 @@ typedef struct ucp_listener_params {
      * UCP_LISTENER_PARAM_FIELD_ACCEPT_HANDLER needs to be set in the
      * field_mask.
      */
-    ucp_listener_accept_handler_t       accept_handler;
+    ucp_listener_accept_handler_t accept_handler;
 
     /**
      * Handler of an incoming connection request in a client-server connection
@@ -1584,9 +1578,8 @@ typedef struct ucp_listener_params {
      *       @ref ucp_ep_params_t::conn_request in order to be able to receive
      *       communications.
      */
-    ucp_listener_conn_handler_t         conn_handler;
+    ucp_listener_conn_handler_t conn_handler;
 } ucp_listener_params_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -1594,29 +1587,29 @@ typedef struct ucp_listener_params {
  *
  * The structure defines the endpoint and its user data.
  */
-typedef struct ucp_stream_poll_ep {
+typedef struct ucp_stream_poll_ep
+{
     /**
      * Endpoint handle.
      */
-    ucp_ep_h    ep;
+    ucp_ep_h ep;
 
     /**
      * User data associated with an endpoint passed in
      * @ref ucp_ep_params_t::user_data.
      */
-    void        *user_data;
+    void* user_data;
 
     /**
      * Reserved for future use.
      */
-    unsigned    flags;
+    unsigned flags;
 
     /**
      * Reserved for future use.
      */
-    uint8_t     reserved[16];
+    uint8_t reserved[16];
 } ucp_stream_poll_ep_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -1625,14 +1618,15 @@ typedef struct ucp_stream_poll_ep {
  * The structure defines the parameters that are used for the
  * UCP memory mapping tuning during the @ref ucp_mem_map "ucp_mem_map" routine.
  */
-typedef struct ucp_mem_map_params {
+typedef struct ucp_mem_map_params
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_mem_map_params_field.
      * Fields not specified in this mask will be ignored.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * If the address is not NULL, the routine maps (registers) the memory segment
@@ -1644,68 +1638,67 @@ typedef struct ucp_mem_map_params {
      * @ref UCP_MEM_MAP_PARAM_FIELD_ADDRESS), the ucp_mem_map routine will consider
      * address as set to NULL and will allocate memory.
      */
-     void                   *address;
+    void* address;
 
-     /**
-      * Length (in bytes) to allocate or map (register).
-      * This field is mandatory for filling (along with its corresponding bit
-      * in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_LENGTH).
-      * The @ref ucp_mem_map routine will return with an error if the length isn't
-      * specified.
-      */
-     size_t                 length;
+    /**
+     * Length (in bytes) to allocate or map (register).
+     * This field is mandatory for filling (along with its corresponding bit
+     * in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_LENGTH).
+     * The @ref ucp_mem_map routine will return with an error if the length isn't
+     * specified.
+     */
+    size_t length;
 
-     /**
-      * Allocation flags, e.g. @ref UCP_MEM_MAP_NONBLOCK.
-      * This value is optional.
-      * If it's not set (along with its corresponding bit in the field_mask -
-      * @ref UCP_MEM_MAP_PARAM_FIELD_FLAGS), the @ref ucp_mem_map routine will
-      * consider the flags as set to zero.
-      */
-     unsigned               flags;
+    /**
+     * Allocation flags, e.g. @ref UCP_MEM_MAP_NONBLOCK.
+     * This value is optional.
+     * If it's not set (along with its corresponding bit in the field_mask -
+     * @ref UCP_MEM_MAP_PARAM_FIELD_FLAGS), the @ref ucp_mem_map routine will
+     * consider the flags as set to zero.
+     */
+    unsigned flags;
 
-     /**
-      * Memory protection mode, e.g. @ref UCP_MEM_MAP_PROT_LOCAL_READ.
-      * This value is optional.
-      * If it's not set, the @ref ucp_mem_map routine will consider
-      * the flags as set to UCP_MEM_MAP_PROT_LOCAL_READ|UCP_MEM_MAP_PROT_LOCAL_WRITE|
-      * UCP_MEM_MAP_PROT_REMOTE_READ|UCP_MEM_MAP_PROT_REMOTE_WRITE.
-      */
-     unsigned               prot;
+    /**
+     * Memory protection mode, e.g. @ref UCP_MEM_MAP_PROT_LOCAL_READ.
+     * This value is optional.
+     * If it's not set, the @ref ucp_mem_map routine will consider
+     * the flags as set to UCP_MEM_MAP_PROT_LOCAL_READ|UCP_MEM_MAP_PROT_LOCAL_WRITE|
+     * UCP_MEM_MAP_PROT_REMOTE_READ|UCP_MEM_MAP_PROT_REMOTE_WRITE.
+     */
+    unsigned prot;
 
-     /*
-      * Memory type (for possible memory types see @ref ucs_memory_type_t)
-      * It is an optimization hint to avoid memory type detection for map buffer.
-      * The meaning of this field depends on the operation type.
-      *
-      * - Memory allocation: (@ref UCP_MEM_MAP_ALLOCATE flag is set) This field
-      *    specifies the type of memory to allocate. If it's not set (along with its
-      *    corresponding bit in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE),
-      *    @ref UCS_MEMORY_TYPE_HOST will be assumed by default.
-      *
-      * - Memory registration: This field specifies the type of memory which is
-      *    pointed by @ref ucp_mem_map_params.address. If it's not set (along with its
-      *    corresponding bit in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE),
-      *    or set to @ref UCS_MEMORY_TYPE_UNKNOWN, the memory type will be detected
-      *    internally.
-      */
-     ucs_memory_type_t      memory_type;
+    /*
+     * Memory type (for possible memory types see @ref ucs_memory_type_t)
+     * It is an optimization hint to avoid memory type detection for map buffer.
+     * The meaning of this field depends on the operation type.
+     *
+     * - Memory allocation: (@ref UCP_MEM_MAP_ALLOCATE flag is set) This field
+     *    specifies the type of memory to allocate. If it's not set (along with its
+     *    corresponding bit in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE),
+     *    @ref UCS_MEMORY_TYPE_HOST will be assumed by default.
+     *
+     * - Memory registration: This field specifies the type of memory which is
+     *    pointed by @ref ucp_mem_map_params.address. If it's not set (along with its
+     *    corresponding bit in the field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_MEMORY_TYPE),
+     *    or set to @ref UCS_MEMORY_TYPE_UNKNOWN, the memory type will be detected
+     *    internally.
+     */
+    ucs_memory_type_t memory_type;
 
-     /**
-      * Exported memory handle buffer as returned by @ref ucp_mem_map
-      * function for a memory handle created and packed by @ref ucp_memh_pack
-      * with @ref UCP_MEMH_PACK_FLAG_EXPORT flag.
-      * If this field is specified for @ref ucp_mem_map function, a resulting
-      * memory handle will be a mapping of peer memory instead of local
-      * memory.
-      * If the field is not set (along with its corresponding bit in the
-      * field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_EXPORTED_MEMH_BUFFER), the
-      * @ref ucp_mem_map routine will consider the memory handle buffer to be
-      * set to NULL by default.
-      */
-    const void              *exported_memh_buffer;
+    /**
+     * Exported memory handle buffer as returned by @ref ucp_mem_map
+     * function for a memory handle created and packed by @ref ucp_memh_pack
+     * with @ref UCP_MEMH_PACK_FLAG_EXPORT flag.
+     * If this field is specified for @ref ucp_mem_map function, a resulting
+     * memory handle will be a mapping of peer memory instead of local
+     * memory.
+     * If the field is not set (along with its corresponding bit in the
+     * field_mask - @ref UCP_MEM_MAP_PARAM_FIELD_EXPORTED_MEMH_BUFFER), the
+     * @ref ucp_mem_map routine will consider the memory handle buffer to be
+     * set to NULL by default.
+     */
+    const void* exported_memh_buffer;
 } ucp_mem_map_params_t;
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -1716,13 +1709,13 @@ typedef struct ucp_mem_map_params {
  * or @ref ucp_tag_recv_request_test routines or
  * @ref ucp_tag_recv_callback_t callback argument.
  */
-struct ucp_tag_recv_info {
+struct ucp_tag_recv_info
+{
     /** Sender tag */
-    ucp_tag_t                              sender_tag;
+    ucp_tag_t sender_tag;
     /** The size of the received data */
-    size_t                                 length;
+    size_t length;
 };
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -1764,16 +1757,17 @@ struct ucp_tag_recv_info {
  * }
  * @endcode
  */
-typedef struct {
+typedef struct
+{
     /**
      * Mask of valid fields in this structure and operation flags, using
      * bits from @ref ucp_op_attr_t. Fields not specified in this mask will be
      * ignored. Provides ABI compatibility with respect to adding new fields.
      */
-    uint32_t       op_attr_mask;
+    uint32_t op_attr_mask;
 
     /* Operation specific flags. */
-    uint32_t       flags;
+    uint32_t flags;
 
     /**
      * Request handle allocated by the user. There should
@@ -1781,18 +1775,19 @@ typedef struct {
      * space before the @a request. The size of the UCP request
      * can be obtained by @ref ucp_context_query function.
      */
-    void          *request;
+    void* request;
 
     /**
      * Callback function that is invoked whenever the
      * send or receive operation is completed.
      */
-    union {
+    union
+    {
         ucp_send_nbx_callback_t         send;
         ucp_tag_recv_nbx_callback_t     recv;
         ucp_stream_recv_nbx_callback_t  recv_stream;
         ucp_am_recv_data_nbx_callback_t recv_am;
-    }              cb;
+    } cb;
 
     /**
      * Datatype descriptor for the elements in the buffer. In case the
@@ -1804,13 +1799,13 @@ typedef struct {
     /**
      * Pointer to user data passed to callback function.
      */
-    void          *user_data;
+    void* user_data;
 
     /**
      * Reply buffer. Can be used for storing operation result, for example by
      * @ref ucp_atomic_op_nbx.
      */
-    void          *reply_buffer;
+    void* reply_buffer;
 
     /**
      * Memory type of the buffer. see @ref ucs_memory_type_t for possible memory types.
@@ -1827,11 +1822,12 @@ typedef struct {
      * provide a pointer to valid memory/variable which will be updated on function
      * return.
      */
-    union {
-        size_t              *length;   /* Length of received message in bytes.
+    union
+    {
+        size_t* length;                /* Length of received message in bytes.
                                           Relevant for non-tagged receive
                                           operations. */
-        ucp_tag_recv_info_t *tag_info; /* Information about received message.
+        ucp_tag_recv_info_t* tag_info; /* Information about received message.
                                           Relevant for @a ucp_tag_recv_nbx
                                           function. */
     } recv_info;
@@ -1847,37 +1843,37 @@ typedef struct {
 
 } ucp_request_param_t;
 
-
 /**
  * @ingroup UCP_COMM
  * @brief Attributes of a particular request.
  */
-typedef struct {
+typedef struct
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_req_attr_field. Fields not specified in this mask will
      * be ignored. Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t          field_mask;
+    uint64_t field_mask;
 
     /**
      * Pointer to allocated string of size @ref debug_string_size that will be filled
      * with debug information about transports and protocols that were selected
      * to complete the request.
      */
-    char              *debug_string;
+    char* debug_string;
 
     /**
      * Size of the @ref debug_string. String will be filled up to this size.
      * Maximum possible size debug string can be obtained by querying the worker
      * via @ref ucp_worker_query.
      */
-    size_t            debug_string_size;
+    size_t debug_string_size;
 
     /**
      * Status of the request. The same as @ref ucp_request_check_status.
      */
-    ucs_status_t      status;
+    ucs_status_t status;
 
     /**
      * Detected memory type of the buffer passed to the operation.
@@ -1885,63 +1881,62 @@ typedef struct {
     ucs_memory_type_t mem_type;
 } ucp_request_attr_t;
 
-
 /**
  * @ingroup UCP_WORKER
  * @brief Active Message handler parameters passed to
  *        @ref ucp_worker_set_am_recv_handler routine.
  */
-typedef struct ucp_am_handler_param {
+typedef struct ucp_am_handler_param
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_am_handler_param_field. Fields not specified in this mask will
      * be ignored. Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                 field_mask;
+    uint64_t field_mask;
 
     /**
      * Active Message id.
      * @warning Value must be between 0 and UINT16_MAX.
      */
-    unsigned                 id;
+    unsigned id;
 
     /**
      * Handler flags as defined by @ref ucp_am_cb_flags.
      */
-    uint32_t                 flags;
+    uint32_t flags;
 
     /**
      * Active Message callback. To clear the already set callback, this value
      * should be set to NULL.
      */
-    ucp_am_recv_callback_t   cb;
+    ucp_am_recv_callback_t cb;
 
     /**
      * Active Message argument, which will be passed in to every invocation of
      * @ref ucp_am_recv_callback_t function as the @a arg argument.
      */
-    void                     *arg;
+    void* arg;
 } ucp_am_handler_param_t;
-
 
 /**
  * @ingroup UCP_WORKER
  * @brief Operation parameters provided in @ref ucp_am_recv_callback_t callback.
  */
-struct ucp_am_recv_param {
+struct ucp_am_recv_param
+{
     /**
      * Mask of valid fields in this structure and receive operation flags, using
      * bits from @ref ucp_am_recv_attr_t. Fields not specified in this mask will
      * be ignored. Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t           recv_attr;
+    uint64_t recv_attr;
 
     /**
      * Endpoint, which can be used for the reply to this message.
      */
-    ucp_ep_h           reply_ep;
+    ucp_ep_h reply_ep;
 };
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -1953,8 +1948,8 @@ struct ucp_am_recv_param {
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_lib_query(ucp_lib_attr_t *attr);
-
+ucs_status_t
+ucp_lib_query(ucp_lib_attr_t* attr);
 
 /**
  * @ingroup UCP_CONFIG
@@ -1982,9 +1977,8 @@ ucs_status_t ucp_lib_query(ucp_lib_attr_t *attr);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_config_read(const char *env_prefix, const char *filename,
-                             ucp_config_t **config_p);
-
+ucs_status_t
+ucp_config_read(const char* env_prefix, const char* filename, ucp_config_t** config_p);
 
 /**
  * @ingroup UCP_CONFIG
@@ -1996,8 +1990,8 @@ ucs_status_t ucp_config_read(const char *env_prefix, const char *filename,
  * @param [out] config        Configuration descriptor as defined by
  *                            @ref ucp_config_t "ucp_config_t".
  */
-void ucp_config_release(ucp_config_t *config);
-
+void
+ucp_config_release(ucp_config_t* config);
 
 /**
  * @ingroup UCP_CONFIG
@@ -2012,9 +2006,8 @@ void ucp_config_release(ucp_config_t *config);
  *
  * @return Error code.
  */
-ucs_status_t ucp_config_modify(ucp_config_t *config, const char *name,
-                               const char *value);
-
+ucs_status_t
+ucp_config_modify(ucp_config_t* config, const char* name, const char* value);
 
 /**
  * @ingroup UCP_CONFIG
@@ -2031,9 +2024,9 @@ ucs_status_t ucp_config_modify(ucp_config_t *config, const char *name,
  * @param [in]  title         Configuration title to print.
  * @param [in]  print_flags   Flags that control various printing options.
  */
-void ucp_config_print(const ucp_config_t *config, FILE *stream,
-                      const char *title, ucs_config_print_flags_t print_flags);
-
+void
+ucp_config_print(const ucp_config_t* config, FILE* stream, const char* title,
+                 ucs_config_print_flags_t print_flags);
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2045,9 +2038,9 @@ void ucp_config_print(const ucp_config_t *config, FILE *stream,
  * @param [out] minor_version       Filled with library minor version.
  * @param [out] release_number      Filled with library release number.
  */
-void ucp_get_version(unsigned *major_version, unsigned *minor_version,
-                     unsigned *release_number);
-
+void
+ucp_get_version(unsigned* major_version, unsigned* minor_version,
+                unsigned* release_number);
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2056,8 +2049,8 @@ void ucp_get_version(unsigned *major_version, unsigned *minor_version,
  * This routine returns the UCP library version as a string which consists of:
  * "major.minor.release".
  */
-const char *ucp_get_version_string(void);
-
+const char*
+ucp_get_version_string(void);
 
 /** @cond PRIVATE_INTERFACE */
 /**
@@ -2067,11 +2060,11 @@ const char *ucp_get_version_string(void);
  *  This is an internal routine used to check compatibility with a particular
  * API version. @ref ucp_init should be used to create UCP context.
  */
-ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_version,
-                              const ucp_params_t *params, const ucp_config_t *config,
-                              ucp_context_h *context_p);
+ucs_status_t
+ucp_init_version(unsigned api_major_version, unsigned api_minor_version,
+                 const ucp_params_t* params, const ucp_config_t* config,
+                 ucp_context_h* context_p);
 /** @endcond */
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2108,14 +2101,11 @@ ucs_status_t ucp_init_version(unsigned api_major_version, unsigned api_minor_ver
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-static inline ucs_status_t ucp_init(const ucp_params_t *params,
-                                    const ucp_config_t *config,
-                                    ucp_context_h *context_p)
+static inline ucs_status_t
+ucp_init(const ucp_params_t* params, const ucp_config_t* config, ucp_context_h* context_p)
 {
-    return ucp_init_version(UCP_API_MAJOR, UCP_API_MINOR, params, config,
-                            context_p);
+    return ucp_init_version(UCP_API_MAJOR, UCP_API_MINOR, params, config, context_p);
 }
-
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2134,8 +2124,8 @@ static inline ucs_status_t ucp_init(const ucp_params_t *params,
  * @param [in] context_p   Handle to @ref ucp_context_h
  *                         "UCP application context".
  */
-void ucp_cleanup(ucp_context_h context_p);
-
+void
+ucp_cleanup(ucp_context_h context_p);
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2150,9 +2140,8 @@ void ucp_cleanup(ucp_context_h context_p);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_context_query(ucp_context_h context_p,
-                               ucp_context_attr_t *attr);
-
+ucs_status_t
+ucp_context_query(ucp_context_h context_p, ucp_context_attr_t* attr);
 
 /**
  * @ingroup UCP_MEM
@@ -2176,8 +2165,7 @@ ucs_status_t ucp_context_query(ucp_context_h context_p,
  */
 ucs_status_t
 ucp_rkey_compare(ucp_worker_h worker, ucp_rkey_h rkey1, ucp_rkey_h rkey2,
-                 const ucp_rkey_compare_params_t *params, int *result);
-
+                 const ucp_rkey_compare_params_t* params, int* result);
 
 /**
  * @ingroup UCP_CONTEXT
@@ -2190,8 +2178,8 @@ ucp_rkey_compare(ucp_worker_h worker, ucp_rkey_h rkey1, ucp_rkey_h rkey2,
  * @param [in] context      Print this context object's configuration.
  * @param [in] stream       Output stream on which to print the information.
  */
-void ucp_context_print_info(const ucp_context_h context, FILE *stream);
-
+void
+ucp_context_print_info(const ucp_context_h context, FILE* stream);
 
 /**
  * @ingroup UCP_WORKER
@@ -2216,10 +2204,9 @@ void ucp_context_print_info(const ucp_context_h context, FILE *stream);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_create(ucp_context_h context,
-                               const ucp_worker_params_t *params,
-                               ucp_worker_h *worker_p);
-
+ucs_status_t
+ucp_worker_create(ucp_context_h context, const ucp_worker_params_t* params,
+                  ucp_worker_h* worker_p);
 
 /**
  * @ingroup UCP_WORKER
@@ -2236,8 +2223,8 @@ ucs_status_t ucp_worker_create(ucp_context_h context,
  *
  * @param [in]  worker        Worker object to destroy.
  */
-void ucp_worker_destroy(ucp_worker_h worker);
-
+void
+ucp_worker_destroy(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WORKER
@@ -2250,9 +2237,8 @@ void ucp_worker_destroy(ucp_worker_h worker);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_query(ucp_worker_h worker,
-                              ucp_worker_attr_t *attr);
-
+ucs_status_t
+ucp_worker_query(ucp_worker_h worker, ucp_worker_attr_t* attr);
 
 /**
  * @ingroup UCP_WORKER
@@ -2264,8 +2250,8 @@ ucs_status_t ucp_worker_query(ucp_worker_h worker,
  * @param [in] worker       Worker object to print information for.
  * @param [in] stream       Output stream to print the information to.
  */
-void ucp_worker_print_info(ucp_worker_h worker, FILE *stream);
-
+void
+ucp_worker_print_info(ucp_worker_h worker, FILE* stream);
 
 /**
  * @ingroup UCP_WORKER
@@ -2286,8 +2272,8 @@ void ucp_worker_print_info(ucp_worker_h worker, FILE *stream);
  * @todo We should consider to change it to return int so we can catch the
  * errors when worker != address
  */
-void ucp_worker_release_address(ucp_worker_h worker, ucp_address_t *address);
-
+void
+ucp_worker_release_address(ucp_worker_h worker, ucp_address_t* address);
 
 /**
  * @ingroup UCP_WORKER
@@ -2301,9 +2287,8 @@ void ucp_worker_release_address(ucp_worker_h worker, ucp_address_t *address);
  *
  * @return Error code as defined by @ref ucs_status_t.
  */
-ucs_status_t ucp_worker_address_query(ucp_address_t *address,
-                                      ucp_worker_address_attr_t *attr);
-
+ucs_status_t
+ucp_worker_address_query(ucp_address_t* address, ucp_worker_address_attr_t* attr);
 
 /**
  * @ingroup UCP_WORKER
@@ -2324,8 +2309,8 @@ ucs_status_t ucp_worker_address_query(ucp_address_t *address,
  *
  * @return Non-zero if any communication was progressed, zero otherwise.
  */
-unsigned ucp_worker_progress(ucp_worker_h worker);
-
+unsigned
+ucp_worker_progress(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WORKER
@@ -2347,10 +2332,9 @@ unsigned ucp_worker_progress(ucp_worker_h worker);
  *         actual number of endpoints filled in @a poll_eps array.
  *
  */
-ssize_t ucp_stream_worker_poll(ucp_worker_h worker,
-                               ucp_stream_poll_ep_t *poll_eps, size_t max_eps,
-                               unsigned flags);
-
+ssize_t
+ucp_stream_worker_poll(ucp_worker_h worker, ucp_stream_poll_ep_t* poll_eps,
+                       size_t max_eps, unsigned flags);
 
 /**
  * @ingroup UCP_WAKEUP
@@ -2382,8 +2366,8 @@ ssize_t ucp_stream_worker_poll(ucp_worker_h worker,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_get_efd(ucp_worker_h worker, int *fd);
-
+ucs_status_t
+ucp_worker_get_efd(ucp_worker_h worker, int* fd);
 
 /**
  * @ingroup UCP_WAKEUP
@@ -2413,8 +2397,8 @@ ucs_status_t ucp_worker_get_efd(ucp_worker_h worker, int *fd);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_wait(ucp_worker_h worker);
-
+ucs_status_t
+ucp_worker_wait(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WAKEUP
@@ -2439,8 +2423,8 @@ ucs_status_t ucp_worker_wait(ucp_worker_h worker);
  * @param [in] worker           Worker to wait for updates on.
  * @param [in] address          Local memory address
  */
-void ucp_worker_wait_mem(ucp_worker_h worker, void *address);
-
+void
+ucp_worker_wait_mem(ucp_worker_h worker, void* address);
 
 /**
  * @ingroup UCP_WAKEUP
@@ -2511,8 +2495,8 @@ void ucp_worker_wait_mem(ucp_worker_h worker, void *address);
  *                         will not be signaled by new events.
  * @return @ref ucs_status_t "Other" different error codes in case of issues.
  */
-ucs_status_t ucp_worker_arm(ucp_worker_h worker);
-
+ucs_status_t
+ucp_worker_arm(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WAKEUP
@@ -2532,8 +2516,8 @@ ucs_status_t ucp_worker_arm(ucp_worker_h worker);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_signal(ucp_worker_h worker);
-
+ucs_status_t
+ucp_worker_signal(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WORKER
@@ -2560,10 +2544,9 @@ ucs_status_t ucp_worker_signal(ucp_worker_h worker);
  *       @ref ucp_listener_params_t::accept_handler must be provided to be
  *       able to handle incoming connections.
  */
-ucs_status_t ucp_listener_create(ucp_worker_h worker,
-                                 const ucp_listener_params_t *params,
-                                 ucp_listener_h *listener_p);
-
+ucs_status_t
+ucp_listener_create(ucp_worker_h worker, const ucp_listener_params_t* params,
+                    ucp_listener_h* listener_p);
 
 /**
  * @ingroup UCP_WORKER
@@ -2574,8 +2557,8 @@ ucs_status_t ucp_listener_create(ucp_worker_h worker,
  *
  * @param [in] listener        A handle to the listener to stop listening on.
  */
-void ucp_listener_destroy(ucp_listener_h listener);
-
+void
+ucp_listener_destroy(ucp_listener_h listener);
 
 /**
  * @ingroup UCP_WORKER
@@ -2588,8 +2571,8 @@ void ucp_listener_destroy(ucp_listener_h listener);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_listener_query(ucp_listener_h listener, ucp_listener_attr_t *attr);
-
+ucs_status_t
+ucp_listener_query(ucp_listener_h listener, ucp_listener_attr_t* attr);
 
 /**
  * @ingroup UCP_WORKER
@@ -2603,9 +2586,8 @@ ucs_status_t ucp_listener_query(ucp_listener_h listener, ucp_listener_attr_t *at
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_conn_request_query(ucp_conn_request_h conn_request,
-                                    ucp_conn_request_attr_t *attr);
-
+ucs_status_t
+ucp_conn_request_query(ucp_conn_request_h conn_request, ucp_conn_request_attr_t* attr);
 
 /**
  * @ingroup UCP_COMM
@@ -2616,8 +2598,8 @@ ucs_status_t ucp_conn_request_query(ucp_conn_request_h conn_request,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_request_query(void *request, ucp_request_attr_t *attr);
-
+ucs_status_t
+ucp_request_query(void* request, ucp_request_attr_t* attr);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -2651,9 +2633,8 @@ ucs_status_t ucp_request_query(void *request, ucp_request_attr_t *attr);
  * In that case, the endpoint will be connected to the *next* endpoint created
  * in the same way on the same @a worker.
  */
-ucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t *params,
-                           ucp_ep_h *ep_p);
-
+ucs_status_t
+ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t* params, ucp_ep_h* ep_p);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -2677,9 +2658,8 @@ ucs_status_t ucp_ep_create(ucp_worker_h worker, const ucp_ep_params_t *params,
  *                                handle is returned to the application in order
  *                                to track progress of the endpoint closure.
  */
-ucs_status_ptr_t ucp_ep_close_nbx(ucp_ep_h ep,
-                                  const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_ep_close_nbx(ucp_ep_h ep, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_WORKER
@@ -2697,9 +2677,8 @@ ucs_status_ptr_t ucp_ep_close_nbx(ucp_ep_h ep,
  * @return Error code as defined by @ref ucs_status_t
  *
  */
-ucs_status_t ucp_listener_reject(ucp_listener_h listener,
-                                 ucp_conn_request_h conn_request);
-
+ucs_status_t
+ucp_listener_reject(ucp_listener_h listener, ucp_conn_request_h conn_request);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -2711,8 +2690,8 @@ ucs_status_t ucp_listener_reject(ucp_listener_h listener,
  * @param [in] ep           Endpoint object whose configuration to print.
  * @param [in] stream       Output stream to print the information to.
  */
-void ucp_ep_print_info(ucp_ep_h ep, FILE *stream);
-
+void
+ucp_ep_print_info(ucp_ep_h ep, FILE* stream);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -2762,8 +2741,8 @@ void ucp_ep_print_info(ucp_ep_h ep, FILE *stream);
  * }
  * @endcode
  */
-ucs_status_ptr_t ucp_ep_flush_nbx(ucp_ep_h ep, const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_ep_flush_nbx(ucp_ep_h ep, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -2778,10 +2757,9 @@ ucs_status_ptr_t ucp_ep_flush_nbx(ucp_ep_h ep, const ucp_request_param_t *param)
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_ep_evaluate_perf(ucp_ep_h ep,
-                                  const ucp_ep_evaluate_perf_param_t *param,
-                                  ucp_ep_evaluate_perf_attr_t *attr);
-
+ucs_status_t
+ucp_ep_evaluate_perf(ucp_ep_h ep, const ucp_ep_evaluate_perf_param_t* param,
+                     ucp_ep_evaluate_perf_attr_t* attr);
 
 /**
  * @ingroup UCP_MEM
@@ -2820,17 +2798,24 @@ ucs_status_t ucp_ep_evaluate_perf(ucp_ep_h ep,
  * <tr><th>parameter/flag <td align="center">@ref UCP_MEM_MAP_NONBLOCK "NONBLOCK"</td>
  *                        <td align="center">@ref UCP_MEM_MAP_ALLOCATE "ALLOCATE"</td>
  *                        <td align="center">@ref UCP_MEM_MAP_FIXED "FIXED"</td>
- *                        <td align="center">@ref ucp_mem_map_params.address "address"</td>
- *                        <td align="center">@b result
- * <tr><td rowspan="8" align="center">@b value <td rowspan="8" align="center">0/1 - the value\n only affects the\n register/map\n phase</td>
- *                                               <td align="center">0 <td align="center">0 <td align="center">0 <td align="center">@ref anch_err "error" if length > 0
- * <tr>                                          <td align="center">1 <td align="center">0 <td align="center">0 <td align="center">@ref anch_alloc_reg "alloc+register"
- * <tr>                                          <td align="center">0 <td align="center">1 <td align="center">0 <td align="center">@ref anch_err "error"</td>
- * <tr>                                          <td align="center">0 <td align="center">0 <td align="center">defined <td align="center">@ref anch_reg "register"
- * <tr>                                          <td align="center">1 <td align="center">1 <td align="center">0 <td align="center">@ref anch_err "error"</td>
- * <tr>                                          <td align="center">1 <td align="center">0 <td align="center">defined <td align="center">@ref anch_alloc_hint_reg "alloc+register,hint"
- * <tr>                                          <td align="center">0 <td align="center">1 <td align="center">defined <td align="center">@ref anch_err "error"</td>
- * <tr>                                          <td align="center">1 <td align="center">1 <td align="center">defined <td align="center">@ref anch_alloc_fixed_reg "alloc+register,fixed"
+ *                        <td align="center">@ref ucp_mem_map_params.address
+ * "address"</td> <td align="center">@b result <tr><td rowspan="8" align="center">@b value
+ * <td rowspan="8" align="center">0/1 - the value\n only affects the\n register/map\n
+ * phase</td> <td align="center">0 <td align="center">0 <td align="center">0 <td
+ * align="center">@ref anch_err "error" if length > 0 <tr> <td align="center">1 <td
+ * align="center">0 <td align="center">0 <td align="center">@ref anch_alloc_reg
+ * "alloc+register" <tr>                                          <td align="center">0 <td
+ * align="center">1 <td align="center">0 <td align="center">@ref anch_err "error"</td>
+ * <tr>                                          <td align="center">0 <td align="center">0
+ * <td align="center">defined <td align="center">@ref anch_reg "register" <tr> <td
+ * align="center">1 <td align="center">1 <td align="center">0 <td align="center">@ref
+ * anch_err "error"</td> <tr>                                          <td
+ * align="center">1 <td align="center">0 <td align="center">defined <td
+ * align="center">@ref anch_alloc_hint_reg "alloc+register,hint" <tr> <td align="center">0
+ * <td align="center">1 <td align="center">defined <td align="center">@ref anch_err
+ * "error"</td> <tr>                                          <td align="center">1 <td
+ * align="center">1 <td align="center">defined <td align="center">@ref
+ * anch_alloc_fixed_reg "alloc+register,fixed"
  * </table>
  *
  * @note
@@ -2857,9 +2842,8 @@ ucs_status_t ucp_ep_evaluate_perf(ucp_ep_h ep,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *params,
-                         ucp_mem_h *memh_p);
-
+ucs_status_t
+ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t* params, ucp_mem_h* memh_p);
 
 /**
  * @ingroup UCP_MEM
@@ -2888,8 +2872,8 @@ ucs_status_t ucp_mem_map(ucp_context_h context, const ucp_mem_map_params_t *para
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh);
-
+ucs_status_t
+ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh);
 
 /**
  * @ingroup UCP_MEM
@@ -2904,8 +2888,8 @@ ucs_status_t ucp_mem_unmap(ucp_context_h context, ucp_mem_h memh);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_mem_query(const ucp_mem_h memh, ucp_mem_attr_t *attr);
-
+ucs_status_t
+ucp_mem_query(const ucp_mem_h memh, ucp_mem_attr_t* attr);
 
 /**
  * @ingroup UCP_MEM
@@ -2923,9 +2907,8 @@ ucs_status_t ucp_mem_query(const ucp_mem_h memh, ucp_mem_attr_t *attr);
  * @param [in] context      The context on which the memory is mapped.
  * @param [in] stream       Output stream on which to print the information.
  */
-void ucp_mem_print_info(const char *mem_spec, ucp_context_h context,
-                        FILE *stream);
-
+void
+ucp_mem_print_info(const char* mem_spec, ucp_context_h context, FILE* stream);
 
 /**
  * @ingroup UCP_MEM
@@ -2934,14 +2917,14 @@ void ucp_mem_print_info(const char *mem_spec, ucp_context_h context,
  * The enumeration list describes memory advice supported by @ref
  * ucp_mem_advise() function.
  */
-typedef enum ucp_mem_advice {
-    UCP_MADV_NORMAL   = 0,  /**< No special treatment */
-    UCP_MADV_WILLNEED       /**< can be used on the memory mapped with
-                                 @ref UCP_MEM_MAP_NONBLOCK to speed up memory
-                                 mapping and to avoid page faults when
-                                 the memory is accessed for the first time. */
+typedef enum ucp_mem_advice
+{
+    UCP_MADV_NORMAL = 0, /**< No special treatment */
+    UCP_MADV_WILLNEED    /**< can be used on the memory mapped with
+                              @ref UCP_MEM_MAP_NONBLOCK to speed up memory
+                              mapping and to avoid page faults when
+                              the memory is accessed for the first time. */
 } ucp_mem_advice_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -2951,30 +2934,30 @@ typedef enum ucp_mem_advice {
  * UCP memory advice tuning during the @ref ucp_mem_advise "ucp_mem_advise"
  * routine.
  */
-typedef struct ucp_mem_advise_params {
+typedef struct ucp_mem_advise_params
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_mem_advise_params_field. All fields are mandatory.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * Memory base address.
      */
-    void                    *address;
+    void* address;
 
     /**
      * Length (in bytes) to allocate or map (register).
      */
-    size_t                  length;
+    size_t length;
 
     /**
      * Memory use advice @ref ucp_mem_advice
      */
-    ucp_mem_advice_t        advice;
+    ucp_mem_advice_t advice;
 } ucp_mem_advise_params_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -2995,9 +2978,8 @@ typedef struct ucp_mem_advise_params {
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_mem_advise(ucp_context_h context, ucp_mem_h memh,
-                            ucp_mem_advise_params_t *params);
-
+ucs_status_t
+ucp_mem_advise(ucp_context_h context, ucp_mem_h memh, ucp_mem_advise_params_t* params);
 
 /**
  * @ingroup UCP_MEM
@@ -3007,14 +2989,14 @@ ucs_status_t ucp_mem_advise(ucp_context_h context, ucp_mem_h memh,
  * @ref ucp_memh_pack_params_t are present. It is used to enable backward
  * compatibility support.
  */
-enum ucp_memh_pack_params_field {
+enum ucp_memh_pack_params_field
+{
     /**
      * Memory handle packing field that will be used in the @ref ucp_memh_pack
      * routine.
      */
     UCP_MEMH_PACK_PARAM_FIELD_FLAGS = UCS_BIT(0)
 };
-
 
 /**
  * @ingroup UCP_MEM
@@ -3023,7 +3005,8 @@ enum ucp_memh_pack_params_field {
  * The enumeration list describes the memory handle packing flags supported by
  * @ref ucp_memh_pack() function.
  */
-enum ucp_memh_pack_flags {
+enum ucp_memh_pack_flags
+{
     /**
      * Pack a memory handle to be exported and used by peers for their local
      * operations on a memory buffer allocated from same or another virtual
@@ -3035,7 +3018,6 @@ enum ucp_memh_pack_flags {
     UCP_MEMH_PACK_FLAG_EXPORT = UCS_BIT(0)
 };
 
-
 /**
  * @ingroup UCP_MEM
  * @brief Memory handle pack parameters passed to @ref ucp_memh_pack.
@@ -3044,20 +3026,20 @@ enum ucp_memh_pack_flags {
  * UCP memory handle during the @ref ucp_memh_pack "ucp_memh_pack"
  * routine.
  */
-typedef struct ucp_memh_pack_params {
+typedef struct ucp_memh_pack_params
+{
     /**
      * Mask of valid fields in this structure. Fields not specified in this
      * mask will be ignored. Provides ABI compatibility with respect to adding
      * new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 
     /**
      * Flags to control packing of a memory handle.
      */
-    uint64_t                flags;
+    uint64_t flags;
 } ucp_memh_pack_params_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -3093,9 +3075,8 @@ typedef struct ucp_memh_pack_params {
  * @return Error code as defined by @ref ucs_status_t
  */
 ucs_status_t
-ucp_memh_pack(ucp_mem_h memh, const ucp_memh_pack_params_t *params,
-              void **buffer_p, size_t *buffer_size_p);
-
+ucp_memh_pack(ucp_mem_h memh, const ucp_memh_pack_params_t* params, void** buffer_p,
+              size_t* buffer_size_p);
 
 /**
  * @ingroup UCP_MEM
@@ -3106,14 +3087,14 @@ ucp_memh_pack(ucp_mem_h memh, const ucp_memh_pack_params_t *params,
  * UCP memory handle buffer during the @ref ucp_memh_buffer_release
  * "ucp_memh_buffer_release" routine.
  */
-typedef struct ucp_memh_buffer_release_params {
+typedef struct ucp_memh_buffer_release_params
+{
     /**
      * Mask of valid fields in this structure. All fields are mandatory.
      * Provides ABI compatibility with respect to adding new fields.
      */
-    uint64_t                field_mask;
+    uint64_t field_mask;
 } ucp_memh_buffer_release_params_t;
-
 
 /**
  * @ingroup UCP_MEM
@@ -3133,9 +3114,8 @@ typedef struct ucp_memh_buffer_release_params {
  * @param [in]  params   Memory handle buffer release parameters, as defined by
  *                       @ref ucp_memh_buffer_release_params_t.
  */
-void ucp_memh_buffer_release(void *buffer,
-                             const ucp_memh_buffer_release_params_t *params);
-
+void
+ucp_memh_buffer_release(void* buffer, const ucp_memh_buffer_release_params_t* params);
 
 /**
  * @ingroup UCP_MEM
@@ -3159,9 +3139,8 @@ void ucp_memh_buffer_release(void *buffer,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_ep_rkey_unpack(ucp_ep_h ep, const void *rkey_buffer,
-                                ucp_rkey_h *rkey_p);
-
+ucs_status_t
+ucp_ep_rkey_unpack(ucp_ep_h ep, const void* rkey_buffer, ucp_rkey_h* rkey_p);
 
 /**
  * @ingroup UCP_MEM
@@ -3182,8 +3161,8 @@ ucs_status_t ucp_ep_rkey_unpack(ucp_ep_h ep, const void *rkey_buffer,
  * @return Error code as defined by @ref ucs_status_t if the remote memory
  *         cannot be accessed directly or the remote memory address is not valid.
  */
-ucs_status_t ucp_rkey_ptr(ucp_rkey_h rkey, uint64_t raddr, void **addr_p);
-
+ucs_status_t
+ucp_rkey_ptr(ucp_rkey_h rkey, uint64_t raddr, void** addr_p);
 
 /**
  * @ingroup UCP_MEM
@@ -3206,8 +3185,8 @@ ucs_status_t ucp_rkey_ptr(ucp_rkey_h rkey, uint64_t raddr, void **addr_p);
  *
  * @param [in]  rkey         Remote key to destroy.
  */
-void ucp_rkey_destroy(ucp_rkey_h rkey);
-
+void
+ucp_rkey_destroy(ucp_rkey_h rkey);
 
 /**
  * @ingroup UCP_WORKER
@@ -3229,9 +3208,8 @@ void ucp_rkey_destroy(ucp_rkey_h rkey);
  * @return error code if the worker does not support Active Messages or
  *         requested callback flags.
  */
-ucs_status_t ucp_worker_set_am_recv_handler(ucp_worker_h worker,
-                                            const ucp_am_handler_param_t *param);
-
+ucs_status_t
+ucp_worker_set_am_recv_handler(ucp_worker_h worker, const ucp_am_handler_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3285,11 +3263,9 @@ ucs_status_t ucp_worker_set_am_recv_handler(ucp_worker_h worker,
  *                                the application is responsible for releasing
  *                                the handle using @ref ucp_request_free routine.
  */
-ucs_status_ptr_t ucp_am_send_nbx(ucp_ep_h ep, unsigned id,
-                                 const void *header, size_t header_length,
-                                 const void *buffer, size_t count,
-                                 const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_am_send_nbx(ucp_ep_h ep, unsigned id, const void* header, size_t header_length,
+                const void* buffer, size_t count, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3337,10 +3313,9 @@ ucs_status_ptr_t ucp_am_send_nbx(ucp_ep_h ep, unsigned id,
  *                                the application is responsible for releasing
  *                                the handle using @ref ucp_request_free routine.
  */
-ucs_status_ptr_t ucp_am_recv_data_nbx(ucp_worker_h worker, void *data_desc,
-                                      void *buffer, size_t count,
-                                      const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_am_recv_data_nbx(ucp_worker_h worker, void* data_desc, void* buffer, size_t count,
+                     const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3354,8 +3329,8 @@ ucs_status_ptr_t ucp_am_recv_data_nbx(ucp_worker_h worker, void *data_desc,
  *                          the Active Message callback as the data
  *                          parameter.
  */
-void ucp_am_data_release(ucp_worker_h worker, void *data);
-
+void
+ucp_am_data_release(ucp_worker_h worker, void* data);
 
 /**
  * @ingroup UCP_COMM
@@ -3383,9 +3358,9 @@ void ucp_am_data_release(ucp_worker_h worker, void *data);
  *                                handle is returned to the application in
  *                                order to track progress of the message.
  */
-ucs_status_ptr_t ucp_stream_send_nbx(ucp_ep_h ep, const void *buffer, size_t count,
-                                     const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_stream_send_nbx(ucp_ep_h ep, const void* buffer, size_t count,
+                    const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3425,9 +3400,9 @@ ucs_status_ptr_t ucp_stream_send_nbx(ucp_ep_h ep, const void *buffer, size_t cou
  *                                is returned to the application in order to track
  *                                progress of the message.
  */
-ucs_status_ptr_t ucp_tag_send_nbx(ucp_ep_h ep, const void *buffer, size_t count,
-                                  ucp_tag_t tag, const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_tag_send_nbx(ucp_ep_h ep, const void* buffer, size_t count, ucp_tag_t tag,
+                 const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3457,10 +3432,9 @@ ucs_status_ptr_t ucp_tag_send_nbx(ucp_ep_h ep, const void *buffer, size_t count,
  *                                is returned to the application in order to track
  *                                progress of the message.
  */
-ucs_status_ptr_t ucp_tag_send_sync_nbx(ucp_ep_h ep, const void *buffer,
-                                       size_t count, ucp_tag_t tag,
-                                       const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_tag_send_sync_nbx(ucp_ep_h ep, const void* buffer, size_t count, ucp_tag_t tag,
+                      const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3497,10 +3471,9 @@ ucs_status_ptr_t ucp_tag_send_sync_nbx(ucp_ep_h ep, const void *buffer,
  * @note The amount of data received, in bytes, is always an integral multiple
  *       of the @a datatype size.
  */
-ucs_status_ptr_t ucp_stream_recv_nbx(ucp_ep_h ep, void *buffer, size_t count,
-                                     size_t *length,
-                                     const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_stream_recv_nbx(ucp_ep_h ep, void* buffer, size_t count, size_t* length,
+                    const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3534,8 +3507,8 @@ ucs_status_ptr_t ucp_stream_recv_nbx(ucp_ep_h ep, void *buffer, size_t count,
  *       be more optimal, for example by processing the incoming data in-place
  *       and thus avoiding extra memory copy operations.
  */
-ucs_status_ptr_t ucp_stream_recv_data_nb(ucp_ep_h ep, size_t *length);
-
+ucs_status_ptr_t
+ucp_stream_recv_data_nb(ucp_ep_h ep, size_t* length);
 
 /**
  * @ingroup UCP_COMM
@@ -3574,10 +3547,9 @@ ucs_status_ptr_t ucp_stream_recv_data_nb(ucp_ep_h ep, size_t *length);
  *                                handle using @ref ucp_request_free
  *                                "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_recv_nbx(ucp_worker_h worker, void *buffer, size_t count,
-                                  ucp_tag_t tag, ucp_tag_t tag_mask,
-                                  const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_tag_recv_nbx(ucp_worker_h worker, void* buffer, size_t count, ucp_tag_t tag,
+                 ucp_tag_t tag_mask, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3619,10 +3591,9 @@ ucs_status_ptr_t ucp_tag_recv_nbx(ucp_worker_h worker, void *buffer, size_t coun
  *       @ref ucp_worker_progress() is called periodically to extract messages
  *       from the transport.
  */
-ucp_tag_message_h ucp_tag_probe_nb(ucp_worker_h worker, ucp_tag_t tag,
-                                   ucp_tag_t tag_mask, int remove,
-                                   ucp_tag_recv_info_t *info);
-
+ucp_tag_message_h
+ucp_tag_probe_nb(ucp_worker_h worker, ucp_tag_t tag, ucp_tag_t tag_mask, int remove,
+                 ucp_tag_recv_info_t* info);
 
 /**
  * @ingroup UCP_COMM
@@ -3654,10 +3625,9 @@ ucp_tag_message_h ucp_tag_probe_nb(ucp_worker_h worker, ucp_tag_t tag,
  *                                handle using @ref ucp_request_free
  *                                "ucp_request_free()" routine.
  */
-ucs_status_ptr_t ucp_tag_msg_recv_nbx(ucp_worker_h worker, void *buffer,
-                                      size_t count, ucp_tag_message_h message,
-                                      const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_tag_msg_recv_nbx(ucp_worker_h worker, void* buffer, size_t count,
+                     ucp_tag_message_h message, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3712,10 +3682,9 @@ ucs_status_ptr_t ucp_tag_msg_recv_nbx(ucp_worker_h worker, void *buffer,
  * @note Only the datatype ucp_dt_make_contig(1) is supported
  * for @a param->datatype, see @ref ucp_dt_make_contig.
  */
-ucs_status_ptr_t ucp_put_nbx(ucp_ep_h ep, const void *buffer, size_t count,
-                             uint64_t remote_addr, ucp_rkey_h rkey,
-                             const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_put_nbx(ucp_ep_h ep, const void* buffer, size_t count, uint64_t remote_addr,
+            ucp_rkey_h rkey, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3769,10 +3738,9 @@ ucs_status_ptr_t ucp_put_nbx(ucp_ep_h ep, const void *buffer, size_t count,
  * @note Only the datatype ucp_dt_make_contig(1) is supported
  * for @a param->datatype, see @ref ucp_dt_make_contig.
  */
-ucs_status_ptr_t ucp_get_nbx(ucp_ep_h ep, void *buffer, size_t count,
-                             uint64_t remote_addr, ucp_rkey_h rkey,
-                             const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_get_nbx(ucp_ep_h ep, void* buffer, size_t count, uint64_t remote_addr,
+            ucp_rkey_h rkey, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3841,10 +3809,9 @@ ucs_status_ptr_t ucp_get_nbx(ucp_ep_h ep, void *buffer, size_t count,
  *                                in order to track progress of the operation.
  */
 ucs_status_ptr_t
-ucp_atomic_op_nbx(ucp_ep_h ep, ucp_atomic_op_t opcode, const void *buffer,
-                  size_t count, uint64_t remote_addr, ucp_rkey_h rkey,
-                  const ucp_request_param_t *param);
-
+ucp_atomic_op_nbx(ucp_ep_h ep, ucp_atomic_op_t opcode, const void* buffer, size_t count,
+                  uint64_t remote_addr, ucp_rkey_h rkey,
+                  const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_COMM
@@ -3858,8 +3825,8 @@ ucp_atomic_op_nbx(ucp_ep_h ep, ucp_atomic_op_t opcode, const void *buffer,
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_request_check_status(void *request);
-
+ucs_status_t
+ucp_request_check_status(void* request);
 
 /**
  * @ingroup UCP_COMM
@@ -3877,8 +3844,8 @@ ucs_status_t ucp_request_check_status(void *request);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_tag_recv_request_test(void *request, ucp_tag_recv_info_t *info);
-
+ucs_status_t
+ucp_tag_recv_request_test(void* request, ucp_tag_recv_info_t* info);
 
 /**
  * @ingroup UCP_COMM
@@ -3897,8 +3864,8 @@ ucs_status_t ucp_tag_recv_request_test(void *request, ucp_tag_recv_info_t *info)
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_stream_recv_request_test(void *request, size_t *length_p);
-
+ucs_status_t
+ucp_stream_recv_request_test(void* request, size_t* length_p);
 
 /**
  * @ingroup UCP_COMM
@@ -3919,8 +3886,8 @@ ucs_status_t ucp_stream_recv_request_test(void *request, size_t *length_p);
  * the application is responsible for calling @ref ucp_request_free
  * "ucp_request_free()".
  */
-void ucp_request_cancel(ucp_worker_h worker, void *request);
-
+void
+ucp_request_cancel(ucp_worker_h worker, void* request);
 
 /**
  * @ingroup UCP_COMM
@@ -3934,8 +3901,8 @@ void ucp_request_cancel(ucp_worker_h worker, void *request);
  * @ref ucp_stream_recv_data_nb when @a data is processed, the application can't
  * use this buffer after calling this function.
  */
-void ucp_stream_data_release(ucp_ep_h ep, void *data);
-
+void
+ucp_stream_data_release(ucp_ep_h ep, void* data);
 
 /**
  * @ingroup UCP_COMM
@@ -3948,8 +3915,8 @@ void ucp_stream_data_release(ucp_ep_h ep, void *data);
  * will make progress internally, however no further notifications or callbacks
  * will be invoked for this request.
  */
-void ucp_request_free(void *request);
-
+void
+ucp_request_free(void* request);
 
 /**
  * @ingroup UCP_DATATYPE
@@ -3973,9 +3940,9 @@ void ucp_request_free(void *request);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_dt_create_generic(const ucp_generic_dt_ops_t *ops, void *context,
-                                   ucp_datatype_t *datatype_p);
-
+ucs_status_t
+ucp_dt_create_generic(const ucp_generic_dt_ops_t* ops, void* context,
+                      ucp_datatype_t* datatype_p);
 
 /**
  * @ingroup UCP_DATATYPE
@@ -3992,8 +3959,8 @@ ucs_status_t ucp_dt_create_generic(const ucp_generic_dt_ops_t *ops, void *contex
  *
  * @param [in]  datatype     Datatype object to destroy.
  */
-void ucp_dt_destroy(ucp_datatype_t datatype);
-
+void
+ucp_dt_destroy(ucp_datatype_t datatype);
 
 /**
  * @ingroup UCP_DATATYPE
@@ -4008,8 +3975,8 @@ void ucp_dt_destroy(ucp_datatype_t datatype);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_dt_query(ucp_datatype_t datatype, ucp_datatype_attr_t *attr);
-
+ucs_status_t
+ucp_dt_query(ucp_datatype_t datatype, ucp_datatype_attr_t* attr);
 
 /**
  * @ingroup UCP_WORKER
@@ -4033,8 +4000,8 @@ ucs_status_t ucp_dt_query(ucp_datatype_t datatype, ucp_datatype_attr_t *attr);
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_worker_fence(ucp_worker_h worker);
-
+ucs_status_t
+ucp_worker_fence(ucp_worker_h worker);
 
 /**
  * @ingroup UCP_WORKER
@@ -4061,9 +4028,8 @@ ucs_status_t ucp_worker_fence(ucp_worker_h worker);
  *                                handle is returned to the application in order
  *                                to track progress.
  */
-ucs_status_ptr_t ucp_worker_flush_nbx(ucp_worker_h worker,
-                                      const ucp_request_param_t *param);
-
+ucs_status_ptr_t
+ucp_worker_flush_nbx(ucp_worker_h worker, const ucp_request_param_t* param);
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -4072,14 +4038,17 @@ ucs_status_ptr_t ucp_worker_flush_nbx(ucp_worker_h worker,
  * The enumeration allows specifying which fields in @ref ucp_ep_attr_t are
  * present. It is used to enable backward compatibility support.
  */
-enum ucp_ep_attr_field {
-    UCP_EP_ATTR_FIELD_NAME            = UCS_BIT(0), /**< UCP endpoint name */
-    UCP_EP_ATTR_FIELD_LOCAL_SOCKADDR  = UCS_BIT(1), /**< Sockaddr used by the endpoint */
-    UCP_EP_ATTR_FIELD_REMOTE_SOCKADDR = UCS_BIT(2), /**< Sockaddr the endpoint is connected to */
-    UCP_EP_ATTR_FIELD_TRANSPORTS      = UCS_BIT(3), /**< Transport and device used by endpoint */
-    UCP_EP_ATTR_FIELD_USER_DATA       = UCS_BIT(4)  /**< User data associated with the endpoint */
+enum ucp_ep_attr_field
+{
+    UCP_EP_ATTR_FIELD_NAME           = UCS_BIT(0), /**< UCP endpoint name */
+    UCP_EP_ATTR_FIELD_LOCAL_SOCKADDR = UCS_BIT(1), /**< Sockaddr used by the endpoint */
+    UCP_EP_ATTR_FIELD_REMOTE_SOCKADDR =
+        UCS_BIT(2), /**< Sockaddr the endpoint is connected to */
+    UCP_EP_ATTR_FIELD_TRANSPORTS =
+        UCS_BIT(3), /**< Transport and device used by endpoint */
+    UCP_EP_ATTR_FIELD_USER_DATA =
+        UCS_BIT(4) /**< User data associated with the endpoint */
 };
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -4088,7 +4057,8 @@ enum ucp_ep_attr_field {
  * The structure defines the attributes that characterize the particular
  * endpoint.
  */
-typedef struct ucp_ep_attr {
+typedef struct ucp_ep_attr
+{
     /**
      * Mask of valid fields in this structure, using bits from
      * @ref ucp_ep_attr_field.
@@ -4101,7 +4071,7 @@ typedef struct ucp_ep_attr {
      * Endpoint name. Tracing and analysis tools can identify the endpoint using
      * this name.
      */
-    char     name[UCP_ENTITY_NAME_MAX];
+    char name[UCP_ENTITY_NAME_MAX];
 
     /**
      * Local socket address for this endpoint. Valid only for endpoints created
@@ -4124,15 +4094,14 @@ typedef struct ucp_ep_attr {
      * by this endpoint. The caller is responsible for allocation and
      * deallocation of this array.
      */
-    ucp_transports_t        transports;
+    ucp_transports_t transports;
 
     /**
      * User data associated with an endpoint passed in
      * @ref ucp_ep_params_t::user_data.
      */
-    void                   *user_data;
+    void* user_data;
 } ucp_ep_attr_t;
-
 
 /**
  * @ingroup UCP_ENDPOINT
@@ -4145,8 +4114,8 @@ typedef struct ucp_ep_attr {
  *
  * @return Error code as defined by @ref ucs_status_t
  */
-ucs_status_t ucp_ep_query(ucp_ep_h ep, ucp_ep_attr_t *attr);
-
+ucs_status_t
+ucp_ep_query(ucp_ep_h ep, ucp_ep_attr_t* attr);
 
 /**
  * @example ucp_hello_world.c

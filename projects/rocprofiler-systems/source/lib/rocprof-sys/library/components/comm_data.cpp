@@ -486,9 +486,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 
 // UCX communication tracking implementations
 
-// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const void* param)
+// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const
+// void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*, 
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
                  size_t count, uint64_t tag, const void*)
 {
     if(count == 0) return;
@@ -508,10 +509,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t tag_mask, const void* param)
+// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t
+// tag_mask, const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, 
-                 size_t count, uint64_t tag, uint64_t tag_mask, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 uint64_t tag, uint64_t tag_mask, const void*)
 {
     if(count == 0) return;
 
@@ -527,11 +529,13 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
         tracker_t _t{ _name };
         add(_t, count);
         add(JOIN('/', _name, JOIN('=', "tag", tag)), count);
-        add(JOIN('/', _name, JOIN('=', "tag", tag), JOIN('=', "tag_mask", tag_mask)), count);
+        add(JOIN('/', _name, JOIN('=', "tag", tag), JOIN('=', "tag_mask", tag_mask)),
+            count);
     }
 }
 
-// ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr, void* rkey, const void* param)
+// ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr, void*
+// rkey, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
                  size_t count, uint64_t remote_addr, void*, const void*)
@@ -553,10 +557,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void* rkey, const void* param)
+// ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void* rkey,
+// const void* param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
-                 size_t count, uint64_t remote_addr, void*, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 uint64_t remote_addr, void*, const void*)
 {
     if(count == 0) return;
 
@@ -575,10 +580,12 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
     }
 }
 
-// ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length, const void* buffer, size_t count, const void* param)
+// ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length,
+// const void* buffer, size_t count, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
-                 const void*, size_t header_length, const void*, size_t count, const void*)
+                 const void*, size_t header_length, const void*, size_t count,
+                 const void*)
 {
     if(count == 0 && header_length == 0) return;
 
@@ -601,7 +608,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
 // ucp_stream_send_nbx: (void* ep, const void* buffer, size_t count, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, const void*)
+                 size_t             count, const void*)
 {
     if(count == 0) return;
 
@@ -619,10 +626,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_stream_recv_nbx: (void* ep, void* buffer, size_t count, size_t* length, const void* param)
+// ucp_stream_recv_nbx: (void* ep, void* buffer, size_t count, size_t* length, const void*
+// param)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
-                 size_t count, size_t*, const void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 size_t*, const void*)
 {
     if(count == 0) return;
 
@@ -642,8 +650,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
 
 // Legacy: ucp_tag_send_nb/nbx - send with tag matching (for old-style wrappers)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
-                 void*, void*, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
+                 void*, void*)
 {
     if(count == 0) return;
 
@@ -663,8 +671,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 
 // Legacy: ucp_tag_recv_nb/nbx - receive with tag matching (for old-style wrappers)
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
-                 void*, void*, void*, void*, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count, void*,
+                 void*, void*, void*, void*)
 {
     if(count == 0) return;
 
@@ -690,7 +698,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
     if(length == 0) return;
 
     bool is_put = _data.tool_id.find("ucp_put") != std::string::npos;
-    
+
     if(get_use_perfetto())
     {
         if(is_put)
@@ -738,13 +746,13 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, voi
 
 // ucp_stream_send/recv operations
 void
-comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*,
-                 size_t count, void*, unsigned, void*)
+comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
+                 void*, unsigned, void*)
 {
     if(count == 0) return;
 
     bool is_send = _data.tool_id.find("send") != std::string::npos;
-    
+
     if(get_use_perfetto())
     {
         if(is_send)
