@@ -41,33 +41,33 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python  
-      uses: actions/setup-python@v5  
-      with:  
-        python-version: '3.12.6'  
-  
-    - name: Install CMake  
-      run: python3 -m pip install cmake  
-  
-    - name: Install Virtualenv  
-      run: python3 -m pip install virtualenv  
-  
-    - name: Install g++  
-      run: sudo apt-get install -y g++ 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12.6'
+
+    - name: Install CMake
+      run: python3 -m pip install cmake
+
+    - name: Install Virtualenv
+      run: python3 -m pip install virtualenv
+
+    - name: Install g++
+      run: sudo apt-get install -y g++
 
     - name: Install libdrm
       run: sudo apt-get install -y libdrm-dev
-  
-    - name: Install DOxygen  
-      run: sudo apt-get install -y doxygen  
-  
-    - name: Install LaTeX  
-      run: sudo apt-get install -y texlive  
-  
-    - name: Clean old ROCm directories  
-      run: |  
-        sudo rm -rf /opt/rocm  
-        sudo rm -rf /opt/rocm-*  
+
+    - name: Install DOxygen
+      run: sudo apt-get install -y doxygen
+
+    - name: Install LaTeX
+      run: sudo apt-get install -y texlive
+
+    - name: Clean old ROCm directories
+      run: |
+        sudo rm -rf /opt/rocm
+        sudo rm -rf /opt/rocm-*
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
@@ -77,14 +77,14 @@ jobs:
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended
 
-    - name: Create build directory  
-      run: mkdir -p build  
-  
-    - name: Build AMD SMI Library  
-      run: |  
-        cd build  
-        cmake ..  
-        make -j $(nproc)  
+    - name: Create build directory
+      run: mkdir -p build
+
+    - name: Build AMD SMI Library
+      run: |
+        cd build
+        cmake ..
+        make -j $(nproc)
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3

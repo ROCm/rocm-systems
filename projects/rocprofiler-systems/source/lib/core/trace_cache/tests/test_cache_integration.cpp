@@ -77,6 +77,19 @@ struct sample_3_hash
     }
 };
 
+struct sample_4_hash
+{
+    size_t operator()(const test_sample_4& s) const
+    {
+        size_t h = 0;
+        for(auto val : s.data)
+        {
+            h ^= std::hash<uint32_t>{}(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+};
+
 }  // namespace
 
 class integration_sample_processor_t
@@ -114,6 +127,16 @@ public:
         }
     }
 
+    void set_expected_samples_4(const std::vector<test_sample_4>& samples)
+    {
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_4.clear();
+        for(const auto& s : samples)
+        {
+            m_expected_samples_4[s]++;
+        }
+    }
+
     void execute_sample_processing(test_type_identifier_t type_identifier,
                                    const rocprofsys::trace_cache::cacheable_t& value)
     {
@@ -143,6 +166,14 @@ public:
                 check_sample_3(sample);
                 break;
             }
+            case test_type_identifier_t::sample_type_4:
+            {
+                const auto& sample = static_cast<const test_sample_4&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                m_sample_4_count++;
+                check_sample_4(sample);
+                break;
+            }
             default: break;
         }
     }
@@ -150,11 +181,12 @@ public:
     int  get_sample_1_count() const { return m_sample_1_count.load(); }
     int  get_sample_2_count() const { return m_sample_2_count.load(); }
     int  get_sample_3_count() const { return m_sample_3_count.load(); }
+    int  get_sample_4_count() const { return m_sample_4_count.load(); }
     bool all_expected_samples_found() const
     {
         std::lock_guard<std::mutex> lock(m_data_mutex);
         return m_expected_samples_1.empty() && m_expected_samples_2.empty() &&
-               m_expected_samples_3.empty();
+               m_expected_samples_3.empty() && m_expected_samples_4.empty();
     }
 
 private:
@@ -200,12 +232,28 @@ private:
         }
     }
 
+    void check_sample_4(const test_sample_4& sample)
+    {
+        auto it = m_expected_samples_4.find(sample);
+        EXPECT_NE(it, m_expected_samples_4.end());
+        if(it != m_expected_samples_4.end())
+        {
+            it->second--;
+            if(it->second == 0)
+            {
+                m_expected_samples_4.erase(it);
+            }
+        }
+    }
+
     std::atomic<int>                                      m_sample_1_count{ 0 };
     std::atomic<int>                                      m_sample_2_count{ 0 };
     std::atomic<int>                                      m_sample_3_count{ 0 };
+    std::atomic<int>                                      m_sample_4_count{ 0 };
     std::unordered_map<test_sample_1, int, sample_1_hash> m_expected_samples_1;
     std::unordered_map<test_sample_2, int, sample_2_hash> m_expected_samples_2;
     std::unordered_map<test_sample_3, int, sample_3_hash> m_expected_samples_3;
+    std::unordered_map<test_sample_4, int, sample_4_hash> m_expected_samples_4;
     mutable std::mutex                                    m_data_mutex;
 };
 
@@ -275,7 +323,7 @@ TEST_F(trace_cache_module_integration_test, buffer_fragmentation_handling)
     processor->set_expected_samples_3(expected_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     parser.load(processor);
@@ -358,7 +406,7 @@ TEST_F(trace_cache_module_integration_test, content_validation_edge_cases)
     processor->set_expected_samples_3(expected_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
     parser.load(processor);
 
@@ -408,7 +456,7 @@ TEST_F(trace_cache_module_integration_test, stress_test_multiple_fragmentations)
     processor->set_expected_samples_1(expected_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
     parser.load(processor);
 
@@ -465,7 +513,7 @@ TEST_F(trace_cache_module_integration_test, performance_write_test)
     processor->set_expected_samples_1(samples);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
     parser.load(processor);
 
@@ -547,10 +595,102 @@ TEST_F(trace_cache_module_integration_test, concurrent_write_read_validation)
     processor->set_expected_samples_1(expected_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
     parser.load(processor);
 
     EXPECT_EQ(processor->get_sample_1_count(), total_samples);
+    EXPECT_TRUE(processor->all_expected_samples_found());
+}
+
+TEST_F(trace_cache_module_integration_test, uint32_vector_element_size_handling)
+{
+    std::vector<test_sample_4> expected_4;
+    expected_4.reserve(100);
+
+    {
+        rocprofsys::trace_cache::buffer_storage<
+            rocprofsys::trace_cache::flush_worker_factory_t, test_type_identifier_t>
+            storage(test_file_path);
+        storage.start();
+
+        for(int i = 0; i < 100; ++i)
+        {
+            std::vector<uint32_t> data;
+            data.reserve(10);
+            for(int j = 0; j < 10; ++j)
+            {
+                data.push_back(static_cast<uint32_t>(i * 1000 + j));
+            }
+            test_sample_4 sample(data);
+            expected_4.push_back(sample);
+            storage.store(sample);
+        }
+
+        storage.shutdown();
+    }
+
+    auto processor = std::make_shared<integration_sample_processor_t>();
+    processor->set_expected_samples_4(expected_4);
+
+    rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
+                                            test_sample_2, test_sample_3, test_sample_4>
+        parser(test_file_path);
+    parser.load(processor);
+
+    EXPECT_EQ(processor->get_sample_4_count(), 100);
+    EXPECT_TRUE(processor->all_expected_samples_found());
+}
+
+TEST_F(trace_cache_module_integration_test, mixed_vector_element_sizes)
+{
+    std::vector<test_sample_3> expected_3;
+    std::vector<test_sample_4> expected_4;
+    expected_3.reserve(50);
+    expected_4.reserve(50);
+
+    {
+        rocprofsys::trace_cache::buffer_storage<
+            rocprofsys::trace_cache::flush_worker_factory_t, test_type_identifier_t>
+            storage(test_file_path);
+        storage.start();
+
+        for(int i = 0; i < 100; ++i)
+        {
+            if(i % 2 == 0)
+            {
+                std::vector<uint8_t> payload(20, static_cast<uint8_t>(i));
+                test_sample_3        sample(payload);
+                expected_3.push_back(sample);
+                storage.store(sample);
+            }
+            else
+            {
+                std::vector<uint32_t> data;
+                data.reserve(5);
+                for(int j = 0; j < 5; ++j)
+                {
+                    data.push_back(static_cast<uint32_t>(i * 100 + j));
+                }
+                test_sample_4 sample(data);
+                expected_4.push_back(sample);
+                storage.store(sample);
+            }
+        }
+
+        storage.shutdown();
+    }
+
+    auto processor = std::make_shared<integration_sample_processor_t>();
+    processor->set_expected_samples_3(expected_3);
+    processor->set_expected_samples_4(expected_4);
+
+    rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
+                                            test_sample_2, test_sample_3, test_sample_4>
+        parser(test_file_path);
+    parser.load(processor);
+
+    EXPECT_EQ(processor->get_sample_3_count(), 50);
+    EXPECT_EQ(processor->get_sample_4_count(), 50);
     EXPECT_TRUE(processor->all_expected_samples_found());
 }
