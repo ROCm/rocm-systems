@@ -28,6 +28,7 @@ Main View Module
 Contains the main view layout and organization for the application.
 """
 
+import traceback
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -165,7 +166,6 @@ class MainView(Horizontal):
             sysinfo_path = selected / "sysinfo.csv"
             if not sysinfo_path.exists():
                 # Let the UI thread handle the error and reset state
-                import traceback
 
                 error = FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
                 tb = traceback.format_exc()
@@ -213,7 +213,6 @@ class MainView(Horizontal):
             )
 
         except Exception as e:  # noqa: BLE001
-            import traceback
 
             tb = traceback.format_exc()
             error_msg = f"Analysis failed: {str(e)}"
