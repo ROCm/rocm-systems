@@ -2480,11 +2480,10 @@ void Runtime::Unload() {
 
   DestroyAgents();
 
-  CloseTools();
-
   SharedSignalPool.clear();
-
   EventPool.clear();
+
+  CloseTools();
   
   AMD::Unload();
 
