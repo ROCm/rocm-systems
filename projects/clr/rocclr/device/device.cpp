@@ -753,7 +753,7 @@ Device::Device()
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
       index_(0) {
-  memset(&info_, '\0', sizeof(info_));
+  memset(static_cast<void*>(&info_), '\0', sizeof(info_));
   // By default consider just 1 xcc per device
   info_.numberOfXccs_ = 1;
 }

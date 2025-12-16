@@ -633,6 +633,8 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, void* dst, const void* src,
                                            *srcMemory->asBuffer(), *dstMemory->asBuffer(), sOffset,
                                            dOffset, sizeBytes, copyMetadata);
       break;
+    case hipHostToHost:
+      break;
   }
   if (command == nullptr) {
     return hipErrorOutOfMemory;
