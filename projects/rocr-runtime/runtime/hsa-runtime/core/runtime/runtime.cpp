@@ -2316,9 +2316,9 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
 }
 
 Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
-  : control(this), events(), new_events(), monitor_exceptions(exceptions_) {
-
-  events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
+  : monitor_exceptions(exceptions_), events(), new_events(), control(this) {
+  // control is initialized last (matching declaration order) so that events
+  // is ready before the thread starts in AsyncEventsControl constructor
 }
 
 Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
@@ -2334,6 +2334,10 @@ Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+
+  // Add wake signal to events before starting thread so the thread has
+  // a valid signal to wait on when it begins execution
+  asyncInfo->events.PushBack(wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
 
   asyncInfo->control.thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
   if (!asyncInfo->control.thread_)
