@@ -167,10 +167,10 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   constexpr GLenum type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
 
   const auto hRC = reinterpret_cast<HGLRC>(GLContext);
-  const GLResource hRes = {.type = type, .name = name};
+  GLResource hRes = {.type = type, .name = name};
   GLResourceData hData = {.version = GL_RESOURCE_DATA_VERSION};
 
-  if (!wglResourceAttachAMD(hRC, const_cast<GLvoid*>(static_cast<const GLvoid*>(&hRes)), &hData)) return false;
+  if (!wglResourceAttachAMD(hRC, static_cast<GLvoid*>(&hRes), &hData)) return false;
 
   *handle = reinterpret_cast<hsa_handle_t>(hData.handle);
   *offset = static_cast<int>(hData.offset);
