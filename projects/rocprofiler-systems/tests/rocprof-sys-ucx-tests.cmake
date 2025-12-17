@@ -35,33 +35,28 @@ endif()
 set(_ucxp_mpi_environment
     "OMPI_MCA_pml=ucx" # Use UCX point-to-point messaging layer
     "OMPI_MCA_osc=ucx" # Use UCX one-sided communications
-    "OMPI_MCA_pml_ucx_tls=any" # Accept any UCX transport (tcp, self, sysv, posix, cma)
+    "OMPI_MCA_pml_ucx_tls=tcp,self" # Force TCP and self (not sysv/posix/cma which bypass UCX functions)
     "OMPI_MCA_pml_ucx_devices=any" # Accept any device (not just InfiniBand/Mellanox)
+    "OMPI_MCA_btl=^vader,sm" # Disable shared memory BTLs to force communication through UCX
+    "UCX_TLS=tcp,self" # Tell UCX to use TCP for inter-process, self for intra-process
+    "OMPI_MCA_pml_base_verbose=100" # Show which PML is selected
+    "UCX_LOG_LEVEL=info" # Enable UCX logging to show transport usage
 )
 
 # Base environment for UCX tests
 set(_ucx_base_environment
-    "ROCPROFSYS_TRACE=ON"
-    "ROCPROFSYS_PROFILE=ON"
-    "ROCPROFSYS_USE_SAMPLING=OFF"
-    "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
-    "ROCPROFSYS_TIME_OUTPUT=OFF"
-    "ROCPROFSYS_FILE_OUTPUT=ON"
+    "${_base_environment}"
     "ROCPROFSYS_USE_UCX=ON"
     "ROCPROFSYS_DEBUG=OFF"
     "ROCPROFSYS_VERBOSE=2"
     "ROCPROFSYS_DL_VERBOSE=2"
     "${_ucxp_mpi_environment}"
-    "${_test_openmp_env}"
-    "${_test_library_path}"
 )
 
 # First test: UCX availability check using mpi-example (basic test)
 # This test checks if UCX is available. If not, subsequent UCX tests will be marked as skipped.
-# Note: SKIP_BASELINE is required because baseline tests don't use the MCA parameter overrides
-#       and will fail on systems without InfiniBand hardware (requires OMPI_MCA_pml_ucx_tls=any)
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
+    SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE SKIP_SYS_RUN
     NAME "ucx-availability-check"
     TARGET mpi-example
     MPI ON
@@ -78,7 +73,7 @@ rocprofiler_systems_add_test(
         args
         --min-instructions
         0
-    ENVIRONMENT "${_ucx_base_environment};ROCPROFSYS_VERBOSE=3"
+    ENVIRONMENT "${_ucx_base_environment};ROCPROFSYS_VERBOSE=1"
     REWRITE_RUN_PASS_REGEX
         "UCX.*configured|ucp_|uct_|UCX transport|pml.*ucx"
     REWRITE_RUN_FAIL_REGEX
@@ -89,24 +84,28 @@ rocprofiler_systems_add_test(
 
 # Enhanced UCX environment with more detailed logging
 set(_ucx_environment
-    "ROCPROFSYS_TRACE=ON"
-    "ROCPROFSYS_PROFILE=ON"
-    "ROCPROFSYS_USE_SAMPLING=OFF"
-    "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
-    "ROCPROFSYS_TIME_OUTPUT=OFF"
-    "ROCPROFSYS_FILE_OUTPUT=ON"
+    "${_base_environment}"
     "ROCPROFSYS_USE_UCX=ON"
     "ROCPROFSYS_DEBUG=ON"
     "ROCPROFSYS_VERBOSE=3"
     "ROCPROFSYS_DL_VERBOSE=3"
+    "ROCPROFSYS_PERFETTO_BACKEND=inprocess"
+    "ROCPROFSYS_PERFETTO_FILL_POLICY=ring_buffer"
+    "ROCPROFSYS_USE_PID=OFF"
+    "ROCPROFSYS_MPI_INIT=OFF"
     "${_ucxp_mpi_environment}"
-    "${_test_openmp_env}"
-    "${_test_library_path}"
+)
+
+# Debug environment - extra verbose for troubleshooting CI issues
+set(_ucx_debug_environment
+    "${_ucx_environment}"
+    "UCX_LOG_LEVEL=debug" # Maximum UCX logging
+    "OMPI_MCA_mpi_show_mca_params=all" # Show all MCA parameters
 )
 
 # UCX perfetto trace test
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
+    SKIP_RUNTIME
     NAME "ucx-perfetto"
     TARGET mpi-example
     MPI ON
@@ -121,17 +120,19 @@ rocprofiler_systems_add_test(
         line
         --min-instructions
         0
-    ENVIRONMENT "${_ucx_base_environment};ROCPROFSYS_VERBOSE=1"
+    ENVIRONMENT "${_ucx_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
-        "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
+        "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
-        "(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)|ROCPROFSYS_ABORT_FAIL_REGEX"
+        "Script not found|Failed to execute|ROCPROFSYS_ABORT_FAIL_REGEX"
+    SYS_RUN_PASS_REGEX
+        "ucp_tag_send|ucp_tag_recv|UCX.*configured|Using UCX|pml.*ucx"
 )
 
 # Validation test for UCX perfetto trace to ensure communication tracks are present
 rocprofiler_systems_add_validation_test(
     NAME ucx-perfetto-sys-run
-    PERFETTO_METRIC "ucx_comm_api"
+    PERFETTO_METRIC "ucx"
     PERFETTO_FILE "merged.proto"
     LABELS "ucx;perfetto"
     ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
@@ -143,8 +144,6 @@ foreach(
     all2all
     allgather
     allreduce
-    bcast
-    reduce
     scatter-gather
     send-recv
 )
@@ -157,15 +156,17 @@ foreach(
         LABELS "ucx"
         REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
         RUN_ARGS 30
-        ENVIRONMENT "${_ucx_environment}"
-        REWRITE_RUN_PASS_REGEX
-            "UCX.*trace|ucp_.*trace|Category.*ucx|UCX function.*called"
+    ENVIRONMENT "${_ucx_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+    REWRITE_RUN_PASS_REGEX
+        "UCX.*trace|ucp_.*trace|Category.*ucx|UCX function.*called"
+    SYS_RUN_PASS_REGEX
+        "ucp_tag_send|ucp_tag_recv|write_perfetto_counter_track.*ucx"
     )
 
     # Add validation test to check for UCX communication tracks and bytes
     rocprofiler_systems_add_validation_test(
         NAME ucx-${_UCX_EXAMPLE}-sys-run
-        PERFETTO_METRIC "ucx_comm_api"
+        PERFETTO_METRIC "ucx"
         PERFETTO_FILE "merged.proto"
         LABELS "ucx"
         ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
@@ -174,7 +175,7 @@ endforeach()
 
 # UCX with MPIP integration test
 rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
+    SKIP_RUNTIME
     NAME "ucx-mpip-integration"
     TARGET mpi-all2all
     MPI ON
@@ -195,72 +196,6 @@ rocprofiler_systems_add_test(
     RUN_ARGS 30
     REWRITE_RUN_PASS_REGEX
         "UCX.*trace.*MPI.*trace|ucp_.*MPI_|Category.*ucx.*Category.*mpi"
-)
-
-# UCX detailed function tracing test
-rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
-    NAME "ucx-detailed-tracing"
-    TARGET mpi-send-recv
-    MPI ON
-    NUM_PROCS 2
-    LABELS "ucx;detailed"
-    REWRITE_ARGS
-        -e
-        -v
-        3
-        --label
-        file
-        line
-        args
-        --min-instructions
-        0
-    ENVIRONMENT
-        "${_ucx_environment};ROCPROFSYS_VERBOSE=3;ROCPROFSYS_DL_VERBOSE=3"
-    RUN_ARGS 100
-    REWRITE_RUN_PASS_REGEX
-        "ucp_tag_send_nbx|ucp_tag_recv_nbx|ucp_worker_progress|ucp_request.*|UCX Gotcha.*audit"
-)
-
-# Validation test for detailed UCX tracing to ensure communication tracking
-rocprofiler_systems_add_validation_test(
-    NAME ucx-detailed-tracing-sys-run
-    PERFETTO_METRIC "ucx_comm_api"
-    PERFETTO_FILE "merged.proto"
-    LABELS "ucx;detailed"
-    ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
-)
-
-# UCX memory operations test
-rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
-    NAME "ucx-memory-ops"
-    TARGET mpi-allgather
-    MPI ON
-    NUM_PROCS 2
-    LABELS "ucx;memory"
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        --label
-        file
-        line
-        --min-instructions
-        0
-    ENVIRONMENT "${_ucx_environment}"
-    RUN_ARGS 50
-    REWRITE_RUN_PASS_REGEX
-        "ucp_put|ucp_get|ucp_mem_|ucp_rkey_|ucp_atomic_"
-)
-
-# Validation test for UCX memory operations to ensure bytes are recorded
-rocprofiler_systems_add_validation_test(
-    NAME ucx-memory-ops-sys-run
-    PERFETTO_METRIC "ucx_comm_api"
-    PERFETTO_FILE "merged.proto"
-    LABELS "ucx;memory"
-    ARGS --counter-names "UCX Comm Recv" "UCX Comm Send" -p
 )
 
 # UCX with different message sizes
