@@ -127,29 +127,29 @@ PerfettoSession::~PerfettoSession()
     auto filename = std::string{"results"};
     auto ofs      = tool::get_output_stream(config, filename, ".pftrace", std::ios::binary);
 
-    auto amount_read = std::atomic<size_t>{0};
-    auto is_done     = std::promise<void>{};
-    auto _mtx        = std::mutex{};
-    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
-                       ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
-        auto _lk = std::unique_lock<std::mutex>{_mtx};
-        if(_args.data && _args.size > 0)
-        {
-            ROCP_TRACE << "Writing " << _args.size << " B to trace...";
-            // Write the trace data into file
-            ofs.stream->write(_args.data, _args.size);
-            amount_read += _args.size;
-        }
-        ROCP_INFO_IF(!_args.has_more && amount_read > 0)
-            << "Wrote " << amount_read << " B to perfetto trace file";
-        if(!_args.has_more) is_done.set_value();
-    };
-
+    // NOTE: These variables must be inside the loop to avoid a TSAN race condition.
+    // If is_done is declared outside and reassigned each iteration, the promise's internal
+    // mutex can be destroyed while the callback thread is still unlocking it after set_value().
     for(size_t i = 0; i < 2; ++i)
     {
         ROCP_TRACE << "Reading trace...";
-        amount_read = 0;
-        is_done     = std::promise<void>{};
+        auto amount_read = std::atomic<size_t>{0};
+        auto is_done     = std::promise<void>{};
+        auto _mtx        = std::mutex{};
+        auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
+                           ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
+            auto _lk = std::unique_lock<std::mutex>{_mtx};
+            if(_args.data && _args.size > 0)
+            {
+                ROCP_TRACE << "Writing " << _args.size << " B to trace...";
+                // Write the trace data into file
+                ofs.stream->write(_args.data, _args.size);
+                amount_read += _args.size;
+            }
+            ROCP_INFO_IF(!_args.has_more && amount_read > 0)
+                << "Wrote " << amount_read << " B to perfetto trace file";
+            if(!_args.has_more) is_done.set_value();
+        };
         tracing_session->ReadTrace(_reader);
         is_done.get_future().wait();
     }
@@ -706,7 +706,7 @@ write_perfetto(
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
         auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
-                                                              std::numeric_limits<uint64_t>::min()};
+                                                               std::numeric_limits<uint64_t>::min()};
         auto constexpr timestamp_buffer = 1000;
         for(auto ditr : memory_copy_gen)
         {
@@ -1130,8 +1130,7 @@ write_perfetto(
                     auto       agent_index_info = agent_data.at(record.agent_abs_index).second;
                     auto       track_name_ss    = std::stringstream{};
                     track_name_ss << agent_index_info.label << " [" << agent_index_info.index
-                                  << "] "
-                                  << "PMC " << record.counter_name;
+                                  << "] " << "PMC " << record.counter_name;
 
                     auto track_name = track_name_ss.str();
 

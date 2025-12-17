@@ -27,6 +27,8 @@
 
 #include "trace_callbacks.hpp"
 
+#include <atomic>
+#include <mutex>
 #include <set>
 
 namespace ATTTest
@@ -37,6 +39,17 @@ rocprofiler_client_id_t* client_id   = nullptr;
 rocprofiler_context_id_t agent_ctx   = {};
 rocprofiler_context_id_t tracing_ctx = {};
 
+// Callback state allocated on heap to control destruction order
+struct CallbackState
+{
+    std::atomic<bool> isprofiling{false};
+    std::atomic<bool> stop_profiling{false};
+    std::mutex        mut{};
+    std::set<int>     captured_ids{};
+};
+
+CallbackState* callback_state = nullptr;
+
 void
 tool_fini(void* tool_data)
 {
@@ -46,6 +59,10 @@ tool_fini(void* tool_data)
 
     // Call the shared finalize logic
     Callbacks::finalize(tool_data);
+
+    // Clean up heap-allocated callback state after finalize
+    delete callback_state;
+    callback_state = nullptr;
 }
 
 void
@@ -56,45 +73,44 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
 
+    // Check if callback_state is still valid (may be null during shutdown)
+    if(!callback_state) return;
+
     assert(record.payload);
     auto* rdata = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
     auto  dispatch_id = rdata->dispatch_info.dispatch_id;
 
     // Choose two dispatches to begin(6) and end(10) the trace
-    constexpr uint64_t       begin_dispatch = 6;
-    constexpr uint64_t       end_dispatch   = 10;
-    static std::atomic<bool> isprofiling{false};
-    static std::atomic<bool> stop_profiling{false};
-
-    static std::mutex    mut{};
-    static std::set<int> captured_ids{};
+    constexpr uint64_t begin_dispatch = 6;
+    constexpr uint64_t end_dispatch   = 10;
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         if(dispatch_id == begin_dispatch)
         {
             ROCPROFILER_CALL(rocprofiler_start_context(agent_ctx), "context start");
-            isprofiling.store(true);
+            callback_state->isprofiling.store(true);
         }
-        if(isprofiling && dispatch_id <= end_dispatch)
+        if(callback_state->isprofiling && dispatch_id <= end_dispatch)
         {
-            std::unique_lock<std::mutex> lk(mut);
-            captured_ids.insert(dispatch_id);
+            std::unique_lock<std::mutex> lk(callback_state->mut);
+            callback_state->captured_ids.insert(dispatch_id);
         }
-        if(dispatch_id > end_dispatch) stop_profiling.store(true);
+        if(dispatch_id > end_dispatch) callback_state->stop_profiling.store(true);
         return;
     }
 
     assert(record.phase == ROCPROFILER_CALLBACK_PHASE_NONE);
 
-    if(!isprofiling) return;
+    if(!callback_state->isprofiling) return;
 
-    std::unique_lock<std::mutex> lk(mut);
-    captured_ids.erase(dispatch_id);
-    if(!captured_ids.empty() || stop_profiling == false) return;
+    std::unique_lock<std::mutex> lk(callback_state->mut);
+    callback_state->captured_ids.erase(dispatch_id);
+    if(!callback_state->captured_ids.empty() || callback_state->stop_profiling == false) return;
 
     bool _exp = true;
-    if(!isprofiling.compare_exchange_strong(_exp, false, std::memory_order_relaxed)) return;
+    if(!callback_state->isprofiling.compare_exchange_strong(_exp, false, std::memory_order_relaxed))
+        return;
 
     ROCPROFILER_CALL(rocprofiler_stop_context(agent_ctx), "context stop");
 }
@@ -166,6 +182,9 @@ int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
     Callbacks::init();
+
+    // Allocate callback state on heap for controlled destruction order
+    callback_state = new CallbackState{};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");

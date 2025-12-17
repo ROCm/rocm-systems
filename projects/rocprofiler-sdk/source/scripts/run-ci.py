@@ -120,9 +120,23 @@ def generate_custom(args, cmake_args, ctest_args):
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt"
         )
+        os.environ["ASAN_OPTIONS"] = " ".join(
+            [
+                "detect_leaks=0",
+                "use_sigaltstack=0",
+                f"suppressions={SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt",
+                os.environ.get("ASAN_OPTIONS", ""),
+            ]
+        )
     elif MEMCHECK_TYPE == "LeakSanitizer":
         MEMCHECK_SUPPRESSION_FILE = (
             f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt"
+        )
+        os.environ["LSAN_OPTIONS"] = " ".join(
+            [
+                f"suppressions={SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt",
+                os.environ.get("LSAN_OPTIONS", ""),
+            ]
         )
     elif MEMCHECK_TYPE == "ThreadSanitizer":
         external_symbolizer_path = ""
@@ -150,6 +164,38 @@ def generate_custom(args, cmake_args, ctest_args):
                 os.environ.get("UBSAN_OPTIONS", ""),
             ]
         )
+
+    # Print suppression file contents for debugging
+    if MEMCHECK_TYPE:
+        print(f"\n{'=' * 60}")
+        print(f"Sanitizer: {MEMCHECK_TYPE}")
+        print(f"{'=' * 60}")
+
+        # Print environment variables for sanitizers that use them
+        for env_var in ["TSAN_OPTIONS", "UBSAN_OPTIONS", "ASAN_OPTIONS", "LSAN_OPTIONS"]:
+            if env_var in os.environ:
+                print(f"\n{env_var}:")
+                print(f"  {os.environ[env_var]}")
+
+        # Print suppression file contents
+        suppression_files = [
+            (f"{SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt", "TSAN"),
+            (f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt", "ASAN"),
+            (f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt", "LSAN"),
+            (f"{SOURCE_DIR}/source/scripts/undef-behavior-sanitizer-suppr.txt", "UBSAN"),
+        ]
+
+        for suppr_file, suppr_type in suppression_files:
+            if os.path.exists(suppr_file):
+                with open(suppr_file, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        print(f"\n{'-' * 40}")
+                        print(f"{suppr_type} Suppression File: {suppr_file}")
+                        print(f"{'-' * 40}")
+                        print(content)
+
+        print(f"\n{'=' * 60}\n")
 
     codecov_exclude = [
         "/usr/.*",
