@@ -54,6 +54,12 @@ public:
         m_expected_samples_3 = samples;
     }
 
+    void set_expected_samples_4(const std::vector<test_sample_4>& samples)
+    {
+        std::lock_guard<std::mutex> lock(m_data_mutex);
+        m_expected_samples_4 = samples;
+    }
+
     void execute_sample_processing(test_type_identifier_t type_identifier,
                                    const rocprofsys::trace_cache::cacheable_t& value)
     {
@@ -83,6 +89,14 @@ public:
                 check_sample_3(idx, sample);
                 break;
             }
+            case test_type_identifier_t::sample_type_4:
+            {
+                const auto& sample = static_cast<const test_sample_4&>(value);
+                std::lock_guard<std::mutex> lock(m_data_mutex);
+                size_t                      idx = m_sample_4_count++;
+                check_sample_4(idx, sample);
+                break;
+            }
             default: m_unknown_count++; break;
         }
     }
@@ -90,6 +104,7 @@ public:
     int get_sample_1_count() const { return m_sample_1_count.load(); }
     int get_sample_2_count() const { return m_sample_2_count.load(); }
     int get_sample_3_count() const { return m_sample_3_count.load(); }
+    int get_sample_4_count() const { return m_sample_4_count.load(); }
     int get_unknown_count() const { return m_unknown_count.load(); }
 
 private:
@@ -117,13 +132,23 @@ private:
         }
     }
 
+    void check_sample_4(size_t index, const test_sample_4& sample)
+    {
+        if(index < m_expected_samples_4.size())
+        {
+            EXPECT_EQ(m_expected_samples_4[index], sample);
+        }
+    }
+
     std::atomic<int>           m_sample_1_count{ 0 };
     std::atomic<int>           m_sample_2_count{ 0 };
     std::atomic<int>           m_sample_3_count{ 0 };
+    std::atomic<int>           m_sample_4_count{ 0 };
     std::atomic<int>           m_unknown_count{ 0 };
     std::vector<test_sample_1> m_expected_samples_1;
     std::vector<test_sample_2> m_expected_samples_2;
     std::vector<test_sample_3> m_expected_samples_3;
+    std::vector<test_sample_4> m_expected_samples_4;
     std::mutex                 m_data_mutex;
 };
 
@@ -196,7 +221,7 @@ TEST_F(storage_parser_test, load_empty_file)
     auto processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -219,7 +244,7 @@ TEST_F(storage_parser_test, load_single_sample_type_1)
     processor->set_expected_samples_1(samples_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -246,7 +271,7 @@ TEST_F(storage_parser_test, load_multiple_sample_types)
     processor->set_expected_samples_3(samples_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -314,7 +339,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
     processor->set_expected_samples_1({ valid_sample });
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -328,7 +353,7 @@ TEST_F(storage_parser_test, load_nonexisting_file)
     auto processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser("non_existent_file.bin");
 
     EXPECT_THROW(parser.load(processor), std::runtime_error);
@@ -347,7 +372,7 @@ TEST_F(storage_parser_test, load_large_sample_data)
     processor->set_expected_samples_3(samples_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -379,7 +404,7 @@ TEST_F(storage_parser_test, load_many_small_samples)
     processor->set_expected_samples_1(many_samples);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));
@@ -406,7 +431,7 @@ TEST_F(storage_parser_test, write_less_than_expected)
     auto processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_THROW(parser.load(processor), std::runtime_error);
@@ -453,7 +478,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
     processor->set_expected_samples_3(samples_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
-                                            test_sample_2, test_sample_3>
+                                            test_sample_2, test_sample_3, test_sample_4>
         parser(test_file_path);
 
     EXPECT_NO_THROW(parser.load(processor));

@@ -441,7 +441,11 @@ bool Device::init() {
     if (amd::IS_HIP && ROC_GLOBAL_CU_MASK[0] != '\0') {
       roc_device->getGlobalCUMask(ROC_GLOBAL_CU_MASK);
     }
-
+    // Note: for now disable HSA path by default except for gfx942
+    if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
+        (std::strcmp(roc_device->info().name_, "gfx942") != 0)) {
+      return false;
+    }
     roc_device.release()->registerDevice();
   }
 
@@ -1624,6 +1628,13 @@ bool Device::populateOCLDeviceConstants() {
       Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC),
                           &info_.numberOfXccs_)) {
     LogError("HSA_AMD_AGENT_INFO_NUM_XCC query failed.");
+  }
+
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PM4_EMULATION),
+                          &pm4_emulation_)) {
+    LogError("HSA_AMD_AGENT_INFO_PM4_EMULATION query failed.");
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),

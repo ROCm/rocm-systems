@@ -562,12 +562,8 @@ Analysis database example
    DEBUG Applied analysis mode filters
    DEBUG Calculated dispatch data
    DEBUG Collected metrics data
-   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
-   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
-   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
-   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
    (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
    DEBUG Calculated metric values

@@ -1,0 +1,91 @@
+name: TheRock CI for rccl
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    types:
+      - labeled
+      - opened
+      - synchronize
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR number if a pull request and otherwise the commit hash. This cancels
+  # queued and in-progress runs for the same PR (presubmit) or commit
+  # (postsubmit). The workflow name is prepended to avoid conflicts between
+  # different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    env:
+      # The commit being checked out is the merge commit for a PR. Its first
+      # parent will be the tip of the base branch.
+      BASE_REF: HEAD^
+    outputs:
+      enable_therock_ci: ${{ steps.configure.outputs.enable_therock_ci }}
+    steps:
+      - name: "Checking out repository"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # We need the parent commit to do a diff
+          fetch-depth: 2
+
+      - name: "Configuring CI options"
+        id: configure
+        run: python .github/scripts/therock_configure_ci.py
+
+  therock-ci-linux:
+    name: TheRock CI Linux
+    needs: setup
+    if: ${{ needs.setup.outputs.enable_therock_ci == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
+    uses: ./.github/workflows/therock-ci-linux.yml
+    secrets: inherit
+    with:
+      amdgpu_families: ${{ matrix.amdgpu_family }}
+      artifact_group: ${{ matrix.amdgpu_family }}
+      extra_cmake_options: >
+        -DTHEROCK_ENABLE_ALL=OFF 
+        -DTHEROCK_BUILD_TESTING=ON 
+        -DTHEROCK_BUNDLE_SYSDEPS=ON 
+        -DTHEROCK_ENABLE_COMM_LIBS=ON 
+        -DTHEROCK_ENABLE_ROCPROFV3=ON 
+        -DTHEROCK_USE_EXTERNAL_RCCL=ON 
+        -DTHEROCK_USE_EXTERNAL_RCCL_TESTS=ON 
+        -DTHEROCK_RCCL_SOURCE_DIR=./rccl 
+        -DTHEROCK_RCCL_TESTS_SOURCE_DIR=./rccl-tests
+        -DTHEROCK_ENABLE_MPI=ON
+
+  therock_ci_summary:
+    name: TheRock CI Summary
+    if: always()
+    needs:
+      - setup
+      - therock-ci-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Output failed jobs
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi

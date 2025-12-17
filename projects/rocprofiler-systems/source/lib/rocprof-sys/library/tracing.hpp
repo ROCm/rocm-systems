@@ -28,6 +28,7 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
+#include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -181,8 +182,9 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
         ROCPROFSYS_VERBOSE_F(4, "[%s] Created %s(%zu) with description: \"%s\"\n",
-                             trait::name<CategoryT>::value, demangle<TrackT>().c_str(),
-                             _uuid, _name.c_str());
+                             trait::name<CategoryT>::value,
+                             rocprofsys::utility::demangle<TrackT>().c_str(), _uuid,
+                             _name.c_str());
 
         _track_uuids.emplace(_uuid, _name);
     }
