@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <io.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
+#include "elf/elf.hpp"
 
 namespace hip {
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;
@@ -43,7 +44,13 @@ constexpr char const* OFFLOAD_KIND_HIP = "hip";
 constexpr char const* OFFLOAD_KIND_HIPV4 = "hipv4";
 constexpr char const* OFFLOAD_KIND_HCC = "hcc";
 constexpr char const* AMDGCN_TARGET_TRIPLE = "amdgcn-amd-amdhsa-";
+constexpr char const* SPIRV_TARGET_TRIPLE = "spirv64-amd-amdhsa-";
 constexpr char const* SPIRV_BUNDLE_ENTRY_ID = "hip-spirv64-amd-amdhsa-unknown-amdgcnspirv";
+
+static bool isSpirv(const std::string& isa) {
+  return isa.find("spirv64") != std::string::npos ||
+         isa.find("amdgcnspirv") != std::string::npos;
+}
 
 static constexpr size_t bundle_magic_string_size =
     strLiteralLength(CLANG_OFFLOAD_BUNDLER_MAGIC_STR);
@@ -312,6 +319,45 @@ bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileIn
                          const std::string& isa, std::vector<std::string>& compileOptions,
                          std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& exe) {
+  if (isSpirv(isa)) {
+    amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
+    comgr_helper::ComgrDataSetUniqueHandle bcOutput;
+    comgr_helper::ComgrDataSetUniqueHandle spirvOutput;
+    comgr_helper::ComgrActionInfoUniqueHandle compileAction;
+
+    // Hip -> Llvm bc
+    if (!createAction(compileAction, compileOptions, isa, lang))
+      return false;
+    if (bcOutput.Create() != AMD_COMGR_STATUS_SUCCESS)
+      return false;
+    if (amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC,
+                              compileAction.get(), compileInputs.get(),
+                              bcOutput.get()) != AMD_COMGR_STATUS_SUCCESS)
+      return false;
+
+    // Llvm bc -> Spirv
+    comgr_helper::ComgrActionInfoUniqueHandle spirvAction;
+    std::vector<std::string> emptyOpts;
+    if (!createAction(spirvAction, emptyOpts, isa, AMD_COMGR_LANGUAGE_NONE))
+      return false;
+    if (spirvOutput.Create() != AMD_COMGR_STATUS_SUCCESS)
+      return false;
+
+    if (amd::Comgr::do_action(AMD_COMGR_ACTION_TRANSLATE_BC_TO_SPIRV, spirvAction.get(),
+                              bcOutput.get(), spirvOutput.get()) != AMD_COMGR_STATUS_SUCCESS)
+      return false;
+    std::vector<char> spirvBinary;
+    if (!extractByteCodeBinary(spirvOutput, AMD_COMGR_DATA_KIND_SPIRV, spirvBinary))
+      return false;
+
+    // Output size-prefixed SPIR-V: [4-byte size][SPIR-V module]
+    uint32_t spirvSize = static_cast<uint32_t>(spirvBinary.size());
+    exe.resize(sizeof(spirvSize) + spirvBinary.size());
+    std::memcpy(exe.data(), &spirvSize, sizeof(spirvSize));
+    std::memcpy(exe.data() + sizeof(spirvSize), spirvBinary.data(), spirvBinary.size());
+    return true;
+  }
+
   amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_HIP;
   comgr_helper::ComgrDataSetUniqueHandle reloc;
   comgr_helper::ComgrDataSetUniqueHandle output;
