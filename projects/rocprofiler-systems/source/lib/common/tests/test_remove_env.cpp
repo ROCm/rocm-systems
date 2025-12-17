@@ -31,7 +31,9 @@
 
 using namespace rocprofsys::common;
 
-static std::string
+namespace
+{
+std::string
 find_env_var(const std::vector<char*>& env, std::string_view var_name)
 {
     std::string prefix = std::string(var_name) + "=";
@@ -45,6 +47,7 @@ find_env_var(const std::vector<char*>& env, std::string_view var_name)
     }
     return "";
 }
+}  // namespace
 
 class RemoveEnvTest : public ::testing::Test
 {
