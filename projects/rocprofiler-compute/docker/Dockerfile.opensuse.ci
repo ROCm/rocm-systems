@@ -24,7 +24,7 @@ RUN set +e; \
 RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
-    zypper --non-interactive install -y python3-pip gcc-c++ git dpkg-devel rpm-build curl wget binutils-gold && \
+    zypper --non-interactive install -y python3-pip gcc-c++ git dpkg-devel rpm-build curl wget && \
     python3 -m pip install 'cmake==3.28.4' && \
     zypper --non-interactive clean --all
 
