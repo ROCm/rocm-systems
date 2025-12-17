@@ -260,7 +260,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
     fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
     std::ifstream file(fullpath.c_str(), std::ifstream::in);
     if (!file.is_open()) {
-        return AMDSMI_STATUS_API_FAILED;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     file.getline(val, DATA_SIZE);
@@ -1028,8 +1028,8 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
     amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << 
-            "Failed to retrieve product serial number! error: " << 
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
+            "Failed to retrieve product serial number! error: " <<
             static_cast<int>(status);
         LOG_DEBUG(ss);
         return serial_number;

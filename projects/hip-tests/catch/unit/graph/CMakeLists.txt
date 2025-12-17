@@ -139,7 +139,7 @@ set(TEST_SRC
   hipGraphDestroy.cc
   hipStreamUpdateCaptureDependencies.cc
   hipThreadExchangeStreamCaptureMode.cc
-  hipLaunchHostFunc.cc
+  hipLaunchHostFuncWithGraph.cc
   hipStreamGetCaptureInfo_v2_old.cc
   hipUserObjectCreate.cc
   hipUserObjectRelease.cc

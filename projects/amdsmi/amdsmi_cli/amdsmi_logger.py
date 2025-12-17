@@ -1080,7 +1080,12 @@ class AMDSMILogger():
 
             power_usage = gpu_info['power_usage']
             if power_usage != "N/A":
-                power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
+                power_limit = gpu_info['power_usage']['power_limit']
+                if power_limit != 0:
+                    power_limit = f"/{power_limit}"
+                else:
+                    power_limit = ""
+                power_usage = f"{gpu_info['power_usage']['current_power']}{power_limit} W"
             power_usage = str(power_usage).rjust(13)
 
             gpu_id = str(gpu_info['gpu_id']).rjust(3)
@@ -1100,7 +1105,16 @@ class AMDSMILogger():
 
             mem_usage = gpu_info['mem_usage']
             if mem_usage != "N/A":
-                mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                # Support both VRAM and GTT memory types for APU-aware display
+                if 'used_gtt' in mem_usage and 'total_gtt' in mem_usage:
+                    # GTT memory selected (likely APU)
+                    mem_usage = f"{gpu_info['mem_usage']['used_gtt']}/{gpu_info['mem_usage']['total_gtt']} MB"
+                elif 'used_vram' in mem_usage and 'total_vram' in mem_usage:
+                    # VRAM memory selected (standard or APU with more VRAM)
+                    mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+                else:
+                    # Fallback if neither format is found
+                    mem_usage = "N/A"
             mem_usage = mem_usage.rjust(21)
 
             print("| {0:12.12s} {1:22.22s} | {2:5.5s}   {3:6.6s}   {4:5.5s}   {5:13.13s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))

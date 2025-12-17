@@ -25,6 +25,7 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
@@ -172,7 +173,7 @@ generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
 {
     nlohmann::json call_stack;
 
-    call_stack["name"] = std::string(demangle(stack_entry.name));
+    call_stack["name"] = std::string(rocprofsys::utility::demangle(stack_entry.name));
     call_stack["pc"]   = as_hex(stack_entry.address);
     call_stack["file"] = std::string(stack_entry.location);
 
@@ -184,7 +185,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
 {
     nlohmann::json line_info;
     line_info["line_address"] = as_hex(line_info_entry.line_address);
-    line_info["name"]         = std::string(demangle(line_info_entry.name));
+    line_info["name"] = std::string(rocprofsys::utility::demangle(line_info_entry.name));
 
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
@@ -193,7 +194,7 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
         for(const auto& line : _lines)
         {
             nlohmann::json inlined;
-            inlined["name"]      = std::string(demangle(line.name));
+            inlined["name"]      = std::string(rocprofsys::utility::demangle(line.name));
             inlined["location"]  = std::string(line.location);
             inlined["line"]      = std::to_string(line.line);
             line_info["inlined"] = inlined;
@@ -311,7 +312,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(demangle(iitr.name));
+            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
             auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
@@ -343,7 +344,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
 
         for(const auto& iitr : itr.m_stack)
         {
-            auto _name       = std::string(demangle(iitr.name));
+            auto _name       = std::string(rocprofsys::utility::demangle(iitr.name));
             auto _track_name = get_track_name<category::overflow_sampling>(*_thread_info);
             auto _call_stack = generate_call_stack_json(iitr);
             auto _line_info  = generate_line_info_json(iitr);
@@ -1384,7 +1385,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
             for(const auto& iitr : itr.m_stack)
             {
                 const auto* _name =
-                    static_strings.emplace(demangle(iitr.name)).first->c_str();
+                    static_strings.emplace(rocprofsys::utility::demangle(iitr.name))
+                        .first->c_str();
                 tracing::push_perfetto_track(
                     category::overflow_sampling{}, _name, _track, _beg,
                     [&](::perfetto::EventContext ctx) {
@@ -1405,7 +1407,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                     auto _label = JOIN('-', "lineinfo", _n++);
                                     tracing::add_perfetto_annotation(
                                         ctx, _label.c_str(),
-                                        JOIN('@', demangle(line.name),
+                                        JOIN('@',
+                                             rocprofsys::utility::demangle(line.name),
                                              JOIN(':', line.location, line.line)));
                                 }
                             }
@@ -1496,7 +1499,9 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                     for(const auto& line : _lines)
                     {
                         const auto* _name =
-                            static_strings.emplace(demangle(line.name)).first->c_str();
+                            static_strings
+                                .emplace(rocprofsys::utility::demangle(line.name))
+                                .first->c_str();
                         auto _info = JOIN(':', line.location, line.line);
                         tracing::push_perfetto_track(
                             category::timer_sampling{}, _name, _track, _beg,
@@ -1542,7 +1547,8 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                         auto _label = JOIN('-', "lineinfo", _n++);
                                         tracing::add_perfetto_annotation(
                                             ctx, _label.c_str(),
-                                            JOIN('@', demangle(line.name),
+                                            JOIN('@',
+                                                 rocprofsys::utility::demangle(line.name),
                                                  JOIN(':', line.location, line.line)));
                                     }
                                 }

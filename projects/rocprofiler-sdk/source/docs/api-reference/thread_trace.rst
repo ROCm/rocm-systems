@@ -346,12 +346,12 @@ The Trace Decoder provides important information about the quality and comprehen
 
 For more information about the data structures and functions available for thread trace decoding, see the following headers:
 
-- `trace_decoder.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>`_
+- `trace_decoder.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>`_
 
-- `trace_decoder_types.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>`_
+- `trace_decoder_types.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>`_
 
-- `core.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/core.h>`_
+- `core.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/core.h>`_
 
-- `dispatch.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/dispatch.h>`_
+- `dispatch.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/dispatch.h>`_
 
-- `agent.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace/agent.h>`_
+- `agent.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/experimental/thread-trace/agent.h>`_

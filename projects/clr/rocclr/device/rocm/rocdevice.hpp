@@ -89,6 +89,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   Flags flags_;
 
+  //! Cached timing data - populated when signal completes, avoids repeated HSA calls
+  struct CachedTiming {
+    uint64_t start_ = 0;   //!< Cached start timestamp from HSA
+    uint64_t end_ = 0;     //!< Cached end timestamp from HSA
+    bool valid_ = false;   //!< True if timing data has been cached
+  };
+  CachedTiming cached_timing_;
+
   ProfilingSignal()
       : ts_(nullptr),
         engine_(HwQueueEngine::Compute),
@@ -101,6 +109,27 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   virtual ~ProfilingSignal();
   amd::Monitor& LockSignalOps() { return lock_; }
+
+  //! Cache timing data from HSA for this signal (called once when signal completes)
+  void CacheTimingData(hsa_agent_t gpu_device);
+
+  //! Reset cached timing for signal reuse
+  void ResetCachedTiming() {
+    amd::ScopedLock lock(lock_);
+    cached_timing_.start_ = 0;
+    cached_timing_.end_ = 0;
+    cached_timing_.valid_ = false;
+  }
+
+  //! Check if timing is already cached
+  bool IsTimingCached() const { return cached_timing_.valid_; }
+
+  //! Get cached timing values
+  void GetCachedTiming(uint64_t& start, uint64_t& end) {
+    amd::ScopedLock lock(lock_);
+    start = cached_timing_.start_;
+    end = cached_timing_.end_;
+  }
 };
 
 class Sampler : public device::Sampler {
@@ -586,6 +615,9 @@ class Device : public NullDevice {
   // Returns the number of allocated normal queues on this device
   uint32_t NumNormalQueues() const { return num_normal_queues_.load(); }
 
+  //! Returns true if PM4 emulation is enabled
+  bool IsPm4Emulation() const { return pm4_emulation_; }
+
  private:
   bool create();
 
@@ -672,6 +704,7 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

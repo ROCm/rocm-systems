@@ -611,7 +611,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if '%' in values:
                         try:
                             amdsmi_helpers.confirm_out_of_spec_warning()
-                            # Convert percentage to fan speed level 
+                            # Convert percentage to fan speed level
                             values = (int(values[:-1]) / 100) * 255
                             values = AMDSMIParser._custom_ceil(values) # Round up (Ceiling)
                             setattr(args, self.dest, values)
@@ -1444,10 +1444,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_exclusive_group.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
             reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
             reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
-            reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
+        reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)
@@ -1635,10 +1635,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
 
     def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
-        if self.helpers.is_virtual_os():
-            # This subparser is only available to Guest and Hypervisor systems
-            return
-
         # Subparser help text
         node_help = "Gets power information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
