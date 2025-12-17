@@ -52,7 +52,7 @@ if(TEST_CLOCK_CYCLE)
 endif()
 
 if(ENABLE_SPIRV)
-    message(STATUS "hip-tests will be built using SPIRV offload arch, Warp size: ${SPIRV_WARP_SIZE}")
+    message(STATUS "hip-tests will be built using SPIRV offload arch")
     set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
