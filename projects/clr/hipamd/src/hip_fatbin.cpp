@@ -190,7 +190,17 @@ static bool IsCodeObjectCompressed(const void* image) {
 
 static bool IsCodeObjectElf(const void* image) {
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
-  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
+  // AMDGPU ELF
+  if (ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA) {
+    return true;
+  }
+  return false;
+}
+
+static bool IsCodeObjectSpirv(const void* image) {
+  const uint32_t spirv_magic = 0x07230203;
+  const uint32_t* words = reinterpret_cast<const uint32_t*>(image);
+  return words[1] == spirv_magic;
 }
 
 static bool UncompressAndPopulateCodeObject(
@@ -425,18 +435,26 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   bool is_compressed = IsCodeObjectCompressed(image_),
        is_uncompressed = IsCodeObjectUncompressed(image_);
 
-  // It better be elf if its neither compressed nor uncompressed
+  // Neither compressed nor uncompressed: therefore, ELF or SPIRV.
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
+      // Load the ELF binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
       for (size_t i = 0; i < devices.size(); i++) {
         if (hipSuccess != AddDevProgram(devices[i], image_, elf_size, 0))
           return hipErrorInvalidImage;
       }
-      return hipSuccess;  // We are done since it was already ELF
+      return hipSuccess;
+    } else if (IsCodeObjectSpirv(image_)) {
+      uint32_t spirv_size = *reinterpret_cast<const uint32_t*>(image_);
+      size_t total_size = sizeof(uint32_t) + spirv_size;
+      for (size_t i = 0; i < devices.size(); i++) {
+        if (hipSuccess != AddDevProgram(devices[i], image_, total_size, 0))
+          return hipErrorInvalidImage;
+      }
+      return hipSuccess;
     } else {
-      LogError("The code object has invalid header: compressed, uncompressed or elf");
+      LogError("The code object has invalid header: compressed, uncompressed, elf, or spirv");
       return hipErrorInvalidImage;
     }
   }
