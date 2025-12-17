@@ -37,6 +37,7 @@ from argparser import omniarg_parser  # noqa: E402
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base  # noqa: E402
 from utils import file_io, parser  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
+from utils.utils import merge_counters_iteration_multiplex  # noqa: E402
 
 
 class Analyzer(OmniAnalyze_Base):
@@ -45,7 +46,7 @@ class Analyzer(OmniAnalyze_Base):
     ) -> None:
         super().__init__(args, supported_archs)
 
-    def dump_raw_values(self) -> None:
+    def dump_values(self) -> None:
         args = self.get_args()
         cols_to_drop = [
             "Kernel_Name",
@@ -58,6 +59,7 @@ class Analyzer(OmniAnalyze_Base):
             "GPU_ID",
             "Info",
             "coll_level",
+            "from_csv",
         ]
 
         for path_info in args.path:
@@ -71,18 +73,22 @@ class Analyzer(OmniAnalyze_Base):
                 self._profiling_config,
             )
 
-            if args.dump_raw_values in ("counter", "all"):
-                raw_pmc["pmc_perf"].to_csv(f"{path_info[0]}/counter_values.csv")
+            if args.dump_values in ("counter", "all"):
+                counter_csv_path = f"{path_info[0]}/counter_values.csv"
+                print(f"Writing raw counter values to {counter_csv_path}")
+                raw_pmc["pmc_perf"].to_csv(counter_csv_path)
 
-            if args.dump_raw_values in ("metric", "all"):
+            if args.dump_values in ("metric", "all"):
                 dfs = []
                 coll_levels = ["pmc_perf"]
+
+                if policy := self._profiling_config.get("iteration_multiplexing"):
+                    raw_pmc = merge_counters_iteration_multiplex(raw_pmc, policy)
 
                 base_workload = self._runs[path_info[0]]
                 df_new = raw_pmc["pmc_perf"].copy()
 
                 for i in range(len(df_new)):
-                    # for i in range(1):
                     workload = copy.deepcopy(base_workload)
                     df = df_new.loc[[i]].copy()
                     df.reset_index(drop=True, inplace=True)
@@ -107,7 +113,9 @@ class Analyzer(OmniAnalyze_Base):
                     dfs.append(value)
 
                 merged_df = pd.concat(dfs, ignore_index=True)
-                merged_df.to_csv(f"{path_info[0]}/metric_values.csv")
+                metric_csv_path = f"{path_info[0]}/metric_values.csv"
+                print(f"Writing metric values to {metric_csv_path}")
+                merged_df.to_csv(metric_csv_path)
 
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to analysis."""
@@ -123,7 +131,7 @@ class Analyzer(OmniAnalyze_Base):
 def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
     parser_obj.add_argument(
         "--dump-values",
-        dest="dump_raw_values",
+        dest="dump_values",
         type=str,
         choices=["counter", "metric", "all"],
         default="all",
@@ -249,7 +257,7 @@ def main() -> None:
 
     analyzer = Analyzer(args, supported_archs)
     analyzer.pre_processing()
-    analyzer.dump_raw_values()
+    analyzer.dump_values()
 
 
 if __name__ == "__main__":
