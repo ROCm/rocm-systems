@@ -45,6 +45,7 @@ else()
             PATHS
                 /usr/include
                 /usr/local/include
+                "${THEROCK_BINARY_DIR}/third-party/simde/source"
             NO_DEFAULT_PATH
     )
     endif()
