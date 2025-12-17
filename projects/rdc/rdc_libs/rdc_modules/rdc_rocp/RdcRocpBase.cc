@@ -340,19 +340,171 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   init_rocp_if_not();
 
-  const bool is_eval_field = (eval_fields.find(field) != eval_fields.end());
-
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
   const double read_dbl = run_profiler(agent_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
-  // divide by elapsed time if needed
-  double divided_dbl = NAN;
 
+  // For OCC_ELAPSED, we need to read the occupancy metric as well
+  std::map<std::string, double> sampled_values;
+  if (field == RDC_FI_PROF_OCC_ELAPSED) {
+    const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+    auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+    if (occ_field_it != field_to_metric.end()) {
+      sampled_values[occ_field_it->second] = occupancy_val;
+    }
+  }
+
+  // Apply field transformations using the helper function
+  return apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values, data,
+                                     type);
+}
+
+rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
+                                           std::vector<rdc_field_value_data>& values,
+                                           std::vector<rdc_field_type_t>& types,
+                                           std::vector<rdc_status_t>& statuses) {
+  if (fields.empty()) {
+    return RDC_ST_OK;
+  }
+
+  init_rocp_if_not();
+
+  // Resize output vectors
+  values.resize(fields.size());
+  types.resize(fields.size());
+  statuses.resize(fields.size());
+
+  // All fields should be for the same GPU
+  uint32_t agent_index = entity_to_prof_map[fields[0].gpu_index];
+
+  // Collect all unique metric names needed for sampling
+  std::vector<std::string> metrics_to_sample;
+  std::map<rdc_field_t, size_t> field_to_metric_index;  // Maps field to position in metrics_to_sample
+
+  for (size_t i = 0; i < fields.size(); i++) {
+    const auto& field = fields[i].field_id;
+    types[i] = DOUBLE;  // Default type
+    statuses[i] = RDC_ST_OK;
+
+    // Handle special case: RDC_FI_PROF_KFD_ID doesn't need sampling
+    if (field == RDC_FI_PROF_KFD_ID) {
+      types[i] = INTEGER;
+      values[i].l_int = agents[agent_index].gpu_id;
+      continue;
+    }
+
+    // Get metric name for this field
+    auto field_it = field_to_metric.find(field);
+    if (field_it == field_to_metric.end()) {
+      RDC_LOG(RDC_ERROR, "Error: Field " << field << " not found in field_to_metric map.");
+      statuses[i] = RDC_ST_BAD_PARAMETER;
+      continue;
+    }
+
+    const std::string metric_name = field_it->second;
+
+    // Check if we've already added this metric
+    if (field_to_metric_index.find(field) == field_to_metric_index.end()) {
+      field_to_metric_index[field] = metrics_to_sample.size();
+      metrics_to_sample.push_back(metric_name);
+    }
+
+    // Special case: RDC_FI_PROF_OCC_ELAPSED needs two metrics
+    if (field == RDC_FI_PROF_OCC_ELAPSED) {
+      if (field_to_metric_index.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU) == field_to_metric_index.end()) {
+        auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+        if (occ_field_it != field_to_metric.end()) {
+          field_to_metric_index[RDC_FI_PROF_OCC_PER_ACTIVE_CU] = metrics_to_sample.size();
+          metrics_to_sample.push_back(occ_field_it->second);
+        }
+      }
+    }
+  }
+
+  // Sample all counters at once using greedy packing
+  std::map<std::string, double> sampled_values;
+  auto counter_sampler = CounterSampler::get_samplers()[agent_index];
+  if (!counter_sampler) {
+    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << agent_index);
+    for (size_t i = 0; i < fields.size(); i++) {
+      statuses[i] = RDC_ST_BAD_PARAMETER;
+    }
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  const auto start_time = std::chrono::high_resolution_clock::now();
+  if (!metrics_to_sample.empty()) {
+    try {
+      counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values,
+                                                    collection_duration_us_k);
+    } catch (const std::exception& e) {
+      RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
+      for (size_t i = 0; i < fields.size(); i++) {
+        if (fields[i].field_id != RDC_FI_PROF_KFD_ID) {
+          statuses[i] = RDC_ST_BAD_PARAMETER;
+        }
+      }
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+  const auto stop_time = std::chrono::high_resolution_clock::now();
+  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+
+  // Process results for each field
+  for (size_t i = 0; i < fields.size(); i++) {
+    const auto& field = fields[i].field_id;
+
+    // Skip fields that already have values set (like RDC_FI_PROF_KFD_ID)
+    if (field == RDC_FI_PROF_KFD_ID) {
+      continue;
+    }
+
+    // Skip fields that had errors earlier
+    if (statuses[i] != RDC_ST_OK) {
+      continue;
+    }
+
+    // Get the sampled value for this field
+    auto field_it = field_to_metric.find(field);
+    if (field_it == field_to_metric.end()) {
+      continue;
+    }
+
+    const std::string& metric_name = field_it->second;
+    auto sampled_it = sampled_values.find(metric_name);
+    if (sampled_it == sampled_values.end()) {
+      RDC_LOG(RDC_ERROR, "Error: Metric " << metric_name << " not found in sampled values.");
+      statuses[i] = RDC_ST_BAD_PARAMETER;
+      continue;
+    }
+
+    double read_dbl = sampled_it->second;
+
+    // Apply field transformation using the helper function
+    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, elapsed,
+                                             sampled_values, &values[i], &types[i]);
+  }
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcRocpBase::apply_field_transformation(
+    rdc_field_t field, uint32_t agent_index, double raw_value, double elapsed_time_ms,
+    const std::map<std::string, double>& sampled_values, rdc_field_value_data* output,
+    rdc_field_type_t* type) {
+
+  // Default type is DOUBLE
+  *type = DOUBLE;
+
+  const bool is_eval_field = (eval_fields.find(field) != eval_fields.end());
+
+  // Calculate divided value for eval fields
+  double divided_dbl = NAN;
   if (is_eval_field) {
-    if (elapsed != 0.0) {
-      divided_dbl = read_dbl / (elapsed / 1000.0);
+    if (elapsed_time_ms != 0.0) {
+      divided_dbl = raw_value / (elapsed_time_ms / 1000.0);
     } else {
       RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
@@ -361,61 +513,63 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   switch (field) {
     case RDC_FI_PROF_GPU_UTIL_PERCENT:
-      // RDC_FI_PROF_GPU_UTIL_PERCENT is mapped to GPU_UTIL
-      // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
-      // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
-      data->dbl = read_dbl / 100.0;
+      output->dbl = raw_value / 100.0F;
       break;
+
     case RDC_FI_PROF_OCC_ELAPSED: {
-      // RDC_FI_PROF_OCC_ELAPSED is mapped to GRBM_GUI_ACTIVE, the read happens earlier in this
-      // function
-      const double active_cycles_val = read_dbl;
+      const double active_cycles_val = raw_value;
       if (active_cycles_val != 0.0) {
-        // read second value from profiler
-        const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-        data->dbl = occupancy_val / active_cycles_val;
+        // Look for the occupancy metric in sampled values
+        auto occ_field_it = field_to_metric.find(RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+        if (occ_field_it != field_to_metric.end()) {
+          auto occ_sampled_it = sampled_values.find(occ_field_it->second);
+          if (occ_sampled_it != sampled_values.end()) {
+            const double occupancy_val = occ_sampled_it->second;
+            output->dbl = occupancy_val / active_cycles_val;
+          } else {
+            return RDC_ST_BAD_PARAMETER;
+          }
+        } else {
+          return RDC_ST_BAD_PARAMETER;
+        }
       } else {
         return RDC_ST_BAD_PARAMETER;
       }
     } break;
+
     case RDC_FI_PROF_EVAL_FLOPS_16_PERCENT: {
       if (!is_eval_field) {
         RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
         return RDC_ST_BAD_PARAMETER;
       }
-      // 1024, 2048, and 256 are taken from "INTRODUCING AMD CDNA 3 ARCHITECTURE" white paper
       const std::string target_version = agents[agent_index].name;
-      // TODO: Design a lookup table for other GPUs
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
-      // FLOPS/clock/CU
       if (isMI200) {
-        data->dbl = divided_dbl / (1024.0 / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       } else {  // Assume mi300
-        data->dbl = divided_dbl / (2048.0 / static_cast<double>(agents[agent_index].simd_per_cu));
+        output->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       }
     } break;
+
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
     case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT:
       if (!is_eval_field) {
         RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
         return RDC_ST_BAD_PARAMETER;
       }
-      // FLOPS/clock/CU
-      data->dbl = divided_dbl / (256.0 / static_cast<double>(agents[agent_index].simd_per_cu));
+      output->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
-    case RDC_FI_PROF_KFD_ID: {
-      // do not care what it is mapped to. read value from agents
+
+    case RDC_FI_PROF_KFD_ID:
       *type = INTEGER;
-      data->l_int = agents[agent_index].gpu_id;
+      output->l_int = agents[agent_index].gpu_id;
       break;
-    }
+
     default:
-      // only support default fallback for doubles
-      assert(*type == DOUBLE);
       if (is_eval_field) {
-        data->dbl = divided_dbl;
+        output->dbl = divided_dbl;
       } else {
-        data->dbl = read_dbl;
+        output->dbl = raw_value;
       }
       break;
   }

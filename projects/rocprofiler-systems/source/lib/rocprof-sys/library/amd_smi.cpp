@@ -697,7 +697,8 @@ data::sample(uint32_t _device_id)
                 serialize_settings(m_dev_id), _device_id, _timestamp,
                 m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
                 m_busy_perc.mm_activity, m_power.current_socket_power, m_temp,
-                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
+                (m_mem_usage / units::megabyte),
+                serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
 
             if(has_data) m_gpu_metrics.push_back(metrics);
         }
