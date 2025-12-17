@@ -249,6 +249,8 @@ class TestOpenMPTarget:
         openmp_target_env: dict[str, str],
         openmp_target_rules: list[Path],
         use_rocpd: bool,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test OpenMP target with sampling instrumentation."""
         env = openmp_target_env.copy()
@@ -270,19 +272,44 @@ class TestOpenMPTarget:
         assert result.success, f"OpenMP target failed: {result.stderr}"
 
         # Verify perfetto trace has kernel dispatch events
-        perfetto_file = result.perfetto_file
-        if perfetto_file:
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-                categories=["rocm_kernel_dispatch"],
-            )
-            # Kernel dispatch may or may not be present based on GPU
-            if not validation.is_valid:
-                pytest.skip("No kernel dispatch events - may need GPU")
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    perfetto_file,
+                    rocprof_config.rocprofsys_tests_dir,
+                    categories=["rocm_kernel_dispatch"],
+                )
+                # Kernel dispatch may or may not be present based on GPU
+                if not validation.is_valid:
+                    pytest.skip("No kernel dispatch events - may need GPU")
+            else:
+                pytest.fail("No perfetto trace found")
+
+        with subtests.test("Perfetto Kernel Dispatch Validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                # Validate trace has expected kernel patterns
+                validation = validate_perfetto_trace(
+                    perfetto_file,
+                    rocprof_config.rocprofsys_tests_dir,
+                    label_substrings=["vmul"],  # Vector multiply kernels
+                )
+                # This validation is informational - kernels may have different names
+                if not validation.is_valid:
+                    pytest.skip("Kernel names differ from expected")
+            else:
+                pytest.fail("No perfetto trace found")
+
 
         # ROCpd validation
-        if use_rocpd:
+        with subtests.test("ROCpd validation"):
+            if not use_rocpd:
+                pytest.skip("ROCpd is not enabled")
             rocpd_file = result.rocpd_file
             assert rocpd_file is not None, "ROCpd database not created"
             existing_rules = [r for r in openmp_target_rules if r.exists()]
@@ -294,42 +321,6 @@ class TestOpenMPTarget:
                 rules_files=existing_rules,
             )
             assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
-
-    def test_perfetto_validation(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        openmp_target_env: dict[str, str],
-    ):
-        """Validate OpenMP target perfetto trace for kernel launches."""
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-target",
-                output_dir=test_output_dir,
-                env=openmp_target_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-target not built")
-
-        result = runner.run()
-        assert result.success, f"OpenMP target failed: {result.stderr}"
-
-        perfetto_file = result.perfetto_file
-        if perfetto_file is None:
-            pytest.skip("No perfetto trace created")
-
-        # Validate trace has expected kernel patterns
-        validation = validate_perfetto_trace(
-            perfetto_file,
-            rocprof_config.rocprofsys_tests_dir,
-            label_substrings=["vmul"],  # Vector multiply kernels
-        )
-        # This validation is informational - kernels may have different names
-        if not validation.is_valid:
-            pytest.skip("Kernel names differ from expected")
-
 
 # ============================================================================
 # Test Class: OpenMP-VV Host Tests
@@ -375,6 +366,8 @@ class TestOpenMPVVHost:
         test_output_dir: Path,
         ompt_env: dict[str, str],
         target_name: str,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test OpenMP VV host programs with sampling."""
         env = ompt_env.copy()
@@ -393,10 +386,18 @@ class TestOpenMPVVHost:
         result = runner.run()
         assert result.success, f"OMPVV host test {target_name} failed: {result.stderr}"
 
-        # Verify output files were created
-        assert result.perfetto_file is not None or \
-               len(list(result.output_dir.glob("*.json"))) > 0, \
-               "No output files created"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    perfetto_file,
+                    rocprof_config.rocprofsys_tests_dir,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+            else:
+                pytest.fail("No perfetto trace found")
 
     def test_binary_rewrite(
         self,
@@ -467,6 +468,8 @@ class TestOpenMPVVHost:
         test_output_dir: Path,
         ompt_env: dict[str, str],
         target_name: str,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test OpenMP VV host programs with rocprof-sys-run wrapper."""
         env = ompt_env.copy()
@@ -485,10 +488,18 @@ class TestOpenMPVVHost:
         result = runner.run()
         assert result.success, f"OMPVV host run {target_name} failed: {result.stderr}"
 
-        # Verify output files were created
-        assert result.perfetto_file is not None or \
-               len(list(result.output_dir.glob("*.json"))) > 0, \
-               "No output files created"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    perfetto_file,
+                    rocprof_config.rocprofsys_tests_dir,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+            else:
+                pytest.fail("No perfetto trace found")
 
 
 # ============================================================================
@@ -591,6 +602,8 @@ class TestOpenMPVVOffload:
         test_output_dir: Path,
         openmp_target_env: dict[str, str],
         target_name: str,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test OpenMP VV offload programs with run mode."""
         env = openmp_target_env.copy()
@@ -613,10 +626,18 @@ class TestOpenMPVVOffload:
         result = runner.run()
         assert result.success, f"OMPVV offload run {target_name} failed: {result.stderr}"
 
-        # Verify output files were created
-        assert result.perfetto_file is not None or \
-               len(list(result.output_dir.glob("*.json"))) > 0, \
-               "No output files created"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    perfetto_file,
+                    rocprof_config.rocprofsys_tests_dir,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+            else:
+                pytest.fail("No perfetto trace found")
 
 # ============================================================================
 # Test Class: Sampling Duration Tests

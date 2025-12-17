@@ -124,6 +124,8 @@ class TestTranspose:
         transpose_env: dict[str, str],
         transpose_rules: list[Path],
         use_rocpd: bool,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test transpose with sampling instrumentation."""
         env = transpose_env.copy()
@@ -143,12 +145,48 @@ class TestTranspose:
         assert result.output_dir.exists(), "Output directory not created"
 
         # Verify perfetto trace was created
-        perfetto = result.perfetto_file
-        assert perfetto is not None, "Perfetto trace not created"
-        assert perfetto.stat().st_size > 0, "Perfetto trace is empty"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
+            assert perfetto.stat().st_size > 0, "Perfetto trace is empty"
+
+        # Verify perfetto trace haskernel dispatch events
+        with subtests.test("Perfetto Kernel Dispatch Validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
+            # Validate trace has kernel dispatch events
+            validation = validate_perfetto_trace(
+                perfetto,
+                rocprof_config.rocprofsys_tests_dir,
+                categories=["kernel_dispatch"],
+            )
+            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+            assert validation.details is not None
+            assert validation.details.get("slice_count", 0) > 0, \
+                    "No kernel dispatch events found in trace"
+
+        # Verify perfetto trace has HIP runtime API events
+        with subtests.test("Perfetto HIP API Call Validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
+            # Validate trace has HIP runtime API events
+            validation = validate_perfetto_trace(
+                perfetto,
+                categories=["hip_runtime_api"],
+                tests_dir=rocprof_config.rocprofsys_tests_dir,
+            )
+            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
 
         # ROCpd validation
-        if use_rocpd:
+        with subtests.test("ROCpd validation"):
+            if not use_rocpd:
+                pytest.skip("ROCpd is not enabled")
             rocpd_file = result.rocpd_file
             assert rocpd_file is not None, "ROCpd database not created"
             existing_rules = [r for r in transpose_rules if r.exists()]
@@ -166,6 +204,8 @@ class TestTranspose:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         transpose_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test transpose with binary rewrite instrumentation."""
         runner = BinaryRewriteRunner(
@@ -184,14 +224,19 @@ class TestTranspose:
         result = runner.run()
         assert result.success, f"Run failed: {result.stderr}"
 
-        perfetto = result.perfetto_file
-        assert perfetto is not None, "Perfetto trace not created"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
 
     def test_runtime_instrument(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         transpose_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test transpose with runtime instrumentation."""
         runner = RuntimeInstrumentRunner(
@@ -206,7 +251,11 @@ class TestTranspose:
         result = runner.run()
 
         assert result.success, f"Runtime instrument failed: {result.stderr}"
-        assert result.perfetto_file is not None, "Perfetto trace not created"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
 
     def test_sys_run(
         self,
@@ -383,6 +432,8 @@ class TestTransposeROCProfiler:
         test_output_dir: Path,
         rocprofiler_env: dict[str, str],
         gpu_info: GPUInfo,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test transpose with ROCProfiler counters via sampling."""
         runner = SamplingRunner(
@@ -400,6 +451,18 @@ class TestTransposeROCProfiler:
         for expected_file in gpu_info.expected_counter_files:
             file_path = result.output_dir / expected_file
             assert file_path.exists(), f"Counter file not found: {expected_file}"
+
+        with subtests.test("Validate Perfetto Counters"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            assert perfetto is not None, "Perfetto trace not created"
+            validation = validate_perfetto_trace(
+                perfetto,
+                counter_names=gpu_info.counter_names,
+                tests_dir=rocprof_config.rocprofsys_tests_dir,
+            )
+            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
 
     def test_binary_rewrite(
         self,
@@ -425,106 +488,6 @@ class TestTransposeROCProfiler:
         for expected_file in gpu_info.expected_counter_files:
             file_path = result.output_dir / expected_file
             assert file_path.exists(), f"Counter file not found: {expected_file}"
-
-    def test_validate_perfetto_counters(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        rocprofiler_env: dict[str, str],
-        gpu_info: GPUInfo,
-    ):
-        """Validate ROCProfiler counters in perfetto trace."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=rocprofiler_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-        assert result.success, f"Test execution failed: {result.stderr}"
-
-        if result.perfetto_file:
-            validation = validate_perfetto_trace(
-                result.perfetto_file,
-                counter_names=gpu_info.counter_names,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-
-# ============================================================================
-# Test Class: Perfetto Trace Validation
-# ============================================================================
-
-
-@pytest.mark.gpu
-class TestTransposePerfettoValidation:
-    """Validate perfetto trace contents for transpose tests."""
-
-    def test_perfetto_has_kernel_dispatch(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        transpose_env: dict[str, str],
-    ):
-        """Verify kernel dispatch events in perfetto trace."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=transpose_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-        assert result.success, f"Test failed: {result.stderr}"
-
-        perfetto_file = result.perfetto_file
-        assert perfetto_file is not None, "Perfetto trace not created"
-
-        # Validate trace has kernel dispatch events
-        validation = validate_perfetto_trace(
-            perfetto_file,
-            rocprof_config.rocprofsys_tests_dir,
-            categories=["kernel_dispatch"],
-        )
-
-        assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-        assert validation.details is not None
-        assert validation.details.get("slice_count", 0) > 0, \
-            "No kernel dispatch events found in trace"
-
-    def test_perfetto_has_hip_api_calls(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        transpose_env: dict[str, str],
-    ):
-        """Verify HIP API calls in perfetto trace."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=transpose_env,
-            timeout=120,
-        )
-
-        result = runner.run()
-        assert result.success, f"Test failed: {result.stderr}"
-
-        perfetto_file = result.perfetto_file
-        assert perfetto_file is not None, "Perfetto trace not created"
-
-        # Validate trace has HIP runtime API events
-        validation = validate_perfetto_trace(
-            perfetto_file,
-            categories=["hip_runtime_api"],
-            tests_dir=rocprof_config.rocprofsys_tests_dir,
-        )
-
-        assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-
 
 # ============================================================================
 # Parametrized Tests

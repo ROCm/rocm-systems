@@ -154,6 +154,22 @@ def use_rocpd(gpu_info: GPUInfo) -> bool:
     return rocm_version >= (7, 0, 0)
 
 @pytest.fixture(scope="session")
+def use_perfetto() -> bool:
+    """Whether Perfetto is available for tests.
+
+    Perfetto requires:
+    - Perfetto Python module installed
+    - ROCPROFSYS_TRACE not set to OFF (default: ON)
+    """
+    if os.environ.get("ROCPROFSYS_TRACE", "").upper() == "OFF":
+        return False
+    try:
+        import perfetto  # noqa
+        return True
+    except ImportError:
+        return False
+
+@pytest.fixture(scope="session")
 def rocprof_config() -> RocprofsysConfig:
     """Session-wide rocprofiler-systems configuration.
 

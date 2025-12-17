@@ -76,6 +76,8 @@ class TestJPEGDecode:
         gpu_info: GPUInfo,
         jpeg_decode_rules: list[Path],
         use_rocpd: bool,
+        use_perfetto: bool,
+        subtests,
     ):
         """Test JPEG decode sampling."""
         env = jpeg_decode_env.copy()
@@ -96,22 +98,27 @@ class TestJPEGDecode:
         assert result.success, f"JPEG decode sampling failed: {result.stderr}"
 
         # Validate perfetto trace
-        assert result.perfetto_file is not None, "Perfetto trace not created"
-        counter_names = ["JPEG Activity"] if gpu_info.is_mi300 else None
-        validation = validate_perfetto_trace(
-            trace_path=result.perfetto_file,
-            tests_dir=rocprof_config.rocprofsys_tests_dir,
-            categories=["rocm_rocjpeg_api"],
-            labels=["rocJpegCreate"],
-            counts=[1],
-            depths=[1],
-            counter_names=counter_names,
-            print_output=True,
-        )
-        assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            assert result.perfetto_file is not None, "Perfetto trace not created"
+            counter_names = ["JPEG Activity"] if gpu_info.is_mi300 else None
+            validation = validate_perfetto_trace(
+                trace_path=result.perfetto_file,
+                tests_dir=rocprof_config.rocprofsys_tests_dir,
+                categories=["rocm_rocjpeg_api"],
+                labels=["rocJpegCreate"],
+                counts=[1],
+                depths=[1],
+                counter_names=counter_names,
+                print_output=True,
+            )
+            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
 
         # ROCpd validation
-        if use_rocpd:
+        with subtests.test("ROCpd validation"):
+            if not use_rocpd:
+                pytest.skip("ROCpd is not enabled")
             rocpd_file = result.rocpd_file
             assert rocpd_file is not None, "ROCpd database not created"
             existing_rules = [r for r in jpeg_decode_rules if r.exists()]

@@ -108,6 +108,7 @@ class TestRoctx:
         roctx_env: dict[str, str],
         roctx_rules: list[Path],
         use_rocpd: bool,
+        subtests,
     ):
         env = roctx_env.copy()
         if use_rocpd:
@@ -127,7 +128,9 @@ class TestRoctx:
         assert result.success, f"rocTX sampling failed: {result.stderr}"
 
         # ROCpd validation
-        if use_rocpd:
+        with subtests.test("ROCpd validation"):
+            if not use_rocpd:
+                pytest.skip("ROCpd is not enabled")
             rocpd_file = result.rocpd_file
             assert rocpd_file is not None, "ROCpd database not created"
 

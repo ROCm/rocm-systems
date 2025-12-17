@@ -52,14 +52,9 @@ import pytest
 
 from rocprofsys import (
     RocprofsysConfig,
-    GPUInfo,
-    BaselineRunner,
-    SamplingRunner,
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
-    SysRunRunner,
     validate_perfetto_trace,
-    validate_rocpd_database,
     validate_timemory_json,
 )
 
@@ -88,6 +83,8 @@ class TestTraceTimeWindow:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         time_window_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test trace time window with binary rewrite instrumentation."""
 
@@ -113,40 +110,46 @@ class TestTraceTimeWindow:
         assert result.success, f"Run failed: {result.failure_reason}"
 
         # Validate timemory wall_clock.json
-        timemory_file = result.output_dir / "wall_clock.json"
-        if timemory_file.exists():
-            validation = validate_timemory_json(
-                json_path=timemory_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                metric="wall_clock",
-                labels=["trace-time-window.inst", "outer_a", "outer_b", "outer_c"],
-                counts=[1, 1, 1, 1],
-                depths=[0, 1, 1, 1],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Timemory validation failed: {validation.message}"
-            assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
+        with subtests.test("Timemory validation"):
+            timemory_file = result.output_dir / "wall_clock.json"
+            if timemory_file.exists():
+                validation = validate_timemory_json(
+                    json_path=timemory_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    metric="wall_clock",
+                    labels=["trace-time-window.inst", "outer_a", "outer_b", "outer_c"],
+                    counts=[1, 1, 1, 1],
+                    depths=[0, 1, 1, 1],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Timemory validation failed: {validation.message}"
+                assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
 
         # Validate perfetto trace
         perfetto_file = result.perfetto_file
-        if perfetto_file:
-            validation = validate_perfetto_trace(
-                trace_path=perfetto_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                categories=["host"],
-                labels=["trace-time-window.inst", "outer_a", "outer_b", "outer_c"],
-                counts=[1, 1, 1, 1],
-                depths=[0, 1, 1, 1],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-            assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    trace_path=perfetto_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["host"],
+                    labels=["trace-time-window.inst", "outer_a", "outer_b", "outer_c"],
+                    counts=[1, 1, 1, 1],
+                    depths=[0, 1, 1, 1],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+                assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
 
     def test_runtime_instrument(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         time_window_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test trace time window with runtime instrumentation."""
 
@@ -169,33 +172,37 @@ class TestTraceTimeWindow:
 
         # Validate timemory wall_clock.json
         timemory_file = result.output_dir / "wall_clock.json"
-        if timemory_file.exists():
-            validation = validate_timemory_json(
-                json_path=timemory_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                metric="wall_clock",
-                labels=["trace-time-window", "outer_a", "outer_b", "outer_c"],
-                counts=[1, 1, 1, 1],
-                depths=[0, 1, 1, 1],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Timemory validation failed: {validation.message}"
-            assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
+        with subtests.test("Timemory validation"):
+            if timemory_file.exists():
+                validation = validate_timemory_json(
+                    json_path=timemory_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    metric="wall_clock",
+                    labels=["trace-time-window", "outer_a", "outer_b", "outer_c"],
+                    counts=[1, 1, 1, 1],
+                    depths=[0, 1, 1, 1],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Timemory validation failed: {validation.message}"
+                assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
 
         # Validate perfetto trace
-        perfetto_file = result.perfetto_file
-        if perfetto_file:
-            validation = validate_perfetto_trace(
-                trace_path=perfetto_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                categories=["host"],
-                labels=["trace-time-window", "outer_a", "outer_b", "outer_c"],
-                counts=[1, 1, 1, 1],
-                depths=[0, 1, 1, 1],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-            assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    trace_path=perfetto_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["host"],
+                    labels=["trace-time-window", "outer_a", "outer_b", "outer_c"],
+                    counts=[1, 1, 1, 1],
+                    depths=[0, 1, 1, 1],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+                assert "outer_d" not in validation.stdout, "outer_d should not appear (time window should exclude it)"
 
 
 # ============================================================================
@@ -214,6 +221,8 @@ class TestTraceTimeWindowDelay:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         time_window_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test trace time window delay with binary rewrite instrumentation."""
         env = time_window_env.copy()
@@ -241,38 +250,44 @@ class TestTraceTimeWindowDelay:
         assert result.success, f"Run failed: {result.failure_reason}"
 
         # Validate timemory wall_clock.json
-        timemory_file = result.output_dir / "wall_clock.json"
-        if timemory_file.exists():
-            validation = validate_timemory_json(
-                json_path=timemory_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                metric="wall_clock",
-                labels=["outer_c", "outer_d"],
-                counts=[1, 1],
-                depths=[0, 0],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Timemory validation failed: {validation.message}"
+        with subtests.test("Timemory validation"):
+            timemory_file = result.output_dir / "wall_clock.json"
+            if timemory_file.exists():
+                validation = validate_timemory_json(
+                    json_path=timemory_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    metric="wall_clock",
+                    labels=["outer_c", "outer_d"],
+                    counts=[1, 1],
+                    depths=[0, 0],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Timemory validation failed: {validation.message}"
 
         # Validate perfetto trace
-        perfetto_file = result.perfetto_file
-        if perfetto_file:
-            validation = validate_perfetto_trace(
-                trace_path=perfetto_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                categories=["host"],
-                labels=["outer_c", "outer_d"],
-                counts=[1, 1],
-                depths=[0, 0],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    trace_path=perfetto_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["host"],
+                    labels=["outer_c", "outer_d"],
+                    counts=[1, 1],
+                    depths=[0, 0],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
 
     def test_runtime_instrument(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         time_window_env: dict[str, str],
+        use_perfetto: bool,
+        subtests,
     ):
         """Test trace time window delay with runtime instrumentation."""
         env = time_window_env.copy()
@@ -296,29 +311,33 @@ class TestTraceTimeWindowDelay:
         assert result.success, f"Run failed: {result.failure_reason}"
 
         # Validate timemory wall_clock.json
-        timemory_file = result.output_dir / "wall_clock.json"
-        if timemory_file.exists():
-            validation = validate_timemory_json(
-                json_path=timemory_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                metric="wall_clock",
-                labels=["outer_c", "outer_d"],
-                counts=[1, 1],
-                depths=[0, 0],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Timemory validation failed: {validation.message}"
+        with subtests.test("Timemory validation"):
+            timemory_file = result.output_dir / "wall_clock.json"
+            if timemory_file.exists():
+                validation = validate_timemory_json(
+                    json_path=timemory_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    metric="wall_clock",
+                    labels=["outer_c", "outer_d"],
+                    counts=[1, 1],
+                    depths=[0, 0],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Timemory validation failed: {validation.message}"
 
         # Validate perfetto trace
-        perfetto_file = result.perfetto_file
-        if perfetto_file:
-            validation = validate_perfetto_trace(
-                trace_path=perfetto_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                categories=["host"],
-                labels=["outer_c", "outer_d"],
-                counts=[1, 1],
-                depths=[0, 0],
-                print_output=True,
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+        with subtests.test("Perfetto validation"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto_file = result.perfetto_file
+            if perfetto_file:
+                validation = validate_perfetto_trace(
+                    trace_path=perfetto_file,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["host"],
+                    labels=["outer_c", "outer_d"],
+                    counts=[1, 1],
+                    depths=[0, 0],
+                    print_output=True,
+                )
+                assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
