@@ -238,6 +238,17 @@ def write_otf2(importData, config):
                             )
                             for row in cursor:
                                 id, name, type = row
+                                # Create ACCELERATOR_DEVICE system tree node as required by OTF2
+                                device_node = archive.definitions.system_tree_node(
+                                    name=f"Node {id}",
+                                    class_name=f"AMD {type}",
+                                    parent=tree_node,
+                                )
+
+                                archive.definitions.SystemTreeNodeDomain(
+                                    device_node, otf2.SystemTreeNodeDomain.SHARED_MEMORY
+                                )
+
                                 agents[id] = (
                                     (
                                         f"{type} Agent-{id}"
@@ -247,7 +258,7 @@ def write_otf2(importData, config):
                                     archive.definitions.location_group(
                                         name=name,
                                         location_group_type=LocationGroupType.ACCELERATOR,
-                                        system_tree_parent=tree_node,
+                                        system_tree_parent=device_node,
                                     ),
                                 )
 
