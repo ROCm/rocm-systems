@@ -44,6 +44,7 @@ jobs:
         os-release: [ '8.10', '9.4' ]
         build-type: ['Release']
     # Steps represent a sequence of tasks that will be executed as part of the job
+    # Note- RHEL8 references python3.9 as python39, whereas RHEL9 default version is already 3.9, so we only need to call it as python3
     steps:
       - name: Install baseline OS dependencies
         run: |
