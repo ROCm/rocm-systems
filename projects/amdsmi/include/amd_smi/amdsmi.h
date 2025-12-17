@@ -922,7 +922,7 @@ typedef struct {
  */
 typedef struct {
     uint8_t num_fw_info;
-    struct {
+    struct fw_info_list_ {
         amdsmi_fw_block_t fw_id;
         uint64_t fw_version;
         uint64_t reserved[2];
@@ -1201,12 +1201,12 @@ typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     amdsmi_process_handle_t pid;
     uint64_t mem;  //!< In Bytes
-    struct {
+    struct engine_usage_ {
         uint64_t gfx;  //!< In nano-secs
         uint64_t enc;  //!< In nano-secs
         uint32_t reserved[12];
     } engine_usage; //!< time the process spends using these engines in ns
-    struct {
+    struct memory_usage_ {
         uint64_t gtt_mem;   //!< In Bytes
         uint64_t cpu_mem;   //!< In Bytes
         uint64_t vram_mem;  //!< In Bytes
@@ -1590,16 +1590,6 @@ typedef struct {
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
-#if 1 // jcnii
-typedef struct {
-    uint8_t major_version;
-    uint8_t minor_version;
-    union {
-        amdsmi_gpu_ras_policy_v4_0_t v4_0;
-        uint64_t info[5]; //!< total size of the EEPROM that can be used by the policy is 40bytes
-    } policy_data;
-} amdsmi_gpu_ras_policy_info_t;
-#else
 typedef struct {
     uint8_t major_version;
     uint8_t minor_version;
@@ -1608,7 +1598,6 @@ typedef struct {
         uint64_t info[5]; //!< total size of the EEPROM that can be used by the policy is 40bytes
     } policy_data;
 } amdsmi_gpu_ras_policy_info_t;
-#endif
 
 /**
  * @brief The current ECC state
@@ -2153,7 +2142,7 @@ typedef struct {
     uint32_t ecc_correction_schema_flag;  /**< ecc_correction_schema mask.
                                                PARITY error(bit 0), Single Bit correctable (bit1),
                                                Double bit error detection (bit2), Poison (bit 3) */
-    struct {
+    struct ras_info_ {
         uint32_t dram_ecc  : 1;
         uint32_t sram_ecc  : 1;
         uint32_t poisoning : 1;
@@ -2252,6 +2241,7 @@ typedef struct {
  * Only F8 and XF32 are always supported at full performance. From the remaining
  * five types, only two can be supported at peak performance simultaneously.
  *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
     AMDSMI_PTL_DATA_FORMAT_I8 = 0x0,        //!< Integer 8-bit format
@@ -4263,6 +4253,10 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
  *  @ingroup tagClkPowerPerfQuery
  *
  *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @note After this function returns, the caller must wait a few seconds before calling
+ *  any other AMD SMI API functions to allow the GPU reset to complete. Calling other APIs
+ *  too soon may result in AMDSMI_STATUS_BUSY or undefined behavior.
  *
  *  @details Given a processor handle @p processor_handle, this function will reset the GPU
  *
@@ -6962,9 +6956,10 @@ amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handl
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details This function retrieves the current PTL fromats
- *  for the specified processor. PTL constrains the product to never deliver more
- *  than a specified TOPS/second.
+ *  @details This function retrieves the current PTL formats
+ *  for the specified processor. PTL prevents the product to never deliver more
+ *  than a specified TOPS/second. If function returns 0 for both formats,
+ *  PTL was never enabled before on that system
  *
  *  @param[in] processor_handle Device which to query
  *
