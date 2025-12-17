@@ -48,6 +48,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
 
+### Optimized
+
+* Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added

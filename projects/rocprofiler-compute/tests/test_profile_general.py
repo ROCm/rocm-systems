@@ -31,9 +31,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+from scipy.stats import zscore
 
 # Globals
 
@@ -64,6 +66,8 @@ config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
+config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
+config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -458,6 +462,150 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 
     if config["METRIC_COMPARE"]:
         baseline_compare_metric(test_name, workload_dir, args)
+
+
+def are_stochastic_counters_similar(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the stochastic counter values are similar. Returns True if all test dataframes
+    have similar counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    stochastic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                ".*REQ_sum$",
+                ".*REQ_.*_sum$",
+                ".*READ_sum$",
+                ".*WRITE_sum$",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+
+        # Warmup values aren't ignored as they do not significantly impact
+        # the analysis for stochastic counters and leaves too few data points
+        # for baseline.
+        if any(
+            re.match(pattern, counter_name) for pattern in stochastic_counter_patterns
+        ):
+            # Remove outliers using Z-score method
+            z_score_threshold = 2.0
+
+            test_z_scores_list = [
+                np.abs(zscore(test_counters)) for test_counters in test_counters_list
+            ]
+            test_counters_list_trimmed = [
+                test_counters[test_z_scores < z_score_threshold]
+                for test_counters, test_z_scores in zip(
+                    test_counters_list, test_z_scores_list
+                )
+            ]
+
+            baseline_mean = baseline_counters.mean()
+            baseline_std = baseline_counters.std()
+            upper_bound = baseline_mean + 3 * baseline_std
+            lower_bound = baseline_mean - 3 * baseline_std
+
+            for test_counters in test_counters_list_trimmed:
+                if test_counters.between(lower_bound, upper_bound).all() is False:
+                    return False
+
+    return True
+
+
+def are_deterministic_counters_equal(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the deterministic counter values are equal. Returns True if all test dataframes
+    have equal counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    deterministic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                "SQ_INSTS_.*",
+                "SPI_CS\\d_NUM_THREADGROUPS",
+                "SPI_CS\\d_WAVE",
+                "SQ_WAVES",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+        if any(
+            re.match(pattern, counter_name)
+            for pattern in deterministic_counter_patterns
+        ):
+            if (
+                all([
+                    test_counters.unique().size == 1
+                    for test_counters in test_counters_list
+                ])
+                and baseline_counters.unique().size == 1
+                and all([
+                    test_counters.values[0] == baseline_counters.values[0]
+                    for test_counters in test_counters_list
+                ])
+            ):
+                continue
+
+            return False
+
+    return True
 
 
 # --
@@ -2367,7 +2515,7 @@ class TestSetsIntegration:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_profiler_options(binary_handler_profile_rocprof_compute):
     options = ["--no-native-tool", "--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2377,7 +2525,7 @@ def test_profiler_options(binary_handler_profile_rocprof_compute):
     assert code == 1
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2407,7 +2555,7 @@ def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing", "kernel"]
     workload_dir = test_utils.get_output_dir()
@@ -2437,7 +2585,7 @@ def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel_launch_params(
     binary_handler_profile_rocprof_compute,
 ):
@@ -2464,6 +2612,100 @@ def test_iteration_multiplexing_kernel_launch_params(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_deterministic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    assert are_deterministic_counters_equal(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_stochastic
+def test_iteration_multiplexing_stochastic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    assert are_stochastic_counters_similar(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

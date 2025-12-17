@@ -2,9 +2,15 @@ name: AMDSMI CI
 
 on:
   pull_request:
-    branches: [develop, juwillia/ci-1.0]
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-build.yml'
   push:
-    branches: [develop, juwillia/ci-1.0]
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
 permissions:
@@ -28,10 +34,22 @@ jobs:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for AMDSMI
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/amdsmi. Searching root..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Update repositories for Debian10
         if: matrix.os == 'Debian10'
@@ -49,7 +67,7 @@ jobs:
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
 
           for i in $(seq 1 $RETRIES); do
@@ -58,8 +76,8 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            # Capture build output to parse warnings
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+            # Configure, build, and package
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
 
@@ -85,7 +103,7 @@ jobs:
 
       - name: Install AMDSMI
         run: |
-          cd $GITHUB_WORKSPACE/build
+          cd ${{ env.PROJECT_DIR }}/build
           if [ "${{ matrix.os }}" != "Debian10" ]; then
             apt update
           fi
@@ -142,10 +160,18 @@ jobs:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Set Project Directory
+        run: |
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Update repositories for Debian10
         if: matrix.os == 'Debian10'
@@ -163,7 +189,7 @@ jobs:
         run: |
           set -e
           echo 'Building for test on ${{ matrix.os }}'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
 
           for i in $(seq 1 $RETRIES); do
@@ -172,7 +198,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
                make -j $(nproc) && \
                make package; then
               echo "Build successful on attempt $i"
@@ -313,7 +339,7 @@ jobs:
 
           # Example Tests
           echo 'Running Example tests'
-          cd $GITHUB_WORKSPACE/example
+          cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
@@ -370,10 +396,18 @@ jobs:
           - AlmaLinux8
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set Project Directory
+        run: |
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Set PkgMgr
         run: |
@@ -399,7 +433,7 @@ jobs:
         run: |
           set -e
           echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5
 
           # Set QA_RPATHS to ignore empty (0x0010) and invalid (0x0002) RPATHs
@@ -411,7 +445,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
                make -j $(nproc) && \
                make package; then
               echo "Build successful on attempt $i"
@@ -432,7 +466,7 @@ jobs:
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
 
           for i in $(seq 1 $RETRIES); do
@@ -442,7 +476,7 @@ jobs:
             cd $BUILD_FOLDER
 
             # Capture build output to parse warnings
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
 
@@ -469,7 +503,7 @@ jobs:
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
-          cd $GITHUB_WORKSPACE/build
+          cd ${{ env.PROJECT_DIR }}/build
           dnf install python3-setuptools python3-wheel -y
 
           RETRIES=3
@@ -499,7 +533,7 @@ jobs:
       - name: Install AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
-          cd $GITHUB_WORKSPACE/build
+          cd ${{ env.PROJECT_DIR }}/build
           case ${{ env.PACKAGE_MANAGER }} in
             zypper)
               timeout 10m zypper --no-refresh --no-gpg-checks install -y ./amd-smi-lib-*99999-local*.rpm
@@ -555,7 +589,7 @@ jobs:
 
   rpm-test:
     name: Tests
-    needs: [rpm-buildinstall, debian-test]  # debian-test is needed to complete before rpm-test starts (see comment about driver reloads)
+    needs: [rpm-buildinstall, debian-test]
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
@@ -572,10 +606,18 @@ jobs:
           - AlmaLinux8
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set Project Directory
+        run: |
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
+          if [ -z "$TARGET_DIR" ]; then
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
+          fi
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Set PkgMgr
         run: |
@@ -601,7 +643,7 @@ jobs:
         run: |
           set -e
           echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5
 
           # Set QA_RPATHS to ignore empty (0x0010 | 0x0002) RPATHs
@@ -613,7 +655,7 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+            if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
                make -j $(nproc) && \
                make package; then
               echo "Build successful on attempt $i"
@@ -653,11 +695,11 @@ jobs:
         run: |
           set -e
           echo 'Building for test on ${{ matrix.os }}'
-          BUILD_FOLDER=$GITHUB_WORKSPACE/build
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           rm -rf $BUILD_FOLDER
           mkdir -p $BUILD_FOLDER
           cd $BUILD_FOLDER
-          cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
+          cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
           make -j $(nproc)
           make package
 
@@ -796,7 +838,7 @@ jobs:
 
           # Example Tests
           echo 'Running Example tests'
-          cd $GITHUB_WORKSPACE/example
+          cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
