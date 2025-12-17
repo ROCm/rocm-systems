@@ -184,60 +184,88 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  // Bulk fetch fields
-  std::vector<rdc_gpu_field_value_t> bulk_results;
-
   struct timeval tv{};
   gettimeofday(&tv, nullptr);
   const uint64_t curTime = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 
-  // Fetch it one by one for left fields
+  // Group fields by GPU index for bulk sampling
+  std::map<uint32_t, std::vector<uint32_t>> gpu_to_field_indices;
+  for (uint32_t i = 0; i < fields_count; i++) {
+    gpu_to_field_indices[fields[i].gpu_index].push_back(i);
+  }
+
+  // Process each GPU group
   const int BULK_FIELDS_MAX = 16;
   rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
   uint32_t bulk_count = 0;
-  rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
-  rdc_field_value_data data;
-  rdc_field_type_t type = DOUBLE;
+  rdc_status_t status = RDC_ST_OK;
 
-  for (uint32_t i = 0; i < fields_count; i++) {
-    if (bulk_count >= BULK_FIELDS_MAX) {
-      status = callback(values, bulk_count, user_data);
-      // When the callback returns errors, stop processing and return.
-      if (status != RDC_ST_OK) {
-        return status;
+  for (const auto& [gpu_index, field_indices] : gpu_to_field_indices) {
+    // Collect fields for this GPU
+    std::vector<rdc_gpu_field_t> gpu_fields;
+    gpu_fields.reserve(field_indices.size());
+    for (uint32_t idx : field_indices) {
+      gpu_fields.push_back(fields[idx]);
+    }
+
+    // Bulk lookup for this GPU
+    // Note: rocp_lookup_bulk only handles rocprofiler-sdk metrics.
+    // Non-rocprofiler fields (e.g., RDC_FI_PROF_KFD_ID) are handled within
+    // the bulk lookup via special case logic in apply_field_transformation().
+    // Fields without rocprofiler metric mappings will return RDC_ST_BAD_PARAMETER.
+    std::vector<rdc_field_value_data> bulk_data;
+    std::vector<rdc_field_type_t> bulk_types;
+    std::vector<rdc_status_t> bulk_statuses;
+
+    status = rocp_p->rocp_lookup_bulk(gpu_fields, bulk_data, bulk_types, bulk_statuses);
+    if (status != RDC_ST_OK) {
+      RDC_LOG(RDC_ERROR, "Error in bulk lookup for GPU " << gpu_index);
+      // Continue with next GPU even if this one failed
+      continue;
+    }
+
+    // Distribute results to callback buffer
+    for (size_t j = 0; j < gpu_fields.size(); j++) {
+      if (bulk_count >= BULK_FIELDS_MAX) {
+        status = callback(values, bulk_count, user_data);
+        if (status != RDC_ST_OK) {
+          return status;
+        }
+        bulk_count = 0;
       }
-      bulk_count = 0;
-    }
 
-    status = rocp_p->rocp_lookup(fields[i], &data, &type);
-    // get value
-    values[bulk_count].gpu_index = fields[i].gpu_index;
-    values[bulk_count].field_value.status = status;
-    values[bulk_count].field_value.ts = curTime;
-    values[bulk_count].field_value.type = type;
-    values[bulk_count].field_value.field_id = fields[i].field_id;
-    switch (type) {
-      case DOUBLE:
-        values[bulk_count].field_value.value.dbl = data.dbl;
-        break;
-      case INTEGER:
-        values[bulk_count].field_value.value.l_int = data.l_int;
-        break;
-      case STRING:
-      case BLOB:
-        strncpy_with_null(values[bulk_count].field_value.value.str, data.str, RDC_MAX_STR_LENGTH);
-        break;
-      default:
-        break;
+      const uint32_t original_idx = field_indices[j];
+      values[bulk_count].gpu_index = fields[original_idx].gpu_index;
+      values[bulk_count].field_value.status = bulk_statuses[j];
+      values[bulk_count].field_value.ts = curTime;
+      values[bulk_count].field_value.type = bulk_types[j];
+      values[bulk_count].field_value.field_id = fields[original_idx].field_id;
+
+      switch (bulk_types[j]) {
+        case DOUBLE:
+          values[bulk_count].field_value.value.dbl = bulk_data[j].dbl;
+          break;
+        case INTEGER:
+          values[bulk_count].field_value.value.l_int = bulk_data[j].l_int;
+          break;
+        case STRING:
+        case BLOB:
+          strncpy_with_null(values[bulk_count].field_value.value.str, bulk_data[j].str,
+                            RDC_MAX_STR_LENGTH);
+          break;
+        default:
+          break;
+      }
+      bulk_count++;
     }
-    bulk_count++;
   }
+
+  // Flush remaining values
   if (bulk_count != 0) {
     status = callback(values, bulk_count, user_data);
     if (status != RDC_ST_OK) {
       return status;
     }
-    bulk_count = 0;
   }
 
   return status;
