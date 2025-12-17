@@ -36,6 +36,8 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#include "hip_tests_config.hh"
+
 #if HT_LINUX
 #include <sys/resource.h>
 #endif
