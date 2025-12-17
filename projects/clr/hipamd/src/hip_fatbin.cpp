@@ -32,7 +32,6 @@ THE SOFTWARE.
 
 namespace hip {
 // Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
-using comgr_helper::ComgrDataSetUniqueHandle;
 using comgr_helper::ComgrActionInfoUniqueHandle;
 using comgr_helper::ComgrDataUniqueHandle;
 
@@ -48,16 +47,16 @@ FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
 }
 
 FatBinaryInfo::~FatBinaryInfo() {
-  // Release Code object allocations
-  for (const auto& i : code_obj_allocations_) {
-    delete[] reinterpret_cast<const char*>(i);
-  }
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
       dev_programs_[dev_id]->release();
       dev_programs_[dev_id] = nullptr;
     }
+  }
+  // Release Code object allocations
+  for (const auto& i : code_obj_allocations_) {
+    delete[] reinterpret_cast<const char*>(i);
   }
   ReleaseImageAndFile();
 }
@@ -290,7 +289,8 @@ static bool UncompressAndPopulateCodeObject(
       comgr_helper::ComgrDataUniqueHandle item_handle(item);
 
       size_t item_name_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
+      if (auto comgr_status =
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -465,6 +465,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
+  LogPrintfInfo("Forcing SPIRV: %s", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
   hipError_t hip_status = hipErrorInvalidImage;
   do {
     bool spirv_isa_found = code_obj_map.find(spirv_isa_name) != code_obj_map.end() ||
@@ -478,16 +479,21 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        LogPrintfInfo("Using native code object for device: %s co: %s", device_name.c_str(),
+                      native_co->first.c_str());
         hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
+        LogPrintfInfo("Using generic code object for device: %s co: %s", device_name.c_str(),
+                      generic_co->first.c_str());
         hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (spirv_isa_found) {
+        LogPrintfInfo("Using spirv code object for device: %s", device_name.c_str());
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
@@ -609,7 +615,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         }
 
         char* co = new char[co_size];
-        code_obj_allocations_.insert(co); // track to release later
+        code_obj_allocations_.insert(co);  // track to release later
         if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, co);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get exe data");
