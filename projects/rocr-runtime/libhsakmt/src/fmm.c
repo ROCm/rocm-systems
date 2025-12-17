@@ -173,6 +173,7 @@ static const manageable_aperture_ops_t mmap_aperture_ops = {
 	mmap_aperture_allocate_aligned,
 	mmap_aperture_release
 };
+static HSAuint8 fmm_check_user_memory(const void *addr, HSAuint64 size);
 
 struct manageable_aperture {
 	void *base;
@@ -347,11 +348,15 @@ static vm_area_t *vm_create_and_init_area(void *start, void *end)
 #define BIGGEST_SINGLE_BUF_SIZE ((1ULL << 39) - GPU_HUGE_PAGE_SIZE)
 
 static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
-					      uint64_t handle, HsaMemFlags mflags)
+					      uint64_t handle, HsaMemFlags mflags,
+					      uint64_t handle_array_size)
 {
 	vm_object_t *object;
-	uint64_t handle_array_size = (size + BIGGEST_SINGLE_BUF_SIZE - 1) /
-				     BIGGEST_SINGLE_BUF_SIZE;
+
+	/* If handle_array_size is 0, use default calculation */
+	if (handle_array_size == 0)
+		handle_array_size = (size + BIGGEST_SINGLE_BUF_SIZE - 1) /
+				    BIGGEST_SINGLE_BUF_SIZE;
 
 	object = (vm_object_t *) malloc(sizeof(vm_object_t) +
 		 handle_array_size * sizeof(uint64_t));
@@ -911,14 +916,16 @@ static vm_object_t *aperture_allocate_object(manageable_aperture_t *app,
 					     void *new_address,
 					     uint64_t handle,
 					     uint64_t MemorySizeInBytes,
-					     HsaMemFlags mflags)
+					     HsaMemFlags mflags,
+					     uint64_t handle_array_size)
 {
 	vm_object_t *new_object;
 
 	/* Allocate new object */
 	new_object = vm_create_and_init_object(new_address,
 					       MemorySizeInBytes,
-					       handle, mflags);
+					       handle, mflags,
+					       handle_array_size);
 	if (!new_object)
 		return NULL;
 
@@ -1190,6 +1197,205 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(void *address,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+/*
+ * Allocate memory objects for non-contiguous userptr ranges.
+ * Each range gets its own kernel BO handle, all stored in one vm_object.
+ *
+ * @gpu_id: GPU device ID
+ * @address: Preferred GPU VA base address (can be NULL)
+ * @ranges: Array of non-contiguous memory ranges
+ * @nranges: Number of ranges
+ * @aperture: Aperture manager
+ * @ioc_flags: IOC allocation flags
+ * @vm_obj: Output vm_object pointer (can be NULL)
+ * @total_size_ret: Output total size of all ranges (can be NULL)
+ *
+ * Returns: Allocated GPU VA base address, or NULL on failure
+ */
+static void *fmm_allocate_memory_object_ranges(
+	uint32_t gpu_id,
+	void *address,
+	HsaMemoryRange *ranges,
+	uint64_t nranges,
+	manageable_aperture_t *aperture,
+	uint32_t ioc_flags,
+	vm_object_t **vm_obj,
+	uint64_t *total_size_ret)
+{
+	struct kfd_ioctl_alloc_memory_of_gpu_args args = {0};
+	struct kfd_ioctl_free_memory_of_gpu_args free_args = {0};
+	vm_object_t *obj = NULL;
+	HsaMemFlags mflags;
+	void *mem = NULL;
+	uint64_t total_size = 0;
+	uint64_t current_offset = 0;
+	uint64_t i;
+
+	if (!ranges || nranges == 0)
+		return NULL;
+
+	/* Calculate total size across all ranges */
+	for (i = 0; i < nranges; i++) {
+		total_size += ranges[i].SizeInBytes;
+		if (((HSAuint64)ranges[i].MemoryAddress & (PAGE_SIZE - 1)) ||
+			(ranges[i].SizeInBytes & (PAGE_SIZE - 1))) {
+			pr_err("Range %lu address %p or size %lu not page aligned\n",
+				   i, ranges[i].MemoryAddress, ranges[i].SizeInBytes);
+			return NULL;
+		}
+	}
+
+	/* Check that aperture is properly initialized/supported */
+	if (!aperture_is_valid(aperture->base, aperture->limit))
+		return NULL;
+
+	/* Reserve GPU virtual address space for the total size */
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	mem = aperture_allocate_area_aligned(aperture, address, total_size, PAGE_SIZE);
+	pthread_mutex_unlock(&aperture->fmm_mutex);
+
+	if (!mem)
+		return NULL;
+
+	/* Now allocate the vm_object for tracking */
+	mflags = fmm_translate_ioc_to_hsa_flags(ioc_flags);
+	obj = aperture_allocate_object(aperture, mem, 0, total_size, mflags, nranges);
+	if (!obj)
+		goto err_release_va;
+
+	/* Reset handle_num as we'll populate handles in the loop */
+	obj->handle_num = 0;
+
+	/* Register each userptr range to the reserved GPU VA space */
+	args.gpu_id = gpu_id;
+	args.flags = ioc_flags | KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE;
+
+	for (i = 0; i < nranges; i++) {
+		/* All ranges are already page-aligned (checked during total_size calculation) */
+		args.va_addr = (uint64_t)mem + current_offset;
+		args.size = ranges[i].SizeInBytes;
+		args.mmap_offset = (HSAuint64)ranges[i].MemoryAddress;
+
+		if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &args)) {
+			pr_err("Failed to register userptr range %lu: addr=%p size=%lu gpu_va=%p\n",
+			       i, ranges[i].MemoryAddress, ranges[i].SizeInBytes, 
+			       (void*)args.va_addr);
+			goto err_ioctl_failed;
+		}
+
+		/* Store handle */
+		obj->handles[obj->handle_num++] = args.handle;
+
+		pr_debug("Registered userptr range %lu: userptr=%p size=%lu gpu_va=%p handle=0x%llx\n",
+		         i, ranges[i].MemoryAddress, ranges[i].SizeInBytes, 
+		         (void*)args.va_addr, args.handle);
+
+		current_offset += ranges[i].SizeInBytes;
+	}
+
+	if (vm_obj)
+		*vm_obj = obj;
+
+	if (total_size_ret)
+		*total_size_ret = total_size;
+
+	return mem;
+
+err_ioctl_failed:
+	/* Clean up already allocated handles */
+	while (obj->handle_num > 0) {
+		free_args.handle = obj->handles[--obj->handle_num];
+		if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args))
+			pr_err("Failed to free GPU memory with handle: 0x%llx\n", free_args.handle);
+	}
+	vm_remove_object(aperture, obj);
+err_release_va:
+	/* Remove the vm_object and release the VA space */
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	aperture_release_area(aperture, mem, total_size);
+	pthread_mutex_unlock(&aperture->fmm_mutex);
+
+	return NULL;
+}
+
+/*
+ * Register non-contiguous userptr ranges.
+ *
+ * @address: Requested GPU VA base address (NULL to let system choose)
+ * @ranges: Array of non-contiguous memory ranges
+ * @nranges: Number of ranges
+ * @obj_ret: Returned vm_object pointer
+ * @flags: Memory flags
+ *
+ * Returns: HSAKMT_STATUS code
+ */
+static HSAKMT_STATUS fmm_register_user_memory_ranges(
+	void *address,
+	HsaMemoryRange *ranges,
+	uint64_t nranges,
+	vm_object_t **obj_ret,
+	HsaMemFlags flags)
+{
+	manageable_aperture_t *aperture = svm.dgpu_aperture;
+	HSAuint32 gpu_id;
+	vm_object_t *obj;
+	void *base_addr;
+	uint64_t total_size = 0;
+	uint64_t i;
+
+	if (!ranges || nranges == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	/* Find first GPU for creating the userptr BO */
+	if (!g_first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	gpu_id = g_first_gpu_mem->gpu_id;
+
+	/* Optionally check all user memory regions are valid */
+	if (svm.check_userptr) {
+		for (i = 0; i < nranges; i++) {
+			fmm_check_user_memory(ranges[i].MemoryAddress, ranges[i].SizeInBytes);
+		}
+	}
+
+	/* Allocate GPU VA and register all non-contiguous userptr ranges */
+	base_addr = fmm_allocate_memory_object_ranges(
+		gpu_id,
+		address,
+		ranges,
+		nranges,
+		aperture,
+		KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
+		KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+		KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE |
+		(flags.ui32.CoarseGrain ? 0 : KFD_IOC_ALLOC_MEM_FLAGS_COHERENT) |
+		(flags.ui32.ExtendedCoherent ? KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT : 0),
+		&obj,
+		&total_size
+	);
+
+	if (!base_addr)
+		return HSAKMT_STATUS_ERROR;
+
+	pthread_mutex_lock(&aperture->fmm_mutex);
+
+	/* Set userptr metadata - use first range's address as key */
+	obj->userptr = base_addr;
+	hsakmt_gpuid_to_nodeid(gpu_id, &obj->node_id);
+	obj->userptr_size = total_size;
+	obj->registration_count = 1;
+	obj->user_node.key = rbtree_key((unsigned long)base_addr, total_size);
+	hsakmt_rbtree_insert(&aperture->user_tree, &obj->user_node);
+
+	pthread_mutex_unlock(&aperture->fmm_mutex);
+
+	if (obj_ret)
+		*obj_ret = obj;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 /* After allocating the memory, return the vm_object created for this memory.
  * Return NULL if any failure.
  */
@@ -1245,7 +1451,7 @@ static vm_object_t *fmm_allocate_memory_object(uint32_t gpu_id, void *mem,
 		if (!vm_obj) {
 			pthread_mutex_lock(&aperture->fmm_mutex);
 			vm_obj = aperture_allocate_object(aperture, mem, args.handle,
-					MemorySizeInBytes, mflags);
+					MemorySizeInBytes, mflags, 0);
 
 			pthread_mutex_unlock(&aperture->fmm_mutex);
 			if (!vm_obj)
@@ -1660,7 +1866,7 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 
 	if (mem) {
 		/* Assign handle 0 to vm_obj since no memory allocated yet */
-		vm_obj = aperture_allocate_object(aperture, mem, 0, size, mflags);
+		vm_obj = aperture_allocate_object(aperture, mem, 0, size, mflags, 0);
 		if (!vm_obj) {
 			aperture_release_area(aperture, mem, size);
 			mem = NULL;
@@ -1770,7 +1976,7 @@ static void* udmabuf_allocation(uint32_t gpu_id, uint32_t node_id, uint64_t size
 	/* Allocate object */
 	pthread_mutex_lock(&aperture->fmm_mutex);
 	*vm_obj = aperture_allocate_object(aperture, mem, importArgs.handle,
-                                          size, mflags);
+                                          size, mflags, 0);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (*vm_obj == NULL)
@@ -1972,7 +2178,7 @@ static void *fmm_allocate_host_cpu(void *address, uint64_t MemorySizeInBytes,
 
 	pthread_mutex_lock(&cpuvm_aperture.fmm_mutex);
 	vm_obj = aperture_allocate_object(&cpuvm_aperture, mem, 0,
-				      MemorySizeInBytes, mflags);
+				      MemorySizeInBytes, mflags, 0);
 	if (vm_obj)
 		vm_obj->node_id = 0; /* APU systems only have one CPU node */
 	pthread_mutex_unlock(&cpuvm_aperture.fmm_mutex);
@@ -3952,6 +4158,37 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS hsakmt_fmm_register_user_memory_ranges(void *address,
+						      HsaMemoryRange *ranges,
+						      uint64_t nranges,
+						      void **obj_ret,
+						      HsaMemFlags flags)
+{
+	vm_object_t *object = NULL;
+	HSAKMT_STATUS ret;
+
+	if (!ranges || nranges == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (flags.ui32.CoarseGrain && flags.ui32.ExtendedCoherent)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (!hsakmt_is_dgpu)
+		/* Only supported on dGPU configurations */
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	/* Register non-contiguous userptr ranges */
+	ret = fmm_register_user_memory_ranges(address, ranges, nranges, &object, flags);
+
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+
+	if (obj_ret)
+		*obj_ret = object;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 #define GRAPHICS_METADATA_DEFAULT_SIZE 64
 HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HSAuint64 GraphicsResourceHandle,
 					   HsaGraphicsResourceInfo *GraphicsResourceInfo,
@@ -4037,7 +4274,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HSAuint64 GraphicsResourceHand
 	mflags = fmm_translate_ioc_to_hsa_flags(infoArgs.flags);
 	mflags.ui32.CoarseGrain = 1;
 	obj = aperture_allocate_object(aperture, mem, importArgs.handle,
-				       infoArgs.size, mflags);
+				       infoArgs.size, mflags, 0);
 	if (obj) {
 		obj->metadata = metadata;
 		obj->registered_device_id_array = gpu_id_array;
@@ -4213,7 +4450,7 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(const HsaSharedMemoryHandle *Sha
 
 	mflags.Value = importArgs.flags;
 	obj = aperture_allocate_object(aperture, reservedMem, importArgs.handle,
-			(SizeInPages << PAGE_SHIFT), mflags);
+			(SizeInPages << PAGE_SHIFT), mflags, 0);
 	if (!obj) {
 		err = HSAKMT_STATUS_NO_MEMORY;
 		goto err_free_mem;

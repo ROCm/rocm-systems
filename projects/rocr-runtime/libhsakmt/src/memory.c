@@ -407,6 +407,36 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
 	return ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryRanges(void *MemoryAddress,
+						    HsaMemoryRange *MemoryRanges,
+						    HSAuint64 RangesCount,
+						    HsaMemFlags MemFlags)
+{
+	CHECK_KFD_OPEN();
+	HSAKMT_STATUS ret;
+
+	pr_debug("[%s] address %p, ranges count %lu\n", __func__, MemoryAddress, RangesCount);
+
+	if (!hsakmt_is_dgpu)
+		/* Only supported on dGPU configurations */
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	if (!MemoryRanges || RangesCount == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (MemFlags.ui32.CoarseGrain && MemFlags.ui32.ExtendedCoherent)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	// Registered memory should be ordinary paged host memory.
+	if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	/* Register non-contiguous userptr ranges directly */
+	ret = hsakmt_fmm_register_user_memory_ranges(MemoryAddress, MemoryRanges, RangesCount, NULL, MemFlags);
+
+	return ret;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 						 HSAuint64 MemorySizeInBytes,
 						 int *DMABufFd,

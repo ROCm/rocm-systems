@@ -91,6 +91,7 @@ hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtAisReadWriteFile;
 hsaKmtRegisterMemoryRangesWithFlags;
+hsaKmtRegisterMemoryRanges;
 local: *;
 };
 

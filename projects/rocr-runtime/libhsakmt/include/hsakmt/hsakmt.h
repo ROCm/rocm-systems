@@ -512,6 +512,18 @@ hsaKmtRegisterRangesWithFlags(
   HsaMemFlags MemFlags);
 
 /**
+  Register non-contiguous memory ranges as userptr.
+  Uses existing upstream AMDKFD_IOC_ALLOC_MEMORY_OF_GPU ioctl for each range.
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRegisterMemoryRanges(
+  void *MemoryAddress,
+  HsaMemoryRange *MemoryRanges,
+  HSAuint64 RangesCount,
+  HsaMemFlags MemFlags);
+
+/**
   Registers with KFD a graphics buffer and returns graphics metadata
 */
 

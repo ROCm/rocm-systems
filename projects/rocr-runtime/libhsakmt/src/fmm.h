@@ -76,6 +76,11 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 								  uint32_t *gpu_id_array,
 								  uint32_t gpu_id_array_size,
 								  HsaMemFlags flags);
+HSAKMT_STATUS hsakmt_fmm_register_user_memory_ranges(void *address,
+						      HsaMemoryRange *ranges,
+						      uint64_t nranges,
+						      void **obj_ret,
+						      HsaMemFlags flags);
 HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HSAuint64 GraphicsResourceHandle,
 					   HsaGraphicsResourceInfo *GraphicsResourceInfo,
 					   uint32_t *gpu_id_array,
