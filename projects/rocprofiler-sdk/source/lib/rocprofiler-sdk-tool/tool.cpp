@@ -128,8 +128,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 namespace
 {
 // Thread for safe cleanup output generation
-std::unique_ptr<std::thread> cleanup_thread = nullptr;
-std::mutex                   cleanup_thread_mutex;
+auto output_generation_thread = common::Synchronized<std::unique_ptr<std::thread>>{};
 
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
@@ -2102,12 +2101,28 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
+void reset_output_thread(auto& thread_ptr)
+{
+    ROCP_INFO << "finalize output thread started...";
+    if(thread_ptr)
+    {
+        if(thread_ptr->joinable()) thread_ptr->join();
+        thread_ptr.reset();
+    }
+    ROCP_INFO << "finalize output thread exiting...";
+}
+
 int
 tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             rocprofiler_context_id_t* context_ids,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    // reset any existing output thread from prior tool usage
+    ::output_generation_thread.wlock([](auto& thread_ptr) {
+        reset_output_thread(thread_ptr);
+    });
+
     // save the existing config for comparison
     auto original_config = tool::get_config();
 
@@ -3161,16 +3176,10 @@ tool_detach(void* /*tool_data*/)
 
     // Launch generate output in a separate thread for safe cleanup
     // This allows tool_detach to return immediately without waiting
-    {
-        std::lock_guard<std::mutex> lock(::cleanup_thread_mutex);
-        if(::cleanup_thread)
-        {
-            if(::cleanup_thread->joinable()) ::cleanup_thread->join();
-            ::cleanup_thread.reset();
-        }
-        ::cleanup_thread =
-            std::make_unique<std::thread>([]() { generate_output(cleanup_mode::reset); });
-    }
+    ::output_generation_thread.wlock([](auto& thread_ptr) {
+        reset_output_thread(thread_ptr);
+        thread_ptr = std::make_unique<std::thread>([]() { generate_output(cleanup_mode::reset); });
+    });
 }
 
 void
@@ -3184,14 +3193,9 @@ tool_fini(void* /*tool_data*/)
     client_finalizer  = nullptr;
 
     // Join the cleanup thread if it exists and is active
-    {
-        std::lock_guard<std::mutex> lock(::cleanup_thread_mutex);
-        if(::cleanup_thread)
-        {
-            if(::cleanup_thread->joinable()) ::cleanup_thread->join();
-            ::cleanup_thread.reset();
-        }
-    }
+    ::output_generation_thread.wlock([](auto& thread_ptr) {
+        reset_output_thread(thread_ptr);
+    });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
