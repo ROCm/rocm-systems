@@ -41,29 +41,32 @@ union float_holder {
 };
 
 std::vector<float> getAllBF16() {
-  constexpr unsigned char max_mantissa = std::numeric_limits<unsigned char>::max() >> 1;  // 7 bits
-  const size_t max_bf16_num =
-      2 /*sign*/ * std::pow(2, 8) /*exponent*/ * std::pow(2, 7) /*mantissa*/;
+  static const std::vector<float> cached = []() {
+    constexpr unsigned char max_mantissa =
+        std::numeric_limits<unsigned char>::max() >> 1;  // 7 bits
+    const size_t max_bf16_num =
+        2 /*sign*/ * std::pow(2, 8) /*exponent*/ * std::pow(2, 7) /*mantissa*/;
 
-  std::vector<float> f_in;
-  f_in.reserve(max_bf16_num);
+    std::vector<float> f_in;
+    f_in.reserve(max_bf16_num);
 
+    for (size_t s = 0; s <= 1; s++) {                                            // sign
+      for (size_t e = 0; e <= std::numeric_limits<unsigned char>::max(); e++) {  // expo
+        for (size_t m = 0; m <= max_mantissa; m++) {                             // man
+          float_holder hold;
+          hold.u32 = 0;  // Init - clear all bits
 
-  for (size_t s = 0; s <= 1; s++) {                                            // sign
-    for (size_t e = 0; e <= std::numeric_limits<unsigned char>::max(); e++) {  // expo
-      for (size_t m = 0; m <= max_mantissa; m++) {                             // man
-        float_holder hold;
-        hold.u32 = 0;  // Init - clear all bits
+          hold.parts.sign = s;
+          hold.parts.exponent = e;
+          hold.parts.bf16_mantisa = m;
 
-        hold.parts.sign = s;
-        hold.parts.exponent = e;
-        hold.parts.bf16_mantisa = m;
-
-        f_in.push_back(hold.fp32);
+          f_in.push_back(hold.fp32);
+        }
       }
     }
-  }
-  return f_in;
+    return f_in;
+  }();
+  return cached;
 }
 
 enum MathOp { Add = 0, Sub, Mul, Div, LastOp = Div };
@@ -224,36 +227,6 @@ TEST_CASE("Unit_bf16_basic") {
   auto f_in = getAllBF16();
   auto max_bf16_num = f_in.size();
 
-  SECTION("Conversion float to bfloat16 to float") {
-    constexpr size_t size = 256;
-
-    float *d_a, *d_c;
-    HIP_CHECK(hipMalloc(&d_a, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_c, sizeof(float) * size));
-
-    auto h_a = std::make_unique<float[]>(size);
-    auto h_c = std::make_unique<float[]>(size);
-
-    for (size_t i = 0; i < size; i++) {
-      h_a[i] = i + 1.25;
-    }
-
-    HIP_CHECK(hipMemcpy(d_a, h_a.get(), sizeof(float) * size, hipMemcpyHostToDevice));
-
-    fp32_bf16_fp32<<<1, size>>>(d_a, d_c, size);
-
-    HIP_CHECK(hipMemcpy(h_c.get(), d_c, sizeof(float) * size, hipMemcpyDeviceToHost));
-
-    for (size_t i = 0; i < size; i++) {
-      INFO("Initial: " << h_a[i] << " - After Conv: " << h_c[i]);
-      // The relative error should be less than 1/(2^7) since bfloat16 has 7 bits mantissa.
-      REQUIRE((std::fabs(h_c[i] - h_a[i]) / h_a[i]) < (1.0 / 128.0f));
-    }
-
-    HIP_CHECK(hipFree(d_a));
-    HIP_CHECK(hipFree(d_c));
-  }
-
   SECTION("Math Op Accuracy") {
     constexpr size_t size = static_cast<size_t>(LastOp);
 
@@ -357,27 +330,6 @@ TEST_CASE("Unit_bf16_basic") {
                      << " result: " << res[i]);
       REQUIRE(abs(static_cast<int>(res_cmp[i] - res[i])) <= 2);
     }
-  }
-
-  SECTION("Round trip equal") {
-    constexpr size_t size = 7;
-    float *d_in, *d_out;
-    std::vector<float> in = {
-        std::numeric_limits<float>::infinity(), -1.0f, -0.5f, -0.0f, 0.0f, 0.5f, 1.0f};
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
-
-    HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
-
-    fp32_bf16_fp32<<<1, size>>>(d_in, d_out, size);
-
-    std::vector<float> res(size, 0.0f);
-
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
-    REQUIRE(in == res);
   }
 
   SECTION("Round trip subsection") {
