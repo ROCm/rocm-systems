@@ -357,10 +357,12 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
                      // using -O0
-  if (maskNumBits == lastLane + 1)
-    // this means the mask "does not have holes", and starts from 0; we can use a specific intrinsic
-    // to calculate the aggregated result
-    return wfReduce(val);
+  if constexpr (!std::is_same<WfReduce, std::nullptr_t>::value){
+    if (maskNumBits == lastLane + 1)
+      // this means the mask "does not have holes", and starts from 0; we can use a specific intrinsic
+      // to calculate the aggregated result
+      return wfReduce(val);
+  }
 #endif
 
   firstLane = __builtin_ctzll(mask);
