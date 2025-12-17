@@ -2460,7 +2460,7 @@ void Runtime::Unload() {
     for (auto agent: nodeAgent.second)
       agent->ReleaseResources();
   }
-  
+
   asyncSignals_.reset();
   asyncExceptions_.reset();
 
@@ -2490,7 +2490,7 @@ void Runtime::Unload() {
   DestroyAgents();
 
   CloseTools();
-  
+
   AMD::Unload();
 
   DestroyDrivers();
