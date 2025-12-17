@@ -62,6 +62,17 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative_Parameters") {
   SECTION("End capture on stream where capture has not yet started") {
     HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorIllegalState);
   }
+#if HT_AMD
+  SECTION("Destroy stream and try to end capture") {
+    hipStream_t destroyed_stream;
+    HIP_CHECK(hipStreamCreate(&destroyed_stream));
+    HIP_CHECK(
+        hipStreamBeginCapture(destroyed_stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipStreamDestroy(destroyed_stream));
+    HIP_CHECK_ERROR(hipStreamEndCapture(destroyed_stream, &graph),
+                    hipErrorContextIsDestroyed);
+  }
+#endif
 }
 
 /**
@@ -195,6 +206,102 @@ TEST_CASE("Unit_hipStreamEndCapture_Positive_Thread") {
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+}
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify below scenario.
+ * 1) Enable capture on stream s1
+ * 2) Record event on stream s1
+ * 3) wait event on another stream s2, stream s2 also becomes capture stream
+ * 4) Enqueue work on capture stream s1
+ * 5) Enqueue work on capture stream s2
+ * 6) End capture on stream s1, returns hipErrorStreamCaptureUnjoined
+ * 7) event wait on stream1. (s2 joined back to s1)
+ * 8) End capture on stream s2, returns hipErrorStreamCaptureUnmatched
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamEndCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipStreamEndCapture_cross_dependencies") {
+  constexpr size_t N = 10;
+  hipGraph_t graph{nullptr};
+  size_t Nbytes = N * sizeof(int);
+  int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
+  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
+
+  // Stream and event create
+  StreamsGuard streams(2);
+  EventsGuard events(2);
+  hipStreamCaptureMode mode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+               hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(streams[0], mode));
+  HIP_CHECK(hipEventRecord(events[0], streams[0]));
+  HIP_CHECK(hipStreamWaitEvent(streams[1], events[0], 0));
+  HIP_CHECK(
+      hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, streams[0]));
+
+  HIP_CHECK(
+      hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, streams[1]));
+
+  SECTION("hipErrorStreamCaptureUnjoined") {
+    HIP_CHECK_ERROR(hipStreamEndCapture(streams[0], &graph),
+                    hipErrorStreamCaptureUnjoined);
+  }
+  SECTION("hipErrorStreamCaptureUnmatched") {
+    HIP_CHECK(hipEventRecord(events[1], streams[1]));
+    HIP_CHECK(hipStreamWaitEvent(streams[0], events[1], 0));
+    HIP_CHECK_ERROR(hipStreamEndCapture(streams[1], &graph),
+                    hipErrorStreamCaptureUnmatched);
+  }
+}
+
+static void thread_func_begin(hipStream_t stream) {
+  constexpr size_t N = 10;
+  size_t Nbytes = N * sizeof(float);
+
+  LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
+  LinearAllocGuard<float> B_h(LinearAllocs::malloc, Nbytes);
+  LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, Nbytes);
+
+  hipStreamCaptureMode captureMode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal);
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
+}
+
+static void thread_func_end(hipStream_t stream, hipGraph_t *graph) {
+#if HT_AMD
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, graph),
+                  hipErrorStreamCaptureWrongThread);
+#endif
+}
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify bewlow scenario.
+ * 1) Enable capture on stream s1 from thread1 with mode {Global, Threadlocal}
+ * 2) Enqueue work on capture stream s1
+ * 3) End capture on s1 from thread2, returns hipErrorStreamCaptureWrongThread
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamEndCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipStreamEndCapture_cros_thread") {
+  hipGraph_t graph{nullptr};
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+  std::thread t1(thread_func_begin, stream);
+  t1.join();
+  std::thread t2(thread_func_end, stream, &graph);
+  t2.join();
 }
 
 /**
