@@ -82,20 +82,20 @@ set_tests_properties(
 #
 # ------------------------------------------------------------------------------#
 
-rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTS "Create tests that link to the installed examples" OFF)
+rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTING "Create tests that link to the installed examples" OFF)
 if(NOT ROCPROFSYS_INSTALL_EXAMPLES)
-    if(ROCPROFSYS_INSTALL_TESTS)
-        set(ROCPROFSYS_INSTALL_TESTS
+    if(ROCPROFSYS_INSTALL_TESTING)
+        set(ROCPROFSYS_INSTALL_TESTING
             OFF
             CACHE BOOL
             "Create tests that link to the installed examples"
             FORCE
         )
-        rocprofiler_systems_message(STATUS "ROCPROFSYS_INSTALL_TESTS requires ROCPROFSYS_INSTALL_EXAMPLES to be enabled. Disabling...")
+        rocprofiler_systems_message(STATUS "ROCPROFSYS_INSTALL_TESTING requires ROCPROFSYS_INSTALL_EXAMPLES to be enabled. Disabling...")
     endif()
 endif()
 
-if(ROCPROFSYS_INSTALL_TESTS)
+if(ROCPROFSYS_INSTALL_TESTING)
     # Pytest
     include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
 
