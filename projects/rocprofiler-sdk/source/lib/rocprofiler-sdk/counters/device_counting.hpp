@@ -64,6 +64,9 @@ struct agent_callback_data
     bool                                                   set_profile     = false;
     std::vector<rocprofiler_counter_record_t>*             cached_counters = nullptr;
 
+    // KFD IOCTL device lock state for this agent
+    bool device_locked = false;
+
     agent_callback_data() = default;
     agent_callback_data(agent_callback_data&& rhs) noexcept
     : queue(rhs.queue)
@@ -76,9 +79,14 @@ struct agent_callback_data
     , agent_id(rhs.agent_id)
     , cb(rhs.cb)
     , buffer(rhs.buffer)
+    , set_profile(rhs.set_profile)
+    , cached_counters(rhs.cached_counters)
+    , device_locked(rhs.device_locked)
     {
         rhs.completion.handle   = 0;
         rhs.start_signal.handle = 0;
+        rhs.cached_counters     = nullptr;
+        rhs.device_locked       = false;
     }
 
     agent_callback_data& operator=(const agent_callback_data&) = delete;

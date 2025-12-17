@@ -34,5 +34,8 @@ counter_collection_has_device_lock();
 rocprofiler_status_t
 counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues);
 
+rocprofiler_status_t
+counter_collection_device_unlock(const rocprofiler_agent_t* agent);
+
 }  // namespace counters
 }  // namespace rocprofiler

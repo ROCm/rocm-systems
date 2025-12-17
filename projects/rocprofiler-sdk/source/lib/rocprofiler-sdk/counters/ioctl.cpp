@@ -89,32 +89,45 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-// Not required now but may be useful in the future.
-// rocprofiler_status_t
-// counter_collection_device_unlock(const rocprofiler_agent_t* agent) {
-//     CHECK(agent);
-//     kfd_ioctl_profiler_args args = {};
-//     args.op = KFD_IOC_PROFILER_PMC;
-//     args.pmc.gpu_id = agent->gpu_id;
-//     args.pmc.lock = 0;
-//     args.pmc.perfcount_enable = 0;
+rocprofiler_status_t
+counter_collection_device_unlock(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_PMC;
+    args.pmc.gpu_id              = agent->gpu_id;
+    args.pmc.lock                = 0;
+    args.pmc.perfcount_enable    = 0;
 
-//     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
-//     if (ret != 0) {
-//         switch (ret) {
-//             case -EBUSY:
-//             case -EPERM:
-//                 ROCP_WARNING << fmt::format("Could not unlock the device {}", agent->id.handle);
-//                 return ROCPROFILER_STATUS_ERROR;
-//             case -EINVAL:
-//                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-//             default:
-//                 ROCP_WARNING << fmt::format("Could not unlock the device {}", agent->id.handle);
-//                 return ROCPROFILER_STATUS_ERROR;
-//         }
-//     }
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
+    if(ret != 0)
+    {
+        switch(ret)
+        {
+            case -EBUSY:
+                // retry?
+                ROCP_WARNING << fmt::format("Device {} is busy and could not be unlocked.",
+                                            agent->id.handle);
+                return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
+            case -EPERM:
+                ROCP_WARNING << fmt::format(
+                    "Device {} could not be unlocked due to lack of permissions (capability "
+                    "SYS_PERFMON). This is probably a bug.",
+                    agent->id.handle);
+                return ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED;
+            case -EINVAL:
+                ROCP_WARNING << fmt::format(
+                    "Driver/Kernel version does not support unlocking device {}. PTL may remain "
+                    "disabled. This is probably a bug.",
+                    agent->id.handle);
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+            default:
+                ROCP_WARNING << fmt::format("Failed to unlock device {}.", agent->id.handle);
+                return ROCPROFILER_STATUS_ERROR;
+        }
+    }
 
-//     return ROCPROFILER_STATUS_SUCCESS;
-// }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 }  // namespace counters
 }  // namespace rocprofiler

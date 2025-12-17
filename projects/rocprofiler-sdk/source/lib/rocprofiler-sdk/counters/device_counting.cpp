@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -505,6 +506,25 @@ start_agent_ctx(const context::context* ctx)
             continue;
         }
 
+        if(!callback_data.device_locked && counters::counter_collection_has_device_lock())
+        {
+            /**
+             * Note: This should retrun if the lock fails to aquire in the future. However, this
+             * is a change in the required permissions for rocprofiler and needs to be communicated
+             * with partners before strict enforcement. If the required permissions are not
+             * obtained, those profilers will function as they currently do (without any of the
+             * benefits of the IOCTL). On some GPU hardware, this IOCTL also disables PTL, if
+             * supported.
+             */
+            auto lock_status =
+                counter_collection_device_lock(agent::get_agent(callback_data.agent_id), true);
+
+            if(lock_status == ROCPROFILER_STATUS_SUCCESS)
+            {
+                callback_data.device_locked = true;
+            }
+        }
+
         callback_data.packet->packets.start_packet.completion_signal = callback_data.start_signal;
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);
         submitPacket(agent->profile_queue(), &callback_data.packet->packets.start_packet);
@@ -571,6 +591,21 @@ stop_agent_ctx(const context::context* ctx)
                                                           1,
                                                           UINT64_MAX,
                                                           HSA_WAIT_STATE_ACTIVE);
+
+        if(callback_data.device_locked && counter_collection_has_device_lock())
+        {
+            auto unlock_status = counter_collection_device_unlock(callback_data.profile->agent);
+            if(unlock_status == ROCPROFILER_STATUS_SUCCESS)
+            {
+                callback_data.device_locked = false;
+            }
+            else
+            {
+                ROCP_WARNING << fmt::format(
+                    "Failed to unlock device for agent {} after stopping counter collection.",
+                    callback_data.agent_id.handle);
+            }
+        }
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::DISABLED);
@@ -601,6 +636,29 @@ device_counting_service_finalize()
                         rocprofiler::context::device_counting_service::state::ENABLED,
                         rocprofiler::context::device_counting_service::state::EXIT};
         };
+
+        if(counters::counter_collection_has_device_lock())
+        {
+            for(auto& callback_data : ctx->device_counter_collection->agent_data)
+            {
+                // Only attempt unlock if the device is actually locked
+                if(callback_data.device_locked && callback_data.profile)
+                {
+                    auto unlock_status =
+                        counter_collection_device_unlock(callback_data.profile->agent);
+                    if(unlock_status == ROCPROFILER_STATUS_SUCCESS)
+                    {
+                        callback_data.device_locked = false;
+                    }
+                    else
+                    {
+                        ROCP_WARNING << fmt::format(
+                            "Failed to unlock device for agent {} during finalization.",
+                            callback_data.agent_id.handle);
+                    }
+                }
+            }
+        }
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
