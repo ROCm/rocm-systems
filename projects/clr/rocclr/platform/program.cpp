@@ -33,6 +33,13 @@
 
 namespace amd {
 
+static bool isSpirv(const void* image, size_t size) {
+  if (size < 8) return false;
+  const uint32_t *words = reinterpret_cast<const uint32_t*>(image);
+  const uint32_t spirv_magic = 0x07230203;
+  return words[1] == spirv_magic;
+}
+
 static void remove_g_option(std::string& option) {
   // Remove " -g " option from application.
   // People can still add -g in AMD_OCL_BUILD_OPTIONS_APPEND, if it is so desired.
@@ -93,7 +100,9 @@ const Symbol* Program::findSymbol(const char* kernelName) const {
 int32_t Program::addDeviceProgram(Device& device, const void* image, size_t length, bool make_copy,
                                   amd::option::Options* options, const amd::Program* same_prog,
                                   amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
-  if (image != NULL && !amd::Elf::isElfMagic((const char*)image)) {
+  // Accept ELF or SPIRV binaries
+  if (image != NULL && !amd::Elf::isElfMagic((const char*)image) &&
+      !isSpirv(image, length)) {
     return CL_INVALID_BINARY;
   }
 

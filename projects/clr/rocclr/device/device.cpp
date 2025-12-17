@@ -1526,6 +1526,9 @@ bool ClBinary::isSPIRV() const {
   char* section = nullptr;
   size_t sz = 0;
 
+  if (!elfIn_) {
+    return false;
+  }
   if (elfIn_->getSection(amd::Elf::SPIRV, &section, &sz) && section && sz > 0) {
     return true;
   }

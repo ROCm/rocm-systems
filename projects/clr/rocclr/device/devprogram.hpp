@@ -121,6 +121,7 @@ class Program : public amd::HeapObject {
       uint32_t isHIP_ : 1;            //!< Determine if the program is for HIP
       uint32_t coLoaded_ : 1;         //!< Has the code objected been loaded
       uint32_t trapHandler_ : 1;      //!< It is a trap handler for debugger
+      uint32_t isSpirv_ : 1;          //!< Is SPIRV
     };
     uint32_t flags_;  //!< Program flags
   };

@@ -27,6 +27,7 @@
 #include "devkernel.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
+#include "utils/util.hpp"
 #include "comgrctx.hpp"
 
 #include <algorithm>
@@ -52,6 +53,13 @@ inline static std::vector<std::string> splitSpaceSeparatedString(const char* str
   std::istream_iterator<std::string> beg(ss), end;
   std::vector<std::string> vec(beg, end);
   return vec;
+}
+
+inline static bool isSpirv(const char* binary, size_t size) {
+  if (size < 8) return false;
+  const uint32_t* words = reinterpret_cast<const uint32_t*>(binary);
+  const uint32_t spirv_magic = 0x07230203;
+  return words[1] == spirv_magic;
 }
 
 // ================================================================================================
@@ -802,6 +810,86 @@ bool Program::linkImpl(amd::option::Options* options) {
       bLinkLLVMBitcode = false;
       break;
     }
+    case FILE_TYPE_SPIRV_BINARY: {
+      amd::Comgr::destroy_data_set(inputs);
+
+      // Get SPIRV binary, compile it to machine code,
+      // then update clBinary to refer to its Kernel.
+
+      const char *spirvSection = llvmBinary_.data();
+      size_t spirvSize = llvmBinary_.size();
+
+      amd_comgr_data_set_t spirvDataSet;
+      if (amd::Comgr::create_data_set(&spirvDataSet) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard spirvDataSetGuard([&]() { amd::Comgr::destroy_data_set(spirvDataSet); });
+      amd_comgr_data_t spirvData;
+      if (amd::Comgr::create_data(AMD_COMGR_DATA_KIND_SPIRV, &spirvData) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard spirvDataGuard([&]() { amd::Comgr::release_data(spirvData); });
+      if (amd::Comgr::set_data(spirvData, spirvSize, spirvSection) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      if (amd::Comgr::set_data_name(spirvData, "offloadhiprtc.spv") != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      if (amd::Comgr::data_set_add(spirvDataSet, spirvData) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+
+      // Spirv -> Reloc
+      amd_comgr_action_info_t relocAction;
+      if (amd::Comgr::create_action_info(&relocAction) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard relocActionGuard([&]() { amd::Comgr::destroy_action_info(relocAction); });
+      std::string isa = device().isa().isaName();
+      if (amd::Comgr::action_info_set_isa_name(relocAction, isa.c_str()) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd_comgr_data_set_t relocDataSet;
+      if (amd::Comgr::create_data_set(&relocDataSet) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard relocDataSetGuard([&]() { amd::Comgr::destroy_data_set(relocDataSet); });
+      if (amd::Comgr::action_info_set_device_lib_linking(relocAction, true) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      if (amd::Comgr::do_action(AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE, relocAction,
+                                spirvDataSet, relocDataSet) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+
+      // Reloc -> Linked Exe
+      amd_comgr_action_info_t exeAction;
+      if (amd::Comgr::create_action_info(&exeAction) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard exeActionGuard([&]() { amd::Comgr::destroy_action_info(exeAction); });
+      if (amd::Comgr::action_info_set_isa_name(exeAction, isa.c_str()) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd_comgr_data_set_t exeDataSet;
+      if (amd::Comgr::create_data_set(&exeDataSet) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard exeDataSetGuard([&]() { amd::Comgr::destroy_data_set(exeDataSet); });
+      if (amd::Comgr::do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, exeAction,
+                                relocDataSet, exeDataSet) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+
+      // Linked Exe -> Kernel in exeBuffer
+      amd_comgr_data_t exeData;
+      if (amd::Comgr::action_data_get_data(exeDataSet, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &exeData) !=
+          AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      amd::ScopeGuard exeDataGuard([&]() { amd::Comgr::release_data(exeData); });
+      size_t exeSize = 0;
+      if (amd::Comgr::get_data(exeData, &exeSize, nullptr) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      char *exeBuffer = new char[exeSize];
+      amd::ScopeGuard exeBufferGuard([&]() { delete[] exeBuffer; });
+      if (amd::Comgr::get_data(exeData, &exeSize, exeBuffer) != AMD_COMGR_STATUS_SUCCESS)
+        return false;
+      if (GPU_DUMP_CODE_OBJECT)
+        dumpCodeObject(std::string{exeBuffer, exeSize});
+      if (!createKernels(exeBuffer, exeSize, options->oVariables->UniformWorkGroupSize, internal_))
+        return false;
+
+      exeBufferGuard.Dismiss();
+      clBinary()->setBinary(exeBuffer, exeSize, /*allocated=*/true);
+      setType(TYPE_EXECUTABLE);
+      return true;
+    }
     case FILE_TYPE_ISA: {
       amd::Comgr::destroy_data_set(inputs);
       binary_t isaBinary = binary();
@@ -1311,7 +1399,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
     }
   }
 
-  if (options->oVariables->FP32RoundDivideSqrt &&
+  if (options->oVariables && options->oVariables->FP32RoundDivideSqrt &&
       !(device().info().singleFPConfig_ & CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT)) {
     buildStatus_ = CL_BUILD_ERROR;
     buildLog_ +=
@@ -1572,6 +1660,19 @@ void Program::addKernel(Kernel* k) {
 // ================================================================================================
 bool Program::setBinary(const char* binaryIn, size_t size, const device::Program* same_dev_prog,
                         amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+  if (isSpirv(binaryIn, size)) {
+    isSpirv_ = true;
+    uint32_t spirvSize = *reinterpret_cast<const uint32_t*>(binaryIn);
+    const char *spirvData = binaryIn + sizeof(uint32_t);
+    llvmBinary_.assign(spirvData, spirvSize);
+    setType(TYPE_INTERMEDIATE);
+    if (same_dev_prog != nullptr) {
+      compileOptions_ = same_dev_prog->compileOptions();
+      linkOptions_ = same_dev_prog->linkOptions();
+    }
+    return true;
+  }
+
   if (!initClBinary(binaryIn, size, fdesc, foffset, uri)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, "Init CL Binary failed \n");
     return false;
@@ -1588,7 +1689,12 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
   }
   switch (type) {
     case ET_NONE: {
-      setType(TYPE_NONE);
+      // ET_NONE ELFs can still contain SPIR-V sections (used by HIPRTC SPIRV output)
+      if (clBinary()->isSPIRV()) {
+        setType(TYPE_INTERMEDIATE);
+      } else {
+        setType(TYPE_NONE);
+      }
       break;
     }
     case ET_REL: {
@@ -1640,8 +1746,15 @@ Program::file_type_t Program::getCompilationStagesFromBinary(
   // Checking llvmir in .llvmir section
   bool containsLlvmirText = (type() == TYPE_COMPILED);
   bool containsShaderIsa = (type() == TYPE_EXECUTABLE);
+  // TYPE_INTERMEDIATE means the binary contains SPIRV
+  // Note: We can't call isSPIRV() here because elfIn_ may have been reset after setBinary()
+  bool containsSpirvBinary = (type() == TYPE_INTERMEDIATE);
   bool containsOpts = !(compileOptions_.empty() && linkOptions_.empty());
 
+  if (containsSpirvBinary) {
+    completeStages.push_back(from);
+    from = FILE_TYPE_SPIRV_BINARY;
+  }
   if (containsLlvmirText && containsOpts) {
     completeStages.push_back(from);
     from = FILE_TYPE_LLVMIR_BINARY;
