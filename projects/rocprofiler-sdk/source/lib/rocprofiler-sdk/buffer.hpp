@@ -48,8 +48,8 @@ struct instance
     static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 
     mutable std::array<buffer_t, size>         buffers       = {};
-    mutable std::array<std::atomic_flag, size> syncer        = {ATOMIC_FLAG_INIT};  // r/w lock
-    mutable std::atomic<uint32_t>              buffer_idx    = {};                  // array index
+    mutable std::array<std::atomic_flag, size> syncer        = {false, false};  // r/w lock
+    mutable std::atomic<uint32_t>              buffer_idx    = {};              // array index
     mutable std::atomic<uint64_t>              drop_count    = {};
     uint64_t                                   watermark     = 0;
     uint64_t                                   context_id    = 0;  // rocprofiler_context_id_t value

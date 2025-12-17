@@ -161,7 +161,8 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     if(wait) task_group->wait();
 
-    auto idx = buff->buffer_idx++ % buff->buffers.size();
+    auto idx = buff->buffer_idx++;
+    idx %= buff->buffers.size();
 
     ROCP_INFO << fmt::format("executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
 
