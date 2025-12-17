@@ -139,3 +139,6 @@ See [Installing the all open use case](https://amdgpu-install.readthedocs.io/en/
 
 ## Documentation
 For detailed documentation including installation guides, configuration options, and metric descriptions, please refer to [Use ROCm on Radeon and Ryzen](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html#)
+
+## Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your WSL environment, building, and submitting pull requests.
