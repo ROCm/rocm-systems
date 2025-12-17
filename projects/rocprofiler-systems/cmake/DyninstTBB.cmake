@@ -88,32 +88,24 @@ if(TBB_FOUND)
     set(TBB_LIBRARY_DIRS ${TBB_LIBRARY_DIRS} CACHE PATH "TBB library directory" FORCE)
     set(TBB_DEFINITIONS ${TBB_DEFINITIONS} CACHE STRING "TBB compiler definitions" FORCE)
     set(TBB_LIBRARIES ${TBB_LIBRARIES} CACHE FILEPATH "TBB library files" FORCE)
-elseif(STERILE_BUILD)
-    rocprofiler_systems_message(
-        FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
-    )
 elseif(NOT ROCPROFSYS_BUILD_TBB)
     rocprofiler_systems_message(
         FATAL_ERROR
         "TBB was not found. Either configure cmake to find TBB properly or set ROCPROFSYS_BUILD_TBB=ON to download and build"
     )
 else()
-    # If we didn't find a suitable version on the system, then download one from the web
-    rocprofiler_systems_message(STATUS "${ThreadingBuildingBlocks_ERROR_REASON}")
-    rocprofiler_systems_message(
-        STATUS "Attempting to build TBB(${TBB_MIN_VERSION}) as external project"
+    rocprofiler_systems_add_cache_option(
+        ROCPROFSYS_TBB_DOWNLOAD_VERSION "Version of TBB to download and install"
+        STRING "2022.3.0"
     )
 
-    if(NOT UNIX)
-        rocprofiler_systems_message(
-            FATAL_ERROR "Building TBB from source is not supported on this platform"
-        )
-    endif()
+    rocprofiler_systems_message(
+        STATUS "Attempting to build TBB(${ROCPROFSYS_TBB_DOWNLOAD_VERSION}) as external project"
+    )
 
     set(TBB_ROOT_DIR ${TPL_STAGING_PREFIX}/tbb CACHE PATH "TBB root directory" FORCE)
 
     set(_tbb_libraries)
-    set(_tbb_components_cfg)
     set(_tbb_library_dirs
         $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib>
         $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>
@@ -132,49 +124,26 @@ else()
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/lib")
 
     foreach(c ${_tbb_components})
-        # Generate make target names
-        if(${c} STREQUAL tbbmalloc_proxy)
-            # tbbmalloc_proxy is spelled tbbproxy in their Makefiles
-            list(APPEND _tbb_components_cfg tbbproxy_release)
-        else()
-            list(APPEND _tbb_components_cfg ${c}_release)
-        endif()
-
         set(_tbb_${c}_lib
             $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}>
             $<INSTALL_INTERFACE:${c}>
         )
 
-        # Generate library filenames
         list(APPEND _tbb_libraries ${_tbb_${c}_lib})
         list(
             APPEND _tbb_build_byproducts
             "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}"
         )
-
-        foreach(t RELEASE DEBUG)
-            set(TBB_${c}_LIBRARY_${t} "${_tbb_${c}_lib}" CACHE FILEPATH "" FORCE)
-        endforeach()
     endforeach()
 
     set(TBB_LIBRARIES "${_tbb_libraries}" CACHE FILEPATH "TBB library files" FORCE)
-
-    # Split the dotted decimal version into major/minor parts
-    string(REGEX REPLACE "\\." ";" _tbb_download_name ${TBB_MIN_VERSION})
-    list(GET _tbb_download_name 0 _tbb_ver_major)
-    list(GET _tbb_download_name 1 _tbb_ver_minor)
-
-    # Set the compiler for TBB It assumes gcc and tests for Intel, so clang is the only
-    # one that needs special treatment.
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-        set(_tbb_compiler "compiler=clang")
-    endif()
 
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-tbb-build
         PREFIX ${TBB_ROOT_DIR}
-        URL https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v2022.3.0.tar.gz
+        URL
+            https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v${ROCPROFSYS_TBB_DOWNLOAD_VERSION}.tar.gz
         CMAKE_ARGS
             -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_BUILD_TYPE=Release
@@ -185,16 +154,12 @@ else()
         INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
     )
 
-    # Strip debug symbols from installed libraries
     if(CMAKE_STRIP)
         add_custom_command(
             TARGET rocprofiler-systems-tbb-build
             POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "Stripping TBB libraries..."
-            COMMAND
-                bash -c
-                "for lib in ${TBB_ROOT_DIR}/lib/libtbb*.so*; do if [ -f \"$lib\" ] && [ ! -L \"$lib\" ]; then ${CMAKE_STRIP} \"$lib\" 2>/dev/null || true; fi; done"
-            COMMENT "Stripping debug symbols from TBB libraries..."
+            COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} ${TBB_ROOT_DIR}/lib/libtbb*.so*
+            COMMENT "Stripping TBB libraries in ${TBB_ROOT_DIR}/lib ..."
         )
     endif()
 
