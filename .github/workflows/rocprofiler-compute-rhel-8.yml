@@ -83,6 +83,7 @@ jobs:
         run: |
           python3 -m pip install -r requirements.txt
           python3 -m pip install -r requirements-test.txt
+          python3 -m pip install cmake
       - name: Configure and install
         working-directory: projects/rocprofiler-compute
         run: |
