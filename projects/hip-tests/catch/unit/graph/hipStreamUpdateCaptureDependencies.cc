@@ -469,7 +469,149 @@ TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters") {
 
   HIP_CHECK(hipGraphDestroy(graph));
 }
+/**
+ * Test Description
+ * ------------------------
+ * - Nodes that are removed from the dependency set via
+ * hipStreamUpdateCaptureDependencies  API do not result in
+ * hipErrorStreamCaptureUnjoined.
+ * 1) Enable capture on stream stream
+ * 2) Enqueue work on capture stream s1
+ * 3) Enqueue eventRecord on stream s1
+ * 4) eventWait on stream s2
+ * 5) Enqueue work on stream s2
+ * 6) Replace capture dependencies with hipStreamUpdateCaptureDependencies
+ * 7) End capture on s1
+ * Test source
+ * ------------------------
+ * - catch\unit\graph\hipStreamUpdateCaptureDependencies.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.0
+ */
+TEST_CASE(
+    "Unit_hipStreamUpdateCaptureDependencies_replace_capture_dependency") {
+  hipGraph_t graph{nullptr};
+  hipGraphExec_t graphExec;
+  size_t N = 10;
+  size_t Nbytes = N * sizeof(int);
+  int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
+  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
+  const auto stream_type = Streams::created;
+  StreamGuard stream_guard1(stream_type);
+  StreamGuard stream_guard2(stream_type);
+  hipStream_t stream1 = stream_guard1.stream();
+  hipStream_t stream2 = stream_guard2.stream();
+  EventsGuard events(3);
+  std::vector<hipGraphNode_t> dependencies;
+  hipStreamCaptureMode captureMode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+               hipStreamCaptureModeRelaxed);
 
+  HIP_CHECK(hipStreamBeginCapture(stream1, captureMode));
+
+  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
+
+  HIP_CHECK(hipEventRecord(events[0], stream1));
+
+  HIP_CHECK(hipStreamWaitEvent(stream2, events[1], 0))
+  HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream2));
+
+  size_t numDependencies;
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
+  hipGraph_t capInfoGraph{nullptr};
+  hipGraphNode_t *nodelist{};
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream1, &captureStatus, nullptr,
+                                       &capInfoGraph, &nodelist,
+                                       &numDependencies));
+  dependencies.push_back(*nodelist);
+  constexpr auto blocksPerCU = 6;  // to hide latency
+  constexpr auto threadsPerBlock = 256;
+  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
+  hipGraphNode_t kNode;
+  hipKernelNodeParams kNodeParams{};
+  void *kernelArgs[] = {&A_d, &C_d, reinterpret_cast<void *>(&N)};
+  kNodeParams.func = reinterpret_cast<void *>(HipTest::vector_square<int>);
+  kNodeParams.gridDim = dim3(blocks);
+  kNodeParams.blockDim = dim3(threadsPerBlock);
+  kNodeParams.kernelParams = reinterpret_cast<void **>(kernelArgs);
+  HIP_CHECK(hipGraphAddKernelNode(&kNode, capInfoGraph, dependencies.data(),
+                                  dependencies.size(), &kNodeParams));
+
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream1, &captureStatus, nullptr,
+                                       &capInfoGraph, &nodelist,
+                                       &numDependencies));
+
+  HIP_CHECK(hipStreamUpdateCaptureDependencies(
+      stream1, &kNode, 1, hipStreamSetCaptureDependencies));
+
+  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
+
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream1));
+  HIP_CHECK(hipStreamSynchronize(stream1));
+  for (int i = 0; i < N; i++) {
+    INFO("Array FAILURE at Index: "<< i << "\nval : " <<C_h[i]);
+    REQUIRE(C_h[i] == A_h[i] * A_h[i]);
+  }
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HipTest::freeArrays<int>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+}
+
+/**
+ * -Test to verify API behavior with null stream/hipStreamLegacy
+ * Test source
+ * ------------------------
+ * - catch\unit\graph\hipStreamUpdateCaptureDependencies.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_null_stream") {
+#if HT_NVIDIA  // SWDEV-543811
+  constexpr int Nbytes = 100;
+  hipGraph_t capInfoGraph{nullptr};
+  hipStreamCaptureStatus captureStatus;
+  size_t numDependencies;
+  hipGraphNode_t *nodelist{};
+  hipGraphNode_t memsetNode{};
+  std::vector<hipGraphNode_t> dependencies;
+
+  LinearAllocGuard<char> A_d(LinearAllocs::hipMalloc, Nbytes);
+
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+  hipStreamCaptureMode captureMode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+               hipStreamCaptureModeRelaxed);
+
+  HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
+  HIP_CHECK(hipMemsetAsync(A_d.ptr(), 0, Nbytes, stream));
+
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr,
+                                       &capInfoGraph, &nodelist,
+                                       &numDependencies));
+
+  hipMemsetParams memsetParams{};
+  memsetParams.dst = reinterpret_cast<void *>(A_d.ptr());
+  memsetParams.value = 1;
+  memsetParams.pitch = 0;
+  memsetParams.elementSize = sizeof(char);
+  memsetParams.width = Nbytes;
+  memsetParams.height = 1;
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, capInfoGraph, nodelist,
+                                  numDependencies, &memsetParams));
+  dependencies.push_back(memsetNode);
+
+  HIP_CHECK_ERROR(hipStreamUpdateCaptureDependencies(
+                      nullptr, dependencies.data(), dependencies.size(),
+                      hipStreamAddCaptureDependencies),
+                  hipErrorStreamCaptureImplicit);
+#endif
+}
 /**
  * End doxygen group GraphTest.
  * @}
