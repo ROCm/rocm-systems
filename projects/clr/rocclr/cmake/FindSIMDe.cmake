@@ -20,7 +20,7 @@
 
 include(FindPackageHandleStandardArgs)
 
-find_package(PkgConfig REQUIRED)
+find_package(PkgConfig)
 if(PkgConfig_FOUND)
     pkg_check_modules(simde IMPORTED_TARGET simde)
 endif()
@@ -29,9 +29,8 @@ if(PkgConfig_FOUND AND simde_FOUND)
     message(STATUS "Found SIMDe via pkg-config")
     set(SIMDE_TARGET PkgConfig::simde)
 else()
-    message(STATUS "SIMDe not found via pkg-config. Falling back to find_path...")
-
     if(WIN32)
+        message(STATUS "SIMDe not found via pkg-config. Falling back to find_path in ENV{DK_ROOT}")
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
             PATHS
@@ -39,6 +38,7 @@ else()
             NO_DEFAULT_PATH
     )
     elseif(UNIX)
+        message(STATUS "SIMDe not found via pkg-config. Falling back to find_path in default installed path")
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
             PATHS
@@ -58,6 +58,6 @@ else()
         endif()
         set(SIMDE_TARGET SIMDE)
     else()
-        message(WARNING "could not find simde")
+        message(WARNING "Could not find simde, install simde package - Linux: libsimde-dev or Windows: update DK/simde")
     endif()
 endif()
