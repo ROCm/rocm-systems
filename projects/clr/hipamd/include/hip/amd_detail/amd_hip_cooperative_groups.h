@@ -114,6 +114,10 @@ class thread_group {
    *           be avoided with synchronization of the group.
    */
   __CG_QUALIFIER__ void sync() const;
+  //! Returns the mask of the group.
+  __CG_QUALIFIER__ unsigned int get_mask() const {
+    return (coalesced_info.member_mask);
+  }
 };
 /**
  *  @defgroup CooperativeG Cooperative Groups
@@ -1276,6 +1280,80 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
     return coalesced_group(mask);
   } else {
     return coalesced_group(tgrp.build_mask() ^ mask);
+  }
+}
+
+// Non-STL utility templates
+template <typename Ty>
+using remove_qual = typename __hip_internal::remove_cv<typename std::remove_reference<Ty>::type>::type;
+
+template <typename TyLhs, typename TyRhs>
+using is_op_type_same = __hip_internal::is_same<remove_qual<TyLhs>, remove_qual<TyRhs>
+>;
+
+// Retrieve mask of coalesced groups and tiles
+template <typename TyGroup>
+__CG_STATIC_QUALIFIER__ unsigned int get_mask(const TyGroup &group) {
+    return group.get_mask();
+}
+
+template <class T>
+struct MinOp {
+  T operator()(const T& lhs, const T& rhs) const
+  {
+    return std::min(lhs, rhs);
+  }
+};
+
+template <class T>
+struct MaxOp {
+  T operator()(const T& lhs, const T& rhs) const
+  {
+    return std::max(lhs, rhs);
+  }
+};
+
+template <class T>
+struct XorOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  {
+    return (!lhs) != (!rhs) == 1;
+  }
+};
+
+template <typename TyGroup, typename TyVal, typename TyFn>
+__CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> decltype(op(val, val)) {
+  static_assert(is_op_type_same<TyVal, decltype(op(val, val))>::value, "Operator input and output types differ");
+
+  if constexpr (!std::is_same<TyGroup, cooperative_groups::tiled_group>::value &&
+                !std::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
+    static_assert(std::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
+  }
+  unsigned mask = get_mask(group);
+
+  using Op  = std::decay_t<TyFn>;
+  using Val = std::decay_t<TyVal>;
+
+  if constexpr (std::is_same<Op, std::plus<Val>>::value) {
+    return __reduce_add_sync(mask, val);
+  }
+  else if constexpr (std::is_same<Op, std::logical_and<Val>>::value) {
+    return __reduce_and_sync(mask, val);
+  }
+  else if constexpr (std::is_same<Op, std::logical_or<Val>>::value) {
+    return __reduce_or_sync(mask, val);
+  }
+  else if constexpr (std::is_same<Op, MinOp<Val>>::value) {
+    return __reduce_min_sync(mask, val);
+  }
+  else if constexpr (std::is_same<Op, MaxOp<Val>>::value) {
+    return __reduce_max_sync(mask, val);
+  }
+  else if constexpr (std::is_same<Op, XorOp<Val>>::value) {
+    return __reduce_xor_sync(mask, val);
+  }
+  else {
+    return __reduce_op_sync(mask, val, op, nullptr);
   }
 }
 #endif
