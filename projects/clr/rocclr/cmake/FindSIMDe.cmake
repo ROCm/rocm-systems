@@ -35,6 +35,7 @@ else()
             NAMES simde/simde-common.h
             PATHS
                 "$ENV{DK_ROOT}/simde"
+                "${THEROCK_BINARY_DIR}/third-party/simde/source"
             NO_DEFAULT_PATH
     )
     elseif(UNIX)
