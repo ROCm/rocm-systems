@@ -148,7 +148,7 @@ class RocProfCompute_Base:
                     f"or turn off iteration multiplexing."
                 ),
             )
-            with open(f"{self.__args.path}/profiling_config.yaml", "a") as f:
+            with open(f"{args.path}/profiling_config.yaml", "a") as f:
                 yaml.dump(
                     {"kernels_with_missing_counters": kernels_with_missing_counters}, f
                 )

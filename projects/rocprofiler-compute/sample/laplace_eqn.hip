@@ -88,6 +88,8 @@ __global__ void jacobi_iteration(float *__restrict__ U_new,
     }
   }
 
+  __syncthreads();
+
   if (i < N && j < N) {
     int east = s_idx - tile_height;
     int west = s_idx + tile_height;
@@ -206,6 +208,10 @@ int main(int argc, char *argv[]) {
   HIP_CHECK(hipFree(d_U_mid_old));
   HIP_CHECK(hipFree(d_U_large_new));
   HIP_CHECK(hipFree(d_U_large_old));
+
+  delete[] h_U_small;
+  delete[] h_U_mid;
+  delete[] h_U_large;
 
   return 0;
 }

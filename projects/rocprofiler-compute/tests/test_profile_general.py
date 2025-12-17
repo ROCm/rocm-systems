@@ -544,9 +544,8 @@ def are_stochastic_counters_similar(test_dfs, baseline_df):
 def are_deterministic_counters_equal(test_dfs, baseline_df):
     """
     Compares multiple test dataframes against a baseline dataframe to check
-    if the detrministic counter values are equal. Returns True if all test dataframes
-    have equal counter values
-       to the baseline, otherwise returns False.
+    if the deterministic counter values are equal. Returns True if all test dataframes
+    have equal counter values to the baseline, otherwise returns False.
     """
     group_labels = [
         "Kernel_Name",
