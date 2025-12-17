@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#define GNU_SOURCE 1
+#define _GNU_SOURCE 1
 
 #include "lib/common/dl.hpp"
 #include "lib/common/environment.hpp"

@@ -210,7 +210,7 @@ set_rocprofiler_register_library()
         // ensures that rocprofiler-register uses this library path
         if(!_this_library_path.empty() && enabled)
         {
-            // used to check for conflicts is already set
+            // used to check for conflicts if already set
             auto _existing = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
             if(_existing.empty() ||
                common::get_env("ROCPROFILER_FORCE_ROCPROFILER_REGISTER_LIBRARY", false))
