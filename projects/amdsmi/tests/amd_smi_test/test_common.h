@@ -63,10 +63,9 @@ static amdsmi_status_t NotSupportedErrorCodes[] = {
   amdsmi_status_t retExpected[] = {__VA_ARGS__}; \
   int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]); \
   amdsmi_status_t RET_EXPECTED = retExpected[0]; \
-  auto it = std::find(std::begin(retExpected), std::end(retExpected), (RET)); \
-  if (it != std::end(retExpected)) { \
-    RET_EXPECTED = (RET); \
-  } \
+  int i; \
+  for (i=0; i<numRetExpected; ++i) if ((RET) == retExpected[i]) break; \
+  if (i < numRetExpected) RET_EXPECTED = (RET); \
   if ((RET) != RET_EXPECTED) { \
     const char *_err; \
     std::string err_str; \
@@ -81,8 +80,9 @@ static amdsmi_status_t NotSupportedErrorCodes[] = {
     std::string status_expected_str = !err_str.empty() ? err_str : "Unknown"; \
     pos = status_expected_str.find(":"); \
     if (pos != std::string::npos) status_expected_str = status_expected_str.substr(0, pos); \
-    auto it = std::find(std::begin(NotSupportedErrorCodes),std::end(NotSupportedErrorCodes), (RET)); \
-    if (it != std::end(NotSupportedErrorCodes)) { \
+    int numNotSupportedErrorCodes = sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]); \
+    for (i=0; i<numNotSupportedErrorCodes ; ++i) if ((RET) == NotSupportedErrorCodes[i]) break; \
+    if (i < numNotSupportedErrorCodes) { \
       std::cout << "\t===> AMDSMI API Returned " << (RET) << ", " << status_str << std::endl; \
     } else { \
       std::string start_dir = std::string(__FILE__); \
