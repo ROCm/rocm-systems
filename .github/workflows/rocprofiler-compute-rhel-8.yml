@@ -54,6 +54,7 @@ jobs:
             yum -y install python39
             yum -y install python39-devel
             alternatives --set python3 /usr/bin/python3.9
+            rm /usr/bin/python3.11
           else
             yum -y install python3-devel
           fi
