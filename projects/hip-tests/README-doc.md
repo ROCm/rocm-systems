@@ -50,7 +50,7 @@ HIP catch tests are built under the folder `$HIP_TESTS_DIR/build`.
 
 HIP tests can be built for a specific arch, users can pass `-DOFFLOAD_ARCH_STR="--offload-arch=gfx90a"` along with the cmake config command.
 
-### SPIR-V mode
+### SPIRV mode
 
 HIP tests can be built with SPIRV offload arch, to enable it users can pass `-DENABLE_SPIRV=ON` to cmake config command.
 
