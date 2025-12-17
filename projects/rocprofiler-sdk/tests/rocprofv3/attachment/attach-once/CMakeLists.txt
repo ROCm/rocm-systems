@@ -25,14 +25,15 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
+# Set ROCPROF_PRELOAD env var for the shell script to use (just the library path, not the
+# full assignment)
 set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    "ROCPROF_PRELOAD=${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
-# Test that launches the app and attaches to it (CSV format)
+# Test that launches the app and attaches to it (CSV format) Note: Don't pass PRELOAD here
+# - the test function automatically adds ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE We set
+# ROCPROF_PRELOAD in ENVIRONMENT for the shell script to use when launching subprocesses
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-once
     COMMAND
@@ -43,7 +44,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 60
     LABELS "integration-tests;attachment"
     DISABLED ${IS_DISABLED}
-    PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "${attachment-env}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-once
