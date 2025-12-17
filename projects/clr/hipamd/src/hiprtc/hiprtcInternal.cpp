@@ -175,7 +175,10 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
           [](const std::string& str) { return str.find("--offload-arch=") != std::string::npos; });
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
-    isa_ = "amdgcn-amd-amdhsa--" + isaName;
+    if (isaName == "amdgcnspirv")
+      isa_ = "spirv64-amd-amdhsa--" + isaName;
+    else
+      isa_ = "amdgcn-amd-amdhsa--" + isaName;
     settings_.offloadArchProvided = true;
     return true;
   }
