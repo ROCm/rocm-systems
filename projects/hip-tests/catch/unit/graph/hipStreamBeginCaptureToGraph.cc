@@ -326,8 +326,11 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph") {
   std::vector<hipGraphNode_t> vnode;
   vnode.push_back(memcpyNode1);
   vnode.push_back(memcpyNode2);
+  hipStreamCaptureMode mode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+               hipStreamCaptureModeRelaxed);
   HIP_CHECK(hipStreamBeginCaptureToGraph(stream, graph, vnode.data(), nullptr, vnode.size(),
-                                         hipStreamCaptureModeGlobal));
+                                         mode));
   HipTest::vectorSUB<<<dim3(blocks), dim3(threadsPerBlock), 0, stream>>>(A1_d, B1_d, C2_d, N);
   HIP_CHECK(hipMemcpyAsync(C2_h.data(), C2_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
@@ -1266,5 +1269,147 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads") {
   HIP_CHECK(hipFree(B2_d));
   HIP_CHECK(hipFree(C2_d));
   fprintf(stderr, "Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads\n");
+}
+#endif
+
+/**
+ * Test Description
+ * ------------------------
+ *   - This test case will perform below scenario
+ *     1) Begin capture on stream with graph  with dependencies as few leaf
+ * nodes. 2) Enqueue work on capture stream , adds nodes as dependencies 3) Add
+ * nodes with manual APIs to the graph 4) End capture on stream returns updated
+ * graph
+ * Test Source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCaptureToGraph.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipStreamBeginCaptureToGraph_addNodesWithManualApis") {
+  hipGraphExec_t graphExec{nullptr};
+  int *A1_d, *B1_d, *C1_d, *C2_d, *C3_d;
+  std::vector<int> A1_h(N), B1_h(N), C1_h(N), C2_h(N), C3_h(N);
+  size_t Nbytes = N * sizeof(int);
+  hipStream_t stream;
+  hipGraph_t graph{nullptr};
+  hipGraphNode_t memcpyNode1, memcpyNode2, memcpyNode3, memcpyNode4;
+  hipGraphNode_t kernelNode, kernelNode2;
+
+  // Fill with data
+  for (size_t i = 0; i < N; i++) {
+    A1_h[i] = 2 * i;
+    B1_h[i] = 2 * i + 1;
+  }
+
+  // Create stream and empty graph
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  // Allocate device resources
+  HIP_CHECK(hipMalloc(&A1_d, Nbytes));
+  HIP_CHECK(hipMalloc(&B1_d, Nbytes));
+  HIP_CHECK(hipMalloc(&C1_d, Nbytes));
+  HIP_CHECK(hipMalloc(&C2_d, Nbytes));
+  HIP_CHECK(hipMalloc(&C3_d, Nbytes));
+
+  // Create manual graph
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode1, graph, nullptr, 0, A1_d,
+                                    A1_h.data(), Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode2, graph, nullptr, 0, B1_d,
+                                    B1_h.data(), Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode3, graph, nullptr, 0,
+                                    C1_h.data(), C1_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
+  size_t arrSize = N;
+  void *kernelArgs[4] = {reinterpret_cast<void *>(&A1_d),
+                         reinterpret_cast<void *>(&B1_d),
+                         reinterpret_cast<void *>(&C1_d), &arrSize};
+  hipKernelNodeParams kernelNodeParams{};
+  kernelNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  kernelNodeParams.gridDim = dim3(blocks, 1, 1);
+  kernelNodeParams.blockDim = dim3(threadsPerBlock, 1, 1);
+  kernelNodeParams.sharedMemBytes = 0;
+  kernelNodeParams.kernelParams = reinterpret_cast<void **>(kernelArgs);
+  kernelNodeParams.extra = nullptr;
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, 0, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode1, &kernelNode, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &memcpyNode2, &kernelNode, 1));
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode, &memcpyNode3, 1));
+
+  // Capture an dependant graph from stream
+  std::vector<hipGraphNode_t> vnode;
+  vnode.push_back(memcpyNode1);
+  vnode.push_back(memcpyNode2);
+  hipStreamCaptureMode mode =
+      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+               hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCaptureToGraph(stream, graph, vnode.data(), nullptr,
+                                         vnode.size(), mode));
+  HipTest::vectorSUB<<<dim3(blocks), dim3(threadsPerBlock), 0, stream>>>(
+      A1_d, B1_d, C2_d, N);
+  HIP_CHECK(
+      hipMemcpyAsync(C2_h.data(), C2_d, Nbytes, hipMemcpyDeviceToHost, stream));
+  // Add kernel node with manual APIs to the graph
+  void *kernelArgs2[3] = {reinterpret_cast<void *>(&A1_d),
+                          reinterpret_cast<void *>(&C3_d), &arrSize};
+  hipKernelNodeParams kernelNodeParams2{};
+  kernelNodeParams2.func =
+      reinterpret_cast<void *>(HipTest::vector_square<int>);
+  kernelNodeParams2.gridDim = dim3(blocks, 1, 1);
+  kernelNodeParams2.blockDim = dim3(threadsPerBlock, 1, 1);
+  kernelNodeParams2.sharedMemBytes = 0;
+  kernelNodeParams2.kernelParams = reinterpret_cast<void **>(kernelArgs2);
+  kernelNodeParams2.extra = nullptr;
+  HIP_CHECK(
+      hipGraphAddKernelNode(&kernelNode2, graph, 0, 0, &kernelNodeParams2));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode4, graph, nullptr, 0,
+                                    C3_h.data(), C3_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipGraphAddDependencies(graph, &kernelNode2, &memcpyNode4, 1));
+
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  REQUIRE(graph != nullptr);
+  // Instantiate and Launch the graph
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  REQUIRE(graphExec != nullptr);
+  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  bool ret = true;
+  // Verify Manual Graph
+  for (size_t i = 0; i < N; i++) {
+    if (C1_h[i] != (A1_h[i] + B1_h[i])) {
+      fprintf(stderr, "Error at %zu: C1=%d, A1=%d, B1=%d\n", i, C1_h[i],
+              A1_h[i], B1_h[i]);
+      ret = false;
+      break;
+    }
+    if (C2_h[i] != (A1_h[i] - B1_h[i])) {
+      fprintf(stderr, "Error at %zu: C2=%d, A1=%d, B1=%d\n", i, C2_h[i],
+              A1_h[i], B1_h[i]);
+      ret = false;
+      break;
+    }
+    if (C3_h[i] != (A1_h[i] * A1_h[i])) {
+      fprintf(stderr, "Error at %zu: C2=%d, A1=%d\n", i, C3_h[i], A1_h[i]);
+      ret = false;
+      break;
+    }
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(A1_d));
+  HIP_CHECK(hipFree(B1_d));
+  HIP_CHECK(hipFree(C1_d));
+  HIP_CHECK(hipFree(C2_d));
+  HIP_CHECK(hipFree(C3_d));
+  REQUIRE(ret == true);
 }
 #endif
