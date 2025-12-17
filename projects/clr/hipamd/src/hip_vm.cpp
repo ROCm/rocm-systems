@@ -368,7 +368,7 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
 
   if (mem_object) {
     memLocationType = static_cast<hipMemLocationType>(mem_object->getUserData().locationType);
-    if (mem_object->parent()) {
+    if (mem_object->parent() && memLocationType == hipMemLocationTypeHost) {
       size_t accumulated_buffer_size = 0;
       for (auto sub_buffer : mem_object->parent()->subBuffers()) {
         accumulated_buffer_size += sub_buffer->getSize();
