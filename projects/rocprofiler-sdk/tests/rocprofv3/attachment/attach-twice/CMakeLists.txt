@@ -11,7 +11,7 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
-                               "ThreadSanitizer")
+                               "ThreadSanitizer" "LeakSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
     set(IS_DISABLED ON)
