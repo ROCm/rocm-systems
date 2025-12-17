@@ -271,6 +271,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "tag", arg4,
                                           "param", arg5);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5);
 }
 
 void
@@ -284,6 +287,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "worker",
                                           arg1, "buffer", arg2, "count", arg3, "tag",
                                           arg4, "tag_mask", arg5, "param", arg6);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 // RMA operations
@@ -298,6 +304,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",
                                           arg4, "rkey", arg5, "param", arg6);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 void
@@ -310,6 +319,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "remote_addr",
                                           arg4, "rkey", arg5, "param", arg6);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 // Active message send
@@ -325,6 +337,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, unsigne
     category_region<category::ucx>::start(
         std::string_view{ _data.tool_id }, "ep", arg1, "id", arg2, "header", arg3,
         "header_length", arg4, "buffer", arg5, "count", arg6, "param", arg7);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 // Stream operations
@@ -337,6 +352,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, const v
         _data.tool_id.c_str(), arg3);
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "param", arg4);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4);
 }
 
 void
@@ -349,6 +367,9 @@ ucx_gotcha::audit(const gotcha_data& _data, audit::incoming, void* arg1, void* a
     category_region<category::ucx>::start(std::string_view{ _data.tool_id }, "ep", arg1,
                                           "buffer", arg2, "count", arg3, "length", arg4,
                                           "param", arg5);
+
+    // Also trigger communication data tracking
+    comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5);
 }
 
 void
