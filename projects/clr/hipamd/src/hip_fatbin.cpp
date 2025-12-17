@@ -48,22 +48,16 @@ FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
 }
 
 FatBinaryInfo::~FatBinaryInfo() {
-  // Different devices in the same model have the same binary_image_
-  std::set<const void*> toDelete;
+  // Release Code object allocations
+  for (const auto& i : code_obj_allocations_) {
+    delete[] reinterpret_cast<const char*>(i);
+  }
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
-      auto& binaryInfo = dev_programs_[dev_id]->binary(*g_devices[dev_id]->devices()[0]);
-      if (std::get<0>(binaryInfo) && std::get<1>(binaryInfo).second == 0 &&
-          std::get<0>(binaryInfo) != image_) {
-        toDelete.insert(std::get<0>(binaryInfo));
-      }
       dev_programs_[dev_id]->release();
       dev_programs_[dev_id] = nullptr;
     }
-  }
-  for (auto itemData : toDelete) {
-    delete[] reinterpret_cast<const char*>(itemData);
   }
   ReleaseImageAndFile();
 }
@@ -461,6 +455,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
+    // For compressed code objects, we use comgr to extract and make a copy.
+    // Track these to release later
+    std::for_each(code_obj_map.begin(), code_obj_map.end(),
+                  [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
@@ -480,20 +478,12 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        // We need to do this because there is existing mechanism which deletes code object in
-        // destructor. Ideally next set of refactor should sort it.
-        char* co = new char[native_co->second.second];
-        std::memcpy(co, reinterpret_cast<const char*>(native_co->second.first),
-                    native_co->second.second);
-        hip_status = AddDevProgram(device, co, native_co->second.second, 0);
+        hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        char* co = new char[generic_co->second.second];
-        std::memcpy(co, reinterpret_cast<const char*>(generic_co->second.first),
-                    generic_co->second.second);
-        hip_status = AddDevProgram(device, co, generic_co->second.second, 0);
+        hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second, 0);
         if (hip_status != hipSuccess) {
           break;
         }
@@ -619,6 +609,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         }
 
         char* co = new char[co_size];
+        code_obj_allocations_.insert(co); // track to release later
         if (auto comgr_status = amd::Comgr::get_data(exe_data.get(), &co_size, co);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get exe data");
@@ -638,15 +629,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       }
     }
   } while (0);
-
-  // release code objects, only in case of compressed code object
-  // When code object is compressed we extract and copy the memory, but when it static code object,
-  // we use image pointer and its offset
-  if (is_compressed) {
-    for (const auto& co : code_obj_map) {
-      delete[] reinterpret_cast<const char*>(co.second.first);
-    }
-  }
 
   return hip_status;
 }
