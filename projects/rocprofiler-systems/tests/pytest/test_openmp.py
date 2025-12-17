@@ -30,6 +30,8 @@ This module tests OpenMP examples with various configurations:
 - OpenMP VV Host
 - OpenMP VV Offload (GPU)
 - Sampling duration tests
+
+Note: OMPT backend is unavailable and tests are skipped if no GPU is available.
 """
 
 from __future__ import annotations
@@ -107,13 +109,38 @@ def openmp_target_env(ompt_env: dict[str, str]) -> dict[str, str]:
 # Test Class: OpenMP CG Tests
 # ============================================================================
 
-@pytest.mark.libomp
+@pytest.mark.gpu
 class TestOpenMPCG:
     """Tests for OpenMP Conjugate Gradient example."""
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    def test_cg_binary_rewrite(
+    def test_sampling(
+        self,
+        rocprof_config: RocprofsysConfig,
+        test_output_dir: Path,
+        ompt_env: dict[str, str],
+    ):
+        """Test OpenMP CG with sampling instrumentation."""
+        env = ompt_env.copy()
+        env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
+        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="openmp-cg",
+                output_dir=test_output_dir,
+                env=env,
+                timeout=180,
+            )
+        except FileNotFoundError:
+            pytest.skip("openmp-cg target not built")
+
+        result = runner.run()
+        assert result.success, f"CG sampling failed: {result.stderr}"
+
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -148,43 +175,18 @@ class TestOpenMPCG:
         result = runner.run()
         assert result.success, f"CG run failed: {result.stderr}"
 
-    def test_cg_sampling(
-        self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        ompt_env: dict[str, str],
-    ):
-        """Test OpenMP CG with sampling instrumentation."""
-        env = ompt_env.copy()
-        env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
-        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
-
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-cg",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-cg target not built")
-
-        result = runner.run()
-        assert result.success, f"CG sampling failed: {result.stderr}"
-
 
 # ============================================================================
 # Test Class: OpenMP LU Tests
 # ============================================================================
 
-@pytest.mark.libomp
+@pytest.mark.gpu
 class TestOpenMPLU:
     """Tests for OpenMP LU decomposition example."""
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    def test_lu_binary_rewrite(
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -227,7 +229,6 @@ class TestOpenMPLU:
 
 
 @pytest.mark.gpu
-@pytest.mark.libomp
 class TestOpenMPTarget:
     """Tests for OpenMP target offload (GPU) example."""
 
@@ -241,7 +242,7 @@ class TestOpenMPTarget:
         ]
 
 
-    def test_target_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -294,7 +295,7 @@ class TestOpenMPTarget:
             )
             assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
 
-    def test_target_perfetto_validation(
+    def test_perfetto_validation(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -342,11 +343,11 @@ class TestOpenMPTarget:
     ],
     ids=["parallel-for-simd-atomic", "team-default-shared"],
 )
-@pytest.mark.libomp
+@pytest.mark.gpu
 class TestOpenMPVVHost:
     """Tests for OpenMP VV host programs."""
 
-    def test_ompvv_host_baseline(
+    def test_baseline(
             self,
             rocprof_config: RocprofsysConfig,
             test_output_dir: Path,
@@ -368,7 +369,7 @@ class TestOpenMPVVHost:
             result = runner.run()
             assert result.success, f"OMPVV host baseline {target_name} failed: {result.stderr}"
 
-    def test_ompvv_host_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -397,7 +398,7 @@ class TestOpenMPVVHost:
                len(list(result.output_dir.glob("*.json"))) > 0, \
                "No output files created"
 
-    def test_ompvv_host_binary_rewrite(
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -431,7 +432,7 @@ class TestOpenMPVVHost:
 
         assert result.success, f"OMPVV host binary rewrite {target_name} failed: {result.stderr}"
 
-    def test_ompvv_host_runtime_instrument(
+    def test_runtime_instrument(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -460,7 +461,7 @@ class TestOpenMPVVHost:
 
         assert result.success, f"Runtime instrumentation failed for {target_name}: {result.stderr}"
 
-    def test_ompvv_host_run(
+    def test_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -494,7 +495,6 @@ class TestOpenMPVVHost:
 # Test Class: OpenMP-VV Offload (GPU) Tests
 # ============================================================================
 
-@pytest.mark.gpu
 @pytest.mark.parametrize(
     "target_name",
     [
@@ -503,11 +503,11 @@ class TestOpenMPVVHost:
     ],
     ids=["target-simd-if", "target-teams-distribute-parallel-for-collapse"],
 )
-@pytest.mark.libomp
+@pytest.mark.gpu
 class TestOpenMPVVOffload:
     """Tests for OpenMP VV offload programs."""
 
-    def test_ompvv_offload_baseline(
+    def test_baseline(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -529,7 +529,7 @@ class TestOpenMPVVOffload:
         result = runner.run()
         assert result.success, f"OMPVV offload baseline {target_name} failed: {result.stderr}"
 
-    def test_ompvv_offload_sampling(
+    def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -551,7 +551,7 @@ class TestOpenMPVVOffload:
         result = runner.run()
         assert result.success, f"OMPVV offload sampling {target_name} failed: {result.stderr}"
 
-    def test_ompvv_offload_binary_rewrite(
+    def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -585,7 +585,7 @@ class TestOpenMPVVOffload:
 
         assert result.success, f"OMPVV offload binary rewrite {target_name} failed: {result.stderr}"
 
-    def test_ompvv_offload_run(
+    def test_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
@@ -622,8 +622,7 @@ class TestOpenMPVVOffload:
 # Test Class: Sampling Duration Tests
 # ============================================================================
 
-
-@pytest.mark.libomp
+@pytest.mark.gpu
 class TestSamplingDuration:
     """Tests for sampling duration functionality."""
 
@@ -686,7 +685,7 @@ class TestSamplingDuration:
 # Test Class: No Temporary Files Tests
 # ============================================================================
 
-
+@pytest.mark.gpu
 class TestNoTmpFiles:
     """Tests for operation without temporary files."""
 

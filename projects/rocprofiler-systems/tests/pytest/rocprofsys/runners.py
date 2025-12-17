@@ -41,7 +41,22 @@ import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
 
-# Matches CMake's ROCPROFSYS_ABORT_FAIL_REGEX from rocprof-sys-testing.cmake
+# Global registry for test results (cleared after each test)
+_test_results: list["TestResult"] = []
+
+
+def _register_result(result: "TestResult") -> None:
+    """Register a test result for potential output display."""
+    _test_results.append(result)
+
+
+def _get_and_clear_results() -> list["TestResult"]:
+    """Get all registered results and clear the registry."""
+    global _test_results
+    results = _test_results.copy()
+    _test_results = []
+    return results
+
 DEFAULT_FAIL_REGEX = [
     r"### ERROR ###",
     r"unknown-hash=",
@@ -358,7 +373,7 @@ class BaseRunner(ABC):
 
             duration = time.time() - start_time
 
-            return TestResult(
+            test_result = TestResult(
                 returncode=result.returncode,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -372,7 +387,7 @@ class BaseRunner(ABC):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
-            return TestResult(
+            test_result = TestResult(
                 returncode=-1,
                 stdout=e.stdout or "",
                 stderr=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
@@ -383,6 +398,10 @@ class BaseRunner(ABC):
                 pass_regex=self.pass_regex,
                 fail_regex=self.fail_regex,
             )
+
+        # Register result for pytest output hooks
+        _register_result(test_result)
+        return test_result
 
 class BaselineRunner(BaseRunner):
     """Run target without any instrumentation."""

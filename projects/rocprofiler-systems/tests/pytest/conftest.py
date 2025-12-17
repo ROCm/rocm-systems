@@ -47,11 +47,29 @@ from rocprofsys import (
     _get_rocm_version,
     _check_rocm_version,
 )
+from rocprofsys.runners import _get_and_clear_results
 
 
 # ============================================================================
 # Pytest Configuration
 # ============================================================================
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add custom command-line options."""
+    group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
+    group.addoption(
+        "--show-output",
+        action="store_true",
+        default=False,
+        help="Show stdout and stderr from runner commands",
+    )
+    group.addoption(
+        "--show-stderr",
+        action="store_true",
+        default=False,
+        help="Show only stderr from runner commands",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -77,23 +95,6 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')"
     )
-    config.addinivalue_line(
-        "markers", "libomp: mark test as requiring libomp.so"
-    )
-
-def _check_libomp_available() -> bool:
-    """Check if libomp.so is available in ROCm LLVM lib paths."""
-    rocm_path = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-    if not rocm_path.exists():
-        return False
-    candidates = [
-        rocm_path / "llvm" / "lib",
-        rocm_path / "lib" / "llvm" / "lib",
-    ]
-    for candidate in candidates:
-        if (candidate / "libomp.so").exists():
-            return True
-    return False
 
 
 def pytest_collection_modifyitems(
@@ -105,10 +106,8 @@ def pytest_collection_modifyitems(
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
-    skip_libomp = pytest.mark.skip(reason="libomp.so not available")
 
     mpi_available = shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
-    libomp_available = _check_libomp_available()
 
     for item in items:
         if "gpu" in item.keywords and not gpu_info.available:
@@ -116,9 +115,6 @@ def pytest_collection_modifyitems(
 
         if "mpi" in item.keywords and not mpi_available:
             item.add_marker(skip_mpi)
-
-        if "libomp" in item.keywords and not libomp_available:
-            item.add_marker(skip_libomp)
 
         # Check rocm_min_version marker
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
@@ -196,6 +192,57 @@ def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to validation rules directory."""
     return rocprof_config.rocpd_validation_rules
 
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
+    """Hook to display runner output after each test.
+
+    Output is displayed:
+    - On test failure: Always prints both stdout and stderr
+    - With --show-output: Prints both stdout and stderr
+    - With --show-stderr: Prints only stderr
+
+    This hook automatically captures output from all BaseRunner.run() calls.
+    """
+    outcome = yield
+
+    # Get results registered during this test
+    results = _get_and_clear_results()
+    if not results:
+        return
+
+    # Check if test failed
+    test_failed = outcome.excinfo is not None
+
+    # Get CLI options
+    show_output = item.config.getoption("--show-output", default=False)
+    show_stderr = item.config.getoption("--show-stderr", default=False)
+
+    # Always show output on failure, otherwise respect CLI flags
+    if not test_failed and not show_output and not show_stderr:
+        return
+
+    for result in results:
+        cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
+        print(f"\n{'='*70}")
+        print(f"Command: {cmd_str}")
+        print(f"{'='*70}")
+
+        stdout = getattr(result, "stdout", "")
+        stderr = getattr(result, "stderr", "")
+
+        if test_failed or show_output:
+            # Show both stdout and stderr on failure or with --show-output
+            if stdout:
+                print(f"--- STDOUT ---\n{stdout}")
+            if stderr:
+                print(f"--- STDERR ---\n{stderr}")
+        elif show_stderr:
+            # Show only stderr with --show-stderr
+            if stderr:
+                print(f"--- STDERR ---\n{stderr}")
+
+
 # Debug helper
 def pytest_report_header(config: pytest.Config) -> list[str]:
     """Add test configuration to pytest header output."""
@@ -206,8 +253,6 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
     rocm_ver = _get_rocm_version()
     rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
-    llvm_lib_paths = rocprof_config.get_llvm_lib_paths()
-    llvm_lib_str = ", ".join(str(p) for p in llvm_lib_paths) if llvm_lib_paths else "Not found"
 
     lines = [
         "",
@@ -217,8 +262,6 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  ROCm version:   {rocm_ver_str}",
         f"  ROCm path:      {rocprof_config.rocm_path}",
         f"  Is installed:   {rocprof_config.is_installed}",
-        f"  LLVM lib paths: {llvm_lib_str}",
-        f"  libomp.so:      {'Found' if _check_libomp_available() else 'Not found'}",
         "-" * 70,
         "Directories:",
         f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
