@@ -170,52 +170,33 @@ else()
         set(_tbb_compiler "compiler=clang")
     endif()
 
-    find_program(MAKE_EXECUTABLE NAMES make gmake PATH_SUFFIXES bin)
-
-    if(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Ninja")
-        dyninst_message(
-            FATAL_ERROR
-            "make/gmake executable not found. Please re-run with -DMAKE_EXECUTABLE=/path/to/make"
-        )
-    elseif(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Makefiles")
-        set(MAKE_EXECUTABLE "$(MAKE)")
-    endif()
-
     include(ExternalProject)
     ExternalProject_Add(
         rocprofiler-systems-tbb-build
         PREFIX ${TBB_ROOT_DIR}
         URL https://github.com/uxlfoundation/oneTBB/archive/refs/tags/v2022.3.0.tar.gz
-        BUILD_IN_SOURCE 1
-        CONFIGURE_COMMAND ""
-        BUILD_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-            [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] ${MAKE_EXECUTABLE} -C src
-            ${_tbb_components_cfg} tbb_build_dir=${TBB_ROOT_DIR}/src tbb_build_prefix=tbb
-            ${_tbb_compiler}
+        CMAKE_ARGS
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DTBB_TEST=OFF
+            -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_INCLUDEDIR=include
+            -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath='$$ORIGIN'
         BUILD_BYPRODUCTS ${_tbb_build_byproducts}
-        INSTALL_COMMAND ""
+        INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
     )
 
-    # post-build target for installing build
-    add_custom_command(
-        TARGET rocprofiler-systems-tbb-build
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-        ARGS
-            -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
-            -DPREFIX=${TBB_ROOT_DIR} -DCMAKE_STRIP=${CMAKE_STRIP} -P
-            ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        COMMENT "Installing TBB..."
-    )
-
-    add_custom_target(
-        rocprofiler-systems-tbb-install
-        COMMAND
-            ${CMAKE_COMMAND} -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
-            -DPREFIX=${TBB_ROOT_DIR} -P ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        COMMENT "Installing TBB..."
-    )
+    # Strip debug symbols from installed libraries
+    if(CMAKE_STRIP)
+        add_custom_command(
+            TARGET rocprofiler-systems-tbb-build
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "Stripping TBB libraries..."
+            COMMAND
+                bash -c
+                "for lib in ${TBB_ROOT_DIR}/lib/libtbb*.so*; do if [ -f \"$lib\" ] && [ ! -L \"$lib\" ]; then ${CMAKE_STRIP} \"$lib\" 2>/dev/null || true; fi; done"
+            COMMENT "Stripping debug symbols from TBB libraries..."
+        )
+    endif()
 
     install(
         DIRECTORY ${TPL_STAGING_PREFIX}/tbb/lib/
