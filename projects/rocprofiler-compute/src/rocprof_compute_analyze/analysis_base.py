@@ -442,7 +442,7 @@ class OmniAnalyze_Base:
                 "analysis",
                 (
                     "The following kernels have missing counter data "
-                    "due to iteration multiplexing: "
+                    "due to iteration multiplexing and should be filtered out: "
                     f"{', '.join(missing_kernels)}"
                 ),
             )
