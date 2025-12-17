@@ -901,7 +901,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
   }
 
   const HSA_REGISTER_MEM_FLAGS regFlags = {
-      .ui32 = {.kmtHandle = (interop_handle.type == HSA_HANDLE_TYPE_KMT) ? 1u : 0u}};
+      .ui32 = {.kmtHandle = (interop_handle.type == HSA_HANDLE_TYPE_KMT)}};
 
   auto status =
       hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, regFlags);
