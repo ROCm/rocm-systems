@@ -361,10 +361,18 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_iteration_multiplexing
+    NAME test_profile_iteration_multiplexing_1
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing
-        --junitxml=tests/test_profile_iteration_multiplexing.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_1
+        --junitxml=tests/test_profile_iteration_multiplexing_1.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_iteration_multiplexing_2
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_2
+        --junitxml=tests/test_profile_iteration_multiplexing_2.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
@@ -382,7 +390,8 @@ set_tests_properties(
     test_profile_pc_sampling
     test_profile_sets_func
     test_profile_live_attach_detach
-    test_profile_iteration_multiplexing
+    test_profile_iteration_multiplexing_1
+    test_profile_iteration_multiplexing_2
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -723,6 +732,7 @@ if(INSTALL_TESTS)
             tests/vsequential_access
             tests/occupancy
             tests/hip_dynamic_shared
+            tests/laplace_eqn
             tests/mat_mul_max
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
