@@ -163,7 +163,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   const auto GLContext = mem->getContext().info().hCtx_;
   const auto name = static_cast<uint>(obj->getGLName());
 
-  static_assert(GL_ARRAY_BUFFER == GL_ARRAY_BUFFER, "Only GL_ARRAY_BUFFER is supported");
+  assert(targetType == GL_ARRAY_BUFFER && "Only GL_ARRAY_BUFFER is supported");
   constexpr GLenum type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
 
   const auto hRC = reinterpret_cast<HGLRC>(GLContext);
@@ -173,7 +173,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   if (!wglResourceAttachAMD(hRC, const_cast<GLvoid*>(static_cast<const GLvoid*>(&hRes)), &hData)) return false;
 
   *handle = reinterpret_cast<hsa_handle_t>(hData.handle);
-  *offset = static_cast<size_t>(hData.offset);
+  *offset = static_cast<int>(hData.offset);
 
   return true;
 }
