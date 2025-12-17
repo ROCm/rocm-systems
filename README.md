@@ -63,6 +63,7 @@ projects/
   aqlprofile/
   clr/
   hip/
+  hipfile/
   hipother/
   hip-tests/
   rccl/
