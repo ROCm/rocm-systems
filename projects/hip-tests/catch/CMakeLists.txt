@@ -54,7 +54,6 @@ endif()
 if(ENABLE_SPIRV)
     message(STATUS "hip-tests will be built using SPIRV offload arch")
     set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
 # flag to generate standalone exe per src file.
