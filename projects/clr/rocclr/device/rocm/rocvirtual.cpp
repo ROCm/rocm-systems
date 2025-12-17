@@ -1273,7 +1273,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
   const size_t numPackets = packets.size();
-  size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  const size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
   const size_t kGpuLagPackets = 16;
 
   // Staggered copy pattern: powers of 2 (1, 2, 4, 8.. to DEBUG_HIP_GRAPH_BATCH_SIZE
@@ -1281,9 +1281,15 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   size_t batchSize = 1;
 
   // Allocate arrays once outside the loop to avoid repeated stack allocations
+#if IS_LINUX
   uint16_t validHeaders[kMaxBatchSize];
   uint16_t validSetups[kMaxBatchSize];
-
+#else
+  // Ensure we don't exceed reasonable stack allocation size on Windows
+  assert(kMaxBatchSize <= 1024 && "Batch size too large for stack allocation");
+  uint16_t* validHeaders = static_cast<uint16_t*>(_alloca(kMaxBatchSize * sizeof(uint16_t)));
+  uint16_t* validSetups = static_cast<uint16_t*>(_alloca(kMaxBatchSize * sizeof(uint16_t)));
+#endif
   while (processedPackets < numPackets) {
     uint64_t currentReadIndex = Hsa::queue_load_read_index_scacquire(gpu_queue_);
     uint64_t currentWriteIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
