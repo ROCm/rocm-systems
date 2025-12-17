@@ -5696,9 +5696,9 @@ typedef int hsa_handle_t;
  */
 typedef enum {
   HSA_HANDLE_TYPE_NONE = 0,
-  HSA_HANDLE_TYPE_FD,
-  HSA_HANDLE_TYPE_NT,
-  HSA_HANDLE_TYPE_KMT,
+  HSA_HANDLE_TYPE_FD,           //!< File descriptor handle
+  HSA_HANDLE_TYPE_NT,           //!< Windows NT handle
+  HSA_HANDLE_TYPE_KMT,          //!< Windows KMT handle
   HSA_HANDLE_TYPE_MAX
 } hsa_handle_type_t;
 
