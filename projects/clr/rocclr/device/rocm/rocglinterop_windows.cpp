@@ -159,6 +159,9 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 
 // ================================================================================================
 bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset) {
+  assert(mem->getInteropObj() != nullptr);
+  assert(mem->getInteropObj()->asGLObject() != nullptr);
+
   const auto* obj = mem->getInteropObj()->asGLObject();
   const auto GLContext = mem->getContext().info().hCtx_;
   const auto name = static_cast<uint>(obj->getGLName());
@@ -166,14 +169,14 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   assert(targetType == GL_ARRAY_BUFFER && "Only GL_ARRAY_BUFFER is supported");
   constexpr GLenum type = GL_RESOURCE_ATTACH_VERTEXBUFFER_AMD;
 
-  const auto hRC = reinterpret_cast<HGLRC>(GLContext);
-  GLResource hRes = {.type = type, .name = name};
-  GLResourceData hData = {.version = GL_RESOURCE_DATA_VERSION};
+  const auto glRenderContext = reinterpret_cast<HGLRC>(GLContext);
+  GLResource glResource = {.type = type, .name = name};
+  GLResourceData glResourceData = {.version = GL_RESOURCE_DATA_VERSION};
 
-  if (!wglResourceAttachAMD(hRC, static_cast<GLvoid*>(&hRes), &hData)) return false;
-
-  *handle = reinterpret_cast<hsa_handle_t>(hData.handle);
-  *offset = static_cast<int>(hData.offset);
+  if (!wglResourceAttachAMD(glRenderContext, static_cast<GLvoid*>(&glResource), &glResourceData))
+    return false;
+  *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
+  *offset = static_cast<int>(glResourceData.offset);
 
   return true;
 }
