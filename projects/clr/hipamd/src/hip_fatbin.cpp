@@ -32,6 +32,7 @@ THE SOFTWARE.
 
 namespace hip {
 // Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
+using comgr_helper::ComgrDataSetUniqueHandle;
 using comgr_helper::ComgrActionInfoUniqueHandle;
 using comgr_helper::ComgrDataUniqueHandle;
 
