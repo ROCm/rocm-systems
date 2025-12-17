@@ -302,7 +302,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterPropertiesCtx(HsaKFDContext *ctx,
 	if (!CounterProperties)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
 	if (perf_ctx->counter_props[NodeId]) {
@@ -402,7 +402,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 	if (!Counters || !TraceRoot || NumberOfCounters == 0)
 		goto invalid_parameter_exit;
 
-	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
 		free(counter_id);
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 	}
@@ -541,7 +541,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTraceCtx(HsaKFDContext* ctx,
 
 /* Unregisters a set of (HW) counters used for tracing/profiling */
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTraceCtx(HsaKFDContext* ctx,
 						 HSAuint32 NodeId,
 						 HSATraceId TraceId)
 {
@@ -553,7 +553,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(
 	if (TraceId == 0)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
 	trace = (struct perf_trace *)PORT_UINT64_TO_VPTR(TraceId);
@@ -577,7 +577,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccessCtx(HsaKFDContext* ctx,
+						    HSAuint32 NodeId,
 						    HSATraceId TraceId)
 {
 	struct perf_trace *trace;
@@ -594,7 +595,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
 	if (trace->magic4cc != HSA_PERF_MAGIC4CC)
 		return HSAKMT_STATUS_INVALID_HANDLE;
 
-	if (hsakmt_validate_nodeid(NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
+	if (hsakmt_validate_nodeid(ctx, NodeId, &gpu_id) != HSAKMT_STATUS_SUCCESS)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
 	return ret;
@@ -739,4 +740,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTrace(HSAuint32 NodeId,
 {
 	return hsaKmtPmcRegisterTraceCtx(&hsakmt_primary_kfd_ctx,
 							NodeId, NumberOfCounters, Counters, TraceRoot);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(HSAuint32 NodeId,
+						 HSATraceId TraceId)
+{
+	return hsaKmtPmcUnregisterTraceCtx(&hsakmt_primary_kfd_ctx,
+							NodeId, TraceId);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
+						    HSATraceId TraceId)
+{
+	return hsaKmtPmcAcquireTraceAccessCtx(&hsakmt_primary_kfd_ctx,
+							NodeId, TraceId);
 }

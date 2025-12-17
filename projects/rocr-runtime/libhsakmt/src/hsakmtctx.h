@@ -864,6 +864,32 @@ hsaKmtPmcRegisterTraceCtx(
     HsaPmcTraceRoot*    TraceRoot           //OUT
     );
 
+/**
+  Allows a user mode process to get exclusive access to the defined set of (HW) counters
+  used for tracing/profiling
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtPmcAcquireTraceAccessCtx(
+    HsaKFDContext      *ctx,                //IN
+    HSAuint32          NodeId,              //IN
+    HSATraceId         TraceId              //IN
+    );
+
+/**
+  Allows a user mode process to release exclusive access to the defined set of (HW) counters
+  used for tracing/profiling
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtPmcReleaseTraceAccessCtx(
+    HsaKFDContext      *ctx,                //IN
+    HSAuint32          NodeId,              //IN
+    HSATraceId         TraceId              //IN
+    );
+
 /* Helper functions for calling KFD SVM ioctl */
 HSAKMT_STATUS
 HSAKMTAPI

@@ -1731,7 +1731,7 @@ static void* udmabuf_allocation(HsaKFDContext *ctx,
 	mflags.ui32.NoSubstitute = 1;
 	/* Bind to NUMA node */
 	/* node_id is gpu id, get closed numa id */
-	numa_node_id = hsakmt_get_direct_link_cpu(node_id);
+	numa_node_id = hsakmt_get_direct_link_cpu(ctx, node_id);
 	if (bind_mem_to_numa(numa_node_id, mem, size, mflags))
 		goto error_release_aperture;
 
@@ -1888,7 +1888,7 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		/* Store memory allocation flags, not ioc flags */
 		 vm_obj->mflags = mflags;
-		 hsakmt_gpuid_to_nodeid(gpu_id, &vm_obj->node_id);
+		 hsakmt_gpuid_to_nodeid(ctx, gpu_id, &vm_obj->node_id);
 		 pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	}
@@ -1931,7 +1931,7 @@ void *hsakmt_fmm_allocate_doorbell(HsaKFDContext *ctx,
 
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		vm_obj->mflags = mflags;
-		hsakmt_gpuid_to_nodeid(gpu_id, &vm_obj->node_id);
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &vm_obj->node_id);
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 	}
 
@@ -2866,7 +2866,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		fmm_ctx->svm.alignment_order = 18;
 
 		for (i = 0; i < NumNodes; i++) {
-			if (hsakmt_get_gfxv_by_node_id(i) != GFX_VERSION_GFX950) {
+			if (hsakmt_get_gfxv_by_node_id(ctx, i) != GFX_VERSION_GFX950) {
 				fmm_ctx->svm.alignment_order = 9;
 				break;
 			}
@@ -2892,7 +2892,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	for (i = 0; i < NumNodes; i++) {
 		HsaNodeProperties props;
 
-		ret = hsakmt_topology_get_node_props(i, &props);
+		ret = hsakmt_topology_get_node_props(ctx, i, &props);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto gpu_mem_init_failed;
 
@@ -2950,7 +2950,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 * required since Number of nodes is already known. Kernel will fill in
 	 * the apertures in kfd_process_device_apertures_ptr
 	 */
-	num_of_sysfs_nodes = hsakmt_get_num_sysfs_nodes();
+	num_of_sysfs_nodes = hsakmt_get_num_sysfs_nodes(ctx);
 	if (num_of_sysfs_nodes < gpu_mem_count) {
 		ret = HSAKMT_STATUS_ERROR;
 		goto sysfs_parse_failed;
@@ -3004,11 +3004,11 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		 * allocated on those GPUs.
 		 */
 		nodeId = gpu_mem[gpu_mem_id].node_id;
-		ret = hsakmt_topology_get_node_props(nodeId, &nodeProps);
+		ret = hsakmt_topology_get_node_props(ctx, nodeId, &nodeProps);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto aperture_init_failed;
 		assert(nodeProps.NumIOLinks <= NumNodes);
-		ret = hsakmt_topology_get_iolink_props(nodeId, nodeProps.NumIOLinks,
+		ret = hsakmt_topology_get_iolink_props(ctx, nodeId, nodeProps.NumIOLinks,
 						linkProps);
 		if (ret != HSAKMT_STATUS_SUCCESS)
 			goto aperture_init_failed;
@@ -3109,7 +3109,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 						    KFD_IOC_CACHE_POLICY_NONCOHERENT,
 						    KFD_IOC_CACHE_POLICY_COHERENT,
 						    alt_base, alt_size,
-						    hsakmt_get_gfxv_by_node_id(i) == GFX_VERSION_GFX950 ?
+						    hsakmt_get_gfxv_by_node_id(ctx, i) == GFX_VERSION_GFX950 ?
 						    mfma_high_precision_mode : 0);
 			if (err) {
 				pr_err("Failed to set mem policy for GPU [0x%x]\n",
@@ -3367,7 +3367,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu(HsaKFDContext *ctx,
 	/* not specified, not registered: map all GPUs */
 		int32_t gpu_mem_id = gpu_mem_find_by_node_id(fmm_ctx, obj->node_id);
 
-		if (!obj->userptr && hsakmt_get_device_id_by_node_id(obj->node_id) &&
+		if (!obj->userptr && hsakmt_get_device_id_by_node_id(ctx, obj->node_id) &&
 		    gpu_mem_id >= 0) {
 			args.device_ids_array_ptr = (uint64_t)
 				fmm_ctx->gpu_mem[gpu_mem_id].usable_peer_id_array;
@@ -3885,7 +3885,7 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 		++exist_obj->registration_count;
 	} else {
 		obj->userptr = addr;
-		hsakmt_gpuid_to_nodeid(gpu_id, &obj->node_id);
+		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
 		obj->userptr_size = size;
 		obj->registration_count = 1;
 		obj->user_node.key = rbtree_key((unsigned long)addr, size);
@@ -4077,7 +4077,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 		obj->metadata = metadata;
 		obj->registered_device_id_array = gpu_id_array;
 		obj->registered_device_id_array_size = gpu_id_array_size;
-		hsakmt_gpuid_to_nodeid(infoArgs.gpu_id, &obj->node_id);
+		hsakmt_gpuid_to_nodeid(ctx, infoArgs.gpu_id, &obj->node_id);
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	if (!obj)
@@ -4087,7 +4087,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	GraphicsResourceInfo->SizeInBytes = infoArgs.size;
 	GraphicsResourceInfo->Metadata = (void *)(unsigned long)infoArgs.metadata_ptr;
 	GraphicsResourceInfo->MetadataSizeInBytes = infoArgs.metadata_size;
-	hsakmt_gpuid_to_nodeid(infoArgs.gpu_id, &GraphicsResourceInfo->NodeId);
+	hsakmt_gpuid_to_nodeid(ctx, infoArgs.gpu_id, &GraphicsResourceInfo->NodeId);
 
 	return HSAKMT_STATUS_SUCCESS;
 
@@ -4177,7 +4177,7 @@ HSAKMT_STATUS hsakmt_fmm_share_memory(HsaKFDContext *ctx,
 	if (!obj)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	r = hsakmt_validate_nodeid(obj->node_id, &gpu_id);
+	r = hsakmt_validate_nodeid(ctx, obj->node_id, &gpu_id);
 	if (r != HSAKMT_STATUS_SUCCESS)
 		return r;
 	if (!gpu_id && hsakmt_is_dgpu) {
@@ -4536,7 +4536,7 @@ HSAKMT_STATUS hsakmt_fmm_get_mem_info(HsaKFDContext *ctx,
 		 * register to new nodes) or the memory being freed
 		 */
 		for (i = 0; i < info->NRegisteredNodes; i++)
-			hsakmt_gpuid_to_nodeid(vm_obj->registered_device_id_array[i],
+			hsakmt_gpuid_to_nodeid(ctx, vm_obj->registered_device_id_array[i],
 				&vm_obj->registered_node_id_array[i]);
 	}
 	info->RegisteredNodes = vm_obj->registered_node_id_array;
@@ -4555,7 +4555,7 @@ HSAKMT_STATUS hsakmt_fmm_get_mem_info(HsaKFDContext *ctx,
 		 * to new nodes) or memory being freed
 		 */
 		for (i = 0; i < info->NMappedNodes; i++)
-			hsakmt_gpuid_to_nodeid(vm_obj->mapped_device_id_array[i],
+			hsakmt_gpuid_to_nodeid(ctx, vm_obj->mapped_device_id_array[i],
 				&vm_obj->mapped_node_id_array[i]);
 	}
 	info->MappedNodes = vm_obj->mapped_node_id_array;

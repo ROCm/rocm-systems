@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 
+struct hsa_kfd_topology_context;
 struct hsa_kfd_queue_context;
 struct hsa_kfd_fmm_context;
 struct hsa_kfd_event_context;
@@ -54,6 +55,9 @@ typedef struct _HsaKFDContext
     /* File descriptor for the KFD device */
     int fd;
 
+    /* Topology context for managing system topology information */
+    struct hsa_kfd_topology_context *topology_context;
+
     /* Queue context for managing user queues */
     struct hsa_kfd_queue_context *queue_context;
 
@@ -75,6 +79,7 @@ void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
 // Release all resources associated with the given KFD context
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
+struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx);
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);
