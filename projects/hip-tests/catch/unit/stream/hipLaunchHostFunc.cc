@@ -17,16 +17,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_test_kernels.hh>
 #define GRIDSIZE 512
 #define BLOCKSIZE 256
 #define NUM_OF_STREAM 3
 #define THREADS_PER_BLOCK 512
 #define GRAPH_LAUNCH_ITERATIONS 1000
 
-static __global__ void reduce(float* d_in, double* d_out) {
+static __global__ void reduce(float *d_in, double *d_out) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   int tid = threadIdx.x;
   for (int s = blockDim.x / 2; s > 0; s >>= 1) {
@@ -39,7 +39,7 @@ static __global__ void reduce(float* d_in, double* d_out) {
     d_out[blockIdx.x] = d_in[myId];
   }
 }
-static __global__ void reduceFinal(double* d_in, double* d_out) {
+static __global__ void reduceFinal(double *d_in, double *d_out) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   int tid = threadIdx.x;
   for (int s = blockDim.x / 2; s > 0; s >>= 1) {
@@ -53,7 +53,7 @@ static __global__ void reduceFinal(double* d_in, double* d_out) {
   }
 }
 
-static void init_input(float* a, size_t size) {
+static void init_input(float *a, size_t size) {
   unsigned int seed = time(nullptr);
   for (size_t i = 0; i < size; i++) {
     a[i] = (HipTest::RAND_R(&seed) & 0xFF) / static_cast<float>(RAND_MAX);
@@ -61,24 +61,24 @@ static void init_input(float* a, size_t size) {
 }
 
 static bool gPassed = true;
-static void* gusrptr;
-static void* ptr0xff = reinterpret_cast<void*>(0xffffffff);
+static void *gusrptr;
+static void *ptr0xff = reinterpret_cast<void *>(0xffffffff);
 static size_t NSize = GRIDSIZE * BLOCKSIZE;
 static size_t Nbytes = NSize * sizeof(float);
 
 typedef struct userDataStruct {
-  float* A_h;
-  float* C_h;
-  float* A_d;
-  float* C_d;
+  float *A_h;
+  float *C_h;
+  float *A_d;
+  float *C_d;
   bool isPassed;
   bool isOpCompleted;
 } usrDataS;
 
 // Common callback function.
-static void Fn_validateSq(void* userData) {
+static void Fn_validateSq(void *userData) {
   REQUIRE(userData != nullptr);
-  usrDataS* ptrUsrData = reinterpret_cast<usrDataS*>(userData);
+  usrDataS *ptrUsrData = reinterpret_cast<usrDataS *>(userData);
   for (size_t i = 0; i < NSize; i++) {
     if (ptrUsrData->C_h[i] != (ptrUsrData->A_h[i] * ptrUsrData->A_h[i])) {
       ptrUsrData->isPassed = false;
@@ -90,22 +90,39 @@ static void Fn_validateSq(void* userData) {
 
 // Test scenario 1
 // simple scenario that validates passing userData to host function.
-static void Fn_ChkUserdataPtr(void* userData) {
+static void Fn_ChkUserdataPtr(void *userData) {
   gPassed = true;
   if (gusrptr != userData) {
     gPassed = false;
   }
 }
 
-TEST_CASE("Unit_hipLaunchHostFunc_basic") {
-  hipStream_t mystream;
-  HIP_CHECK(hipStreamCreate(&mystream));
+/**
+ * Test Description
+ * ------------------------
+ *  - This test validates the basic functionality of hipLaunchHostFunc
+ *  - api during the stream capture.
+ * Test source
+ * ------------------------
+ *    - catch\unit\stream\hipLaunchHostFunc.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.0
+ */
+TEST_CASE("Unit_hipLaunchHostFunc_streamCapture") {
+  GENERATE_CAPTURE();
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  BEGIN_CAPTURE(stream);
+
   gusrptr = ptr0xff;
   gPassed = true;
-  HIP_CHECK(hipLaunchHostFunc(mystream, Fn_ChkUserdataPtr, gusrptr));
-  HIP_CHECK(hipStreamSynchronize(mystream));
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK(hipLaunchHostFunc(stream, Fn_ChkUserdataPtr, gusrptr));
   REQUIRE(gPassed);
+
+  END_CAPTURE(stream);
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 // Negative test scenario for hipLaunchHostFunc
@@ -120,19 +137,22 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative") {
 }
 
 // Local Function
-static void launchOperationOnStrm(usrDataS* usrDataptr, hipStream_t stream) {
+static void launchOperationOnStrm(usrDataS *usrDataptr, hipStream_t stream) {
   usrDataptr->isPassed = false;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr->A_d)), Nbytes, stream));
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr->C_d)), Nbytes, stream));
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr->A_d, usrDataptr->A_h, Nbytes, hipMemcpyHostToDevice, stream));
-  hipLaunchKernelGGL((HipTest::vector_square), dim3(GRIDSIZE), dim3(BLOCKSIZE), 0, stream,
-                     usrDataptr->A_d, usrDataptr->C_d, NSize);
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr->C_h, usrDataptr->C_d, Nbytes, hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipLaunchHostFunc(stream, Fn_validateSq, reinterpret_cast<void*>(usrDataptr)));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr->A_d), stream));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr->C_d), stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr->A_d)),
+                           Nbytes, stream));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr->C_d)),
+                           Nbytes, stream));
+  HIP_CHECK(hipMemcpyAsync(usrDataptr->A_d, usrDataptr->A_h, Nbytes,
+                           hipMemcpyHostToDevice, stream));
+  hipLaunchKernelGGL((HipTest::vector_square), dim3(GRIDSIZE), dim3(BLOCKSIZE),
+                     0, stream, usrDataptr->A_d, usrDataptr->C_d, NSize);
+  HIP_CHECK(hipMemcpyAsync(usrDataptr->C_h, usrDataptr->C_d, Nbytes,
+                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipLaunchHostFunc(stream, Fn_validateSq,
+                              reinterpret_cast<void *>(usrDataptr)));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void *>(usrDataptr->A_d), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void *>(usrDataptr->C_d), stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(usrDataptr->isPassed);
 }
@@ -145,11 +165,11 @@ TEST_CASE("Unit_hipLaunchHostFunc_streams") {
   HIP_CHECK(hipStreamCreate(&stream[0]));
   stream[1] = 0;  // Null stream
   stream[2] = hipStreamPerThread;
-  usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr = reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
-  usrDataptr->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->A_h != nullptr);
-  usrDataptr->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->C_h != nullptr);
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr->A_h[i] = 21.0f;
@@ -166,9 +186,9 @@ TEST_CASE("Unit_hipLaunchHostFunc_streams") {
 // Test scenario 3
 // test case to validate hipLaunchHostFunc for multi stream scenario.
 // create 2 different streams and call hipLaunchHostFunc, stream synchronize.
-static void Fn_validateMul_stream(void* userData) {
+static void Fn_validateMul_stream(void *userData) {
   REQUIRE(userData != nullptr);
-  usrDataS* ptrUsrData = reinterpret_cast<usrDataS*>(userData);
+  usrDataS *ptrUsrData = reinterpret_cast<usrDataS *>(userData);
   for (size_t i = 0; i < NSize; i++) {
     if (ptrUsrData->C_h[i] != (ptrUsrData->A_h[i] * ptrUsrData->A_h[i])) {
       ptrUsrData->isPassed = false;
@@ -182,13 +202,15 @@ TEST_CASE("Unit_hipLaunchHostFunc_multistreams") {
   hipStream_t mystream1, mystream2;
   HIP_CHECK(hipStreamCreateWithFlags(&mystream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&mystream2, hipStreamNonBlocking));
-  usrDataS* usrDataptr1 = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr1 =
+      reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr1 != nullptr);
-  usrDataS* usrDataptr2 = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr2 =
+      reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr2 != nullptr);
-  usrDataptr1->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr1->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr1->A_h != nullptr);
-  usrDataptr1->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr1->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr1->C_h != nullptr);
   // input data
   for (size_t i = 0; i < NSize; i++) {
@@ -196,41 +218,51 @@ TEST_CASE("Unit_hipLaunchHostFunc_multistreams") {
   }
   usrDataptr1->isPassed = false;
   usrDataptr2->isPassed = false;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr1->A_d)), Nbytes, mystream1));
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr1->C_d)), Nbytes, mystream1));
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr1->A_d, usrDataptr1->A_h, Nbytes, hipMemcpyHostToDevice, mystream1));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr1->A_d)),
+                           Nbytes, mystream1));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr1->C_d)),
+                           Nbytes, mystream1));
+  HIP_CHECK(hipMemcpyAsync(usrDataptr1->A_d, usrDataptr1->A_h, Nbytes,
+                           hipMemcpyHostToDevice, mystream1));
   const unsigned blocks = GRIDSIZE;
   const unsigned threadsPerBlock = BLOCKSIZE;
-  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream1,
-                     usrDataptr1->A_d, usrDataptr1->C_d, NSize);
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr1->C_h, usrDataptr1->C_d, Nbytes, hipMemcpyDeviceToHost, mystream1));
-  HIP_CHECK(
-      hipLaunchHostFunc(mystream1, Fn_validateMul_stream, reinterpret_cast<void*>(usrDataptr1)));
+  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks),
+                     dim3(threadsPerBlock), 0, mystream1, usrDataptr1->A_d,
+                     usrDataptr1->C_d, NSize);
+  HIP_CHECK(hipMemcpyAsync(usrDataptr1->C_h, usrDataptr1->C_d, Nbytes,
+                           hipMemcpyDeviceToHost, mystream1));
+  HIP_CHECK(hipLaunchHostFunc(mystream1, Fn_validateMul_stream,
+                              reinterpret_cast<void *>(usrDataptr1)));
   // launch kernel function for mystream2
-  usrDataptr2->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr2->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr2->A_h != nullptr);
-  usrDataptr2->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr2->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr2->C_h != nullptr);
   // input data
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr2->A_h[i] = 9.0f;
   }
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr2->A_d)), Nbytes, mystream2));
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr2->C_d)), Nbytes, mystream2));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr2->A_d)),
+                           Nbytes, mystream2));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr2->C_d)),
+                           Nbytes, mystream2));
+  HIP_CHECK(hipMemcpyAsync(usrDataptr2->A_d, usrDataptr2->A_h, Nbytes,
+                           hipMemcpyHostToDevice, mystream2));
+  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks),
+                     dim3(threadsPerBlock), 0, mystream2, usrDataptr2->A_d,
+                     usrDataptr2->C_d, NSize);
+  HIP_CHECK(hipMemcpyAsync(usrDataptr2->C_h, usrDataptr2->C_d, Nbytes,
+                           hipMemcpyDeviceToHost, mystream2));
+  HIP_CHECK(hipLaunchHostFunc(mystream2, Fn_validateMul_stream,
+                              reinterpret_cast<void *>(usrDataptr2)));
   HIP_CHECK(
-      hipMemcpyAsync(usrDataptr2->A_d, usrDataptr2->A_h, Nbytes, hipMemcpyHostToDevice, mystream2));
-  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream2,
-                     usrDataptr2->A_d, usrDataptr2->C_d, NSize);
+      hipFreeAsync(reinterpret_cast<void *>(usrDataptr1->A_d), mystream1));
   HIP_CHECK(
-      hipMemcpyAsync(usrDataptr2->C_h, usrDataptr2->C_d, Nbytes, hipMemcpyDeviceToHost, mystream2));
+      hipFreeAsync(reinterpret_cast<void *>(usrDataptr1->C_d), mystream1));
   HIP_CHECK(
-      hipLaunchHostFunc(mystream2, Fn_validateMul_stream, reinterpret_cast<void*>(usrDataptr2)));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr1->A_d), mystream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr1->C_d), mystream1));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr2->A_d), mystream2));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr2->C_d), mystream2));
+      hipFreeAsync(reinterpret_cast<void *>(usrDataptr2->A_d), mystream2));
+  HIP_CHECK(
+      hipFreeAsync(reinterpret_cast<void *>(usrDataptr2->C_d), mystream2));
   HIP_CHECK(hipStreamSynchronize(mystream1));
   HIP_CHECK(hipStreamSynchronize(mystream2));
   HIP_CHECK(hipStreamDestroy(mystream1));
@@ -248,9 +280,9 @@ TEST_CASE("Unit_hipLaunchHostFunc_multistreams") {
 // Test scenario 4
 // test case to validate hipLaunchHostFunc for the kernel,
 // validate hipLaunchHostFunc after kernel launch.
-static void Fn_Completion_state(void* userData) {
+static void Fn_Completion_state(void *userData) {
   REQUIRE(userData != nullptr);
-  usrDataS* ptrUsrData = reinterpret_cast<usrDataS*>(userData);
+  usrDataS *ptrUsrData = reinterpret_cast<usrDataS *>(userData);
   ptrUsrData->isOpCompleted = true;
 }
 
@@ -259,40 +291,46 @@ TEST_CASE("Unit_hipLaunchHostFunc_KernelHost") {
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipStreamCreate(&stream3));
-  usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr = reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
-  usrDataptr->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->A_h != nullptr);
-  usrDataptr->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->C_h != nullptr);
   // input data
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr->A_h[i] = 7.0f;
   }
   usrDataptr->isOpCompleted = false;
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr->A_d)), Nbytes, stream1));
-  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&(usrDataptr->C_d)), Nbytes, stream1));
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr->A_d, usrDataptr->A_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HIP_CHECK(hipLaunchHostFunc(stream1, Fn_Completion_state, reinterpret_cast<void*>(usrDataptr)));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr->A_d)),
+                           Nbytes, stream1));
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void **>(&(usrDataptr->C_d)),
+                           Nbytes, stream1));
+  HIP_CHECK(hipMemcpyAsync(usrDataptr->A_d, usrDataptr->A_h, Nbytes,
+                           hipMemcpyHostToDevice, stream1));
+  HIP_CHECK(hipLaunchHostFunc(stream1, Fn_Completion_state,
+                              reinterpret_cast<void *>(usrDataptr)));
   while (!usrDataptr->isOpCompleted) {
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
   }  // Sleep for 100 ms*/
   usrDataptr->isOpCompleted = false;
   const unsigned blocks = GRIDSIZE;
   const unsigned threadsPerBlock = BLOCKSIZE;
-  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, stream2,
-                     usrDataptr->A_d, usrDataptr->C_d, NSize);
-  HIP_CHECK(hipLaunchHostFunc(stream2, Fn_Completion_state, reinterpret_cast<void*>(usrDataptr)));
+  hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks),
+                     dim3(threadsPerBlock), 0, stream2, usrDataptr->A_d,
+                     usrDataptr->C_d, NSize);
+  HIP_CHECK(hipLaunchHostFunc(stream2, Fn_Completion_state,
+                              reinterpret_cast<void *>(usrDataptr)));
   while (!usrDataptr->isOpCompleted) {
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
   }  // Sleep for 100 ms*/
   usrDataptr->isOpCompleted = false;
-  HIP_CHECK(
-      hipMemcpyAsync(usrDataptr->C_h, usrDataptr->C_d, Nbytes, hipMemcpyDeviceToHost, stream3));
-  HIP_CHECK(hipLaunchHostFunc(stream2, Fn_Completion_state, reinterpret_cast<void*>(usrDataptr)));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr->A_d), stream3));
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(usrDataptr->C_d), stream3));
+  HIP_CHECK(hipMemcpyAsync(usrDataptr->C_h, usrDataptr->C_d, Nbytes,
+                           hipMemcpyDeviceToHost, stream3));
+  HIP_CHECK(hipLaunchHostFunc(stream2, Fn_Completion_state,
+                              reinterpret_cast<void *>(usrDataptr)));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void *>(usrDataptr->A_d), stream3));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void *>(usrDataptr->C_d), stream3));
   while (!usrDataptr->isOpCompleted) {
     std::this_thread::sleep_for(std::chrono::microseconds(100000));
   }  // Sleep for 100 ms*/
@@ -313,18 +351,18 @@ TEST_CASE("Unit_hipLaunchHostFunc_KernelHost") {
 // Test scenario 5
 // scenario that validates the host launch function on multi device
 // environment.
-TEST_CASE("Unit_hipLaunchHostFunc_multidevice", "[multigpu]") {
+TEST_CASE("Unit_hipLaunchHostFunc_multidevice") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
     SUCCEED("Skipping the testcases as numDevices < 2");
     return;
   }
-  usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr = reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
-  usrDataptr->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->A_h != nullptr);
-  usrDataptr->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->C_h != nullptr);
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr->A_h[i] = 21.0f;
@@ -347,11 +385,11 @@ TEST_CASE("Unit_hipLaunchHostFunc_multidevice", "[multigpu]") {
 TEST_CASE("Unit_hipLaunchHostFunc_Samepriority") {
   int priority = 0;
   unsigned int flags = 0;
-  usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr = reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
-  usrDataptr->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->A_h != nullptr);
-  usrDataptr->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->C_h != nullptr);
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr->A_h[i] = 21.0f;
@@ -378,18 +416,19 @@ TEST_CASE("Unit_hipLaunchHostFunc_Diffpriority") {
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&priority_low, &priority_high));
   int numOfPriorities = priority_low - priority_high;
   const float arr_size = numOfPriorities + 1;
-  hipStream_t* stream = reinterpret_cast<hipStream_t*>(malloc(arr_size * sizeof(hipStream_t)));
+  hipStream_t *stream =
+      reinterpret_cast<hipStream_t *>(malloc(arr_size * sizeof(hipStream_t)));
   stream[0] = 0;
   int count = 1;
   // Create a stream for each of the priority levels
   for (priority = priority_high; priority < priority_low; priority++) {
     HIP_CHECK(hipStreamCreateWithPriority(&stream[count++], flags, priority));
   }
-  usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
+  usrDataS *usrDataptr = reinterpret_cast<usrDataS *>(malloc(sizeof(usrDataS)));
   REQUIRE(usrDataptr != nullptr);
-  usrDataptr->A_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->A_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->A_h != nullptr);
-  usrDataptr->C_h = reinterpret_cast<float*>(malloc(Nbytes));
+  usrDataptr->C_h = reinterpret_cast<float *>(malloc(Nbytes));
   REQUIRE(usrDataptr->C_h != nullptr);
   for (size_t i = 0; i < NSize; i++) {
     usrDataptr->A_h[i] = 11.0f;
@@ -411,18 +450,18 @@ TEST_CASE("Unit_hipLaunchHostFunc_Diffpriority") {
 // create a graph by using hipGraphsUsingStreamCapture and call host function.
 
 typedef struct callBackData {
-  const char* fn_name;
-  double* data;
+  const char *fn_name;
+  double *data;
 } callBackData_t;
 double result_gpu = 0.0;
-void myHostNodeCallback(void* data) {
+void myHostNodeCallback(void *data) {
   static int iter = 0;
   iter++;
   // Check status of GPU after stream operations are done
-  callBackData_t* tmp = reinterpret_cast<callBackData_t*>(data);
+  callBackData_t *tmp = reinterpret_cast<callBackData_t *>(data);
   // checkCudaErrors(tmp->status);
-  double* result = reinterpret_cast<double*>(tmp->data);
-  const char* function = reinterpret_cast<const char*>(tmp->fn_name);
+  double *result = reinterpret_cast<double *>(tmp->data);
+  const char *function = reinterpret_cast<const char *>(tmp->fn_name);
   if (iter == GRAPH_LAUNCH_ITERATIONS)
     printf("[%s] Host callback final reduced sum = %lf\n", function, *result);
   result_gpu = *result;
@@ -434,7 +473,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
   size_t maxBlocks = 512;
   float *inputVec_d = NULL, *inputVec_h = NULL;
   double *outputVec_d = NULL, *result_d;
-  inputVec_h = reinterpret_cast<float*>(malloc(sizeof(float) * size));
+  inputVec_h = reinterpret_cast<float *>(malloc(sizeof(float) * size));
   HIP_CHECK(hipMalloc(&inputVec_d, sizeof(float) * size));
   HIP_CHECK(hipMalloc(&outputVec_d, sizeof(double) * maxBlocks));
   HIP_CHECK(hipMalloc(&result_d, sizeof(double)));
@@ -455,19 +494,22 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
   HIP_CHECK(hipEventRecord(forkStreamEvent, stream1));
   HIP_CHECK(hipStreamWaitEvent(stream2, forkStreamEvent, 0));
   HIP_CHECK(hipStreamWaitEvent(stream3, forkStreamEvent, 0));
+  HIP_CHECK(hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * size,
+                           hipMemcpyDefault, stream1));
   HIP_CHECK(
-      hipMemcpyAsync(inputVec_d, inputVec_h, sizeof(float) * size, hipMemcpyDefault, stream1));
-  HIP_CHECK(hipMemsetAsync(outputVec_d, 0, sizeof(double) * maxBlocks, stream2));
+      hipMemsetAsync(outputVec_d, 0, sizeof(double) * maxBlocks, stream2));
   HIP_CHECK(hipEventRecord(memsetEvent1, stream2));
   HIP_CHECK(hipMemsetAsync(result_d, 0, sizeof(double), stream3));
   HIP_CHECK(hipEventRecord(memsetEvent2, stream3));
   HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent1, 0));
-  hipLaunchKernelGGL(reduce, dim3(size / THREADS_PER_BLOCK, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0,
-                     stream1, inputVec_d, outputVec_d);
+  hipLaunchKernelGGL(reduce, dim3(size / THREADS_PER_BLOCK, 1, 1),
+                     dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1, inputVec_d,
+                     outputVec_d);
   HIP_CHECK(hipStreamWaitEvent(stream1, memsetEvent2, 0));
-  hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1), 0, stream1,
-                     outputVec_d, result_d);
-  HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double), hipMemcpyDefault, stream1));
+  hipLaunchKernelGGL(reduceFinal, dim3(1, 1, 1), dim3(THREADS_PER_BLOCK, 1, 1),
+                     0, stream1, outputVec_d, result_d);
+  HIP_CHECK(hipMemcpyAsync(&result_h, result_d, sizeof(double),
+                           hipMemcpyDefault, stream1));
 
   callBackData_t hostFnData;
   hostFnData.data = &result_h;
@@ -476,15 +518,15 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
   HIP_CHECK(hipLaunchHostFunc(stream1, fn, &hostFnData));
 
   HIP_CHECK(hipStreamEndCapture(stream1, &graph));
-  hipGraphNode_t* nodes = NULL;
+  hipGraphNode_t *nodes = NULL;
   size_t numNodes = 0;
   HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
-  printf(
-      "\nNum of nodes in the graph created using stream"
-      "capture API = %zu\n",
-      numNodes);
+  printf("\nNum of nodes in the graph created using stream"
+         "capture API = %zu\n",
+         numNodes);
   HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numNodes));
-  printf("root nodes in the graph created using stream capture API = %zu\n", numNodes);
+  printf("root nodes in the graph created using stream capture API = %zu\n",
+         numNodes);
   hipGraphExec_t graphExec;
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
@@ -496,11 +538,13 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
   auto stop = std::chrono::high_resolution_clock::now();
   auto WithInit = std::chrono::duration<double, std::milli>(stop - start);
   auto WithoutInit = std::chrono::duration<double, std::milli>(stop - start1);
-  std::cout << "Time taken for hipGraphsUsingStreamCapture with Init: "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(WithInit).count()
-            << " milliseconds without Init:"
-            << std::chrono::duration_cast<std::chrono::milliseconds>(WithoutInit).count()
-            << " milliseconds " << std::endl;
+  std::cout
+      << "Time taken for hipGraphsUsingStreamCapture with Init: "
+      << std::chrono::duration_cast<std::chrono::milliseconds>(WithInit).count()
+      << " milliseconds without Init:"
+      << std::chrono::duration_cast<std::chrono::milliseconds>(WithoutInit)
+             .count()
+      << " milliseconds " << std::endl;
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
