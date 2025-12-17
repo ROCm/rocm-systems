@@ -63,7 +63,7 @@ SUBROOT = Path(__file__).resolve().parents[2]
 CONFIGS_ROOT: Path = SUBROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 HASH_FILE: Path = SUBROOT / "tools" / "config_management" / ".config_hashes.json"
 TEMPLATE_FILE: Path = (
-    SUBROOT / "tools" / "config_management" / "analysis_config_template.yaml"
+    SUBROOT / "tools" / "config_management" / "gfx9_config_template.yaml"
 )
 
 
