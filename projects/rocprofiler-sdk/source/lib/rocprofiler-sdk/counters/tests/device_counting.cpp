@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -44,7 +45,9 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
+#include <sys/ioctl.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -99,14 +102,17 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
 void
 test_init()
 {
-    HsaApiTable table;
-    table.amd_ext_ = &get_ext_table();
-    table.core_    = &get_api_table();
-    rocprofiler::hsa::copy_table(table.core_, 0);
-    rocprofiler::hsa::copy_table(table.amd_ext_, 0);
-    agent::construct_agent_cache(&table);
-    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
-    hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
+    static std::once_flag once{};
+    std::call_once(once, [&]() {
+        HsaApiTable table;
+        table.amd_ext_ = &get_ext_table();
+        table.core_    = &get_api_table();
+        rocprofiler::hsa::copy_table(table.core_, 0);
+        rocprofiler::hsa::copy_table(table.amd_ext_, 0);
+        agent::construct_agent_cache(&table);
+        ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+        hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
+    });
 }
 
 common::Synchronized<std::vector<rocprofiler_record_counter_t>>&
@@ -263,6 +269,49 @@ get_agent_data_from_ctx(rocprofiler_context_id_t ctx, const rocprofiler_agent_t*
     return &(*it);
 }
 
+bool
+expect_device_lock(rocprofiler_context_id_t ctx, const rocprofiler_agent_t* agent)
+{
+    std::once_flag once{};
+
+    int kfd_ioctl_status = -EPERM;
+
+    // Check if we can lock the device using the KFD IOCTL
+    std::call_once(once, [&]() {
+        if(!counters::counter_collection_has_device_lock()) return;
+
+        int kfd_fd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+        if(kfd_fd == -1)
+        {
+            return;
+        }
+
+        kfd_ioctl_profiler_args args = {};
+        args.op                      = KFD_IOC_PROFILER_PMC;
+        args.pmc.gpu_id              = agent->gpu_id;
+        args.pmc.lock                = 1;
+        args.pmc.perfcount_enable    = 0;
+
+        kfd_ioctl_status = ::ioctl(kfd_fd, AMDKFD_IOC_PROFILER, &args);
+        if(kfd_ioctl_status != 0)
+        {
+            close(kfd_fd);
+            return;
+        }
+
+        args.pmc.gpu_id           = agent->gpu_id;
+        args.pmc.lock             = 0;
+        args.pmc.perfcount_enable = 0;
+
+        auto ret = ::ioctl(kfd_fd, AMDKFD_IOC_PROFILER, &args);
+        ASSERT_EQ(ret, 0) << "Unable to unlock device when lock was successful";
+        close(kfd_fd);
+    });
+
+    const auto* agent_data = get_agent_data_from_ctx(ctx, agent);
+    return (kfd_ioctl_status == 0) && !agent_data->profile->reqired_hw_counters.empty();
+}
+
 }  // namespace
 
 class device_counting_service_test : public ::testing::Test
@@ -282,6 +331,9 @@ protected:
         test_init();
         // rocprofiler_debugger_block();
         counters::device_counting_service_hsa_registration();
+
+        const bool has_device_lock = counters::counter_collection_has_device_lock();
+        ROCP_WARNING_IF(!has_device_lock) << fmt::format("Kernel does not support device lock");
 
         std::string kernel_name = "null_kernel";
 
@@ -400,6 +452,9 @@ protected:
                         static_cast<void*>(&cfg_id)),
                     "Could not create agent collection");
 
+                const auto* agent_data = get_agent_data_from_ctx(ctx, agent.get_rocp_agent());
+                EXPECT_FALSE(agent_data->device_locked) << "Device should be unlocked";
+
                 // This queue will only be present if a context exists when AgentCache is
                 // construction This is a workaround for the test environment since we create
                 // contexts after AgentCache constructed.
@@ -423,8 +478,10 @@ protected:
 
                 ROCPROFILER_CALL(status, "Could not start context");
 
-                const auto* agent_data = get_agent_data_from_ctx(ctx, agent.get_rocp_agent());
-                EXPECT_TRUE(agent_data->device_locked) << "Device should be locked";
+                if(expect_device_lock(ctx, agent.get_rocp_agent()))
+                {
+                    EXPECT_TRUE(agent_data->device_locked) << "Device should be locked";
+                }
 
                 // Execute kernel
                 submitPacket(queue, &kernel_pkt);
@@ -462,7 +519,10 @@ protected:
                 ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "Could not stop context");
                 rocprofiler_flush_buffer(opt_buff_id);
 
-                EXPECT_FALSE(agent_data->device_locked) << "Device should be unlocked";
+                if(expect_device_lock(ctx, agent.get_rocp_agent()))
+                {
+                    EXPECT_FALSE(agent_data->device_locked) << "Device should be unlocked";
+                }
 
                 if(hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,

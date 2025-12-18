@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "rocprofiler-sdk/rocprofiler.h"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -523,6 +524,12 @@ start_agent_ctx(const context::context* ctx)
             {
                 callback_data.device_locked = true;
             }
+            else
+            {
+                ROCP_WARNING << fmt::format("Failed to lock device for agent {} with status {}.",
+                                            callback_data.agent_id.handle,
+                                            rocprofiler_get_status_string(lock_status));
+            }
         }
 
         callback_data.packet->packets.start_packet.completion_signal = callback_data.start_signal;
@@ -595,16 +602,13 @@ stop_agent_ctx(const context::context* ctx)
         if(callback_data.device_locked && counter_collection_has_device_lock())
         {
             auto unlock_status = counter_collection_device_unlock(callback_data.profile->agent);
-            if(unlock_status == ROCPROFILER_STATUS_SUCCESS)
-            {
-                callback_data.device_locked = false;
-            }
-            else
-            {
-                ROCP_WARNING << fmt::format(
-                    "Failed to unlock device for agent {} after stopping counter collection.",
-                    callback_data.agent_id.handle);
-            }
+            callback_data.device_locked = false;
+
+            ROCP_WARNING_IF(unlock_status != ROCPROFILER_STATUS_SUCCESS)
+                << fmt::format("Failed to unlock device for agent {} with status {}. "
+                               "Counter values may be inaccurate.",
+                               callback_data.agent_id.handle,
+                               rocprofiler_get_status_string(unlock_status));
         }
     }
 
@@ -637,28 +641,7 @@ device_counting_service_finalize()
                         rocprofiler::context::device_counting_service::state::EXIT};
         };
 
-        if(counters::counter_collection_has_device_lock())
-        {
-            for(auto& callback_data : ctx->device_counter_collection->agent_data)
-            {
-                // Only attempt unlock if the device is actually locked
-                if(callback_data.device_locked && callback_data.profile)
-                {
-                    auto unlock_status =
-                        counter_collection_device_unlock(callback_data.profile->agent);
-                    if(unlock_status == ROCPROFILER_STATUS_SUCCESS)
-                    {
-                        callback_data.device_locked = false;
-                    }
-                    else
-                    {
-                        ROCP_WARNING << fmt::format(
-                            "Failed to unlock device for agent {} during finalization.",
-                            callback_data.agent_id.handle);
-                    }
-                }
-            }
-        }
+        // No need unlock, as KFD unlocks the agent when the process exits
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
