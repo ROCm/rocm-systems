@@ -66,10 +66,9 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
- * - 1.16 -  hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 16
+#define HSA_AMD_INTERFACE_VERSION_MINOR 15
 
 #ifdef __cplusplus
 extern "C" {
@@ -716,10 +715,6 @@ typedef enum hsa_amd_agent_info_s {
    * valid on Windows. The type of this attribute is LUID.
    */
   HSA_AMD_AGENT_INFO_LUID = 0xA11A,
-  /**
-   * The agent supports expert scheduling mode. The type of this attribute is bool.
-   */
-  HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
 } hsa_amd_agent_info_t;
 
 /**
