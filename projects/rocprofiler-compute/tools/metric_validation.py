@@ -56,6 +56,7 @@ class Colors:
 
 class Analyzer(OmniAnalyze_Base):
     """Analyzer class for dumping raw counter and metric values."""
+
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
     ) -> None:
