@@ -45,6 +45,7 @@
 #include <limits>
 #include <functional>
 #include <exception>
+#include <libdrm/amdgpu_drm.h>
 
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
