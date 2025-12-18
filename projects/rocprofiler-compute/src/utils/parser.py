@@ -111,6 +111,8 @@ SUPPORTED_CALL: dict[str, str] = {
     "MOD": "to_mod",
     # Concat operation from the memory chart "active cus"
     "CONCAT": "to_concat",
+    # Threshold-based clamping for multi-pass profiling noise
+    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
@@ -248,6 +250,205 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
+# Threshold for noise clamping: 0.1% relative error
+NOISE_CLAMP_THRESHOLD = 0.001
+
+# TODO: TEMPORARY DEBUG FLAG - REMOVE BEFORE COMMIT
+NOISE_CLAMP_DEBUG = True
+NOISE_CLAMP_CALL_COUNT = 0  # Track which call we're on
+NOISE_CLAMP_CURRENT_METRIC = "unknown"  # Track current metric being evaluated
+NOISE_CLAMP_CURRENT_AGG = "unknown"  # Track current aggregation (avg/min/max)
+
+
+def to_noise_clamp(
+    difference: Union[pd.Series, float, np.ndarray],
+    reference: Union[pd.Series, float, np.ndarray],
+) -> Union[pd.Series, float, np.ndarray]:
+    """
+    Threshold-based variance clamping for multi-pass profiling noise.
+
+    Hardware counters collected across different profiling passes may have
+    slight timing differences, causing Counter_A - Counter_B to occasionally
+    go negative. This function distinguishes measurement noise from real issues:
+
+    - If difference >= 0: return as-is
+    - If difference < 0 and |difference|/reference < 0.1%: clamp to 0 (silent)
+    - If difference < 0 and |difference|/reference >= 0.1%: preserve negative + warn
+
+    Args:
+        difference: The result of counter subtraction (may be negative)
+        reference: The reference counter for calculating relative error
+                   (typically the first/larger counter in the subtraction)
+
+    Returns:
+        Clamped or original value depending on threshold
+    """
+    # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+    global NOISE_CLAMP_CALL_COUNT
+    NOISE_CLAMP_CALL_COUNT += 1
+    
+    if NOISE_CLAMP_DEBUG:
+        print(f"\n[NOISE_CLAMP #{NOISE_CLAMP_CALL_COUNT}] Metric: '{NOISE_CLAMP_CURRENT_METRIC}' ({NOISE_CLAMP_CURRENT_AGG})")
+        print(f"  difference type: {type(difference).__name__}")
+        print(f"  reference type: {type(reference).__name__}")
+        if isinstance(difference, pd.Series):
+            print(f"  difference shape: {difference.shape}, min: {difference.min():.4f}, max: {difference.max():.4f}")
+            print(f"  negative count: {(difference < 0).sum()}")
+        elif isinstance(difference, np.ndarray):
+            print(f"  difference shape: {difference.shape}, min: {difference.min():.4f}, max: {difference.max():.4f}")
+            print(f"  negative count: {(difference < 0).sum()}")
+        else:
+            print(f"  difference value: {difference}")
+
+    if isinstance(difference, pd.Series):
+        result = difference.copy()
+        # Avoid division by zero
+        safe_ref = reference.replace(0, np.nan) if isinstance(reference, pd.Series) else reference
+        if safe_ref == 0 if isinstance(safe_ref, (int, float)) else False:
+            safe_ref = np.nan
+
+        # Calculate relative error for negative values
+        negative_mask = result < 0
+        if negative_mask.any():
+            rel_error = np.abs(result[negative_mask]) / np.abs(safe_ref[negative_mask] if isinstance(safe_ref, pd.Series) else safe_ref)
+
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [Series] Found {negative_mask.sum()} negative values")
+                print(f"  [Series] Relative errors: min={rel_error.min()*100:.4f}%, max={rel_error.max()*100:.4f}%")
+                # Show distribution of relative errors
+                rel_err_pct = rel_error * 100
+                bins = [0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+                bin_labels = ["<0.001%", "0.001-0.01%", "0.01-0.1%", "0.1-1%", "1-10%", ">10%"]
+                hist_counts = []
+                for i in range(len(bins) - 1):
+                    count = ((rel_err_pct >= bins[i]) & (rel_err_pct < bins[i+1])).sum()
+                    hist_counts.append(count)
+                print(f"  [Series] Relative error distribution:")
+                for label, count in zip(bin_labels, hist_counts):
+                    if count > 0:
+                        bar = "█" * min(count, 50)
+                        print(f"    {label:>12}: {count:5d} {bar}")
+
+            # Small errors (< threshold): clamp silently
+            small_error_mask = rel_error < NOISE_CLAMP_THRESHOLD
+            clamped_count = small_error_mask.sum()
+            result.loc[negative_mask & small_error_mask.reindex(result.index, fill_value=False)] = 0
+
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [Series] Clamped {clamped_count} values (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
+
+            # Large errors (>= threshold): preserve negative and warn
+            large_error_indices = negative_mask & ~small_error_mask.reindex(result.index, fill_value=False)
+            if large_error_indices.any():
+                large_count = large_error_indices.sum()
+                max_neg = result[large_error_indices].min()
+                max_rel_err = rel_error[~small_error_mask].max() * 100 if (~small_error_mask).any() else 0
+
+                # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+                if NOISE_CLAMP_DEBUG:
+                    print(f"  [Series] PRESERVED {large_count} negative values (threshold exceeded!)")
+                    print(f"  [Series] Most negative value: {max_neg:.4f}, max rel_error: {max_rel_err:.4f}%")
+                    # Show details for problematic dispatches
+                    print(f"  [Series] === PROBLEMATIC DISPATCH DETAILS ===")
+                    problematic_indices = result.index[large_error_indices]
+                    for idx in problematic_indices[:10]:  # Show first 10
+                        diff_val = difference.loc[idx]
+                        ref_val = reference.loc[idx] if isinstance(reference, pd.Series) else reference
+                        rel_err_val = abs(diff_val) / abs(ref_val) * 100 if ref_val != 0 else 0
+                        print(f"    Dispatch {idx}: diff={diff_val:.2f}, ref={ref_val:.2f}, rel_err={rel_err_val:.4f}%")
+                    if len(problematic_indices) > 10:
+                        print(f"    ... and {len(problematic_indices) - 10} more")
+                    print(f"  [Series] ===================================")
+
+                console_warning(
+                    f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: {large_count} dispatch(es) "
+                    f"with relative error >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
+                    f"(min value: {max_neg:.2f}, max relative error: {max_rel_err:.3f}%)"
+                )
+        elif NOISE_CLAMP_DEBUG:
+            print(f"  [Series] No negative values found - returning as-is")
+
+        return result
+
+    elif isinstance(difference, np.ndarray):
+        result = difference.copy()
+        safe_ref = np.where(reference == 0, np.nan, reference)
+
+        negative_mask = result < 0
+        if negative_mask.any():
+            rel_error = np.abs(result[negative_mask]) / np.abs(safe_ref[negative_mask] if isinstance(safe_ref, np.ndarray) else safe_ref)
+
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [ndarray] Found {negative_mask.sum()} negative values")
+                print(f"  [ndarray] Relative errors: min={rel_error.min()*100:.4f}%, max={rel_error.max()*100:.4f}%")
+
+            small_error_mask = rel_error < NOISE_CLAMP_THRESHOLD
+            neg_indices = np.where(negative_mask)[0]
+            clamped_count = small_error_mask.sum()
+            result[neg_indices[small_error_mask]] = 0
+
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [ndarray] Clamped {clamped_count} values (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
+
+            large_error_mask = ~small_error_mask
+            if large_error_mask.any():
+                large_count = large_error_mask.sum()
+                max_neg = result[neg_indices[large_error_mask]].min()
+                max_rel_err = rel_error[large_error_mask].max() * 100
+
+                # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+                if NOISE_CLAMP_DEBUG:
+                    print(f"  [ndarray] PRESERVED {large_count} negative values (threshold exceeded!)")
+                    print(f"  [ndarray] Most negative value: {max_neg:.4f}, max rel_error: {max_rel_err:.4f}%")
+
+                console_warning(
+                    f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: {large_count} value(s) "
+                    f"with relative error >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
+                    f"(min value: {max_neg:.2f}, max relative error: {max_rel_err:.3f}%)"
+                )
+        elif NOISE_CLAMP_DEBUG:
+            print(f"  [ndarray] No negative values found - returning as-is")
+
+        return result
+
+    else:
+        # Scalar case
+        if difference >= 0:
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [scalar] Value >= 0, returning as-is: {difference}")
+            return difference
+
+        safe_ref = reference if reference != 0 else np.nan
+        rel_error = abs(difference) / abs(safe_ref) if not np.isnan(safe_ref) else 0
+
+        # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+        if NOISE_CLAMP_DEBUG:
+            print(f"  [scalar] Negative value: {difference}, reference: {reference}")
+            print(f"  [scalar] Relative error: {rel_error*100:.4f}%")
+
+        if rel_error < NOISE_CLAMP_THRESHOLD:
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [scalar] CLAMPED to 0 (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
+            return 0
+        else:
+            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+            if NOISE_CLAMP_DEBUG:
+                print(f"  [scalar] PRESERVED negative (threshold exceeded!)")
+
+            console_warning(
+                f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: "
+                f"relative error {rel_error*100:.3f}% >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
+                f"(value: {difference:.2f})"
+            )
+            return difference
+
+
 class CodeTransformer(ast.NodeTransformer):
     """
     Python AST visitor to transform user defined equation string to df format
@@ -338,6 +539,7 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
+                "to_noise_clamp": to_noise_clamp,
             })
 
             eval_result = eval(
@@ -1011,6 +1213,11 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
+        # TODO: TEMPORARY DEBUG - Set current metric/aggregation for NOISE_CLAMP debug output
+        global NOISE_CLAMP_CURRENT_METRIC, NOISE_CLAMP_CURRENT_AGG
+        NOISE_CLAMP_CURRENT_METRIC = row_id
+        NOISE_CLAMP_CURRENT_AGG = col
+        
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
     # Check for metrics exceeding theoretical peak due to dual-issue

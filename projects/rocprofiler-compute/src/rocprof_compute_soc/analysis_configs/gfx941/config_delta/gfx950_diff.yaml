@@ -28,6 +28,9 @@ Addition:
             - L2 Wr Lat:
                 value: |
                   ROUND(AVG(((TCP_TCC_WRITE_REQ_LATENCY_sum / (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else None)), 0)
+            - VL1 Lat:
+                value: |
+                  ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum != 0) else None)), 0)
     metric_descriptions:
       L2 Rd Lat:
           plain: |
@@ -39,6 +42,11 @@ Addition:
             Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
           rst: |
             Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+      VL1 Lat:
+          plain: |
+            Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
+          rst: |
+            Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
   - Panel Config:
       id: 400
       title: Roofline
@@ -769,35 +777,35 @@ Modification:
           title: Workgroup manager utilizations
           metrics:
             - Dispatched Wavefronts:
-                max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
                 min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+                max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
                 avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
             - Dispatched Workgroups:
-                max: |
-                  MAX(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
                 min: |
                   MIN(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+                max: |
+                  MAX(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
                 avg: |
                   AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
             - SGPR Writes:
-                max: |
-                  MAX((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
                 min: |
                   MIN((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+                max: |
+                  MAX((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
                 avg: |
                   AVG((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
             - Scheduler-Pipe Utilization:
-                max: |
-                  MAX(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
                 min: |
                   MIN(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+                max: |
+                  MAX(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
                 avg: |
                   AVG(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
             - VGPR Writes:
-                max: |
-                  MAX((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
                 min: |
                   MIN((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+                max: |
+                  MAX((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
                 avg: |
                   AVG((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
   - Panel Config:
@@ -809,8 +817,8 @@ Modification:
           title: Wavefront Launch Stats
           metrics:
             - Total Wavefronts:
-                max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
                 min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+                max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
                 avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
   - Panel Config:
       id: 1100
@@ -845,10 +853,10 @@ Modification:
           title: Arithmetic Operations
           metrics:
             - FLOPs (Total):
-                max: |
-                  MAX((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
                 min: |
                   MIN((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
+                max: |
+                  MAX((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
                 avg: |
                   AVG((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
   - Panel Config:
@@ -867,30 +875,23 @@ Modification:
           title: L2-Fabric interface metrics
           metrics:
             - Read BW:
-                max: |
-                  MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
                 min: |
                   MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+                max: |
+                  MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
                 avg: |
                   AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
-            - Remote Read Traffic:
-                max: |
-                  MAX((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-                min: |
-                  MIN((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-                avg: |
-                  AVG((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
       - metric_table:
           id: 1706
           title: L2 - Fabric interface detailed metrics
           metrics:
             - HBM Write and Atomic:
-                max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
                 min: MIN((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
+                max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
                 avg: AVG((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
             - Read (64B):
-                max: MAX((TCC_EA0_RDREQ_64B_sum / $denom))
                 min: MIN((TCC_EA0_RDREQ_64B_sum / $denom))
+                max: MAX((TCC_EA0_RDREQ_64B_sum / $denom))
                 avg: AVG((TCC_EA0_RDREQ_64B_sum / $denom))
   - Panel Config:
       id: 1800
@@ -901,14 +902,14 @@ Modification:
           title: L2-Fabric Read Stall (Cycles per normUnit)
           metrics:
             - ::_1:
-                ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+                ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
       - metric_table:
           id: 1810
           title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
           metrics:
             - ::_1:
+                ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
-                ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))

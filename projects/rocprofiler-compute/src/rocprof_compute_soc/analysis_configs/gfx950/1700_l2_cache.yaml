@@ -60,11 +60,11 @@ Panel Config:
             != 0) else None))
           unit: pct
         Remote Read Traffic:
-          avg: AVG((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) /
+          avg: AVG((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) /
             TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-          min: MIN((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) /
+          min: MIN((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) /
             TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-          max: MAX((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) /
+          max: MAX((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) /
             TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
           unit: pct
         Uncached Read Traffic:
@@ -92,11 +92,11 @@ Panel Config:
             != 0) else None))
           unit: pct
         Remote Write and Atomic Traffic:
-          avg: AVG((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum)
+          avg: AVG((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
             if (TCC_EA0_WRREQ_sum != 0) else None))
-          min: MIN((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum)
+          min: MIN((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
             if (TCC_EA0_WRREQ_sum != 0) else None))
-          max: MAX((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum)
+          max: MAX((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
             if (TCC_EA0_WRREQ_sum != 0) else None))
           unit: pct
         Atomic Traffic:
@@ -436,9 +436,9 @@ Panel Config:
           max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Read:
-          avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
+          min: MIN((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
+          max: MAX((NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Read Bandwidth - PCIe:
           avg: AVG(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
@@ -456,9 +456,9 @@ Panel Config:
           max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Write and Atomic (32B):
-          avg: AVG(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
-          min: MIN(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
-          max: MAX(MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), 0))
+          avg: AVG(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
+          min: MIN(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
+          max: MAX(NOISE_CLAMP(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom), TCC_EA0_WRREQ_sum))
           unit: (Req + $normUnit)
         Write and Atomic (Uncached):
           avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
@@ -476,9 +476,9 @@ Panel Config:
           max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
           unit: (Req + $normUnit)
         Remote Write and Atomic:
-          avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
+          min: MIN((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
+          max: MAX((NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / $denom))
           unit: (Req + $normUnit)
         Write Bandwidth - PCIe:
           avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))

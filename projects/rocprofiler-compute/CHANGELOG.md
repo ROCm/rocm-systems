@@ -33,6 +33,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Implemented threshold-based clamping (`NOISE_CLAMP`) for L2 cache metrics to handle negative values from multi-pass profiling variance. Small relative errors (< 0.1%) are silently clamped to 0, while larger errors preserve the negative value and emit a warning to alert users to potential data quality issues.
+
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 
 * The meaning of --dispatch option in analyze is still the same which is which dispatch ids to analyze
