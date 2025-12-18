@@ -44,6 +44,8 @@
 #include <timemory/utility/types.hpp>
 
 #include <csignal>
+#include <cstring>
+#include <dlfcn.h>
 #include <ostream>
 #include <pthread.h>
 #include <utility>
@@ -540,11 +542,38 @@ pthread_create_gotcha::get_native_handles()
     return _v;
 }
 
+namespace
+{
+bool
+is_rocm_internal_thread(void* func_ptr)
+{
+    if(!func_ptr) return false;
+
+    Dl_info info;
+    if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr) return false;
+
+    const char* lib_name = info.dli_fname;
+
+    if(std::strstr(lib_name, "libhsa-runtime64") != nullptr) return true;
+    if(std::strstr(lib_name, "librocprofiler-sdk") != nullptr) return true;
+    if(std::strstr(lib_name, "libamdhip64") != nullptr) return true;
+
+    return false;
+}
+}  // namespace
+
 // pthread_create
 int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                                   void* (*func)(void*), void*              arg) const
 {
+    // Bypass wrapper for internal ROCm threads to avoid interfering with their event
+    // loops
+    if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
+    {
+        return (*m_wrappee)(thread, attr, func, arg);
+    }
+
     auto        _tid          = utility::get_thread_index();
     auto        _thr_state    = get_thread_state();
     auto        _glob_state   = get_state();
