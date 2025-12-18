@@ -99,7 +99,7 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"rocTX baseline failed: {result.stderr}"
+        assert result.success, f"rocTX baseline failed: {result.test_output}"
 
     def test_sampling(
         self,
@@ -125,7 +125,7 @@ class TestRoctx:
         except FileNotFoundError:
             pytest.skip("roctx target not built")
         result = runner.run()
-        assert result.success, f"rocTX sampling failed: {result.stderr}"
+        assert result.success, f"rocTX sampling failed: {result.test_output}"
 
         # ROCpd validation
         with subtests.test("ROCpd validation"):
@@ -164,7 +164,7 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
 
     def test_sys_run(
         self,
@@ -183,4 +183,4 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"rocTX sys run failed: {result.stderr}"
+        assert result.success, f"rocTX sys run failed: {result.test_output}"

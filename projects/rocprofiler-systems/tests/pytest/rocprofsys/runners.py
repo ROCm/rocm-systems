@@ -57,7 +57,7 @@ def _get_and_clear_results() -> list["TestResult"]:
     _test_results = []
     return results
 
-DEFAULT_FAIL_REGEX = [
+ROCPROFSYS_ABORT_FAIL_REGEX = [
     r"### ERROR ###",
     r"unknown-hash=",
     r"address of faulting memory reference",
@@ -89,26 +89,26 @@ class TestResult:
 
     Attributes:
         returncode: Process exit code
-        stdout: Standard output content
-        stderr: Standard error content
+        test_output: Standard output and error content
+        extra_output: Extra output set by the test itself (as of now, only used for timeout errors)
         output_dir: Directory containing output files
         command: The command that was executed
         env: Environment variables used
         duration: Execution time in seconds (if measured)
         pass_regex: Optional regex pattern(s) that must be found for success
-        fail_regex: Regex pattern(s) that must NOT be found (defaults to DEFAULT_FAIL_REGEX)
+        fail_regex: Regex pattern(s) that must NOT be found (defaults to ROCPROFSYS_ABORT_FAIL_REGEX)
         _instrumented_files: List of instrumented binary files created
     """
 
     returncode: int
-    stdout: str
-    stderr: str
+    test_output: str
     output_dir: Path
     command: list[str]
     environment: dict[str, str]
+    extra_output: Optional[str] = None
     duration: Optional[float] = None
     pass_regex: Optional[list[str]] = None
-    fail_regex: list[str] = field(default_factory=lambda: DEFAULT_FAIL_REGEX.copy())
+    fail_regex: list[str] = field(default_factory=lambda: ROCPROFSYS_ABORT_FAIL_REGEX.copy())
     _instrumented_files: list[Path] = field(default_factory=list)
 
     def _check_patterns(self) -> tuple[bool, Optional[str]]:
@@ -119,8 +119,6 @@ class TestResult:
         """
         if self.returncode != 0:
             return False, f"Non-zero return code: {self.returncode}"
-
-        combined_output = self.stdout + self.stderr
 
         # Build combined regex for single-pass scanning
         all_patterns = []
@@ -143,7 +141,7 @@ class TestResult:
         combined_regex = re.compile("|".join(all_patterns))
         found_pass = set()
 
-        for match in combined_regex.finditer(combined_output):
+        for match in combined_regex.finditer(self.test_output):
             matched_group = match.lastgroup
 
             # Fail pattern found - immediate failure
@@ -170,7 +168,7 @@ class TestResult:
 
         Returns True only if:
         - Return code is 0
-        - No fail_regex patterns found in stdout or stderr
+        - No fail_regex patterns found in test_output
         - All pass_regex patterns found (if specified)
 
         Uses single-pass scanning for efficiency on large outputs.
@@ -297,7 +295,7 @@ class BaseRunner(ABC):
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
         self.pass_regex = pass_regex
-        self.fail_regex = fail_regex if fail_regex is not None else DEFAULT_FAIL_REGEX.copy()
+        self.fail_regex = fail_regex if fail_regex is not None else ROCPROFSYS_ABORT_FAIL_REGEX.copy()
 
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
@@ -332,7 +330,8 @@ class BaseRunner(ABC):
             try:
                 result = subprocess.run(
                     [str(self.config.mpiexec), "--oversubscribe", "-n", "1", "true"],
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     timeout=5,
                 )
                 if result.returncode == 0:
@@ -364,7 +363,8 @@ class BaseRunner(ABC):
         try:
             result = subprocess.run(
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 timeout=self.timeout,
                 env=full_env,
@@ -375,8 +375,7 @@ class BaseRunner(ABC):
 
             test_result = TestResult(
                 returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                test_output=result.stdout,
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -389,8 +388,8 @@ class BaseRunner(ABC):
             duration = time.time() - start_time
             test_result = TestResult(
                 returncode=-1,
-                stdout=e.stdout or "",
-                stderr=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                test_output=e.stdout or "",
+                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -491,7 +490,8 @@ class BinaryRewriteRunner(BaseRunner):
 
         result = subprocess.run(
             command,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             timeout=self.timeout,
             env=full_env,
@@ -504,8 +504,7 @@ class BinaryRewriteRunner(BaseRunner):
 
         return TestResult(
             returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            test_output=result.stdout,
             output_dir=self.output_dir,
             command=command,
             environment=self.env,
@@ -533,6 +532,7 @@ class BinaryRewriteRunner(BaseRunner):
         """
         # First, perform rewrite
         rewrite_result = self.rewrite()
+        _register_result(rewrite_result)
         if not rewrite_result.success:
             return rewrite_result
 
@@ -665,9 +665,11 @@ class SysBinaryRunner(BaseRunner):
                         if part:
                             processed_fail_regex.append(part)
                         if i < len(parts) - 1:
-                            processed_fail_regex.extend(DEFAULT_FAIL_REGEX)
+                            processed_fail_regex.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
                 else:
                     processed_fail_regex.append(pattern)
+        else:
+            processed_fail_regex = ROCPROFSYS_ABORT_FAIL_REGEX.copy()
 
         # Handle environment variables
         base_env = config.get_base_binary_environment()
@@ -721,7 +723,8 @@ class SysBinaryRunner(BaseRunner):
         try:
             result = subprocess.run(
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 timeout=self.timeout,
                 env=full_env,
@@ -730,10 +733,9 @@ class SysBinaryRunner(BaseRunner):
 
             duration = time.time() - start_time
 
-            return TestResult(
+            test_result = TestResult(
                 returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                test_output=result.stdout,
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -744,10 +746,10 @@ class SysBinaryRunner(BaseRunner):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
-            return TestResult(
+            test_result = TestResult(
                 returncode=-1,
-                stdout=e.stdout or "",
-                stderr=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                test_output=e.stdout or "",
+                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -755,3 +757,6 @@ class SysBinaryRunner(BaseRunner):
                 pass_regex=self.pass_regex,
                 fail_regex=self.fail_regex,
             )
+
+        _register_result(test_result)
+        return test_result

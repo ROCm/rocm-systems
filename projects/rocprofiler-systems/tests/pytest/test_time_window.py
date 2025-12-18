@@ -103,7 +103,7 @@ class TestTraceTimeWindow:
             pytest.skip("trace-time-window target not built")
 
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
         assert runner.instrumented_exe.exists(), "Instrumented binary not created"
 
         result = runner.run()
@@ -243,7 +243,7 @@ class TestTraceTimeWindowDelay:
             pytest.skip("trace-time-window target not built")
 
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
         assert runner.instrumented_exe.exists(), "Instrumented binary not created"
 
         result = runner.run()

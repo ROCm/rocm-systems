@@ -29,6 +29,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import os
+import re
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -173,7 +174,6 @@ class TestInstrumentBinary:
         result = runner.run()
         assert result.success, f"Instrument simulate lib failed: {result.failure_reason}"
 
-    # TOCHECK
     def test_simulate_lib_basename(
         self,
         rocprof_config: RocprofsysConfig,
@@ -196,7 +196,7 @@ class TestInstrumentBinary:
                     "--print-available", "functions",
                     "-v", "2",
                     "-o", str(output_lib),
-                    "--", lib_basename,  # Just basename, not full path
+                    "--", lib_basename,
                 ],
                 timeout=120,
                 # Run from lib directory so basename can be found
@@ -237,8 +237,6 @@ class TestInstrumentBinary:
 
         result = runner.run()
         assert result.success, f"Instrument write log failed: {result.failure_reason}"
-
-        # Verify log file exists (replaces the separate -check test)
         result.assert_file_exists("instrumentation/user.log")
 
 
@@ -344,8 +342,6 @@ class TestAvailBinary:
 
         result = runner.run()
         assert result.success, f"Avail all only available alphabetical failed: {result.failure_reason}"
-
-        # Verify log file was created (ATTACHED_FILES in CMake)
         assert log_file.exists(), f"Log file not created: {log_file}"
 
     def test_all_csv(
@@ -380,7 +376,11 @@ class TestAvailBinary:
         test_output_dir: Path,
     ):
         pass_regex = [
-            r"\|[-]+\|[\s\S]*\|[ ]+COMPONENT[ ]+\|[\s\S]*\|[-]+\|[\s\S]*\| (wall_clock)[ ]+\|[\s\S]*\|[-]+\|"
+            r"\|[-]+\|[\s\S]*"
+            r"\|[ ]+COMPONENT[ ]+\|[\s\S]*"
+            r"\|[-]+\|[\s\S]*"
+            r"\| (wall_clock)[ ]+\|[\s\S]*"
+            r"\|[-]+\|"
         ]
 
         try:
@@ -458,8 +458,10 @@ class TestAvailBinary:
         test_output_dir: Path,
     ):
         pass_regex = [
-            r"ENVIRONMENT VARIABLE,[\s\S]*ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
-            r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*ROCPROFSYS_USE_PID,"
+            r"ENVIRONMENT VARIABLE,[\s\S]*"
+            r"ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
+            r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
+            r"ROCPROFSYS_USE_PID,"
         ]
         fail_regex = [r"ROCPROFSYS_TRACE", "|ROCPROFSYS_ABORT_FAIL_REGEX"]
 
@@ -490,6 +492,17 @@ class TestAvailBinary:
     ):
         config_base = test_output_dir / "rocprof-sys-test"
 
+        avail_cfg_path = test_output_dir / "rocprof-sys-"
+        avail_cfg_path = str(avail_cfg_path).replace("+", r"\+")
+
+        pass_regex = [
+            rf"Outputting JSON configuration file '{avail_cfg_path}test\.json'"
+            r"[\s\S]*"
+            rf"Outputting XML configuration file '{avail_cfg_path}test\.xml'"
+            r"[\s\S]*"
+            rf"Outputting text configuration file '{avail_cfg_path}test\.cfg'"
+        ]
+
         try:
             runner = SysBinaryRunner(
                 config=rocprof_config,
@@ -501,6 +514,7 @@ class TestAvailBinary:
                     "--force", "--all", "-c", "rocprofsys",
                 ],
                 timeout=45,
+                pass_regex=pass_regex,
             )
         except FileNotFoundError:
             pytest.skip(f"{self.target} not built")
@@ -519,11 +533,22 @@ class TestAvailBinary:
         test_output_dir: Path,
     ):
         config_base = test_output_dir / "rocprof-sys-tweak"
-        # Override specific env vars (merged with base env in runner)
+
         env_overrides = {
             "ROCPROFSYS_TRACE": "OFF",
             "ROCPROFSYS_PROFILE": "ON",
         }
+
+        avail_cfg_path = test_output_dir / "rocprof-sys-"
+        avail_cfg_path = str(avail_cfg_path).replace("+", r"\+")
+
+        pass_regex = [
+            rf"Outputting JSON configuration file '{avail_cfg_path}tweak\.json'"
+            r"[\s\S]*"
+            rf"Outputting XML configuration file '{avail_cfg_path}tweak\.xml'"
+            r"[\s\S]*"
+            rf"Outputting text configuration file '{avail_cfg_path}tweak\.cfg'"
+        ]
 
         try:
             runner = SysBinaryRunner(
@@ -537,6 +562,7 @@ class TestAvailBinary:
                 ],
                 env=env_overrides,
                 timeout=45,
+                pass_regex=pass_regex,
             )
         except FileNotFoundError:
             pytest.skip(f"{self.target} not built")

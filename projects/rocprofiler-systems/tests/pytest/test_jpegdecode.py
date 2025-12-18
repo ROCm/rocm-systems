@@ -95,7 +95,7 @@ class TestJPEGDecode:
             run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
         )
         result = runner.run()
-        assert result.success, f"JPEG decode sampling failed: {result.stderr}"
+        assert result.success, f"JPEG decode sampling failed: {result.test_output}"
 
         # Validate perfetto trace
         with subtests.test("Perfetto validation"):
@@ -146,4 +146,4 @@ class TestJPEGDecode:
             run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
         )
         result = runner.run()
-        assert result.success, f"JPEG decode sys-run failed: {result.stderr}"
+        assert result.success, f"JPEG decode sys-run failed: {result.test_output}"

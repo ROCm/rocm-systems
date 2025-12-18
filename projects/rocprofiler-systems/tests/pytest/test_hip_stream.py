@@ -59,7 +59,7 @@ class TestTransposeGroupByQueue:
             timeout=120,
         )
         result = runner.run()
-        assert result.success, f"Sampling failed: {result.stderr}"
+        assert result.success, f"Sampling failed: {result.test_output}"
 
     def test_sys_run(
         self,
@@ -78,7 +78,7 @@ class TestTransposeGroupByQueue:
             timeout=120,
         )
         result = runner.run()
-        assert result.success, f"Sys run failed: {result.stderr}"
+        assert result.success, f"Sys run failed: {result.test_output}"
 
 @pytest.mark.gpu
 @pytest.mark.rocm_min_version("7.0")
@@ -102,7 +102,7 @@ class TestTransposeGroupByStream:
             timeout=120,
         )
         result = runner.run()
-        assert result.success, f"Sampling failed: {result.stderr}"
+        assert result.success, f"Sampling failed: {result.test_output}"
 
     def test_sys_run(
         self,
@@ -121,4 +121,4 @@ class TestTransposeGroupByStream:
             timeout=120,
         )
         result = runner.run()
-        assert result.success, f"Sys run failed: {result.stderr}"
+        assert result.success, f"Sys run failed: {result.test_output}"

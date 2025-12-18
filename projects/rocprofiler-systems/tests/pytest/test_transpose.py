@@ -115,7 +115,7 @@ class TestTranspose:
 
         result = runner.run()
 
-        assert result.success, f"Baseline failed: {result.stderr}"
+        assert result.success, f"Baseline failed: {result.test_output}"
 
     def test_sampling(
         self,
@@ -141,7 +141,7 @@ class TestTranspose:
 
         result = runner.run()
 
-        assert result.success, f"Sampling failed: {result.stderr}"
+        assert result.success, f"Sampling failed: {result.test_output}"
         assert result.output_dir.exists(), "Output directory not created"
 
         # Verify perfetto trace was created
@@ -218,11 +218,11 @@ class TestTranspose:
         )
 
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
         assert runner.instrumented_exe.exists(), "Instrumented binary not created"
 
         result = runner.run()
-        assert result.success, f"Run failed: {result.stderr}"
+        assert result.success, f"Run failed: {result.test_output}"
 
         with subtests.test("Perfetto validation"):
             if not use_perfetto:
@@ -250,7 +250,7 @@ class TestTranspose:
 
         result = runner.run()
 
-        assert result.success, f"Runtime instrument failed: {result.stderr}"
+        assert result.success, f"Runtime instrument failed: {result.test_output}"
         with subtests.test("Perfetto validation"):
             if not use_perfetto:
                 pytest.skip("Perfetto is not enabled")
@@ -274,7 +274,7 @@ class TestTranspose:
 
         result = runner.run()
 
-        assert result.success, f"sys-run failed: {result.stderr}"
+        assert result.success, f"sys-run failed: {result.test_output}"
         assert result.output_dir.exists(), "Output directory not created"
 
 
@@ -307,7 +307,7 @@ class TestTransposeTwoKernels:
 
         result = runner.run()
 
-        assert result.success, f"Two kernels test failed: {result.stderr}"
+        assert result.success, f"Two kernels test failed: {result.test_output}"
 
     def test_sys_run(
         self,
@@ -327,7 +327,7 @@ class TestTransposeTwoKernels:
 
         result = runner.run()
 
-        assert result.success, f"sys-run two kernels failed: {result.stderr}"
+        assert result.success, f"sys-run two kernels failed: {result.test_output}"
 
 
 # ============================================================================
@@ -369,7 +369,7 @@ class TestTransposeLoops:
 
         result = runner.run()
 
-        assert result.success, f"Sampling loops failed: {result.stderr}"
+        assert result.success, f"Sampling loops failed: {result.test_output}"
 
     def test_binary_rewrite(
         self,
@@ -390,15 +390,15 @@ class TestTransposeLoops:
 
         # Check rewrite phase
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
 
         # Verify loops were instrumented (not 0)
-        assert "0 instrumented loops in procedure transpose" not in rewrite_result.stdout, \
+        assert "0 instrumented loops in procedure transpose" not in rewrite_result.test_output, \
             "No loops were instrumented in transpose function"
 
         # Run the instrumented binary
         result = runner.run()
-        assert result.success, f"Run failed: {result.stderr}"
+        assert result.success, f"Run failed: {result.test_output}"
 
 
 # ============================================================================
@@ -446,7 +446,7 @@ class TestTransposeROCProfiler:
 
         result = runner.run()
 
-        assert result.success, f"ROCProfiler sampling failed: {result.stderr}"
+        assert result.success, f"ROCProfiler sampling failed: {result.test_output}"
 
         for expected_file in gpu_info.expected_counter_files:
             file_path = result.output_dir / expected_file
@@ -483,7 +483,7 @@ class TestTransposeROCProfiler:
 
         result = runner.run()
 
-        assert result.success, f"ROCProfiler rewrite failed: {result.stderr}"
+        assert result.success, f"ROCProfiler rewrite failed: {result.test_output}"
 
         for expected_file in gpu_info.expected_counter_files:
             file_path = result.output_dir / expected_file
@@ -529,7 +529,7 @@ class TestTransposeParametrized:
         result = runner.run()
 
         assert result.success, (
-            f"Config ({iterations}, {tile_dim}, {block_rows}) failed: {result.stderr}"
+            f"Config ({iterations}, {tile_dim}, {block_rows}) failed: {result.test_output}"
         )
 
     @pytest.mark.parametrize(
@@ -560,5 +560,5 @@ class TestTransposeParametrized:
 
         result = runner.run()
 
-        assert result.success, f"{runner_class.__name__} failed: {result.stderr}"
+        assert result.success, f"{runner_class.__name__} failed: {result.test_output}"
         assert result.output_dir.exists(), "Output directory not created"

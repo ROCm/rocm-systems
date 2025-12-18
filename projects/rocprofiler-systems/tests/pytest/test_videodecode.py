@@ -95,7 +95,7 @@ class TestVideoDecode:
             run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
         )
         result = runner.run()
-        assert result.success, f"Video decode sampling failed: {result.stderr}"
+        assert result.success, f"Video decode sampling failed: {result.test_output}"
 
         # Validate perfetto trace
         with subtests.test("Perfetto validation"):
@@ -146,4 +146,4 @@ class TestVideoDecode:
             run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
         )
         result = runner.run()
-        assert result.success, f"Video decode sys-run failed: {result.stderr}"
+        assert result.success, f"Video decode sys-run failed: {result.test_output}"

@@ -62,15 +62,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Show stdout and stderr from runner commands",
+        help="Shows both stdout and stderr from runner commands (default: False)",
     )
-    group.addoption(
-        "--show-stderr",
-        action="store_true",
-        default=False,
-        help="Show only stderr from runner commands",
-    )
-
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
@@ -215,8 +208,7 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
 
     Output is displayed:
     - On test failure: Always prints both stdout and stderr
-    - With --show-output: Prints both stdout and stderr
-    - With --show-stderr: Prints only stderr
+    - With --show-output: Shows both stdout and stderr
 
     This hook automatically captures output from all BaseRunner.run() calls.
     """
@@ -227,36 +219,28 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
     if not results:
         return
 
-    # Check if test failed
     test_failed = outcome.excinfo is not None
-
-    # Get CLI options
     show_output = item.config.getoption("--show-output", default=False)
-    show_stderr = item.config.getoption("--show-stderr", default=False)
 
-    # Always show output on failure, otherwise respect CLI flags
-    if not test_failed and not show_output and not show_stderr:
+    # Always show output on failure, otherwise respect flags
+    if not test_failed and not show_output:
         return
 
     for result in results:
         cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
-        print(f"\n{'='*70}")
-        print(f"Command: {cmd_str}")
-        print(f"{'='*70}")
 
-        stdout = getattr(result, "stdout", "")
-        stderr = getattr(result, "stderr", "")
+        if cmd_str is not None and cmd_str != "":
+            print(f"\n{'='*70}")
+            print(f"Command: {cmd_str}")
+            print(f"{'='*70}")
 
-        if test_failed or show_output:
-            # Show both stdout and stderr on failure or with --show-output
-            if stdout:
-                print(f"--- STDOUT ---\n{stdout}")
-            if stderr:
-                print(f"--- STDERR ---\n{stderr}")
-        elif show_stderr:
-            # Show only stderr with --show-stderr
-            if stderr:
-                print(f"--- STDERR ---\n{stderr}")
+        test_output = getattr(result, "test_output", "")
+        extra_output = getattr(result, "extra_output", "")
+
+        if test_output is not None and test_output != "":
+            print(f"--- TEST OUTPUT ---\n{test_output}")
+        if extra_output is not None and extra_output != "":
+            print(f"--- EXTRA OUTPUT ---\n{extra_output}")
 
 
 # Debug helper

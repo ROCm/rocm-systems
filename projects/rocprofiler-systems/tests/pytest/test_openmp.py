@@ -138,7 +138,7 @@ class TestOpenMPCG:
             pytest.skip("openmp-cg target not built")
 
         result = runner.run()
-        assert result.success, f"CG sampling failed: {result.stderr}"
+        assert result.success, f"CG sampling failed: {result.test_output}"
 
     def test_binary_rewrite(
         self,
@@ -165,15 +165,15 @@ class TestOpenMPCG:
 
         # Perform rewrite
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
 
         # Check loops were instrumented
-        assert "0 instrumented loops in procedure" not in rewrite_result.stdout, \
+        assert "0 instrumented loops in procedure" not in rewrite_result.test_output, \
             "No loops were instrumented"
 
         # Run the instrumented binary
         result = runner.run()
-        assert result.success, f"CG run failed: {result.stderr}"
+        assert result.success, f"CG run failed: {result.test_output}"
 
 
 # ============================================================================
@@ -212,15 +212,15 @@ class TestOpenMPLU:
 
         # Perform rewrite
         rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
 
         # Check loops were instrumented
-        assert "0 instrumented loops in procedure" not in rewrite_result.stdout, \
+        assert "0 instrumented loops in procedure" not in rewrite_result.test_output, \
             "No loops were instrumented"
 
         # Run the instrumented binary
         result = runner.run()
-        assert result.success, f"LU run failed: {result.stderr}"
+        assert result.success, f"LU run failed: {result.test_output}"
 
 
 # ============================================================================
@@ -269,7 +269,7 @@ class TestOpenMPTarget:
             pytest.skip("openmp-target not built")
 
         result = runner.run()
-        assert result.success, f"OpenMP target failed: {result.stderr}"
+        assert result.success, f"OpenMP target failed: {result.test_output}"
 
         # Verify perfetto trace has kernel dispatch events
         with subtests.test("Perfetto validation"):
@@ -358,7 +358,7 @@ class TestOpenMPVVHost:
                 pytest.skip(f"{target_name} not built")
 
             result = runner.run()
-            assert result.success, f"OMPVV host baseline {target_name} failed: {result.stderr}"
+            assert result.success, f"OMPVV host baseline {target_name} failed: {result.test_output}"
 
     def test_sampling(
         self,
@@ -384,7 +384,7 @@ class TestOpenMPVVHost:
             pytest.skip(f"{target_name} not built")
 
         result = runner.run()
-        assert result.success, f"OMPVV host test {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV host test {target_name} failed: {result.test_output}"
 
         with subtests.test("Perfetto validation"):
             if not use_perfetto:
@@ -426,12 +426,12 @@ class TestOpenMPVVHost:
         # Perform rewrite phase
         rewrite_result = runner.rewrite()
 
-        assert rewrite_result.success, f"Rewrite failed for {target_name}: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed for {target_name}: {rewrite_result.test_output}"
 
         # Run the instrumented binary
         result = runner.run()
 
-        assert result.success, f"OMPVV host binary rewrite {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV host binary rewrite {target_name} failed: {result.test_output}"
 
     def test_runtime_instrument(
         self,
@@ -460,7 +460,7 @@ class TestOpenMPVVHost:
 
         result = runner.run()
 
-        assert result.success, f"Runtime instrumentation failed for {target_name}: {result.stderr}"
+        assert result.success, f"Runtime instrumentation failed for {target_name}: {result.test_output}"
 
     def test_run(
         self,
@@ -486,7 +486,7 @@ class TestOpenMPVVHost:
             pytest.skip(f"{target_name} not built")
 
         result = runner.run()
-        assert result.success, f"OMPVV host run {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV host run {target_name} failed: {result.test_output}"
 
         with subtests.test("Perfetto validation"):
             if not use_perfetto:
@@ -538,7 +538,7 @@ class TestOpenMPVVOffload:
             pytest.skip(f"{target_name} not built")
 
         result = runner.run()
-        assert result.success, f"OMPVV offload baseline {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV offload baseline {target_name} failed: {result.test_output}"
 
     def test_sampling(
         self,
@@ -560,7 +560,7 @@ class TestOpenMPVVOffload:
             pytest.skip(f"{target_name} not built")
 
         result = runner.run()
-        assert result.success, f"OMPVV offload sampling {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV offload sampling {target_name} failed: {result.test_output}"
 
     def test_binary_rewrite(
         self,
@@ -589,12 +589,12 @@ class TestOpenMPVVOffload:
         # Perform rewrite phase
         rewrite_result = runner.rewrite()
 
-        assert rewrite_result.success, f"Rewrite failed for {target_name}: {rewrite_result.stderr}"
+        assert rewrite_result.success, f"Rewrite failed for {target_name}: {rewrite_result.test_output}"
 
         # Run the instrumented binary
         result = runner.run()
 
-        assert result.success, f"OMPVV offload binary rewrite {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV offload binary rewrite {target_name} failed: {result.test_output}"
 
     def test_run(
         self,
@@ -624,7 +624,7 @@ class TestOpenMPVVOffload:
             pytest.skip(f"{target_name} not built")
 
         result = runner.run()
-        assert result.success, f"OMPVV offload run {target_name} failed: {result.stderr}"
+        assert result.success, f"OMPVV offload run {target_name} failed: {result.test_output}"
 
         with subtests.test("Perfetto validation"):
             if not use_perfetto:
@@ -666,10 +666,10 @@ class TestSamplingDuration:
             pytest.skip("openmp-cg target not built")
 
         result = runner.run()
-        assert result.success, f"Sampling duration test failed: {result.stderr}"
+        assert result.success, f"Sampling duration test failed: {result.test_output}"
 
         # Verify sampling messages in output
-        combined_output = result.stdout + result.stderr
+        combined_output = result.test_output + result.test_output
         expected_patterns = [
             "will be triggered",
             "per second",
@@ -699,7 +699,7 @@ class TestSamplingDuration:
             pytest.skip("openmp-lu target not built")
 
         result = runner.run()
-        assert result.success, f"Sampling duration test failed: {result.stderr}"
+        assert result.success, f"Sampling duration test failed: {result.test_output}"
 
 
 # ============================================================================
@@ -746,7 +746,7 @@ class TestNoTmpFiles:
             pytest.skip("openmp-cg target not built")
 
         result = runner.run()
-        assert result.success, f"No tmp files test failed: {result.stderr}"
+        assert result.success, f"No tmp files test failed: {result.test_output}"
 
         # Verify sampling output files were created
         sampling_files = list(result.output_dir.glob("sampling_*.json")) + \
