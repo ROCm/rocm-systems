@@ -70,6 +70,18 @@ class Analyzer(OmniAnalyze_Base):
             "from_csv",
         ]
 
+        start_columns = [
+            "Dispatch_ID",
+            "GPU_ID",
+            "Kernel_Name",
+            "Metric",
+            "Channel",
+        ]
+
+        end_columns = [
+            "Description",
+        ]
+
         written_csv_paths = []
 
         for path_info in args.path:
@@ -99,8 +111,6 @@ class Analyzer(OmniAnalyze_Base):
                     f"{counter_csv_path}{Colors.ENDC}"
                 )
                 raw_pmc["pmc_perf"].set_index("Dispatch_ID").to_csv(counter_csv_path)
-
-            from icecream import ic
 
             if args.dump_values in ("metric", "all"):
                 dfs = []
@@ -135,15 +145,29 @@ class Analyzer(OmniAnalyze_Base):
                         value.drop(columns=cols_to_drop, inplace=True, errors="ignore")
                         if not value.empty:
                             value = value.dropna(how="all")
+                            value.insert(0, "Dispatch_ID", df.at[0, "Dispatch_ID"])
+                            value.insert(1, "GPU_ID", df.at[0, "GPU_ID"])
+                            value.insert(2, "Kernel_Name", df.at[0, "Kernel_Name"])
                             dfs.append(value)
 
                 merged_df = pd.concat(dfs, ignore_index=True)
+                # reorder columns
+                reordered_cols = (
+                    start_columns
+                    + [
+                        col
+                        for col in merged_df.columns
+                        if col not in start_columns + end_columns
+                    ]
+                    + end_columns
+                )
+                merged_df = merged_df.reindex(columns=reordered_cols)
                 metric_csv_path = f"{args.output_dir}/metric_values_{path_suffix}.csv"
                 print(
                     f"{Colors.GREEN}Writing metric values to "
                     f"{metric_csv_path}{Colors.ENDC}"
                 )
-                merged_df.to_csv(metric_csv_path)
+                merged_df.set_index(start_columns).to_csv(metric_csv_path)
 
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to analysis."""
