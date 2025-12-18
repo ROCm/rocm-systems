@@ -1717,9 +1717,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       static_cast<hsa_luid_t*>(value)->low = properties_.LuidLowPart;
       static_cast<hsa_luid_t*>(value)->high = properties_.LuidHighPart;
       break;
-    case HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE:
-      *((bool*)value) = properties_.HasExpertSchedMode != 0;
-      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
