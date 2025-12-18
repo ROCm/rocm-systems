@@ -26,6 +26,7 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
+      - user/dsclear/shorten_pr_checks_for_docs_changes
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
