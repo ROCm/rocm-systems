@@ -90,14 +90,15 @@ class RocprofsysConfig:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries."""
         paths = [str(self.rocprofsys_lib_dir)]
 
-        # Add ROCm LLVM lib if available
-        for llvm_path in self.get_llvm_lib_paths():
-            paths.append(str(llvm_path))
-
-        # Append existing LD_LIBRARY_PATH
+        # Add existing LD_LIBRARY_PATH first (before system ROCm paths)
+        # This ensures user-specified paths (e.g., TheRock builds) take precedence
         existing = os.environ.get("LD_LIBRARY_PATH", "")
         if existing:
             paths.append(existing)
+
+        # Add ROCm LLVM lib as fallback
+        for llvm_path in self.get_llvm_lib_paths():
+            paths.append(str(llvm_path))
 
         return ":".join(paths)
 
