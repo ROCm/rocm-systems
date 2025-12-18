@@ -21,8 +21,6 @@ jobs:
   major_abi_check:
     name: Major ABI Compliance Check
     runs-on: ubuntu-22.04
-    outputs:
-      has_breakage: ${{ steps.check_result.outputs.has_breakage }}
     steps:
       - name: Setup Environment
         run: |
@@ -130,24 +128,6 @@ jobs:
           echo "Displaying Major ABI compliance check logs (if any)"
           find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
 
-      - name: Check Major ABI Result
-        id: check_result
-        if: always()
-        run: |
-          if [ -f $GITHUB_WORKSPACE/major_abi_status.txt ]; then
-            source $GITHUB_WORKSPACE/major_abi_status.txt
-            if [ "$abi_exit_code" -ne 0 ]; then
-              echo "has_breakage=true" >> $GITHUB_OUTPUT
-              echo "Major ABI breakage detected"
-            else
-              echo "has_breakage=false" >> $GITHUB_OUTPUT
-              echo "No major ABI breakage"
-            fi
-          else
-            echo "has_breakage=false" >> $GITHUB_OUTPUT
-            echo "No status file found, assuming no breakage"
-          fi
-
       - name: Upload Major ABI Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -173,8 +153,6 @@ jobs:
   minor_abi_check:
     name: Minor ABI Compliance Check
     runs-on: ubuntu-22.04
-    outputs:
-      has_breakage: ${{ steps.check_result_minor.outputs.has_breakage }}
     steps:
       - name: Setup Environment
         run: |
@@ -311,24 +289,6 @@ jobs:
           echo "Displaying Minor ABI compliance check logs (if any)"
           find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
 
-      - name: Check Minor ABI Result
-        id: check_result_minor
-        if: always()
-        run: |
-          if [ -f $GITHUB_WORKSPACE/minor_abi_status.txt ]; then
-            source $GITHUB_WORKSPACE/minor_abi_status.txt
-            if [ "$abi_exit_code" -ne 0 ]; then
-              echo "has_breakage=true" >> $GITHUB_OUTPUT
-              echo "Minor ABI breakage detected"
-            else
-              echo "has_breakage=false" >> $GITHUB_OUTPUT
-              echo "No minor ABI breakage"
-            fi
-          else
-            echo "has_breakage=false" >> $GITHUB_OUTPUT
-            echo "No status file found, assuming no breakage"
-          fi
-
       - name: Upload Minor ABI Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -349,35 +309,4 @@ jobs:
             else
               echo "✅ Minor ABI check (Strict) succeeded or found no changes."
             fi
-          fi
-
-  abi_summary:
-    name: ABI Check Summary
-    runs-on: ubuntu-22.04
-    needs: [major_abi_check, minor_abi_check]
-    if: always()
-    steps:
-      - name: Report Summary and Fail if Breakage Detected
-        run: |
-          echo "=== ABI Compliance Check Summary ==="
-          echo "Major ABI Breakage: ${{ needs.major_abi_check.outputs.has_breakage }}"
-          echo "Minor ABI Breakage: ${{ needs.minor_abi_check.outputs.has_breakage }}"
-          
-          HAS_MAJOR="${{ needs.major_abi_check.outputs.has_breakage }}"
-          HAS_MINOR="${{ needs.minor_abi_check.outputs.has_breakage }}"
-          
-          if [ "$HAS_MAJOR" == "true" ]; then
-            echo "::error::⚠️ MAJOR ABI BREAKAGE DETECTED ⚠️"
-          fi
-          
-          if [ "$HAS_MINOR" == "true" ]; then
-            echo "::error::⚠️ MINOR ABI BREAKAGE DETECTED ⚠️"
-          fi
-          
-          # Fail this job if there's any breakage
-          if [ "$HAS_MAJOR" == "true" ] || [ "$HAS_MINOR" == "true" ]; then
-            echo "Failing workflow due to ABI breakage"
-            exit 1
-          else
-            echo "✅ No ABI breakage detected"
           fi

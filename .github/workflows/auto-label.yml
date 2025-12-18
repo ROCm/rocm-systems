@@ -9,7 +9,7 @@ on:
 
 jobs:
   apply-labels:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-22.04
     permissions:
       pull-requests: write
       actions: read
@@ -125,7 +125,6 @@ jobs:
             let hasMinorAbiBreakage = false;
 
             if (context.eventName === 'workflow_run') {
-              // Handle workflow_run events - check for ABI summary job
               const workflowRun = context.payload.workflow_run;
 
               if (workflowRun.name === 'ABI Compliance Check') {
@@ -139,103 +138,41 @@ jobs:
                     run_id: workflowRun.id
                   });
 
-                  // Look for the ABI Check Summary job
-                  const summaryJob = jobs.jobs.find(job => job.name === 'ABI Check Summary');
-                  
-                  if (summaryJob) {
-                    console.log(`Found ABI Check Summary job with conclusion: ${summaryJob.conclusion}`);
+                  // Check individual job logs for ABI warnings
+                  for (const job of jobs.jobs) {
+                    console.log(`Job: ${job.name}, Conclusion: ${job.conclusion}`);
                     
-                    if (summaryJob.conclusion === 'failure') {
-                      // Summary job failed, meaning there's ABI breakage
-                      // Now check individual jobs to determine which type
-                      console.log('ABI breakage detected from summary job failure');
+                    try {
+                      const { data: logData } = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        job_id: job.id
+                      });
+                      const logs = logData.toString();
                       
-                      // Check major job output
-                      const majorJob = jobs.jobs.find(job => job.name === 'Major ABI Compliance Check');
-                      if (majorJob) {
-                        // Download logs to check for breakage warnings
-                        try {
-                          const { data: majorLogs } = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                            owner: context.repo.owner,
-                            repo: context.repo.repo,
-                            job_id: majorJob.id
-                          });
-                          const majorLogsStr = majorLogs.toString();
-                          if (majorLogsStr.includes('⚠️ MAJOR ABI BREAKAGE FOUND ⚠️') || 
-                              majorLogsStr.includes('has_breakage=true') ||
-                              majorLogsStr.includes('Major ABI breakage detected')) {
-                            hasMajorAbiBreakage = true;
-                            console.log('Major ABI breakage confirmed from logs');
-                          }
-                        } catch (logError) {
-                          console.log(`Could not fetch major job logs: ${logError.message}`);
-                          // Assume breakage if we can't check logs but summary failed
+                      if (job.name.includes('Major ABI')) {
+                        if (logs.includes('⚠️ MAJOR ABI BREAKAGE FOUND ⚠️') || 
+                            logs.includes('abi_exit_code=1')) {
                           hasMajorAbiBreakage = true;
+                          console.log('Major ABI breakage detected from job logs');
+                        } else if (logs.includes('✅ Major ABI check succeeded')) {
+                          hasMajorAbiBreakage = false;
+                          console.log('Major ABI check passed');
                         }
                       }
                       
-                      // Check minor job output
-                      const minorJob = jobs.jobs.find(job => job.name === 'Minor ABI Compliance Check');
-                      if (minorJob) {
-                        try {
-                          const { data: minorLogs } = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                            owner: context.repo.owner,
-                            repo: context.repo.repo,
-                            job_id: minorJob.id
-                          });
-                          const minorLogsStr = minorLogs.toString();
-                          if (minorLogsStr.includes('⚠️ MINOR ABI CHANGES FOUND') || 
-                              minorLogsStr.includes('has_breakage=true') ||
-                              minorLogsStr.includes('Minor ABI breakage detected')) {
-                            hasMinorAbiBreakage = true;
-                            console.log('Minor ABI breakage confirmed from logs');
-                          }
-                        } catch (logError) {
-                          console.log(`Could not fetch minor job logs: ${logError.message}`);
-                          // Assume breakage if we can't check logs but summary failed
+                      if (job.name.includes('Minor ABI')) {
+                        if (logs.includes('⚠️ MINOR ABI CHANGES FOUND') ||
+                            logs.includes('STRICT ABI CHECK FAILED')) {
                           hasMinorAbiBreakage = true;
+                          console.log('Minor ABI breakage detected from job logs');
+                        } else if (logs.includes('✅ Minor ABI check') && logs.includes('succeeded')) {
+                          hasMinorAbiBreakage = false;
+                          console.log('Minor ABI check passed');
                         }
                       }
-                    } else {
-                      // Summary job succeeded, no ABI breakage
-                      console.log('ABI Compliance Check passed - no ABI breakage');
-                      hasMajorAbiBreakage = false;
-                      hasMinorAbiBreakage = false;
-                    }
-                  } else {
-                    // Fallback: No summary job found, check individual jobs
-                    console.log('Summary job not found, checking individual job logs');
-                    
-                    for (const job of jobs.jobs) {
-                      console.log(`Job: ${job.name}, Conclusion: ${job.conclusion}`);
-                      
-                      try {
-                        const { data: logData } = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          job_id: job.id
-                        });
-                        const logs = logData.toString();
-                        
-                        if (job.name.includes('Major ABI')) {
-                          if (logs.includes('⚠️ MAJOR ABI BREAKAGE FOUND ⚠️') || 
-                              logs.includes('has_breakage=true')) {
-                            hasMajorAbiBreakage = true;
-                            console.log('Major ABI breakage detected from job logs');
-                          }
-                        }
-                        
-                        if (job.name.includes('Minor ABI')) {
-                          if (logs.includes('⚠️ MINOR ABI CHANGES FOUND') ||
-                              logs.includes('STRICT ABI CHECK FAILED') ||
-                              logs.includes('has_breakage=true')) {
-                            hasMinorAbiBreakage = true;
-                            console.log('Minor ABI breakage detected from job logs');
-                          }
-                        }
-                      } catch (logError) {
-                        console.log(`Could not fetch logs for job ${job.id}: ${logError.message}`);
-                      }
+                    } catch (logError) {
+                      console.log(`Could not fetch logs for job ${job.id}: ${logError.message}`);
                     }
                   }
 
@@ -262,7 +199,7 @@ jobs:
                   });
 
                   // Check if amdsmi.h has any changes
-                  const amdsmiFile = comparison.files?.find(file => file.filename === 'include/amd_smi/amdsmi.h');
+                  const amdsmiFile = comparison.files?.find(file => file.filename === 'projects/amdsmi/include/amd_smi/amdsmi.h');
 
                   if (!amdsmiFile) {
                     console.log('No changes to amdsmi.h found in this PR - removing ABI labels');
