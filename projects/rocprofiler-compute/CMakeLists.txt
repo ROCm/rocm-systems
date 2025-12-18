@@ -380,6 +380,14 @@ add_test(
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_iteration_multiplexing_stochastic
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m test_profile_iteration_multiplexing_stochastic
+        --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -396,6 +404,7 @@ set_tests_properties(
     test_profile_live_attach_detach
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
+    test_profile_iteration_multiplexing_stochastic
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
