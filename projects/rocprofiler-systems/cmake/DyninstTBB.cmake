@@ -108,11 +108,11 @@ else()
     set(_tbb_libraries)
     set(_tbb_library_dirs
         $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib>
-        $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>
+        $<INSTALL_INTERFACE:${TBB_ROOT_DIR}/lib>
     )
     set(_tbb_include_dirs
         $<BUILD_INTERFACE:${TBB_ROOT_DIR}/include>
-        $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${TBB_ROOT_DIR}/include>
     )
 
     # Forcibly update the cache variables
@@ -149,7 +149,7 @@ else()
             -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${TBB_ROOT_DIR} -DTBB_TEST=OFF
             -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_INCLUDEDIR=include
-            -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-rpath='$$ORIGIN'
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=\$ORIGIN
         BUILD_BYPRODUCTS ${_tbb_build_byproducts}
         INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
     )
@@ -186,3 +186,4 @@ rocprofiler_systems_message(STATUS "TBB include directory: ${TBB_INCLUDE_DIRS}."
 rocprofiler_systems_message(STATUS "TBB library directory: ${TBB_LIBRARY_DIRS}.")
 rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}.")
 rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}.")
+rocprofiler_systems_message(STATUS "TBB byproducts: ${_tbb_build_byproducts}.")
