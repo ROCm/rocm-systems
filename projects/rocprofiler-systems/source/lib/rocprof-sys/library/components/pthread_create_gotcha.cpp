@@ -44,10 +44,10 @@
 #include <timemory/utility/types.hpp>
 
 #include <csignal>
-#include <cstring>
 #include <dlfcn.h>
 #include <ostream>
 #include <pthread.h>
+#include <string_view>
 #include <utility>
 
 namespace rocprofsys
@@ -544,19 +544,28 @@ pthread_create_gotcha::get_native_handles()
 
 namespace
 {
+constexpr const char* rocm_internal_libraries[] = { "libhsa-runtime64",
+                                                    "librocprofiler-sdk", "libamdhip64" };
+
 bool
 is_rocm_internal_thread(void* func_ptr)
 {
     if(!func_ptr) return false;
 
     Dl_info info;
-    if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr) return false;
+    if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr)
+    {
+        ROCPROFSYS_VERBOSE(4, "dladdr failed or returned no filename for func_ptr=%p\n",
+                           func_ptr);
+        return false;
+    }
 
-    const char* lib_name = info.dli_fname;
+    std::string_view lib_name{ info.dli_fname };
 
-    if(std::strstr(lib_name, "libhsa-runtime64") != nullptr) return true;
-    if(std::strstr(lib_name, "librocprofiler-sdk") != nullptr) return true;
-    if(std::strstr(lib_name, "libamdhip64") != nullptr) return true;
+    for(const auto* lib : rocm_internal_libraries)
+    {
+        if(lib_name.find(lib) != std::string_view::npos) return true;
+    }
 
     return false;
 }
