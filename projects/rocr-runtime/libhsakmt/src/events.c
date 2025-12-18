@@ -26,11 +26,9 @@
 #include "libhsakmt.h"
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <stdio.h>
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"

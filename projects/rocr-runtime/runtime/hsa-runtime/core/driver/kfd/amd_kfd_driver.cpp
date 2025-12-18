@@ -42,9 +42,6 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
-#include <memory>
-#include <string>
-
 #if defined(__linux__)
 #include <amdgpu_drm.h>
 #include <link.h>

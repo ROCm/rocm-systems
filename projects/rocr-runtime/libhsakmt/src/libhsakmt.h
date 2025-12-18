@@ -33,6 +33,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
+#include <stdio.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
