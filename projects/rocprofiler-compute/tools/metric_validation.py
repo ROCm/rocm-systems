@@ -170,7 +170,13 @@ class Analyzer(OmniAnalyze_Base):
                             value = value.dropna(how="all")
 
                             # Insert identifying columns
-                            value.insert(0, "Dispatch_ID", df.at[0, "Dispatch_ID"])
+                            value.insert(
+                                0,
+                                "Dispatch_ID",
+                                df.at[0, "Dispatch_ID"]
+                                if "Dispatch_ID" in df.columns
+                                else 0,
+                            )
                             value.insert(1, "GPU_ID", df.at[0, "GPU_ID"])
                             value.insert(2, "Kernel_Name", df.at[0, "Kernel_Name"])
 
