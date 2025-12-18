@@ -129,7 +129,6 @@ static vhsakmt_bo_handle vhsakmt_find_userptr(vhsakmt_device_handle dev, unsigne
 }
 
 static void vhsakmt_destroy_userptr(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
-  hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
   pthread_mutex_destroy(&bo->map_mutex);
 
   struct drm_gem_close drm_req = {
@@ -754,6 +753,9 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
   size_t page_size = getpagesize();
   unsigned long aligned_addr = ((uint64_t)MemoryAddress / page_size) * page_size;
   interval_tree_node_t* n;
+  vhsakmt_bo_handle* bos_to_free = NULL;
+  int free_count = 0;
+  int free_capacity = 0;
 
   pthread_mutex_lock(&dev->bo_handles_mutex);
 
@@ -773,7 +775,7 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
     n = hsakmt_interval_tree_iter_next(&dev->userptr_tree, n, aligned_addr, aligned_addr);
   }
 
-  /* Second pass: Free all userptrs if all refcounts are <= 0 */
+  /* Second pass: Collect BOs to free and remove from tree */
   if (can_free_all) {
     n = hsakmt_interval_tree_iter_first(&dev->userptr_tree, aligned_addr, aligned_addr);
     while (n) {
@@ -785,7 +787,21 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
         vhsa_debug("%s: destroying userptr: %p, size: %x, res_id: %d\n", __FUNCTION__, bo->cpu_addr,
                    bo->size, bo->real.res_id);
 
-        vhsakmt_destroy_userptr(dev, bo);
+        hsakmt_interval_tree_remove(&dev->userptr_tree, &bo->itn);
+
+        if (free_count >= free_capacity) {
+          int new_capacity = free_capacity == 0 ? 32 : free_capacity * 2;
+          vhsakmt_bo_handle* new_array = realloc(bos_to_free, new_capacity * sizeof(vhsakmt_bo_handle));
+          if (!new_array) {
+            vhsa_err("%s: failed to allocate memory for BO array, freeing %d BOs\n", __FUNCTION__, free_count);
+            pthread_mutex_unlock(&dev->bo_handles_mutex);
+            goto cleanup;
+          }
+          bos_to_free = new_array;
+          free_capacity = new_capacity;
+        }
+
+        bos_to_free[free_count++] = bo;
       }
 
       n = next;
@@ -793,6 +809,17 @@ static int vhsakmt_deregister_userptr_non_svm(vhsakmt_device_handle dev, void* M
   }
 
   pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+cleanup:
+  for (int i = 0; i < free_count; i++) {
+    vhsakmt_bo_handle bo = bos_to_free[i];
+    vhsakmt_destroy_userptr(dev, bo);
+  }
+
+  if (bos_to_free) {
+    free(bos_to_free);
+  }
+
   return 0;
 }
 
