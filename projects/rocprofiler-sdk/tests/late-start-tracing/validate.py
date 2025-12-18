@@ -80,13 +80,13 @@ def test_pre_init_not_traced(input_data):
                 traced_pre_init_markers.append(name)
 
     # These operations should NOT be in the traces
-    assert len(traced_pre_init_ops) == 0, (
-        f"Pre-init HIP operations should not be traced, but found: {traced_pre_init_ops}"
-    )
+    assert (
+        len(traced_pre_init_ops) == 0
+    ), f"Pre-init HIP operations should not be traced, but found: {traced_pre_init_ops}"
 
-    assert len(traced_pre_init_markers) == 0, (
-        f"Pre-init ROCTx markers should not be traced, but found: {traced_pre_init_markers}"
-    )
+    assert (
+        len(traced_pre_init_markers) == 0
+    ), f"Pre-init ROCTx markers should not be traced, but found: {traced_pre_init_markers}"
 
 
 def test_post_init_traced(input_data):

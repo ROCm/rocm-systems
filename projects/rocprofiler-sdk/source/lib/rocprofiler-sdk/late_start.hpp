@@ -28,7 +28,6 @@ namespace rocprofiler
 {
 namespace late_start
 {
-
 /**
  * @brief Invoke rocprofiler-register to re-propagate all registered API tables
  *

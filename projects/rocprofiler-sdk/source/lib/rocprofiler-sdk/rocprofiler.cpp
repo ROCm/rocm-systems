@@ -146,8 +146,7 @@ get_status_string(rocprofiler_status_t status, std::index_sequence<Idx, Tail...>
 }  // namespace
 }  // namespace rocprofiler
 
-extern "C"
-{
+extern "C" {
 rocprofiler_status_t
 rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
 {

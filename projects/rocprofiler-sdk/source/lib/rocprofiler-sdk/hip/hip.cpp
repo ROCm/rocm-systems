@@ -578,7 +578,6 @@ update_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
     if constexpr(sizeof...(OpIdxTail) > 0)
         update_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
 }
-
 }  // namespace
 
 // check out the assembly here... this compiles to a switch statement
