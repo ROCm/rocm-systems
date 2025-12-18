@@ -20,7 +20,7 @@ set(TEST_SRC
     hipDeviceCanAccessPeer.cc
     hipDeviceEnableDisablePeerAccess.cc
     hipExtGetLinkTypeAndHopCount.cc
-    hipDeviceSetLimit_old.cc
+    hipDeviceGetLimit_old.cc
     hipDeviceSetGetLimit.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
@@ -41,7 +41,7 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
 endif()
 
 if(UNIX)
-    set(TEST_SRC ${TEST_SRC}
+  set(TEST_SRC ${TEST_SRC}
                  hipIpcOpenMemHandle.cc
                  hipIpcGetMemHandle.cc
                  hipIpcCloseMemHandle.cc
@@ -101,9 +101,9 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              uuidList)
 #Disabled below two executable due to the defect ticket SWDEV-467665
 if(0)
-add_executable(passUUIDToGrandChild_Exe EXCLUDE_FROM_ALL passUUIDToGrandChild_Exe.cc)
-add_executable(ResetUUIDInChild_Exe EXCLUDE_FROM_ALL ResetUUIDInChild_Exe.cc)
-set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+  add_executable(passUUIDToGrandChild_Exe EXCLUDE_FROM_ALL passUUIDToGrandChild_Exe.cc)
+  add_executable(ResetUUIDInChild_Exe EXCLUDE_FROM_ALL ResetUUIDInChild_Exe.cc)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              passUUIDToGrandChild_Exe
              ResetUUIDInChild_Exe)
 endif()
@@ -113,7 +113,7 @@ hip_add_exe_to_target(NAME DeviceTest
 add_dependencies(build_tests getDeviceCount chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
 #Disabled below two executable due to the defect ticket SWDEV-467665
 if(0)
-add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)
+  add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
