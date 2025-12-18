@@ -105,7 +105,7 @@ class Analyzer(OmniAnalyze_Base):
             written_csv_paths.append(path_suffix)
 
             if args.dump_values in ("counter", "all"):
-                counter_csv_path = f"{args.output_dir}/counter_values_{path_suffix}.csv"
+                counter_csv_path = f"{args.output_dir}/{path_suffix}_counters.csv"
                 print(
                     f"{Colors.GREEN}Writing raw counter values to "
                     f"{counter_csv_path}{Colors.ENDC}"
@@ -162,7 +162,7 @@ class Analyzer(OmniAnalyze_Base):
                     + end_columns
                 )
                 merged_df = merged_df.reindex(columns=reordered_cols)
-                metric_csv_path = f"{args.output_dir}/metric_values_{path_suffix}.csv"
+                metric_csv_path = f"{args.output_dir}/{path_suffix}_metrics.csv"
                 print(
                     f"{Colors.GREEN}Writing metric values to "
                     f"{metric_csv_path}{Colors.ENDC}"
