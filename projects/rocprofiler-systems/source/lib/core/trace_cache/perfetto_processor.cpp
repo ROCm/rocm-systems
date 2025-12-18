@@ -693,7 +693,9 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_hip_api{}) ||
          try_category(category::rocm_hsa_api{}) ||
          try_category(category::rocm_marker_api{}) ||
-         try_category(category::rocm_rccl{}));
+         try_category(category::rocm_rccl{}) ||
+         try_category(category::rocm_rocdecode_api{}) ||
+         try_category(category::rocm_rocjpeg_api{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
     {
@@ -986,6 +988,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 
         using Category = std::decay_t<decltype(category)>;
 
+        const char* metric_name = nullptr;
+        if constexpr(std::is_same_v<Category, category::amd_smi_vcn_activity>)
+            metric_name = "VCN Activity";
+        else if constexpr(std::is_same_v<Category, category::amd_smi_jpeg_activity>)
+            metric_name = "JPEG Activity";
+        else
+            metric_name = trait::name<Category>::value;
+
         for(size_t i = 0; i < data.size(); ++i)
         {
             const auto value = data[i];
@@ -996,16 +1006,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
             {
                 // Per-XCP format
                 track_name = JOIN(
-                    " ", "GPU", JOIN("", '[', _device_id, ']'),
-                    trait::name<Category>::value,
+                    " ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                     JOIN("", "XCP_", _idx.value(), ": [", (i < 10 ? "0" : ""), i, ']'),
                     "(S)");
             }
             else
             {
                 // Device-level format
-                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                  trait::name<Category>::value,
+                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                                   JOIN("", "[", (i < 10 ? "0" : ""), i, ']'), "(S)");
             }
 

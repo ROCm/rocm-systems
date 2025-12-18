@@ -40,6 +40,8 @@ endif()
 # Use legacy trace mode for roctx tests to preserve depth information
 set(_roctx_environment
     "${_base_environment}"
+    "ROCPROFSYS_TRACE_LEGACY=ON"
+    "ROCPROFSYS_TRACE_CACHED=OFF"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch"
 )
 
@@ -137,10 +139,19 @@ set(ROCTX_CACHED_DEPTH
     1
 )
 
-# Use cached mode expectations by default (matches _base_environment)
+# Determine which expectations to use based on trace mode in environment
 set(ROCTX_LABEL ${ROCTX_CACHED_LABEL})
 set(ROCTX_COUNT ${ROCTX_CACHED_COUNT})
 set(ROCTX_DEPTH ${ROCTX_CACHED_DEPTH})
+
+# Check if ROCPROFSYS_TRACE_LEGACY=ON is set in the test environment
+list(FIND _roctx_environment "ROCPROFSYS_TRACE_LEGACY=ON" _legacy_idx)
+if(_legacy_idx GREATER -1)
+    # Legacy mode is enabled, use legacy expectations
+    set(ROCTX_LABEL ${ROCTX_LEGACY_LABEL})
+    set(ROCTX_COUNT ${ROCTX_LEGACY_COUNT})
+    set(ROCTX_DEPTH ${ROCTX_LEGACY_DEPTH})
+endif()
 
 rocprofiler_systems_add_validation_test(
     NAME roctx-api-sampling
