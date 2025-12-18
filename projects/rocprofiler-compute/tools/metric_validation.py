@@ -41,6 +41,13 @@ from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils import merge_counters_iteration_multiplex  # noqa: E402
 
 
+class Colors:
+    """ANSI color codes as class attributes for easy use."""
+
+    GREEN = "\033[92m"
+    ENDC = "\033[0m"  # Resets the color
+
+
 class Analyzer(OmniAnalyze_Base):
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -63,6 +70,8 @@ class Analyzer(OmniAnalyze_Base):
             "from_csv",
         ]
 
+        written_csv_paths = []
+
         for path_info in args.path:
             # create 'mega dataframe'
             raw_pmc = file_io.create_df_pmc(
@@ -74,10 +83,24 @@ class Analyzer(OmniAnalyze_Base):
                 self._profiling_config,
             )
 
+            path_suffix_base = "_".join(Path(path_info[0]).parts[-2:])
+            path_suffix = path_suffix_base
+            counter_index = 1
+            while path_suffix in written_csv_paths:
+                path_suffix = f"{path_suffix_base}_{counter_index}"
+                counter_index += 1
+
+            written_csv_paths.append(path_suffix)
+
             if args.dump_values in ("counter", "all"):
-                counter_csv_path = f"{path_info[0]}/counter_values.csv"
-                print(f"Writing raw counter values to {counter_csv_path}")
-                raw_pmc["pmc_perf"].to_csv(counter_csv_path)
+                counter_csv_path = f"{args.output_dir}/counter_values_{path_suffix}.csv"
+                print(
+                    f"{Colors.GREEN}Writing raw counter values to "
+                    f"{counter_csv_path}{Colors.ENDC}"
+                )
+                raw_pmc["pmc_perf"].set_index("Dispatch_ID").to_csv(counter_csv_path)
+
+            from icecream import ic
 
             if args.dump_values in ("metric", "all"):
                 dfs = []
@@ -108,14 +131,18 @@ class Analyzer(OmniAnalyze_Base):
                         skip_kernel_top=False,
                     )
 
-                for _, value in workload.dfs.items():
-                    value.drop(columns=cols_to_drop, inplace=True, errors="ignore")
-                    value = value.dropna(how="all")
-                    dfs.append(value)
+                    for _, value in workload.dfs.items():
+                        value.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+                        if not value.empty:
+                            value = value.dropna(how="all")
+                            dfs.append(value)
 
                 merged_df = pd.concat(dfs, ignore_index=True)
-                metric_csv_path = f"{path_info[0]}/metric_values.csv"
-                print(f"Writing metric values to {metric_csv_path}")
+                metric_csv_path = f"{args.output_dir}/metric_values_{path_suffix}.csv"
+                print(
+                    f"{Colors.GREEN}Writing metric values to "
+                    f"{metric_csv_path}{Colors.ENDC}"
+                )
                 merged_df.to_csv(metric_csv_path)
 
     def pre_processing(self) -> None:
@@ -147,7 +174,16 @@ def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify the raw data root dirs or desired results directory.",
+        help="\t\tSpecify the directory/directories of profiling data.",
+    )
+    parser_obj.add_argument(
+        "-o",
+        "--output-dir",
+        dest="output_dir",
+        required=False,
+        metavar="",
+        help="\t\tSpecify the directory for writing values.",
+        default=".",
     )
 
 
