@@ -9,9 +9,9 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, collect_projects_to_run
 import time
-from typing import Mapping, Optional, Iterable
+from typing import Mapping, Optional, Iterable, List
 import os
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,16 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
+def get_pr_labels(args) -> List[str]:
+    """Gets a list of labels applied to a pull request."""
+    data = json.loads(args.get("pr_labels"))
+    labels = []
+    for label in data.get("labels", []):
+        labels.append(label["name"])
+    return labels
+
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -39,14 +49,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -148,27 +163,26 @@ def retrieve_projects(args):
     if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
 
-    projects = set()
-    # collect the associated subtree to project
-    for subtree in subtrees:
-        if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
+    enable_rocm_libraries = False
+    pr_labels = get_pr_labels(args)
+    for label in pr_labels:
+        if label == "enable-rocm-libraries":
+            enable_rocm_libraries = True
+            break
 
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
-    project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made.
-    # As we start to get an idea of test times, we can divide test jobs.
-    if projects:
-        for project in ["all"]:
-            if project in project_map:
-                project_to_run.append(project_map.get(project))
+    project_to_run = collect_projects_to_run(subtrees, enable_rocm_libraries)
 
-    return project_to_run
+    return project_to_run, json.dumps(enable_rocm_libraries)
 
 
 def run(args):
-    project_to_run = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run)})
+    project_to_run, enable_rocm_libraries = retrieve_projects(args)
+    set_github_output(
+        {
+            "projects": json.dumps(project_to_run),
+            "enable_rocm_libraries": enable_rocm_libraries,
+        }
+    )
 
 
 if __name__ == "__main__":
@@ -185,6 +199,8 @@ if __name__ == "__main__":
     args["input_projects"] = input_projects
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
+
+    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     logging.info(f"Retrieved arguments {args}")
 
