@@ -622,7 +622,6 @@ class AMDSMILogger():
             combined_json["partition_profiles"] = self.store_partition_profiles_json_output
         if self.store_partition_resources_json_output:
             combined_json["partition_resources"] = self.store_partition_resources_json_output
-
         if self.destination == 'stdout':
             json_std_output = json.dumps(combined_json, indent=4)
             print(json_std_output)
