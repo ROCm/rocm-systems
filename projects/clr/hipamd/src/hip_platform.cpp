@@ -368,6 +368,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const amd::Kernel* kernel = function->kernel();
 
   if (kernel == nullptr) {
+    assert(false && "kernel was unexpectedly nullptr");
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
   const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
@@ -712,6 +713,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   switch (hip_error) {
   case hipErrorInvalidKernelFile:
   case hipErrorInvalidDeviceFunction:
+  case hipErrorInvalidImage:
     return hip_error;
   case hipSuccess:
     if (func)
