@@ -287,7 +287,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
       return false;
   }
 
-  if (interopMapBuffer(out.dmabuf_fd) != HSA_STATUS_SUCCESS) return false;
+  if (interopMapBuffer(out.dmabuf_fd, HSA_HANDLE_TYPE_FD) != HSA_STATUS_SUCCESS) return false;
 
   close(out.dmabuf_fd);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + out.buf_offset;
