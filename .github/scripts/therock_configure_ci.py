@@ -168,7 +168,6 @@ def retrieve_projects(args):
     for label in pr_labels:
         if label == "enable-rocm-libraries":
             enable_rocm_libraries = True
-            break
 
     project_to_run = collect_projects_to_run(subtrees, enable_rocm_libraries)
 
