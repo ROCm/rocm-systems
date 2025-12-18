@@ -51,9 +51,7 @@ from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
-    detect_rocprof,
     get_panel_alias,
-    get_submodules,
     is_tcc_channel_counter,
     mibench,
     parse_sets_yaml,
@@ -421,9 +419,9 @@ class OmniSoC_Base:
         # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
         # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
         new_path = str(
-            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
+            Path(args.rocprofiler_sdk_library_path).parent / "python3/site-packages"
         )
-        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
+        old_path = str(Path(args.rocprofiler_sdk_library_path).parents[1] / "bin")
         try:
             sys.path.append(new_path)
             from rocprofv3 import avail
@@ -438,7 +436,6 @@ class OmniSoC_Base:
                 from rocprofv3_avail_module import avail
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
-
 
         avail.loadLibrary.libname = str(
             Path(args.rocprofiler_sdk_library_path).parent
