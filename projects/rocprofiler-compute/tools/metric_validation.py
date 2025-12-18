@@ -23,6 +23,12 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
+##############################################################################
+# This script reads counter values of workloads and computes metrics
+# per dispatch based on the counter values. The computed metrics and counter
+# values are dumped to CSV files.
+##############################################################################
 import argparse
 import copy
 import sys
@@ -49,13 +55,17 @@ class Colors:
 
 
 class Analyzer(OmniAnalyze_Base):
+    """Analyzer class for dumping raw counter and metric values."""
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
     ) -> None:
         super().__init__(args, supported_archs)
 
     def dump_values(self) -> None:
+        """Dump raw counter and/or metric values to CSV files."""
         args = self.get_args()
+
+        # Columns to drop from the metric dataframes
         cols_to_drop = [
             "Kernel_Name",
             "Count",
@@ -70,6 +80,7 @@ class Analyzer(OmniAnalyze_Base):
             "from_csv",
         ]
 
+        # Define the order of columns for the final output of metrics
         start_columns = [
             "Dispatch_ID",
             "GPU_ID",
@@ -78,10 +89,12 @@ class Analyzer(OmniAnalyze_Base):
             "Channel",
         ]
 
+        # Define the end columns for the final output of metrics
         end_columns = [
             "Description",
         ]
 
+        # Keep track of written CSV paths to avoid overwriting
         written_csv_paths = []
 
         for path_info in args.path:
@@ -98,30 +111,37 @@ class Analyzer(OmniAnalyze_Base):
             path_suffix_base = "_".join(Path(path_info[0]).parts[-2:])
             path_suffix = path_suffix_base
             counter_index = 1
+            # Ensure unique file names
             while path_suffix in written_csv_paths:
                 path_suffix = f"{path_suffix_base}_{counter_index}"
                 counter_index += 1
 
             written_csv_paths.append(path_suffix)
 
+            # Dump counter values if requested
             if args.dump_values in ("counter", "all"):
                 counter_csv_path = f"{args.output_dir}/{path_suffix}_counters.csv"
                 print(
                     f"{Colors.GREEN}Writing raw counter values to "
                     f"{counter_csv_path}{Colors.ENDC}"
                 )
+                # Dump the raw counters to CSV
                 raw_pmc["pmc_perf"].set_index("Dispatch_ID").to_csv(counter_csv_path)
 
+            # Dump metric values if requested
             if args.dump_values in ("metric", "all"):
                 dfs = []
                 coll_levels = ["pmc_perf"]
 
+                # Handle iteration multiplexing if specified
                 if policy := self._profiling_config.get("iteration_multiplexing"):
                     raw_pmc = merge_counters_iteration_multiplex(raw_pmc, policy)
 
                 base_workload = self._runs[path_info[0]]
+                # Make a copy of the dataframe to process
                 df_new = raw_pmc["pmc_perf"].copy()
 
+                # Process each dispatch individually
                 for i in range(len(df_new)):
                     workload = copy.deepcopy(base_workload)
                     df = df_new.loc[[i]].copy()
@@ -131,6 +151,7 @@ class Analyzer(OmniAnalyze_Base):
                         pmc_dfs, keys=coll_levels, axis=1, join="inner", copy=False
                     )
                     workload.raw_pmc = final_df
+
                     # create the loaded table
                     parser.load_table_data(
                         workload=workload,
@@ -143,11 +164,17 @@ class Analyzer(OmniAnalyze_Base):
 
                     for _, value in workload.dfs.items():
                         value.drop(columns=cols_to_drop, inplace=True, errors="ignore")
+
+                        # Check if the dataframe is not empty after dropping NaNs
                         if not value.empty:
                             value = value.dropna(how="all")
+
+                            # Insert identifying columns
                             value.insert(0, "Dispatch_ID", df.at[0, "Dispatch_ID"])
                             value.insert(1, "GPU_ID", df.at[0, "GPU_ID"])
                             value.insert(2, "Kernel_Name", df.at[0, "Kernel_Name"])
+
+                            # Append to list of dataframes to merge
                             dfs.append(value)
 
                 merged_df = pd.concat(dfs, ignore_index=True)
@@ -181,6 +208,7 @@ class Analyzer(OmniAnalyze_Base):
 
 
 def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
+    """Add arguments to the parser object."""
     parser_obj.add_argument(
         "--dump-values",
         dest="dump_values",
@@ -230,6 +258,7 @@ def copy_actions(
         "--path",
     ),
 ) -> None:
+    """Copy actions from src_parser to dst_parser, excluding specified options."""
     for action in src_parser._actions:
         # Skip general group commands and subparser actions
         if any(s in exclude for s in action.option_strings):
@@ -290,15 +319,16 @@ def copy_actions(
 
 
 def remove_subparsers(parser: argparse.ArgumentParser) -> None:
+    """Remove subparsers from the parser object."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             parser._remove_action(action)
-            break
 
 
 def get_subparsers(
     parser: argparse.ArgumentParser,
 ) -> dict[str, argparse.ArgumentParser]:
+    """Get subparsers from the parser object."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
             return action.choices  # dict: {name: ArgumentParser}
@@ -315,10 +345,12 @@ def main() -> None:
 
     omniarg_parser(parser_obj, rocprof_compute_path, supported_archs, rocprof_version)
 
+    # Move analyze subparser actions to main parser for argument initialization
     subparsers = get_subparsers(parser_obj)
     analyze_subparser = subparsers["analyze"]
     copy_actions(analyze_subparser, parser_obj)
 
+    # Suppress help for all actions in the rocprof-compute parser and copied actions
     for action in parser_obj._actions:
         action.help = argparse.SUPPRESS
 
@@ -326,6 +358,8 @@ def main() -> None:
     add_parser_args(parser_obj)
 
     args = parser_obj.parse_args()
+
+    # Convert paths to absolute paths
     args.path = [
         list(map(lambda x: str(Path(x).absolute()), path)) for path in args.path
     ]
