@@ -37,7 +37,6 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <strings.h>
 #include "fmm.h"
 #include <dlfcn.h>
