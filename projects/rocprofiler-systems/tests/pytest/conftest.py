@@ -64,6 +64,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Shows both stdout and stderr from runner commands (default: False)",
     )
+    group.addoption(
+        "--no-output",
+        action="store_true",
+        default=False,
+        help="Do not show any output from runner commands (default: False)",
+    )
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
@@ -209,6 +215,7 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
     Output is displayed:
     - On test failure: Always prints both stdout and stderr
     - With --show-output: Shows both stdout and stderr
+    - With --no-output: Do not show any output from runner commands
 
     This hook automatically captures output from all BaseRunner.run() calls.
     """
@@ -217,6 +224,10 @@ def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
     # Get results registered during this test
     results = _get_and_clear_results()
     if not results:
+        return
+
+    no_output = item.config.getoption("--no-output", default=False)
+    if no_output:
         return
 
     test_failed = outcome.excinfo is not None
