@@ -25,6 +25,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
@@ -239,6 +240,29 @@ submitPacket(hsa_queue_t* queue, const void* packet)
     return write_idx;
 }
 
+const rocprofiler::counters::agent_callback_data*
+get_agent_data_from_ctx(rocprofiler_context_id_t ctx, const rocprofiler_agent_t* agent)
+{
+    using namespace rocprofiler::counters;
+    const auto* ctx_obj = context::get_registered_context(ctx);
+
+    [&]() {
+        ASSERT_NE(ctx_obj, nullptr);
+        ASSERT_NE(ctx_obj->device_counter_collection, nullptr);
+        ASSERT_GT(ctx_obj->device_counter_collection->agent_data.size(), 0);
+    }();
+
+    const auto& agents = ctx_obj->device_counter_collection->agent_data;
+    auto        it =
+        std::find_if(agents.begin(), agents.end(), [&](const agent_callback_data& agent_data) {
+            return agent_data.agent_id.handle == agent->id.handle;
+        });
+
+    EXPECT_NE(it, agents.end())
+        << "Agent with specified agent_id not found, this should not happen";
+    return &(*it);
+}
+
 }  // namespace
 
 class device_counting_service_test : public ::testing::Test
@@ -399,6 +423,9 @@ protected:
 
                 ROCPROFILER_CALL(status, "Could not start context");
 
+                const auto* agent_data = get_agent_data_from_ctx(ctx, agent.get_rocp_agent());
+                EXPECT_TRUE(agent_data->device_locked) << "Device should be locked";
+
                 // Execute kernel
                 submitPacket(queue, &kernel_pkt);
                 submitPacket(queue, &kernel_pkt);
@@ -434,6 +461,8 @@ protected:
                 }
                 ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "Could not stop context");
                 rocprofiler_flush_buffer(opt_buff_id);
+
+                EXPECT_FALSE(agent_data->device_locked) << "Device should be unlocked";
 
                 if(hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,
