@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ##############################################################################
 # MIT License
 #
@@ -183,7 +184,7 @@ def copy_actions(
             "type": getattr(action, "type", None),
             "choices": getattr(action, "choices", None),
             "required": getattr(action, "required", False),
-            "help": action.help,
+            "help": argparse.SUPPRESS,
             "metavar": getattr(action, "metavar", None),
         }
 
@@ -228,6 +229,13 @@ def copy_actions(
             dst_parser.add_argument(action.dest, **pos_kwargs)
 
 
+def remove_subparsers(parser: argparse.ArgumentParser) -> None:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            parser._remove_action(action)
+            break
+
+
 def get_subparsers(
     parser: argparse.ArgumentParser,
 ) -> dict[str, argparse.ArgumentParser]:
@@ -246,10 +254,17 @@ def main() -> None:
     parser_obj = argparse.ArgumentParser(description="Metric validation tool.")
 
     omniarg_parser(parser_obj, rocprof_compute_path, supported_archs, rocprof_version)
+
     subparsers = get_subparsers(parser_obj)
     analyze_subparser = subparsers["analyze"]
     copy_actions(analyze_subparser, parser_obj)
+
+    for action in parser_obj._actions:
+        action.help = argparse.SUPPRESS
+
+    remove_subparsers(parser_obj)
     add_parser_args(parser_obj)
+
     args = parser_obj.parse_args()
     args.path = [
         list(map(lambda x: str(Path(x).absolute()), path)) for path in args.path
