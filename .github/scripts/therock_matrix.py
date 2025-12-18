@@ -1,8 +1,6 @@
 """
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
-from therock_configure_ci import get_pr_labels
-
 subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/clr": "core",
