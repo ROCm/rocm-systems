@@ -29,6 +29,7 @@
 #include <fstream>
 
 #include <nlohmann/json.hpp>
+#include <string>
 #include <string_view>
 
 namespace rocprofsys
@@ -449,8 +450,7 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
     });
 
     fill_from_json("strings", [&_registry](const auto& item) {
-        auto str = item.template get<std::string_view>();
-        _registry.add_string(str);
+        _registry.add_string(item.template get<std::string_view>());
     });
 
 #if ROCPROFSYS_USE_ROCM
@@ -546,14 +546,14 @@ metadata_registry::add_stream(const uint64_t& stream_handle)
 }
 
 void
-metadata_registry::add_string(const std::string_view& string_value)
+metadata_registry::add_string(const std::string_view string_value)
 {
     m_strings.wlock([&string_value](auto& _data) {
-        if(_data.count(string_value) > 0)
+        std::string str{ string_value };
+        if(_data.count(str) == 0)
         {
-            return;
+            _data.emplace(std::move(str));
         }
-        _data.emplace(string_value);
     });
 }
 
