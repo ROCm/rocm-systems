@@ -910,6 +910,7 @@ finalize()
         }
         if(num_clients > 0) internal_threading::finalize();
         set_fini_status(1);
+        // NOTE: correlation_id_finalize is done at the end to avoid shutdown races
         context::correlation_id_finalize();
     });
 
