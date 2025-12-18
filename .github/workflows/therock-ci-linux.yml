@@ -53,6 +53,13 @@ jobs:
           repository: "ROCm/rocm-libraries"
           path: "rocm-libraries"
 
+      - name: Checkout composable_kernel repository
+        if: ${{ inputs.enable_rocm_libraries == 'true' }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/composable_kernel"
+          path: "composable_kernel"
+
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt

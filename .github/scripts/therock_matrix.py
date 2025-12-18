@@ -61,7 +61,7 @@ def collect_projects_to_run(subtrees, enable_rocm_libraries):
                 # If the "enable_rocm_libraries" label is set, we allow the ROCm Libraries to be used and we build everything
                 if enable_rocm_libraries:
                     project_map[project]["cmake_options"] = [
-                        "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../rocm-libraries"
+                        "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../rocm-libraries", "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON", "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel"
                     ]
 
                 cmake_flag_options = " ".join(project_map[project]["cmake_options"])
