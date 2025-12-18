@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 # ============================================================
-# PATH RESOLUTION (ABSOLUTE, CWD-INDEPENDENT)
+# PATH RESOLUTION
 # ============================================================
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -34,11 +34,6 @@ GENERATE_DELTAS_SCRIPT = TOOLS_DIR / "generate_config_deltas.py"
 APPLY_DELTAS_SCRIPT = TOOLS_DIR / "apply_config_deltas.py"
 HASH_CHECKER_SCRIPT = TOOLS_DIR / "hash_checker.py"
 HASH_MANAGER_SCRIPT = TOOLS_DIR / "hash_manager.py"
-
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 
 def run(cmd):
@@ -90,11 +85,6 @@ def restore(backup_path, paths):
         else:
             shutil.copy2(src, p)
     print("Restore complete.")
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 
 def main():

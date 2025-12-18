@@ -54,10 +54,6 @@ def load_yaml_ordered(path: Path) -> Any:
     return cm_utils.load_yaml(path, round_trip=True)
 
 
-def ensure_map(x) -> CommentedMap:
-    return cm_utils.ensure_commented_map(x)
-
-
 def get_metric_tables(data: dict) -> list[dict]:
     """Extract all metric tables from data source."""
     tables: list[dict] = []
