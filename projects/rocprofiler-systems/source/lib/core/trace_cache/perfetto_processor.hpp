@@ -68,6 +68,7 @@ public:
 private:
     void       initialize_perfetto();
     void       setup_perfetto();
+    void       enable_categories_for_post_processing();
     void       start_session();
     void       stop_session();
     void       flush(bool& perfetto_output_error);

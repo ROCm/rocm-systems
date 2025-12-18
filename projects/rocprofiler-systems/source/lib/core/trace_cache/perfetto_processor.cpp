@@ -437,7 +437,69 @@ perfetto_processor_t::prepare_for_processing()
 {
     initialize_perfetto();
     setup_perfetto();
+    enable_categories_for_post_processing();
     start_session();
+}
+
+void
+perfetto_processor_t::enable_categories_for_post_processing()
+{
+    trait::runtime_enabled<category::rocm>::set(true);
+    trait::runtime_enabled<category::rocm_kernel_dispatch>::set(true);
+    trait::runtime_enabled<category::rocm_memory_copy>::set(true);
+    trait::runtime_enabled<category::rocm_memory_allocate>::set(true);
+
+    trait::runtime_enabled<category::timer_sampling>::set(true);
+    trait::runtime_enabled<category::overflow_sampling>::set(true);
+    trait::runtime_enabled<category::sampling>::set(true);
+
+    trait::runtime_enabled<category::user>::set(true);
+    trait::runtime_enabled<category::host>::set(true);
+
+    trait::runtime_enabled<category::process_page>::set(true);
+    trait::runtime_enabled<category::process_virt>::set(true);
+    trait::runtime_enabled<category::process_peak>::set(true);
+    trait::runtime_enabled<category::process_context_switch>::set(true);
+    trait::runtime_enabled<category::process_page_fault>::set(true);
+    trait::runtime_enabled<category::process_user_mode_time>::set(true);
+    trait::runtime_enabled<category::process_kernel_mode_time>::set(true);
+    trait::runtime_enabled<category::cpu_freq>::set(true);
+
+    trait::runtime_enabled<category::thread_cpu_time>::set(true);
+    trait::runtime_enabled<category::thread_peak_memory>::set(true);
+    trait::runtime_enabled<category::thread_context_switch>::set(true);
+    trait::runtime_enabled<category::thread_page_fault>::set(true);
+    trait::runtime_enabled<category::thread_hardware_counter>::set(true);
+
+    trait::runtime_enabled<category::rocm_counter_collection>::set(true);
+    trait::runtime_enabled<category::comm_data>::set(true);
+    trait::runtime_enabled<category::mpi>::set(true);
+
+    trait::runtime_enabled<category::amd_smi>::set(true);
+    trait::runtime_enabled<category::amd_smi_gfx_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_umc_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_mm_busy>::set(true);
+    trait::runtime_enabled<category::amd_smi_temp>::set(true);
+    trait::runtime_enabled<category::amd_smi_power>::set(true);
+    trait::runtime_enabled<category::amd_smi_memory_usage>::set(true);
+    trait::runtime_enabled<category::amd_smi_vcn_activity>::set(true);
+    trait::runtime_enabled<category::amd_smi_jpeg_activity>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_link_width>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_link_speed>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_read_data>::set(true);
+    trait::runtime_enabled<category::amd_smi_xgmi_write_data>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_link_width>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_link_speed>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_acc>::set(true);
+    trait::runtime_enabled<category::amd_smi_pcie_bandwidth_inst>::set(true);
+
+    trait::runtime_enabled<category::python>::set(true);
+    trait::runtime_enabled<category::kokkos>::set(true);
+    trait::runtime_enabled<category::pthread>::set(true);
+    trait::runtime_enabled<category::rocm_hip_api>::set(true);
+    trait::runtime_enabled<category::rocm_hsa_api>::set(true);
+    trait::runtime_enabled<category::rocm_marker_api>::set(true);
+    trait::runtime_enabled<category::rocm_rccl>::set(true);
 }
 
 void
@@ -693,7 +755,9 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_hip_api{}) ||
          try_category(category::rocm_hsa_api{}) ||
          try_category(category::rocm_marker_api{}) ||
-         try_category(category::rocm_rccl{}));
+         try_category(category::rocm_rccl{}) ||
+         try_category(category::rocm_rocdecode_api{}) ||
+         try_category(category::rocm_rocjpeg_api{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
     {
@@ -986,6 +1050,15 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 
         using Category = std::decay_t<decltype(category)>;
 
+        // Get the human-readable metric name for the track
+        const char* metric_name = nullptr;
+        if constexpr(std::is_same_v<Category, category::amd_smi_vcn_activity>)
+            metric_name = "VCN Activity";
+        else if constexpr(std::is_same_v<Category, category::amd_smi_jpeg_activity>)
+            metric_name = "JPEG Activity";
+        else
+            metric_name = trait::name<Category>::value;
+
         for(size_t i = 0; i < data.size(); ++i)
         {
             const auto value = data[i];
@@ -996,16 +1069,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
             {
                 // Per-XCP format
                 track_name = JOIN(
-                    " ", "GPU", JOIN("", '[', _device_id, ']'),
-                    trait::name<Category>::value,
+                    " ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                     JOIN("", "XCP_", _idx.value(), ": [", (i < 10 ? "0" : ""), i, ']'),
                     "(S)");
             }
             else
             {
                 // Device-level format
-                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                  trait::name<Category>::value,
+                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                                   JOIN("", "[", (i < 10 ? "0" : ""), i, ']'), "(S)");
             }
 
