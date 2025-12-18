@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - develop
+      - user/dsclear/shorten_pr_checks_for_docs_changes
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**.txt'
+      - '**.md'
+      - '**.rtf'
   pull_request:
     types:
       - opened
