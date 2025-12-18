@@ -10,6 +10,10 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**.txt'
+      - '**.md'
+      - '**.rtf'
   workflow_dispatch:
     inputs:
       projects:
