@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 /**
- * @file late_start.cpp
+ * @file late.cpp
  * @brief Late-start functionality for rocprofiler-sdk
  *
  * Enables rocprofiler-sdk to receive API tables that were registered with
@@ -34,8 +34,9 @@
  * all registered API tables through the normal rocprofiler_set_api_table() flow.
  */
 
-#include "lib/rocprofiler-sdk/late_start.hpp"
+#include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/registration/iterate.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -48,39 +49,13 @@
 
 namespace rocprofiler
 {
-namespace late_start
+namespace registration
+{
+namespace late
 {
 namespace
 {
-// Define minimal types for rocprofiler-register API to avoid build dependency
-// These match the definitions in rocprofiler-register.h
-struct rocprofiler_register_registration_info_t
-{
-    size_t      size;
-    const char* common_name;
-    uint32_t    lib_version;
-    uint64_t    api_table_length;
-};
-
-using rocprofiler_register_registration_info_cb_t =
-    int (*)(rocprofiler_register_registration_info_t*, void*);
-
-using rocprofiler_register_iterate_registration_info_fn_t =
-    int (*)(rocprofiler_register_registration_info_cb_t, void*);
-
 using rocprofiler_register_invoke_all_fn_t = int (*)();
-
-// Callback to collect registered API table names
-int
-collect_registration_callback(rocprofiler_register_registration_info_t* info, void* data)
-{
-    auto*       names = static_cast<std::vector<std::string>*>(data);
-    std::string name  = info->common_name ? info->common_name : "<unknown>";
-    names->push_back(name);
-    ROCP_TRACE << "Found registration: " << name << " (version: " << info->lib_version
-               << ", api_table_length: " << info->api_table_length << ")";
-    return 0;  // Continue iterating
-}
 }  // namespace
 
 rocprofiler_status_t
@@ -88,26 +63,13 @@ invoke_register_propagation()
 {
     ROCP_INFO << "Invoking rocprofiler-register to re-propagate all registered API tables";
 
-    // Step 1: Get the rocprofiler_register_iterate_registration_info function
-    // Use dlsym(nullptr, ...) since rocprofiler-register should already be loaded
-    auto* iterate_info_fn = reinterpret_cast<rocprofiler_register_iterate_registration_info_fn_t>(
-        dlsym(nullptr, "rocprofiler_register_iterate_registration_info"));
+    auto registered_tables = registration::iterate::get_runtime_registrations();
 
-    if(!iterate_info_fn)
+    if(!registered_tables.has_value())
     {
-        ROCP_WARNING << "rocprofiler-register library is not loaded. "
-                     << "This is expected if no runtimes have initialized yet, or if "
-                     << "rocprofiler-register is not being used. Late-start profiling "
-                     << "requires rocprofiler-register to store runtime API tables.";
-        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
     }
-
-    // Step 2: Check if any dispatch tables have been registered
-    // Collect the names of all registrations using iterate_registration_info
-    std::vector<std::string> registered_tables;
-    iterate_info_fn(collect_registration_callback, &registered_tables);
-
-    if(registered_tables.empty())
+    else if(registered_tables.has_value() && registered_tables->empty())
     {
         ROCP_INFO << "No runtime API tables have been registered with rocprofiler-register yet. "
                   << "This is normal if runtimes initialize after rocprofiler_force_configure(). "
@@ -115,7 +77,7 @@ invoke_register_propagation()
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
-    ROCP_TRACE << "Found " << registered_tables.size() << " registered API tables";
+    ROCP_TRACE << "Found " << registered_tables->size() << " registered API tables";
 
     // Step 3: Get the rocprofiler_register_invoke_all_registrations function
     // This function re-propagates all stored API table registrations to rocprofiler-sdk
@@ -125,12 +87,12 @@ invoke_register_propagation()
     if(!invoke_all_fn)
     {
         ROCP_ERROR << fmt::format(
-            "Found {} registered API tables ({}) but "
-            "rocprofiler_register_invoke_all_registrations is not available. "
-            "The loaded rocprofiler-register version (pre-7.0) does not support "
-            "late-start profiling. Please update to ROCm 7.0 or later.",
-            registered_tables.size(),
-            fmt::join(registered_tables, ", "));
+            "Found {} registered API tables ({}) but rocprofiler_register_invoke_all_registrations "
+            "is not available. The loaded rocprofiler-register version (pre-v0.5.0) does not "
+            "support late initialization of profiling. Please update to rocprofiler-register "
+            "v0.5.0 or newer (ROCm 7.0 or newer).",
+            registered_tables->size(),
+            fmt::join(*registered_tables, ", "));
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
     }
 
@@ -168,5 +130,6 @@ invoke_register_propagation()
     }
 }
 
-}  // namespace late_start
+}  // namespace late
+}  // namespace registration
 }  // namespace rocprofiler

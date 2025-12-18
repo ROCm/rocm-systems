@@ -20,7 +20,6 @@ set(ROCPROFILER_LIB_SOURCES
     external_correlation.cpp
     intercept_table.cpp
     internal_threading.cpp
-    late_start.cpp
     ompt.cpp
     pc_sampling.cpp
     registration.cpp
@@ -57,6 +56,7 @@ add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 add_subdirectory(details)
 add_subdirectory(ompt)
+add_subdirectory(registration)
 
 target_link_libraries(
     rocprofiler-sdk-object-library

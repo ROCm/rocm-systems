@@ -22,7 +22,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include "lib/rocprofiler-sdk/late_start.hpp"
+#include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/tests/common.hpp"
 
 #include <gtest/gtest.h>
@@ -64,7 +64,7 @@ TEST_F(LateStartTest, no_register_loaded)
     if(!handle)
     {
         // rocprofiler-register not loaded (expected in isolated unit tests)
-        auto status = rocprofiler::late_start::invoke_register_propagation();
+        auto status = rocprofiler::registration::late::invoke_register_propagation();
 
         // Should return NOT_AVAILABLE but this is not an error - just means
         // no runtimes have initialized yet
@@ -88,8 +88,8 @@ TEST_F(LateStartTest, multiple_calls_safe)
     // Calling invoke_register_propagation() multiple times should be safe
     // Even if it fails (no register loaded), repeated calls should not crash
 
-    auto status1 = rocprofiler::late_start::invoke_register_propagation();
-    auto status2 = rocprofiler::late_start::invoke_register_propagation();
+    auto status1 = rocprofiler::registration::late::invoke_register_propagation();
+    auto status2 = rocprofiler::registration::late::invoke_register_propagation();
 
     // Both calls should have the same result
     EXPECT_EQ(status1, status2) << "Multiple calls should return same status";
@@ -116,7 +116,7 @@ TEST_F(LateStartTest, register_loaded_no_runtimes)
     }
 
     // rocprofiler-register is loaded, invoke propagation
-    auto status = rocprofiler::late_start::invoke_register_propagation();
+    auto status = rocprofiler::registration::late::invoke_register_propagation();
 
     // Expected outcomes:
     // 1. SUCCESS - if function succeeds (no runtimes registered is not an error)
@@ -142,7 +142,7 @@ TEST_F(LateStartTest, function_linkage)
     // This test verifies the function exists and can be called
     // Even if it returns an error, the function should be properly linked
 
-    rocprofiler_status_t status = rocprofiler::late_start::invoke_register_propagation();
+    rocprofiler_status_t status = rocprofiler::registration::late::invoke_register_propagation();
 
     // Any status is fine - we're just verifying it links and executes
     EXPECT_TRUE(status == ROCPROFILER_STATUS_SUCCESS ||

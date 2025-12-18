@@ -54,9 +54,9 @@ rocprofiler_add_unit_test(
 set(rocprofiler_shared_lib_sources
     external_correlation.cpp
     intercept_table.cpp
-    # late_start.cpp  # Temporarily disabled - needs internal function export
-    # late_start_register_integration.cpp  # Temporarily disabled - needs internal
-    # function export
+    # late.cpp  # Temporarily disabled - needs internal function export
+    # late_register_integration.cpp  # Temporarily disabled - needs internal function
+    # export
     registration.cpp
     roctx.cpp
     status.cpp)

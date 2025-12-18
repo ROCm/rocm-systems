@@ -47,9 +47,9 @@ namespace
 struct api_trace_data_t
 {
     uint64_t    timestamp;
-    uint32_t    kind;
-    uint32_t    operation;
-    uint32_t    phase;
+    int32_t     kind;
+    int32_t     operation;
+    int32_t     phase;
     std::string name;
 };
 
@@ -58,7 +58,7 @@ std::vector<api_trace_data_t> traces;
 rocprofiler_context_id_t      client_ctx = {.handle = 0};
 
 const char*
-get_operation_name(rocprofiler_callback_tracing_kind_t kind, uint32_t operation)
+get_operation_name(rocprofiler_callback_tracing_kind_t kind, int32_t operation)
 {
     const char* name = nullptr;
     rocprofiler_query_callback_tracing_kind_operation_name(kind, operation, &name, nullptr);

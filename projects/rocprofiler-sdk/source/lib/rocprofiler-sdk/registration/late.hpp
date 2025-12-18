@@ -26,7 +26,9 @@
 
 namespace rocprofiler
 {
-namespace late_start
+namespace registration
+{
+namespace late
 {
 /**
  * @brief Invoke rocprofiler-register to re-propagate all registered API tables
@@ -52,5 +54,6 @@ namespace late_start
 rocprofiler_status_t
 invoke_register_propagation();
 
-}  // namespace late_start
+}  // namespace late
+}  // namespace registration
 }  // namespace rocprofiler
