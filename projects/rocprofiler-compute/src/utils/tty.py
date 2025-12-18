@@ -493,6 +493,12 @@ def show_all(
         if not csv_dir.exists():
             csv_dir.mkdir()
 
+    # Check for valid roofline data once (used to skip roofline tables in the loop)
+    has_valid_roofline = any(
+        hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
+        for workload in runs.values()
+    )
+
     for panel_id, panel in arch_configs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
@@ -509,18 +515,8 @@ def show_all(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 # Skip roofline tables (401, 402) if roofline data is invalid
-                if table_config["id"] in [401, 402]:
-                    has_valid_roofline = any(
-                        hasattr(workload, "roofline_peaks")
-                        and not workload.roofline_peaks.empty
-                        for workload in runs.values()
-                    )
-                    if not has_valid_roofline:
-                        console_warning(
-                            f"Not showing Roofline table {table_config['id']} "
-                            "due to invalid roofline data."
-                        )
-                        continue
+                if table_config["id"] in [401, 402] and not has_valid_roofline:
+                    continue
 
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
