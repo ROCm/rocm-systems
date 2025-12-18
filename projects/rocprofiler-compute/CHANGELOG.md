@@ -13,11 +13,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * ``--no-native-tool`` option is provided, forcing usage of the default profiler.
     * When performing a dynamic attach to a process for profiling.
 
-* Iteration multiplexing to collect counters in single application run:
-  * Is incompatible with --no-native-tool
-  * Two options:
-    * kernel: Counters are collected in a round robin fashion for unique kernels.
-    * kernel_launch_params: Counters are collected in a round robin fashion for unique kernels having the exact same launch parameters.
+* Iteration multiplexing to collect counters in single application run
 
 * Runtime compilation of Roofline benchmarking:
   * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository are moved into the ROCm Compute Profiler and are compiled at runtime using local HIP and HIPRTC Python wrappers.
@@ -43,6 +39,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
   * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
+
+* Analysis mode bugfixes
+  * Improved warnings when metrics could not be calculated due to missing counter data
+  * Fix the check to prevent showing table where a column is full of N/A
+  * Improve detection of empty values when metric evalulation fails due to counter data missing
 
 ### Removed
 
