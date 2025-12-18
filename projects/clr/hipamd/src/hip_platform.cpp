@@ -364,8 +364,7 @@ namespace hip_impl {
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
     hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel& kernel = *(reinterpret_cast<amd::Kernel*>(func));
 
   const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
   if (bCalcPotentialBlkSz == false) {
@@ -487,16 +486,11 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-  if (function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-
   hipDeviceProp_t prop = {0};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, dev_id));
 
   const amd::Device& device = *hip::getCurrentDevice()->devices()[dev_id];
-  const amd::Kernel& kernel = *function->kernel();
+  const amd::Kernel& kernel = *(reinterpret_cast<amd::Kernel*>(func));
   const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel.getDeviceKernel(device)->workGroupInfo();
 
   const int staticSharedMemoryUsage = wrkGrpInfo->usedLDSSize_;

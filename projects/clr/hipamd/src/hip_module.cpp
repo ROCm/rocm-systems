@@ -37,7 +37,7 @@ extern hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 
                                    hipEvent_t startEvent, hipEvent_t stopEvent, int flags);
 
 const std::string& FunctionName(const hipFunction_t f) {
-  return hip::DeviceFunc::asFunction(f)->kernel()->name();
+  return (reinterpret_cast<amd::Kernel*>(f))->name();
 }
 
 hipError_t hipModuleUnload(hipModule_t hmod) {
@@ -130,12 +130,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(hfunc);
-  if (function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = reinterpret_cast<amd::Kernel*>(hfunc);
   if (kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -202,20 +197,18 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   }
 
   hipFunction_t h_func = nullptr;
-  const hip::DeviceFunc* function = nullptr;
+  amd::Kernel* kernel = nullptr;
 
   hipError_t err = PlatformState::instance().getStatFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
     if (PlatformState::instance().isValidDynFunc((func))) {
-      function = reinterpret_cast<const hip::DeviceFunc*>(func);
+      kernel = reinterpret_cast<amd::Kernel*>(const_cast<void*>(func));
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
     }
   } else {
-    function = reinterpret_cast<const hip::DeviceFunc*>(h_func);
+    kernel = reinterpret_cast<amd::Kernel*>(h_func);
   }
-
-  amd::Kernel* kernel = function->kernel();
 
   if (kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -303,8 +296,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
     return hipErrorInvalidConfiguration;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = reinterpret_cast<amd::Kernel*>(f);
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
@@ -319,7 +311,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
                    launch_params.local_[0], launch_params.local_[1], launch_params.local_[2],
                    kernel->getDeviceKernel(*device)->workGroupInfo()->size_,
-                   function->name().c_str());
+                   kernel->name().c_str());
     return hipErrorLaunchFailure;
   }
 
@@ -356,8 +348,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                    uint32_t flags = 0, uint32_t params = 0, uint32_t gridId = 0,
                                    uint32_t numGrids = 0, uint64_t prevGridSum = 0,
                                    uint64_t allGridSum = 0, uint32_t firstDevice = 0) {
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = reinterpret_cast<amd::Kernel*>(f);
 
   size_t globalWorkOffset[3] = {0};
   amd::NDRangeContainer ndrange(3, globalWorkOffset, launch_params.global_.Data(),
@@ -460,8 +451,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
+  amd::Kernel* kernel = reinterpret_cast<amd::Kernel*>(f);
 
   hipError_t status =
       ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);

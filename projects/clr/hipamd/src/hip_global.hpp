@@ -56,23 +56,7 @@ class DeviceVar {
   size_t size_;                // Size of the var
 };
 
-class DeviceFunc {
- public:
-  DeviceFunc(std::string name, hipModule_t hmod);
-  ~DeviceFunc();
-
-  // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
-  hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }
-  static DeviceFunc* asFunction(hipFunction_t f) { return reinterpret_cast<DeviceFunc*>(f); }
-
-  // Accessor for kernel_ and name_ populated during constructor.
-  std::string name() const { return name_; }
-  amd::Kernel* kernel() const { return kernel_; }
-
- private:
-  std::string name_;     // name of the func(not unique identifier)
-  amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol
-};
+amd::Kernel* CreateDeviceFunc(std::string name, hipModule_t hmod);
 
 // Abstract Structures
 class Function {
@@ -91,9 +75,9 @@ class Function {
   const std::string& name() const { return name_; }
 
  private:
-  std::vector<DeviceFunc*> dFunc_;  //!< DeviceFuncObj per Device
-  std::string name_;                //!< name of the func(not unique identifier)
-  FatBinaryInfo** modules_;         //!< static module where it is referenced
+  std::vector<amd::Kernel*> dFunc_;  //!< amd::Kernel per Device
+  std::string name_;                 //!< name of the func(not unique identifier)
+  FatBinaryInfo** modules_;          //!< static module where it is referenced
 };
 
 class Var {

@@ -55,6 +55,16 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
 #endif
 namespace hip {
 
+amd::Kernel* CreateDeviceFunc(std::string name, hipModule_t hmod) {
+  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  
+  const amd::Symbol* symbol = program->findSymbol(name.c_str());
+  guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
+  
+  amd::Kernel* kernel = new amd::Kernel(*program, *symbol, name);
+  return kernel;
+}
+
 // forward declaration of methods required for managed variables
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
@@ -100,24 +110,6 @@ DeviceVar::~DeviceVar() {
   size_ = 0;
 }
 
-// Device Functions
-DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
-    : name_(name), kernel_(nullptr) {
-  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
-
-  const amd::Symbol* symbol = program->findSymbol(name.c_str());
-  guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
-
-  kernel_ = new amd::Kernel(*program, *symbol, name);
-  guarantee(kernel_ != nullptr, "Cannot Create kernel with name: %s", name.c_str());
-}
-
-DeviceFunc::~DeviceFunc() {
-  if (kernel_ != nullptr) {
-    kernel_->release();
-  }
-}
-
 // Abstract functions
 Function::Function(const std::string& name, FatBinaryInfo** modules)
     : name_(name), modules_(modules) {
@@ -126,7 +118,7 @@ Function::Function(const std::string& name, FatBinaryInfo** modules)
 
 Function::~Function() {
   for (auto& elem : dFunc_) {
-    delete elem;
+    elem->release();
   }
   name_ = "";
   modules_ = nullptr;
@@ -135,15 +127,15 @@ Function::~Function() {
 hipError_t Function::getDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
   guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
   if (dFunc_[ihipGetDevice()] == nullptr) {
-    dFunc_[ihipGetDevice()] = new DeviceFunc(name_, hmod);
+    dFunc_[ihipGetDevice()] = hip::CreateDeviceFunc(name_, hmod);
   }
-  *hfunc = dFunc_[ihipGetDevice()]->asHipFunction();
+  *hfunc = reinterpret_cast<hipFunction_t>(dFunc_[ihipGetDevice()]);
 
   return hipSuccess;
 }
 
 bool Function::isValidDynFunc(const void* hfunc) {
-  return (hfunc == dFunc_[ihipGetDevice()]->asHipFunction());
+  return (hfunc == reinterpret_cast<hipFunction_t>(dFunc_[ihipGetDevice()]));
 }
 
 hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
@@ -151,20 +143,20 @@ hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
     return hipErrorNoBinaryForGpu;
   }
   if (dFunc_[deviceId] != nullptr) {
-    *hfunc = dFunc_[deviceId]->asHipFunction();
+    *hfunc = reinterpret_cast<hipFunction_t>(dFunc_[deviceId]);
     return hipSuccess;
   }
   amd::ScopedLock lock((*modules_)->FatBinaryLock());
   // Check for the compiled kernel again, to make sure only one thread does compilation
   if (dFunc_[deviceId] != nullptr) {
-    *hfunc = dFunc_[deviceId]->asHipFunction();
+    *hfunc = reinterpret_cast<hipFunction_t>(dFunc_[deviceId]);
     return hipSuccess;
   }
   hipModule_t hmod = nullptr;
   IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
   IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
-  dFunc_[deviceId] = new DeviceFunc(name_, hmod);
-  *hfunc = dFunc_[deviceId]->asHipFunction();
+  dFunc_[deviceId] = hip::CreateDeviceFunc(name_, hmod);
+  *hfunc = reinterpret_cast<hipFunction_t>(dFunc_[deviceId]);
   return hipSuccess;
 }
 
@@ -178,12 +170,12 @@ hipError_t Function::getStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
 
   if (dFunc_[deviceId] == nullptr) {
-    dFunc_[deviceId] = new DeviceFunc(name_, hmod);
+    dFunc_[deviceId] = hip::CreateDeviceFunc(name_, hmod);
   }
 
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
 
-  amd::Kernel* kernel = dFunc_[deviceId]->kernel();
+  amd::Kernel* kernel = dFunc_[deviceId];
   auto* device_handle = devices[deviceId];
   const device::Kernel::WorkGroupInfo* wginfo =
       kernel->getDeviceKernel(*device_handle)->workGroupInfo();

@@ -276,13 +276,9 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
   if (kernel == nullptr || paramOffset == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  const auto* const d_function = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(kernel));
-  if (d_function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-  const auto* const d_kernel = d_function->kernel();
+  amd::Kernel* d_kernel = reinterpret_cast<amd::Kernel*>(kernel);
   if (d_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    HIP_RETURN(hipErrorInvalidHandle);
   }
   const amd::KernelSignature& signature = d_kernel->signature();
   if (paramIndex >= signature.numParameters()) {
