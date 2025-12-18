@@ -3,6 +3,8 @@ This script determines which build flag and tests to run based on SUBTREES
 
 Required environment variables:
   - SUBTREES
+
+For documentation, please see docs/ci-behavior-manipulation.md
 """
 
 import fnmatch
