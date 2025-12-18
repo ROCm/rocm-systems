@@ -666,6 +666,7 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   return true;
 }
 
+// ================================================================================================
 bool Device::init() {
   assert(!Runtime::initialized() && "initialize only once");
   bool ret = false;
@@ -690,7 +691,17 @@ bool Device::init() {
       // abort();
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_INIT, "KFD is not installed \n");
       // Disable direct dispatch if ROC initialization wasn't successful
-      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+        AMD_DIRECT_DISPATCH = false;
+      }
+      GPU_ENABLE_PAL = 1;
+    } else {
+      // ROC initialization successful, enable direct dispatch
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+        AMD_DIRECT_DISPATCH = true;
+      }
+      // Disable PAL path
+      GPU_ENABLE_PAL = 0;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
@@ -701,7 +712,9 @@ bool Device::init() {
   if (GPU_ENABLE_PAL != 0) {
     if (GPU_ENABLE_PAL == 1) {
       // PAL path can't support direct dispatch, unless it's forced
-      AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? false : AMD_DIRECT_DISPATCH;
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+        AMD_DIRECT_DISPATCH = false;
+      }
     }
     ret |= PalDeviceLoad();
   }
@@ -709,6 +722,7 @@ bool Device::init() {
   return ret;
 }
 
+// ================================================================================================
 void Device::tearDown() {
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {

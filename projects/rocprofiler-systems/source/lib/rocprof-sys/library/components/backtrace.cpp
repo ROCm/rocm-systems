@@ -24,6 +24,7 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
@@ -150,7 +151,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     _ret.reserve(_data.size());
     for(const auto& itr : _data)
     {
-        auto _name = tim::demangle(_patch_label(itr.name));
+        auto _name = rocprofsys::utility::demangle(_patch_label(itr.name));
         auto _use  = _use_label(_name);
         if(_use == -1) break;
         if(_use == 0) continue;

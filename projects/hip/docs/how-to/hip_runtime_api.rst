@@ -15,11 +15,11 @@ CUDA platform, it is only a thin layer over the CUDA runtime or Driver API.
 
 - **CLR** contains source code for AMD's compute language runtimes: ``HIP`` and
   ``OpenCL™``. CLR includes the ``HIP`` implementation on the AMD
-  platform: `hipamd <https://github.com/ROCm/clr/tree/develop/hipamd>`_ and the
+  platform: `hipamd <https://github.com/ROCm/rocm-systems/tree/develop/projects/clr/hipamd>`_ and the
   ROCm Compute Language Runtime (``rocclr``). ``rocclr`` is a
   virtual device interface that enables the HIP runtime to interact with
   different backends such as :doc:`ROCr <rocr-runtime:index>` on Linux or PAL on
-  Windows. CLR also includes the `OpenCL runtime <https://github.com/ROCm/clr/tree/develop/opencl>`_
+  Windows. CLR also includes the `OpenCL runtime <https://github.com/ROCm/rocm-systems/tree/develop/projects/clr/opencl>`_
   implementation.
 - The **CUDA runtime** is built on top of the CUDA driver API, which is a C API
   with lower-level access to NVIDIA GPUs. For details about the CUDA driver and
@@ -33,7 +33,7 @@ the following figure:
 .. note::
 
   On NVIDIA platform HIP runtime API calls CUDA runtime or CUDA driver via
-  hipother interface. For more information, see the `hipother repository <https://github.com/ROCm/hipother>`_.
+  hipother interface. For more information, see the `hipother repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipother>`_.
 
 Here are the various HIP Runtime API high level functions:
 

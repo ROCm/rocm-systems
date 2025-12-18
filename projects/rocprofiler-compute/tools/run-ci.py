@@ -58,7 +58,12 @@ def generate_custom(args, cmake_args, ctest_args):
     CMAKE_CMD = which("cmake", require=True)
     _ = which("ctest", require=True)
 
-    NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
+    # For Continuous builds transform to PR_XXXX format and include the actor
+    match = re.match(r"(.*)-([0-9]+)/merge(.*)", NAME)
+    if match and args.actor:
+        NAME = f"[{args.actor}] PR_{match.group(2)}_{match.group(1)}{match.group(3)}"
+    elif match:
+        NAME = f"PR_{match.group(2)}_{match.group(1)}{match.group(3)}"
 
     return f"""
         set(CTEST_PROJECT_NAME "rocprofiler-compute")
@@ -88,8 +93,10 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
 
         set(CTEST_UPDATE_COMMAND {GIT_CMD})
-        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} {CMAKE_ARGS}")
-        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all --parallel {BUILD_JOBS}")
+        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} \
+        {CMAKE_ARGS}")
+        set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all \
+        --parallel {BUILD_JOBS}")
         set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
         """
 
@@ -136,7 +143,10 @@ def generate_dashboard_script(args):
             ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
         endif()
 
-        handle_error("Testing" _test_ret)
+        # Report test failures but don't fail the build, post results to CDash
+        if(NOT ${{_test_ret}} EQUAL 0)
+            message(WARNING "Some tests failed (see CDash for details)")
+        endif()
 
         ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
         """
@@ -164,6 +174,13 @@ def parse_cdash_args(args):
 
     parser.add_argument(
         "-n", "--name", help="Job name", default=None, type=str, required=True
+    )
+    parser.add_argument(
+        "-a",
+        "--actor",
+        help="GitHub actor/username (included in Continuous builds)",
+        default=None,
+        type=str,
     )
     parser.add_argument("-s", "--site", help="Site name", default=SITE, type=str)
     parser.add_argument(

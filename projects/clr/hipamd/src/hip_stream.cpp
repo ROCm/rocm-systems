@@ -207,7 +207,6 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
 }
 
 // ================================================================================================
-
 stream_per_thread::stream_per_thread() {
   m_streams.resize(g_devices.size());
   for (auto& stream : m_streams) {
@@ -215,15 +214,21 @@ stream_per_thread::stream_per_thread() {
   }
 }
 
+// ================================================================================================
 stream_per_thread::~stream_per_thread() {
   for (auto& stream : m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
-      hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
+      // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
+      if (IS_LINUX || (GPU_ENABLE_PAL != 0)) {
+        hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      }
       stream = nullptr;
     }
   }
 }
 
+// ================================================================================================
 hipStream_t stream_per_thread::get() {
   hip::Device* device = hip::getCurrentDevice();
   int currDev = device->deviceId();
@@ -246,12 +251,12 @@ hipStream_t stream_per_thread::get() {
   return m_streams[currDev];
 }
 
+// ================================================================================================
 void stream_per_thread::clear_spt() {
   if (!m_streams.empty()) {
     m_streams[getCurrentDevice()->deviceId()] = nullptr;
   }
 }
-
 
 // ================================================================================================
 void getStreamPerThread(hipStream_t& stream) {
@@ -326,13 +331,17 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 
 // ================================================================================================
 hipError_t hipStreamGetFlags_common(hipStream_t stream, unsigned int* flags) {
-  if ((flags != nullptr) && (stream != nullptr)) {
-    getStreamPerThread(stream);
-    *flags = reinterpret_cast<hip::Stream*>(stream)->Flags();
-  } else {
+  if (flags == nullptr || stream == nullptr) {
     return hipErrorInvalidValue;
   }
 
+  getStreamPerThread(stream);
+
+  if (!hip::isValid(stream)) {
+    return hipErrorInvalidResourceHandle;
+  }
+
+  *flags = reinterpret_cast<hip::Stream*>(stream)->Flags();
   return hipSuccess;
 }
 
@@ -724,18 +733,22 @@ hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize
 
 // ================================================================================================
 hipError_t hipStreamGetPriority_common(hipStream_t stream, int* priority) {
-  if ((priority != nullptr) && (stream == nullptr)) {
+  if (priority == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (stream == nullptr) {
     *priority = 0;
     return hipSuccess;
   }
 
-  if ((priority != nullptr) && (stream != nullptr)) {
-    getStreamPerThread(stream);
-    *priority = static_cast<int>(reinterpret_cast<hip::Stream*>(stream)->GetPriority());
-  } else {
-    return hipErrorInvalidValue;
+  getStreamPerThread(stream);
+
+  if (!hip::isValid(stream)) {
+    return hipErrorInvalidResourceHandle;
   }
 
+  *priority = static_cast<int>(reinterpret_cast<hip::Stream*>(stream)->GetPriority());
   return hipSuccess;
 }
 
@@ -779,14 +792,13 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
   uint32_t temp = 0;
   uint32_t bit_index = 0;
   for (uint32_t i = 0; i < info.maxComputeUnits_; i++) {
-    temp |= 1UL << bit_index;
+    temp |= 1U << bit_index;
+    bit_index += 1;
     if (bit_index >= 32) {
       defaultCUMask.push_back(temp);
       temp = 0;
       bit_index = 0;
-      temp |= 1UL << bit_index;
     }
-    bit_index += 1;
   }
   if (bit_index != 0) {
     defaultCUMask.push_back(temp);
@@ -904,7 +916,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
   HIP_INIT_API(hipStreamGetAttribute, stream, attr, value_out);
 
   if (value_out == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!hip::isValid(stream)) {
