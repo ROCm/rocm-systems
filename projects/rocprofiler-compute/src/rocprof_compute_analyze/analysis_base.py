@@ -45,6 +45,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
     get_panel_alias,
     get_uuid,
@@ -276,11 +277,27 @@ class OmniAnalyze_Base:
             if sysinfo_path:
                 w.sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
                 if not getattr(args, "no_roof", False):
-                    try:
-                        roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
-                        w.roofline_peaks = roofline_df
-                    except FileNotFoundError:
-                        console_warning("roofline.csv not found.")
+                    # Validate roofline CSV before loading
+
+                    is_valid, error_msg = validate_roofline_csv(sysinfo_path)
+
+                    if is_valid:
+                        try:
+                            roofline_df = pd.read_csv(f"{sysinfo_path}/roofline.csv")
+                            w.roofline_peaks = roofline_df
+                        except Exception as e:
+                            console_error(
+                                "roofline",
+                                f"Failed to load roofline.csv: {e}",
+                                exit=False,
+                            )
+                            w.roofline_peaks = pd.DataFrame()
+                    else:
+                        console_error(
+                            "roofline",
+                            f"Roofline analysis skipped: {error_msg}",
+                            exit=False,
+                        )
                         w.roofline_peaks = pd.DataFrame()
                 else:
                     w.roofline_peaks = pd.DataFrame()
@@ -411,6 +428,23 @@ class OmniAnalyze_Base:
                 "analysis",
                 "Dispatch filtering (-d/--dispatch) cannot be used "
                 "with profiling data collected with iteration multiplexing.",
+            )
+
+        # Check if any kernel's counters are missing due to iteration multiplexing
+        if (
+            self._profiling_config.get("iteration_multiplexing") is not None
+            and self._profiling_config.get("kernels_with_missing_counters") is not None
+        ):
+            missing_kernels = self._profiling_config.get(
+                "kernels_with_missing_counters"
+            )
+            console_warning(
+                "analysis",
+                (
+                    "The following kernels have missing counter data "
+                    "due to iteration multiplexing and should be filtered out: "
+                    f"{', '.join(missing_kernels)}"
+                ),
             )
 
         # initalize runs

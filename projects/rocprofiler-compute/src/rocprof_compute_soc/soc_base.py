@@ -46,6 +46,7 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.roofline_calc import validate_roofline_csv
 from utils.specs import MachineSpecs
 from utils.utils import (
     METRIC_ID_RE,
@@ -669,16 +670,36 @@ class OmniSoC_Base:
 
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
-                console_warning(
-                    "Incomplete or missing profiling data. Skipping roofline."
+                console_error(
+                    "roofline",
+                    "Incomplete or missing profiling data. Skipping roofline.",
+                    exit=False,
                 )
                 return
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                result = benchmark.run_on_devices([self.get_args().device])
-                benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                try:
+                    result = benchmark.run_on_devices([self.get_args().device])
+                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                except Exception as e:
+                    console_error(
+                        "roofline",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
+                        exit=False,
+                    )
+                    return
+
+            # Validate roofline.csv before post-processing
+            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            if not is_valid:
+                console_error(
+                    "roofline",
+                    f"Roofline post-processing skipped: {error_msg}",
+                    exit=False,
+                )
+                return
 
             self.roofline_obj.post_processing()
 

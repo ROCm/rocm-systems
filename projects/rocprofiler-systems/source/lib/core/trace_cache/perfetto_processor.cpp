@@ -25,6 +25,7 @@
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
@@ -474,7 +475,7 @@ perfetto_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds
         throw std::runtime_error("Kernel symbol is missing for kernel dispatch");
     }
 
-    auto kernel_name = tim::demangle(kernel_symbol->kernel_name);
+    auto kernel_name = rocprofsys::utility::demangle(kernel_symbol->kernel_name);
 
     const auto _track =
         tracing::get_perfetto_track(category::rocm_kernel_dispatch{}, _track_desc,

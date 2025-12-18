@@ -184,7 +184,8 @@ class Roofline:
         df_list = df_pmc["Kernel_Name"].tolist()
 
         for idx in range(len(df_list)):
-            if df_list[idx].split("(")[0] not in args.kernel:
+            # If there is no any kernel match, drop the row
+            if not any([kernel in df_list[idx] for kernel in args.kernel]):
                 df_filtered.drop(index=idx, inplace=True)
 
         # Verify that final filtered kernel df matches the kernel list requested
@@ -577,6 +578,15 @@ class Roofline:
             ai_data=self.__ai_data,
         )
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
+
+        if all(
+            v is None or all(x is None for x in v) for v in self.__ceiling_data.values()
+        ):
+            console_warning(
+                "Unable to generate roofline plot due to missing or corrupted "
+                "benchmark data. Returning empty figure."
+            )
+            return fig if fig is not None else go.Figure()
 
         ops_flops = "OP" if dtype.startswith("I") else "FLOP"
         subplot_kwargs = {"row": subplot_row, "col": 1} if subplot_row else {}
@@ -1193,6 +1203,15 @@ class Roofline:
             console_log("roofline", f"{roofline_csv} does not exist")
             return
 
+        if (
+            workload
+            and hasattr(workload, "roofline_peaks")
+            and workload.roofline_peaks.empty
+        ):
+            # CSV validation failed earlier, skip plot generation
+            console_warning("roofline", "Skipping plot generation")
+            return None
+
         # if workload is detected, utilize Roofline yamls.
         # If not, fallback to legacy calc_ai
         if workload and config and arch_config:
@@ -1224,9 +1243,6 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters, dtype=dtype
         )
-
-        console_debug(f"AI data: {self.__ai_data}")
-        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
         self.roof_setup()
 
