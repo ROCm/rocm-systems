@@ -358,11 +358,25 @@ CPU Arguments:
   --cpu-dimm-temp-range-rate DIMM_ADDR      Displays dimm temperature range and refresh rate
   --cpu-dimm-pow-consumption DIMM_ADDR      Displays dimm power consumption
   --cpu-dimm-thermal-sensor DIMM_ADDR       Displays dimm thermal sensor
+  --cpu-dfcstate-ctrl                       Displays DFCState control status
+  --cpu-railisofreq-policy                  Displays CPU ISO frequency policy
+  --cpu-pc6-enable                          Displays PC6 enable control
+  --cpu-cc6-enable                          Displays CC6 enable control
+  --cpu-dimm-sb-reg-read                    Read DIMM sideband register.Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0xA->SPDHub),REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM)
+  --cpu-tdelta                              Displays CPU thermal delta (TDELTA) value for the selected CPU socket
+  --cpu-svi3-vr-controller-temp TYPE [RAIL_INDEX ...]
+                                            Get SVI3 VR controller temperature. TYPE: 0=HottestRail, 1=IndividualRail. If TYPE=1, RAIL_INDEX (0-7) must be specified
+  --cpu-socket-sdps-limit                   Displays socket SDPS limit for the selected CPU socket
+  --cpu-xgmi-pstate-range                   Displays XGMI pstate range (min and max values) for the selected CPU
+  --cpu-enabled-commands                    Displays HSMP enabled commands bit masks (Read/Write EnabledCommandsBitMask0-2)
 
 CPU Core Arguments:
   --core-boost-limit                        Get boost limit for the selected cores
   --core-curr-active-freq-core-limit        Get Current CCLK limit set per Core
   --core-energy                             Displays core energy for the selected core
+  --core-ccd-power                          Displays CCD (Core Complex Die) power consumption for the selected core
+  --core-floor-limit                        Get floor limit frequency for the selected core (MHz)
+  --core-eff-floor-limit                    Get effective floor limit frequency for the selected core (MHz)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
@@ -547,10 +561,13 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
-                   [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
+                   [--cpu-df-pstate-range MIN_PSTATE MAX_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
                    [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
-                   [--loglevel LEVEL]
+                   [--loglevel LEVEL] [--cpu-dfcstate-ctrl VALUE] [--cpu-railisofreq-policy VALUE] [--cpu-pc6-enable VALUE] [--cpu-cc6-enable VALUE]
+                   [--cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE] [--cpu-dimm-sb-reg-write DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA]
+                   [--cpu-socket-sdps-limit SDPS_LIMIT] [--soc-floor-limit FLOOR_LIMIT] [--cpu-msr-floorlimit MSR_FLOOR_LIMIT]
+                   [--core-floor-limit FLOOR_LIMIT] [--core-msr-floorlimit MSR_FLOOR_LIMIT]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -585,19 +602,31 @@ Set Arguments:
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
-  --cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH                      Set max and Min linkwidth. Input parameters are min and max link width values
-  --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the max and min dpm level on a given NBIO.
-                                                                  Input parameters are die_index, min dpm, max dpm.
+  --cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH                      Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN)
+  --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the min and max dpm level on a given NBIO.
+                                                                  Input parameters are die_index, min dpm, max dpm (MAX >= MIN).
   --cpu-pwr-eff-mode MODE                                        Sets the power efficency mode policy. Input parameter is mode.
-  --cpu-gmi3-link-width MIN_LW MAX_LW                            Sets max and min gmi3 link width range
+  --cpu-gmi3-link-width MIN_LW MAX_LW                            Sets min and max gmi3 link width range (MAX >= MIN)
   --cpu-pcie-link-rate LINK_RATE                                 Sets pcie link rate
-  --cpu-df-pstate-range MAX_PSTATE MIN_PSTATE                    Sets max and min df-pstates
+  --cpu-df-pstate-range MIN_PSTATE MAX_PSTATE                    Sets min and max df-pstates (MAX <= MIN)
   --cpu-enable-apb                                               Enables the DF p-state performance boost algorithm
   --cpu-disable-apb DF_PSTATE                                    Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)
   --soc-boost-limit BOOST_LIMIT                                  Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value
+  --cpu-dfcstate-ctrl VALUE                                      Sets the DFCState control for the given socket. Input parameter is VALUE (0-1)
+  --cpu-railisofreq-policy VALUE                                 Sets the CPU ISO frequency policy. Input parameter is VALUE (0-1)
+  --cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE                  Sets min and max for xgmi pstate range (MAX <= MIN)
+  --cpu-pc6-enable VALUE                                         Sets PC6 enable control. Input parameter is value (0-1)
+  --cpu-cc6-enable VALUE                                         Sets CC6 enable control. Input parameter is value (0-1)
+  --cpu-dimm-sb-reg-write DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA
+                                                                 Write data to DIMM sideband register. Requires DIMM_ADDR, LID, REG_OFFSET (hex), REG_SPACE (0-1), WRITE_DATA (hex)
+  --cpu-socket-sdps-limit SDPS_LIMIT                             Set socket SDPS limit for the given socket. Input parameter is SDPS limit value.
+  --soc-floor-limit FLOOR_LIMIT                                  Sets the floor limit for the given socket. Input parameter is socket FLOOR_LIMIT value MHz
+  --cpu-msr-floorlimit MSR_FLOOR_LIMIT                           Sets the CPU MSR floor limit frequency for the given socket. Input parameter is MSR_FLOOR_LIMIT value in MHz
 
 CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
+  --core-floor-limit FLOOR_LIMIT                                 Sets the floor limit for the given core. Input parameter is core FLOOR_LIMIT value in MHz
+  --core-msr-floorlimit MSR_FLOOR_LIMIT                          Sets the MSR floor limit for the given core. Input parameter is core MSR_FLOOR_LIMIT value in MHz
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:

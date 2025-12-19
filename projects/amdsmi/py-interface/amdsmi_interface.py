@@ -1142,6 +1142,27 @@ def amdsmi_get_cpu_core_energy(
 
     return f"{float(penergy.value * pow(10, -6))} J"
 
+def amdsmi_get_ccd_power(
+    processor_handle: processor_handle_t,
+    ccd_id: int
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    if not isinstance(ccd_id, int) or ccd_id < 0 or ccd_id > 7:
+        raise AmdSmiParameterException(ccd_id, "int (0-7)")
+
+    power = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ccd_power(
+            processor_handle, ctypes.c_uint32(ccd_id), ctypes.byref(power)
+        )
+    )
+
+    return power.value
+
 def amdsmi_get_cpu_socket_energy(
     processor_handle: processor_handle_t
 ) -> str:
@@ -1377,20 +1398,29 @@ def amdsmi_set_cpu_socket_power_cap(
     )
 
 def amdsmi_set_cpu_pwr_efficiency_mode(
-    processor_handle: processor_handle_t, mode: int
-):
+    processor_handle: processor_handle_t, mode: int, util: int, ppt_limit: int
+) -> tuple:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     if not isinstance(mode, int):
         raise AmdSmiParameterException(mode, int)
+    if not isinstance(util, int):
+        raise AmdSmiParameterException(util, int)
+    if not isinstance(ppt_limit, int):
+        raise AmdSmiParameterException(ppt_limit, int)
+
     mode_8 = ctypes.c_uint8(mode)
+    util_32 = ctypes.c_uint32(util)
+    ppt_limit_32 = ctypes.c_uint32(ppt_limit)
 
     _check_res(
         amdsmi_wrapper.amdsmi_set_cpu_pwr_efficiency_mode(
-            processor_handle, mode_8)
+            processor_handle, mode_8, ctypes.byref(util_32), ctypes.byref(ppt_limit_32))
     )
+
+    return (util_32.value, ppt_limit_32.value)
 
 def amdsmi_get_cpu_core_boostlimit(
     processor_handle: processor_handle_t
@@ -1701,23 +1731,23 @@ def amdsmi_set_cpu_pcie_link_rate(
 
 def amdsmi_set_cpu_df_pstate_range(
     processor_handle: processor_handle_t,
-    max_pstate: int, min_pstate: int
+    min_pstate: int, max_pstate: int
 ):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    if not isinstance(max_pstate, int):
-        raise AmdSmiParameterException(max_pstate, int)
     if not isinstance(min_pstate, int):
         raise AmdSmiParameterException(min_pstate, int)
+    if not isinstance(max_pstate, int):
+        raise AmdSmiParameterException(max_pstate, int)
 
-    max_pstate_8 = ctypes.c_uint8(max_pstate)
     min_pstate_8 = ctypes.c_uint8(min_pstate)
+    max_pstate_8 = ctypes.c_uint8(max_pstate)
 
     _check_res(
         amdsmi_wrapper.amdsmi_set_cpu_df_pstate_range(
-            processor_handle, max_pstate_8, min_pstate_8))
+            processor_handle, min_pstate_8, max_pstate_8))
 
 def amdsmi_get_cpu_current_io_bandwidth(
     processor_handle: processor_handle_t,
@@ -1788,6 +1818,456 @@ def amdsmi_get_hsmp_metrics_table_version(
 
     return metric_tbl_version.value
 
+def amdsmi_set_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_rail_isofreq_policy(processor_handle, value)
+    )
+
+def amdsmi_get_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    cpurailiso = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_rail_isofreq_policy(
+            processor_handle, ctypes.byref(cpurailiso)
+        )
+    )
+
+    return cpurailiso.value
+
+def amdsmi_get_dfc_ctrl(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    dfc_ctrl = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_dfc_ctrl(
+            processor_handle, ctypes.byref(dfc_ctrl)
+        )
+    )
+
+    return dfc_ctrl.value
+def amdsmi_set_dfc_ctrl(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_dfc_ctrl(processor_handle, value)
+    )
+
+def amdsmi_set_cpu_xgmi_pstate_range(
+    processor_handle: processor_handle_t,
+    min_pstate: int, max_pstate: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(min_pstate, int):
+        raise AmdSmiParameterException(min_pstate, int)
+    if not isinstance(max_pstate, int):
+        raise AmdSmiParameterException(max_pstate, int)
+    min_pstate_8 = ctypes.c_uint8(min_pstate)
+    max_pstate_8 = ctypes.c_uint8(max_pstate)
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_xgmi_pstate_range(
+            processor_handle, min_pstate_8, max_pstate_8))
+
+def amdsmi_get_pc6_enable(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    pc6_enable = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_pc6_enable(
+            processor_handle, ctypes.byref(pc6_enable)
+        )
+    )
+
+    return pc6_enable.value
+def amdsmi_set_pc6_enable(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(value, int):
+        raise AmdSmiParameterException(value, int)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_pc6_enable(processor_handle, value)
+    )
+
+def amdsmi_get_cc6_enable(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    cc6_enable = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cc6_enable(
+            processor_handle, ctypes.byref(cc6_enable)
+        )
+    )
+
+    return cc6_enable.value
+
+def amdsmi_set_cc6_enable(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(value, int):
+        raise AmdSmiParameterException(value, int)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cc6_enable(processor_handle, value)
+    )
+def amdsmi_dimm_sb_reg_read(
+    processor_handle: processor_handle_t,
+    dimm_addr: int,
+    lid: int,
+    reg_offset: int,
+    reg_space: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(dimm_addr, int):
+        raise AmdSmiParameterException(dimm_addr, int)
+    if not isinstance(lid, int):
+        raise AmdSmiParameterException(lid, int)
+    if not isinstance(reg_offset, int):
+        raise AmdSmiParameterException(reg_offset, int)
+    if not isinstance(reg_space, int):
+        raise AmdSmiParameterException(reg_space, int)
+
+    dimm_addr_64 = ctypes.c_uint64(dimm_addr)
+    lid_64 = ctypes.c_uint64(lid)
+    reg_offset_64 = ctypes.c_uint64(reg_offset)
+    reg_space_64 = ctypes.c_uint64(reg_space)
+    data = ctypes.c_uint32()
+
+    _check_res(amdsmi_wrapper.amdsmi_dimm_sb_reg_read(
+        processor_handle,
+        dimm_addr_64,
+        lid_64,
+        reg_offset_64,
+        reg_space_64,
+        ctypes.byref(data)
+    ))
+
+    return data.value
+def amdsmi_dimm_sb_reg_write(
+    processor_handle: processor_handle_t,
+    dimm_addr: int,
+    lid: int,
+    reg_offset: int,
+    reg_space: int,
+    write_data: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(dimm_addr, int):
+        raise AmdSmiParameterException(dimm_addr, int)
+    if not isinstance(lid, int):
+        raise AmdSmiParameterException(lid, int)
+    if not isinstance(reg_offset, int):
+        raise AmdSmiParameterException(reg_offset, int)
+    if not isinstance(reg_space, int):
+        raise AmdSmiParameterException(reg_space, int)
+    if not isinstance(write_data, int):
+        raise AmdSmiParameterException(write_data, int)
+
+    dimm_addr_64 = ctypes.c_uint64(dimm_addr)
+    lid_64 = ctypes.c_uint64(lid)
+    reg_offset_64 = ctypes.c_uint64(reg_offset)
+    reg_space_64 = ctypes.c_uint64(reg_space)
+    write_data_64 = ctypes.c_uint64(write_data)
+
+    _check_res(amdsmi_wrapper.amdsmi_dimm_sb_reg_write(
+        processor_handle,
+        dimm_addr_64,
+        lid_64,
+        reg_offset_64,
+        reg_space_64,
+        write_data_64
+    ))
+
+    # Write operations typically dont return data, just success/failure
+    return True
+
+def amdsmi_read_tdelta(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    tdelta = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_read_tdelta(
+            processor_handle, ctypes.byref(tdelta)
+        )
+    )
+
+    return tdelta.value
+def amdsmi_get_svi3_vr_controller_temp(
+    processor_handle: processor_handle_t,
+    rail_selection: int,
+    rail_index: int = 0
+) -> dict:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(rail_selection, int) or rail_selection not in [0, 1]:
+        raise AmdSmiParameterException(rail_selection, "int (0 or 1)")
+    if rail_selection == 1 and (not isinstance(rail_index, int) or rail_index < 0 or rail_index > 7):
+        raise AmdSmiParameterException(rail_index, "int (0-7)")
+
+    vr_temp = amdsmi_wrapper.struct_amdsmi_svi3_vr_controller_temp_t()
+    vr_temp.rail_selection = rail_selection
+    vr_temp.rail_index = rail_index if rail_selection == 1 else 0
+    vr_temp.temperature = 0
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_svi3_vr_controller_temp(
+            processor_handle, ctypes.byref(vr_temp)
+        )
+    )
+
+    return {
+        "rail_selection": vr_temp.rail_selection,
+        "rail_index": vr_temp.rail_index,
+        "temperature": f"{vr_temp.temperature} Millidegree C"
+    }
+def amdsmi_get_cpu_socket_sdps_limit(
+    processor_handle: processor_handle_t
+) -> str:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    sdps_limit = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_socket_sdps_limit(
+            processor_handle, ctypes.byref(sdps_limit)
+        )
+    )
+
+    return f"{sdps_limit.value}"
+
+
+def amdsmi_set_cpu_socket_sdps_limit(
+    processor_handle: processor_handle_t, sdps_limit: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(sdps_limit, int):
+        raise AmdSmiParameterException(sdps_limit, int)
+
+    sdps_limit_32 = ctypes.c_uint32(sdps_limit)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_socket_sdps_limit(
+            processor_handle, sdps_limit_32)
+    )
+
+def amdsmi_get_cpu_core_floorlimit(
+   processor_handle: processor_handle_t
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    floorlimit = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_core_floorlimit(
+            processor_handle, ctypes.byref(floorlimit)
+        )
+    )
+
+    # In MHz
+    return floorlimit.value
+
+def amdsmi_get_cpu_core_efffloorlimit(
+    processor_handle: processor_handle_t
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    efffloorlimit = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_core_efffloorlimit(
+            processor_handle, ctypes.byref(efffloorlimit)
+        )
+    )
+
+    # In MHz
+    return efffloorlimit.value
+
+def amdsmi_set_cpu_core_floorlimit(
+    processor_handle: processor_handle_t, floorlimit: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(floorlimit, int):
+        raise AmdSmiParameterException(floorlimit, int)
+
+    floorlimit_32 = ctypes.c_uint32(floorlimit)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_core_floorlimit(
+            processor_handle, floorlimit_32)
+    )
+
+def amdsmi_set_cpu_floorlimit(
+    processor_handle: processor_handle_t, floorlimit: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(floorlimit, int):
+        raise AmdSmiParameterException(floorlimit, int)
+
+    floorlimit_32 = ctypes.c_uint32(floorlimit)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_floorlimit(
+            processor_handle, floorlimit_32)
+    )
+
+def amdsmi_cpu_msr_floorlimit(
+    processor_handle: processor_handle_t, msrfloorlimit: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(msrfloorlimit, int):
+        raise AmdSmiParameterException(msrfloorlimit, int)
+
+    msrfloorlimit_32 = ctypes.c_uint32(msrfloorlimit)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_cpu_msr_floorlimit(
+            processor_handle, msrfloorlimit_32)
+    )
+
+def amdsmi_cpu_core_msr_floorlimit(
+    processor_handle: processor_handle_t, msrfloorlimit: int
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    if not isinstance(msrfloorlimit, int):
+        raise AmdSmiParameterException(msrfloorlimit, int)
+
+    msrfloorlimit_32 = ctypes.c_uint32(msrfloorlimit)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_cpu_core_msr_floorlimit(
+            processor_handle, msrfloorlimit_32)
+    )
+
+def amdsmi_get_cpu_xgmi_pstate_range(
+    processor_handle: processor_handle_t
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    min_pstate = ctypes.c_uint8()
+    max_pstate = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_xgmi_pstate_range(
+            processor_handle, ctypes.byref(min_pstate), ctypes.byref(max_pstate)
+        )
+    )
+
+    return {
+        "min_pstate": min_pstate.value,
+        "max_pstate": max_pstate.value
+    }
+
+def amdsmi_get_enabled_commands(
+    processor_handle: processor_handle_t
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    enabled_cmds = amdsmi_wrapper.amdsmi_hsmp_enabled_commands_t()
+
+    # First call for read commands
+    enabled_cmds.read_mask = True
+    _check_res(amdsmi_wrapper.amdsmi_get_enabled_commands(
+        processor_handle, enabled_cmds))
+    read_mask0 = enabled_cmds.arg0
+    read_mask1 = enabled_cmds.arg1
+    read_mask2 = enabled_cmds.arg2
+
+    # Second call for write commands
+    enabled_cmds.read_mask = False
+    _check_res(amdsmi_wrapper.amdsmi_get_enabled_commands(
+        processor_handle, enabled_cmds))
+    write_mask0 = enabled_cmds.arg0
+    write_mask1 = enabled_cmds.arg1
+    write_mask2 = enabled_cmds.arg2
+
+    return {
+        "ReadEnabledCommandsBitMask0": read_mask0,
+        "ReadEnabledCommandsBitMask1": read_mask1,
+        "ReadEnabledCommandsBitMask2": read_mask2,
+        "WriteEnabledCommandsBitMask0": write_mask0,
+        "WriteEnabledCommandsBitMask1": write_mask1,
+        "WriteEnabledCommandsBitMask2": write_mask2,
+    }
 
 # Get 2's complement of 32 bit unsigned integer
 def check_msb_32(num):

@@ -6750,3 +6750,592 @@ try:
 except AmdSmiException as e:
     print(e)
 ```
+
+### amdsmi_set_cpu_rail_isofreq_policy
+
+Description: Set the CPU Rail Isofrequency Policy. This function configures the frequency policy for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): Input policy value indicating the isofrequency setting:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Set independent control mode (0)
+            amdsmi_set_cpu_rail_isofreq_policy(processor, 0)
+            print("CPU rail isofrequency policy: set to each rail has independent frequency limit")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_rail_isofreq_policy
+
+Description: Get the CPU Rail Isofrequency Policy. This function retrieves the current frequency policy configuration for CPU power rails.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the CPU rail isofrequency policy:
+    - 0: Independent control enabled (each rail has an independent frequency limit)
+    - 1: Independent control disabled (all cores on both rails or each rail - have the same frequency limit)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_rail_isofreq_policy` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            policy = amdsmi_get_cpu_rail_isofreq_policy(processor)
+            if policy == 0:
+                print("CPU rail isofrequency policy: Each rail has independent frequency limit")
+            elif policy == 1:
+                print("CPU rail isofrequency policy: Both rail have same frequency limit")
+            else:
+                print("CPU rail isofrequency policy: Unknown value {policy}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_dfc_ctrl
+
+Description: Set the DFCState enabling control. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): DFCState control value:
+  - 0: Disable DFCState control
+  - 1: Enable DFCState control
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Enable DFCState control
+            amdsmi_set_dfc_ctrl(processor, 1)
+            print("DFCState control enabled")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_dfc_ctrl
+
+Description: Get the current DFCState enabling control status. DFCState is a low power state used for I/O Die (IOD).
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the DFCState control status:
+    - 0: DFCState control is disabled
+    - 1: DFCState control is enabled
+
+Exceptions that can be thrown by `amdsmi_get_dfc_ctrl` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            dfc_status = amdsmi_get_dfc_ctrl(processor)
+            if dfc_status == 0:
+                print("DFCState control is disabled")
+            elif dfc_status == 1:
+                print("DFCState control is enabled")
+            else:
+                print(f"DFCState control: Unknown status {dfc_status}")
+except AmdSmiException as e:
+    print(e)
+```
+
+
+
+
+### amdsmi_set_cpu_xgmi_pstate_range
+
+Description: Set the Min and Max XGMI PState Range. This API configures the XGMI P-State frequency range for the specified processor socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
+- `min_pstate` (int): Minimum XGMI P-State value (highest frequency setting)
+- `max_pstate` (int): Maximum XGMI P-State value (lowest frequency setting)
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cpu_xgmi_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Set XGMI PState range (max_pstate <= min_pstate)
+            amdsmi_set_cpu_xgmi_pstate_range(processor, 1, 1)
+            print("XGMI PState range set successfully")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_xgmi_pstate_range
+
+Description: Get the Max and Min XGMI PState Range. This API retrieves the current XGMI P-State frequency range configuration for the specified processor socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Dictionary containing XGMI PState range values:
+    - `min_pstate`: Current minimum XGMI P-State setting (highest frequency)
+    - `max_pstate`: Current maximum XGMI P-State setting (lowest frequency)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_xgmi_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            pstate_range = amdsmi_get_cpu_xgmi_pstate_range(processor)
+            print(f"Min PState: {pstate_range['min_pstate']}")
+            print(f"Max PState: {pstate_range['max_pstate']}")
+except AmdSmiException as e:
+    print(e)
+```
+
+
+### amdsmi_set_pc6_enable
+
+Description: Set the PC6 (Package C6) enable state. PC6 is a low power state used for package-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): PC6 enable state value:
+  - 0: Disable PC6 state
+  - 1: Enable PC6 state
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_pc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Enable PC6 state
+            amdsmi_set_pc6_enable(processor, 1)
+            print("PC6 enable state set to enabled")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_pc6_enable
+
+Description: Get the current PC6 (Package C6) enable state. PC6 is a low power state used for package-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the PC6 enable state:
+    - 0: PC6 state is disabled
+    - 1: PC6 state is enabled
+
+Exceptions that can be thrown by `amdsmi_get_pc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            pc6_status = amdsmi_get_pc6_enable(processor)
+            if pc6_status == 0:
+                print("PC6 state is disabled")
+            elif pc6_status == 1:
+                print("PC6 state is enabled")
+            else:
+                print(f"PC6 enable state: Unknown status {pc6_status}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_cc6_enable
+
+Description: Set the CC6 (Core C6) enable state. CC6 is a low power state used for CPU core-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `value` (int): CC6 enable state value:
+  - 0: Disable CC6 state
+  - 1: Enable CC6 state
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_set_cc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Enable CC6 state
+            amdsmi_set_cc6_enable(processor, 1)
+            print("CC6 enable state set to enabled")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cc6_enable
+
+Description: Get the current CC6 (Core C6) enable state. CC6 is a low power state used for CPU core-level power management.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the CC6 enable state:
+    - 0: CC6 state is disabled
+    - 1: CC6 state is enabled
+
+Exceptions that can be thrown by `amdsmi_get_cc6_enable` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            cc6_status = amdsmi_get_cc6_enable(processor)
+            if cc6_status == 0:
+                print("CC6 state is disabled")
+            elif cc6_status == 1:
+                print("CC6 state is enabled")
+            else:
+                print(f"CC6 enable state: Unknown status {cc6_status}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_dimm_sb_reg_read
+
+Description: Read data from DIMM sideband register using JEDEC Sideband Bus protocol. This API executes a four-byte read transaction at a specified register offset in a designated device on the target DIMM.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `dimm_addr` (int): DIMM address identifier
+- `lid` (int): Local Identifier (LID) for the device on DIMM:
+  - 0x2: TS0 (Thermal Sensor 0)
+  - 0x6: TS1 (Thermal Sensor 1)
+  - 0xA: SPD Hub
+- `reg_offset` (int): Register offset within the specified register space (hexadecimal)
+- `reg_space` (int): Register space selector:
+  - 0: Volatile register space
+  - 1: Non-volatile memory (NVM) register space
+
+Output: Integer representing the 4-byte data read from the register
+
+Exceptions that can be thrown by `amdsmi_dimm_sb_reg_read` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Read from DIMM sideband register (SPD Hub, volatile space)
+            dimm_addr = 0x50  # Example DIMM address
+            lid = 0xA         # SPD Hub
+            reg_offset = 0x00 # Register offset
+            reg_space = 0     # Volatile register space
+
+            data = amdsmi_dimm_sb_reg_read(processor, dimm_addr, lid, reg_offset, reg_space)
+            print(f"DIMM sideband register data: 0x{data:08X}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_dimm_sb_reg_write
+
+Description: Write data to DIMM sideband register using JEDEC Sideband Bus protocol. This API executes a four-byte write transaction at a specified register offset in a designated device on the target DIMM.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `dimm_addr` (int): DIMM address identifier
+- `lid` (int): Local Identifier (LID) for the device on DIMM:
+  - 0x2: TS0 (Thermal Sensor 0)
+  - 0x6: TS1 (Thermal Sensor 1)
+  - 0xA: SPD Hub
+- `reg_offset` (int): Register offset within the specified register space (hexadecimal)
+- `reg_space` (int): Register space selector:
+  - 0: Volatile register space
+  - 1: Non-volatile memory (NVM) register space
+- `write_data` (int): 4-byte data value to write to the target register (hexadecimal)
+
+Output: `True` on successful write operation
+
+Exceptions that can be thrown by `amdsmi_dimm_sb_reg_write` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Write to DIMM sideband register (SPD Hub, volatile space)
+            dimm_addr = 0x50    # Example DIMM address
+            lid = 0xA           # SPD Hub
+            reg_offset = 0x00   # Register offset
+            reg_space = 0       # Volatile register space
+            write_data = 0x12345678  # Data to write
+
+            result = amdsmi_dimm_sb_reg_write(processor, dimm_addr, lid, reg_offset, reg_space, write_data)
+            if result:
+                print("DIMM sideband register write successful")
+            else:
+                print("DIMM sideband register write failed")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_ccd_power
+
+Description: Get the power consumption of a specific CCD (Core Complex Die) within a CPU socket. This function reads the average power consumed by the specified CCD.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+- `ccd_id` (int): CCD identifier (typically 0-7 for most AMD CPU systems)
+
+Output: Integer representing the CCD power consumption in milliwatts (mW)
+
+Exceptions that can be thrown by `amdsmi_get_ccd_power` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for processor in processor_handles:
+            # Read CCD power consumption for multiple CCDs
+            for ccd_id in range(8):  # Most AMD systems have up to 8 CCDs
+                try:
+                    ccd_power = amdsmi_get_ccd_power(processor, ccd_id)
+                    print(f"CCD {ccd_id} power consumption: {ccd_power} mW")
+                except AmdSmiException:
+                    print(f"CCD {ccd_id} not available or not supported")
+except AmdSmiException as e:
+    print(e)
+```
