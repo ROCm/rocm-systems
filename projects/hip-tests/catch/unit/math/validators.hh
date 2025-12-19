@@ -25,10 +25,7 @@ THE SOFTWARE.
 #include <catch2/catch_all.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include <hip/hip_runtime.h>
 #include <cstdint>
-#include <hip_test_common.hh>
-
 #include <cstring>
 #include <iomanip>
 
@@ -146,30 +143,6 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
    }
 
    return convertInt16toFloat16(next_bits);
-
-
-  //  int16_t ix = convertFloat16toInt16(from);
-  //  int16_t mx = static_cast<int16_t>(signbit_float16) - ix;
-  //  mx = ix < static_cast<int16_t>(0) ? mx : ix;
-  //  int16_t iy = convertFloat16toInt16(direction);
-  //  int16_t my = static_cast<int16_t>(signbit_float16) - iy;
-
-
-  //  my = iy < static_cast<int16_t>(0) ? my : iy;
-
-
-  //  int16_t t = mx + (mx < my ? static_cast<int16_t>(1) : static_cast<int16_t>(-1));
-  //  int16_t r = static_cast<int16_t>(signbit_float16) - t;
-
-  //  r = t < static_cast<int16_t>(0) ? r : t;
-  //  r = (mx == static_cast<int16_t>(-1) && mx < my) ? static_cast<int16_t>(signbit_float16) : r;
-
-  //  r = (ix == iy || (convertFloat16toInt16(std::abs(from)) |
-  //                    convertFloat16toInt16(std::abs(direction))) == static_cast<int16_t>(0))
-  //          ? iy
-  //          : r;
-
-  //  return convertInt16toFloat16(r);
   }
 
   Float16 step(Float16 start, Float16 direction, uint64_t steps) const {
@@ -181,8 +154,8 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   }
 
   void write(std::ostream& out, Float16 num) const {
-    const uint32_t float16MaxDigits = 5;
-    out << std::scientific << std::setprecision(float16MaxDigits) << num;
+    const uint32_t float16_max_digits = 5;
+    out << std::scientific << std::setprecision(float16_max_digits) << num;
   }
 
    static Float16 convertInt16toFloat16(int16_t d) {
