@@ -80,6 +80,7 @@ amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size) {
     }
     memObj = new (memObj->getContext()) amd::Buffer(*memObj, memObj->getMemFlags(), offset, size);
     if (memObj == nullptr) {
+      ;
       return nullptr;
     }
 
@@ -271,7 +272,7 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
           *hip_stream, extSemArray[i], paramsArray[i].params.fence.value,
           amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE);
       if (command == nullptr) {
-        HIP_RETURN(hipErrorOutOfMemory);
+        return hipErrorOutOfMemory;
       }
       command->enqueue();
       command->release();
@@ -309,7 +310,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
           *hip_stream, extSemArray[i], paramsArray[i].params.fence.value,
           amd::ExternalSemaphoreCmd::COMMAND_WAIT_EXTSEMAPHORE);
       if (command == nullptr) {
-        HIP_RETURN(hipErrorOutOfMemory);
+        return hipErrorOutOfMemory;
       }
       command->enqueue();
       command->release();
@@ -846,10 +847,6 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   HIP_INIT_API(hipMemPtrGetInfo, ptr, size);
 
-  if (size == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
   if (ptr == nullptr) {
     *size = 0;
     HIP_RETURN(hipSuccess);
@@ -914,10 +911,6 @@ hipError_t hipFreeArray(hipArray_t array) {
 
 hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   HIP_INIT_API(hipMemGetAddressRange, pbase, psize, dptr);
-
-  if (pbase == nullptr || psize == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
 
   // Since we are using SVM buffer DevicePtr and HostPtr is the same
   void* ptr = dptr;
@@ -1224,7 +1217,7 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
 hipError_t hipArrayCreate(hipArray_t* array, const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
   HIP_INIT_API(hipArrayCreate, array, pAllocateArray);
   if (pAllocateArray == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR desc = {
@@ -1639,10 +1632,10 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
   hipMemcpyKind kind = hipMemcpyHostToDevice;
   STREAM_CAPTURE(hipMemcpyHtoDAsync, stream, dstDevice, srcHost, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -1657,10 +1650,10 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
   hipMemcpyKind kind = hipMemcpyDeviceToDevice;
   STREAM_CAPTURE(hipMemcpyDtoDAsync, stream, dstDevice, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -1675,10 +1668,10 @@ hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t By
   hipMemcpyKind kind = hipMemcpyDeviceToHost;
   STREAM_CAPTURE(hipMemcpyDtoHAsync, stream, dstHost, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
