@@ -256,6 +256,10 @@ configure_settings(bool _init)
     auto _system_backend =
         tim::get_env("ROCPROFSYS_PERFETTO_BACKEND_SYSTEM", false, false);
 
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_LOG_LEVEL",
+                              "Rocprofiler-systems log level", "info", "debugging",
+                              "advanced");
+
     auto _rocprofsys_debug = _config->get<bool>("ROCPROFSYS_DEBUG");
     if(_rocprofsys_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
 
@@ -876,6 +880,8 @@ configure_settings(bool _init)
     _add_rocprofsys_category(_config->find("ROCPROFSYS_CONFIG_FILE"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_DEBUG"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_VERBOSE"));
+    // TODO: Check is needed
+    _add_rocprofsys_category(_config->find("ROCPROFSYS_LOG_LEVEL"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_TIME_OUTPUT"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_OUTPUT_PREFIX"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_OUTPUT_PATH"));
@@ -905,6 +911,8 @@ configure_settings(bool _init)
     _add_advanced_category("ROCPROFSYS_TEXT_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DIFF_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DEBUG");
+    // TODO: Check is needed
+    _add_advanced_category("ROCPROFSYS_LOG_LEVEL");
     _add_advanced_category("ROCPROFSYS_ENABLE_SIGNAL_HANDLER");
     _add_advanced_category("ROCPROFSYS_FLAT_PROFILE");
     _add_advanced_category("ROCPROFSYS_INPUT_EXTENSIONS");
