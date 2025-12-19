@@ -51,6 +51,7 @@ class Colors:
     """ANSI color codes as class attributes for easy use."""
 
     GREEN = "\033[92m"
+    RED = "\033[91m"
     ENDC = "\033[0m"  # Resets the color
 
 
@@ -97,6 +98,11 @@ class Analyzer(OmniAnalyze_Base):
 
         # Keep track of written CSV paths to avoid overwriting
         written_csv_paths = []
+
+        print(
+            f"{Colors.RED}Dumping values takes a long time for workloads with "
+            f"large number of dispatches.{Colors.ENDC}"
+        )
 
         for path_info in args.path:
             # create 'mega dataframe'
@@ -234,7 +240,6 @@ def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
         nargs="+",
         action="append",
         help="\t\tSpecify the directory/directories of profiling data.",
-        default=".",
     )
     parser_obj.add_argument(
         "-o",
@@ -367,6 +372,10 @@ def main() -> None:
     add_parser_args(parser_obj)
 
     args = parser_obj.parse_args()
+
+    if not args.path:
+        parser_obj.print_help()
+        sys.exit(1)
 
     # Convert paths to absolute paths
     args.path = [
