@@ -885,24 +885,48 @@ def run_prof(
             rocprof_cmd == "rocprofiler-sdk"
             and options["ROCPROF_COUNTER_COLLECTION"] == "0"
         ):
-            # Update rocpd database with counter csv created by native tool
-            rocpd_data.update_rocpd_pmc_events(
-                pd.read_csv(glob.glob(workload_dir + "/out/pmc_1/*.csv")[0]),
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-            )
+            for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_name).stem.split("_")[0]
+                rocpd_data.update_rocpd_pmc_events(
+                    pd.read_csv(
+                        f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                    ),
+                    db_name,
+                )
+                console_debug(f"Updated rocpd db {db_name} with native tool counters.")
         # Write results_fbase.csv
-        rocpd_data.convert_db_to_csv(
-            glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+        rocpd_data.convert_dbs_to_csv(
+            glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
             workload_dir + f"/results_{fbase}.csv",
         )
+        combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
+        # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_df["Dispatch_ID"] = combined_df.groupby(
+            ["PID", "Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_df["Kernel_ID"] = combined_df.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
+        # Drop PID since its not required
+        combined_df = combined_df.drop(columns=["PID"])
+        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
+
         if retain_rocpd_output:
-            shutil.copyfile(
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                workload_dir + "/" + fbase + ".db",
-            )
-            console_warning(
-                f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
-            )
+            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_path).stem.split("_")[0]
+                shutil.copyfile(
+                    db_path,
+                    workload_dir + f"/{fbase}_{pid}.db",
+                )
+                console_warning(
+                    f"Retaining large raw rocpd database: "
+                    f"{workload_dir}/{fbase}_{pid}.db"
+                )
         # Remove temp directory
         shutil.rmtree(workload_dir + "/" + "out")
         return
@@ -1064,81 +1088,83 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     trace to write counter collection csv in rocprofiler-sdk format
     for further processing to pmc_perf.csv file
     """
-    counter_data = pd.read_csv(
-        glob.glob(f"{workload_dir}/out/pmc_1/*.csv")[0], index_col=False
-    )
-    # Group by on counter_data based on dispatch_id and
-    # counter_id and sum the counter_value
-    counter_data = counter_data.groupby(
-        ["dispatch_id", "counter_name"], as_index=False
-    ).agg({"counter_value": "sum"})
-    kernel_data_filename = glob.glob(f"{workload_dir}/out/pmc_1/*/*_kernel_trace.csv")[
-        0
-    ]
-    kernel_data = pd.read_csv(kernel_data_filename)
-    rocprofv3_counter_data = pd.DataFrame({
-        "Correlation_Id": counter_data["dispatch_id"],
-        "Dispatch_Id": counter_data["dispatch_id"],
-        "Agent_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Agent_Id"
-        ].values,
-        "Queue_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Queue_Id"
-        ].values,
-        "Process_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Thread_Id"
-        ].values,
-        "Thread_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Thread_Id"
-        ].values,
-        "Grid_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                ["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]
-            ]
-            .prod(axis=1)
-            .values
-        ),
-        "Kernel_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Kernel_Id"
-        ].values,
-        "Kernel_Name": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Kernel_Name"
-        ].values,
-        "Workgroup_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
-            ]
-            .prod(axis=1)
-            .values
-        ),
-        "LDS_Block_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "LDS_Block_Size"
-        ].values,
-        "Scratch_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Scratch_Size"
-        ].values,
-        "VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "VGPR_Count"
-        ].values,
-        "Accum_VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Accum_VGPR_Count"
-        ].values,
-        "SGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "SGPR_Count"
-        ].values,
-        "Counter_Name": counter_data["counter_name"],
-        "Counter_Value": counter_data["counter_value"],
-        "Start_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Start_Timestamp"
-        ].values,
-        "End_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "End_Timestamp"
-        ].values,
-    })
-    rocprofv3_counter_data.to_csv(
-        kernel_data_filename.replace("kernel_trace", "counter_collection"),
-        index=False,
-    )
+    for native_filename in glob.glob(
+        f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
+    ):
+        pid = Path(native_filename).stem.split("_")[0]
+        counter_data = pd.read_csv(native_filename, index_col=False)
+        # Group by on counter_data based on dispatch_id and
+        # counter_id and sum the counter_value
+        counter_data = counter_data.groupby(
+            ["dispatch_id", "counter_name"], as_index=False
+        ).agg({"counter_value": "sum"})
+        kernel_data_filename = glob.glob(
+            f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
+        )[0]
+        kernel_data = pd.read_csv(kernel_data_filename)
+        rocprofv3_counter_data = pd.DataFrame({
+            "Correlation_Id": counter_data["dispatch_id"],
+            "Dispatch_Id": counter_data["dispatch_id"],
+            "Agent_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Agent_Id"
+            ].values,
+            "Queue_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Queue_Id"
+            ].values,
+            "Process_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Thread_Id"
+            ].values,
+            "Thread_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Thread_Id"
+            ].values,
+            "Grid_Size": (
+                kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                    ["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]
+                ]
+                .prod(axis=1)
+                .values
+            ),
+            "Kernel_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Kernel_Id"
+            ].values,
+            "Kernel_Name": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Kernel_Name"
+            ].values,
+            "Workgroup_Size": (
+                kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                    ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
+                ]
+                .prod(axis=1)
+                .values
+            ),
+            "LDS_Block_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "LDS_Block_Size"
+            ].values,
+            "Scratch_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Scratch_Size"
+            ].values,
+            "VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "VGPR_Count"
+            ].values,
+            "Accum_VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Accum_VGPR_Count"
+            ].values,
+            "SGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "SGPR_Count"
+            ].values,
+            "Counter_Name": counter_data["counter_name"],
+            "Counter_Value": counter_data["counter_value"],
+            "Start_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "Start_Timestamp"
+            ].values,
+            "End_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                "End_Timestamp"
+            ].values,
+        })
+        rocprofv3_counter_data.to_csv(
+            kernel_data_filename.replace("kernel_trace", "counter_collection"),
+            index=False,
+        )
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
