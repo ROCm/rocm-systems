@@ -1606,9 +1606,9 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     df["instruction"] = (
         df["inst_index"].apply(
-            lambda x: pc_sample_instructions[x]
-            if x < len(pc_sample_instructions)
-            else None
+            lambda x: (
+                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
+            )
         )
         if pc_sample_instructions
         else None
@@ -1618,9 +1618,11 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
     df["source_line"] = (
         df["inst_index"].apply(
-            lambda x: f".../{Path(pc_sample_comments[x]).name}"
-            if x < len(pc_sample_comments)
-            else None
+            lambda x: (
+                f".../{Path(pc_sample_comments[x]).name}"
+                if x < len(pc_sample_comments)
+                else None
+            )
         )
         if pc_sample_comments
         else None

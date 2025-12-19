@@ -41,6 +41,29 @@ import pytest
 
 import utils.utils as utils
 
+
+class MockMSpec:
+    def __init__(
+        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
+    ):
+        self.gpu_model = gpu_model
+        self.gpu_arch = gpu_arch
+        self.compute_partition = compute_partition
+        self.l2_banks = l2_banks
+
+
+class MockArgs:
+    def __init__(self, **kwargs):
+        # Set kwargs as attributes
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class MockSoc:
+    def __init__(self):
+        pass
+
+
 logging.trace = lambda *args, **kwargs: None
 
 ##################################################
@@ -2681,9 +2704,6 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
 
     utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
-    assert "ROCPROFILER_INDIVIDUAL_XCC_MODE" in captured_env
-    assert captured_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] == "1"
-
 
 def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     """
@@ -2897,19 +2917,6 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
-import utils.utils as utils_mod  # noqa
-
-
-class MockMSpec:
-    def __init__(
-        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
-    ):
-        self.gpu_model = gpu_model
-        self.gpu_arch = gpu_arch
-        self.compute_partition = compute_partition
-        self.l2_banks = l2_banks
-
-
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     """
     Covers: new_env = os.environ.copy()
@@ -2947,7 +2954,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     mock_fname_path_obj.stem = "counters"
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=Path)
+
+    mock_div_result = mock.Mock(spec=Path)
+    mock_div_result.parent = "dummy_path"
+    mock_fname_path_obj.__truediv__.return_value = mock_div_result
 
     mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
@@ -2972,11 +2982,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
-    original_env_var = "original_value"
-    monkeypatch.setenv("EXISTING_VAR", original_env_var)
-    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)
-
-    profiler_options = {"APP_CMD": "my_app --arg"}
     mspec = MockMSpec(gpu_model="mi250")
     loglevel = logging.DEBUG
     format_rocprof_output = True
@@ -2986,17 +2991,52 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("tempfile.mkdtemp", lambda *a, **k: None)
+    monkeypatch.setattr("yaml.dump", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
 
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options.copy(),
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
+    import utils.utils as utils_mod
+    from rocprof_compute_profile.profiler_rocprofiler_sdk import (
+        rocprofiler_sdk_profiler as rocprofiler_sdk_profiler,
     )
+
+    profiler = rocprofiler_sdk_profiler(
+        profiling_args=MockArgs(
+            rocprofiler_sdk_tool_path="sdk_tool",
+            roof_only=True,
+            format_rocprof_output="format",
+            path="path",
+            remaining="remaining",
+            iteration_multiplexing=None,
+            attach_pid=None,
+            kokkos_trace=None,
+            hip_trace=None,
+            kernel=None,
+            dispatch=None,
+        ),
+        profiler_mode="rocprofiler-sdk",
+        soc=MockSoc(),
+    )
+
+    # Since we check all env. vars. in test,
+    # empty them out while calling profiling function
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert len(os.environ) == 0
+        original_env_var = "original_value"
+        monkeypatch.setenv("EXISTING_VAR", original_env_var)
+        monkeypatch.setenv("LD_LIBRARY_PATH", original_env_var)
+        profiler_options = {"APP_CMD": "my_app --arg"}
+        profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
+
+        utils_mod.run_prof(
+            fname_str,
+            profiler_options,
+            workload_dir_str,
+            mspec,
+            loglevel,
+            format_rocprof_output,
+        )
 
     assert capture_subprocess_called_with_env is not None, (
         "new_env should have been created"
@@ -3004,8 +3044,24 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
         "new_env should be a copy of os.environ"
     )
+    # Ensure existing env. vars. are preserved
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
-    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
+    # Ensure LD_LIBRARY_PATH is not touched
+    assert capture_subprocess_called_with_env["LD_LIBRARY_PATH"] == original_env_var
+    # APP_CMD
+    print(capture_subprocess_called_with_env["ROCPROFILER_METRICS_PATH"])
+    assert (
+        capture_subprocess_called_with_env["ROCPROFILER_METRICS_PATH"] == "dummy_path"
+    )
+    assert capture_subprocess_called_with_env["ROCPROF_COUNTER_COLLECTION"] == "0"
+    assert capture_subprocess_called_with_env["LD_PRELOAD"] == "sdk_tool:native_tool"
+    assert capture_subprocess_called_with_env["ROCPROF_KERNEL_TRACE"] == "1"
+    assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_FORMAT"] == "format"
+    assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_PATH"] == "path/out/pmc_1"
+    assert (
+        capture_subprocess_called_with_env["ROCPROF_COUNTERS"]
+        == "pmc: COUNTER1 COUNTER2"
+    )
     assert "APP_CMD" not in capture_subprocess_called_with_env
 
 
@@ -3102,6 +3158,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     }
     hip_trace_called_with = None
     kokkos_trace_called_with = None
+
+    import utils.utils as utils_mod
 
     utils_mod.run_prof(
         fname_str,
@@ -3883,35 +3941,34 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
 
 # =============================================================================
 # HIP TRACE PROCESSING TESTS
+#
+# These test cases comprehensively cover:
+#
+# Multiple valid CSV files concatenation
+# Single file processing
+# Different CSV schemas handling
+# Edge Cases:
+#
+# No files found
+# Files listed by glob but don't exist
+# Empty CSV files
+# CSV files with only headers
+# Corrupted/malformed CSV data
+# Error Conditions:
+#
+# Permission errors during file operations
+# Invalid filename characters
+# Output directory doesn't exist
+# Performance & Special Content:
+#
+# Large files (memory handling)
+# Unicode content handling
+# Mixed file states (valid, empty, corrupted)
+# File System Edge Cases:
+#
+# Missing output directory for copy operation
+# File I/O errors
 # =============================================================================
-"""
-These test cases comprehensively cover:
-
-Multiple valid CSV files concatenation
-Single file processing
-Different CSV schemas handling
-Edge Cases:
-
-No files found
-Files listed by glob but don't exist
-Empty CSV files
-CSV files with only headers
-Corrupted/malformed CSV data
-Error Conditions:
-
-Permission errors during file operations
-Invalid filename characters
-Output directory doesn't exist
-Performance & Special Content:
-
-Large files (memory handling)
-Unicode content handling
-Mixed file states (valid, empty, corrupted)
-File System Edge Cases:
-
-Missing output directory for copy operation
-File I/O errors
-"""
 
 
 def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
@@ -4456,39 +4513,39 @@ def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch
         utils_mod.process_hip_trace_output(workload_dir, fbase)
 
 
-"""
-Normal Functionality:
-
-Basic submodule listing with real packages
-Correct name processing with underscores
-Multiple underscore handling
-Base module filtering
-Edge Cases:
-
-Empty packages (no submodules)
-Non-existent packages
-Names without underscores (IndexError case)
-Empty name parts
-Packages without __path__ attribute
-Error Conditions:
-
-ModuleNotFoundError for invalid packages
-AttributeError for packages without __path__
-TypeError for invalid input types
-ImportError from pkgutil.walk_packages
-Special Scenarios:
-
-Large numbers of submodules
-Special characters in names
-Unicode character handling
-Import isolation testing
-Mixed module types
-Data Integrity:
-
-Return type consistency
-Docstring verification
-Behavior validation
-"""
+# =============================================================================
+# Normal Functionality:
+#
+# Basic submodule listing with real packages
+# Correct name processing with underscores
+# Multiple underscore handling
+# Base module filtering
+# Edge Cases:
+#
+# Empty packages (no submodules)
+# Non-existent packages
+# Names without underscores (IndexError case)
+# Empty name parts
+# Packages without __path__ attribute
+# Error Conditions:
+#
+# ModuleNotFoundError for invalid packages
+# AttributeError for packages without __path__
+# TypeError for invalid input types
+# ImportError from pkgutil.walk_packages
+# Special Scenarios:
+#
+# Large numbers of submodules
+# Special characters in names
+# Unicode character handling
+# Import isolation testing
+# Mixed module types
+# Data Integrity:
+#
+# Return type consistency
+# Docstring verification
+# Behavior validation
+# =============================================================================
 
 
 mock_package = mock.MagicMock()
@@ -4934,40 +4991,39 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
+#
+# Normal Functionality:
+#
+# Valid CSV files with data
+# Mixed valid and invalid data
+# Large datasets
+# Unicode content handling
+# Edge Cases:
+#
+# Empty CSV files
+# CSV with only headers
+# Files with all NaN values that become empty after dropna()
+# Malformed CSV files
+# Missing pmc_perf.csv file
+# Nonexistent directories
+# Error Conditions:
+#
+# File permission errors
+# CSV reading errors
+# Directory access issues
+# String Formatting and Dependencies:
+#
+# Console error message formatting
+# Path handling (string vs Path)
+# Pandas dependency verification
+# Return value consistency
+# Special Scenarios:
+#
+# Special characters in paths
+# Unicode content in CSV files
+# Large datasets with performance implications
+# Different input path types
 # =============================================================================
-"""
-Normal Functionality:
-
-Valid CSV files with data
-Mixed valid and invalid data
-Large datasets
-Unicode content handling
-Edge Cases:
-
-Empty CSV files
-CSV with only headers
-Files with all NaN values that become empty after dropna()
-Malformed CSV files
-Missing pmc_perf.csv file
-Nonexistent directories
-Error Conditions:
-
-File permission errors
-CSV reading errors
-Directory access issues
-String Formatting and Dependencies:
-
-Console error message formatting
-Path handling (string vs Path)
-Pandas dependency verification
-Return value consistency
-Special Scenarios:
-
-Special characters in paths
-Unicode content in CSV files
-Large datasets with performance implications
-Different input path types
-"""
 
 
 def test_is_workload_empty_valid_data_file(tmp_path):
@@ -5510,39 +5566,38 @@ def test_is_workload_empty_pandas_import_dependency():
 
 # =============================================================================
 # TESTS FOR LOCAL ENCODING FUNCTION
+#
+# Normal Functionality:
+#
+# Successful C.UTF-8 locale setting
+# Fallback to current UTF-8 locale when C.UTF-8 fails
+# Various UTF-8 encoding formats and case variations
+# Edge Cases:
+#
+# getdefaultlocale returning None or partial None values
+# Empty encoding strings
+# Unusual but valid locale names
+# Multiple function calls
+# Error Conditions:
+#
+# C.UTF-8 locale not available
+# Fallback locale setting failures
+# No UTF-8 locales available on system
+# getdefaultlocale exceptions
+# Various locale.Error scenarios
+# String Handling and Dependencies:
+#
+# UTF-8 substring detection in encoding names
+# Console error message formatting and parameters
+# Locale module dependency verification
+# Return value consistency
+# Special Scenarios:
+#
+# Thread safety simulation
+# Different locale error types and messages
+# Comprehensive error path coverage
+# Module import dependencies
 # =============================================================================
-"""
-Normal Functionality:
-
-Successful C.UTF-8 locale setting
-Fallback to current UTF-8 locale when C.UTF-8 fails
-Various UTF-8 encoding formats and case variations
-Edge Cases:
-
-getdefaultlocale returning None or partial None values
-Empty encoding strings
-Unusual but valid locale names
-Multiple function calls
-Error Conditions:
-
-C.UTF-8 locale not available
-Fallback locale setting failures
-No UTF-8 locales available on system
-getdefaultlocale exceptions
-Various locale.Error scenarios
-String Handling and Dependencies:
-
-UTF-8 substring detection in encoding names
-Console error message formatting and parameters
-Locale module dependency verification
-Return value consistency
-Special Scenarios:
-
-Thread safety simulation
-Different locale error types and messages
-Comprehensive error path coverage
-Module import dependencies
-"""
 
 
 def test_set_locale_encoding_successful_c_utf8():
@@ -6222,44 +6277,43 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
 # =============================================================================
 # TESTS FOR reverse_multi_index_df_pmc FUNCTION
+#
+# Normal Functionality:
+#
+# Basic multi-index DataFrame decomposition
+# Multiple levels with different column counts
+# Data type preservation
+# Column order preservation
+# Edge Cases:
+#
+# Single-level columns (error case)
+# Empty DataFrames
+# Single column per level
+# Uneven column distribution
+# Single row DataFrames
+# Error Conditions:
+#
+# Non-multi-index columns raising ValueError
+# Proper error message validation
+# Data Integrity:
+#
+# Mixed data types preservation
+# NaN value handling
+# Index preservation
+# Memory efficiency
+# Special Scenarios:
+#
+# Special characters in column names
+# Numeric level names
+# Three-level MultiIndex handling
+# Large DataFrame performance
+# Duplicate level name handling
+# Return Value Validation:
+#
+# Correct return types (list of DataFrames, list of levels)
+# Proper DataFrame structure in results
+# Consistent length of returned lists
 # =============================================================================
-"""
-Normal Functionality:
-
-Basic multi-index DataFrame decomposition
-Multiple levels with different column counts
-Data type preservation
-Column order preservation
-Edge Cases:
-
-Single-level columns (error case)
-Empty DataFrames
-Single column per level
-Uneven column distribution
-Single row DataFrames
-Error Conditions:
-
-Non-multi-index columns raising ValueError
-Proper error message validation
-Data Integrity:
-
-Mixed data types preservation
-NaN value handling
-Index preservation
-Memory efficiency
-Special Scenarios:
-
-Special characters in column names
-Numeric level names
-Three-level MultiIndex handling
-Large DataFrame performance
-Duplicate level name handling
-Return Value Validation:
-
-Correct return types (list of DataFrames, list of levels)
-Proper DataFrame structure in results
-Consistent length of returned lists
-"""
 
 
 def test_reverse_multi_index_df_pmc_basic_functionality():
@@ -7218,9 +7272,6 @@ def test_add_counter_overwrite_existing():
 # =============================================================================
 # additional test detect_rocprof console error
 # =============================================================================
-class MockArgs:
-    def __init__(self, rocprofiler_sdk_tool_path):
-        self.rocprofiler_sdk_tool_path = rocprofiler_sdk_tool_path
 
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
@@ -7251,16 +7302,6 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
 
     mock_path_constructor.assert_called_once_with(fake_library_path)
     mock_path_instance.exists.assert_called_once()
-
-
-class MockArgs:  # noqa
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __eq__(self, other):
-        if not isinstance(other, MockArgs):
-            return NotImplemented
-        return self.__dict__ == other.__dict__
 
 
 # =============================================================================

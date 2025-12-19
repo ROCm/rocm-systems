@@ -776,17 +776,6 @@ def run_prof(
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
     )
 
-    # set required env var for >= mi300
-    if mspec.gpu_model.lower() not in (
-        "mi50",
-        "mi60",
-        "mi100",
-        "mi210",
-        "mi250",
-        "mi250x",
-    ):
-        new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
-
     time_1 = time.time()
 
     output_path = Path(workload_dir + "/out/pmc_1")
