@@ -26,107 +26,108 @@ THE SOFTWARE.
 #include <string>
 #include <map>
 #include <memory>
-#include <hip/hip_runtime.h>
 
 /**
- * @brief Global parameter store for test configuration and runtime-detected values.
+ * @brief Global parameter store for test configuration.
+ * 
+ * Parameters are loaded from compile-time constants generated from 
+ * hip_tests_config.yaml at build time.
  * 
  * Example usage:
  * @code
- * TEST_CASE("My_Test", "[level_0]") {
+ * TEST_CASE(Unit_hipMemcpy_Quick) {  // Macro expands to include "[level_0]" tag
  *     auto& params = TestParameterStore::instance();
- *     auto size = GENERATE_COPY(from_range(params.getMemorySizesForCurrentLevel()));
- *     // size comes from test_levels.txt: level_0.memory_sizes = 1K, 1M, 10M
+ *     // Event listener detected [level_0] tag and loaded level_0 parameters
+ *     auto sizes = params.getMemorySizesForCurrentLevel();
+ *     auto size = GENERATE_COPY(from_range(sizes));
+ *     // Test with sizes from YAML: level_0.memory_sizes = [1K, 1M, 10M]
  * }
  * @endcode
  */
 class TestParameterStore {
 public:
+    /**
+     * @brief Get singleton instance
+     */
     static TestParameterStore& instance() {
         static TestParameterStore inst;
         return inst;
     }
 
-    // Device Information (detected at runtime)
-    std::vector<int> deviceIds;                    
-    std::vector<std::string> deviceArchs;          
-    std::map<int, size_t> deviceMemorySizes;       
-    std::map<int, int> deviceComputeCapabilities;  
-    std::map<int, int> deviceMaxThreadsPerBlock;   
-    
-    // Test Parameters
-    std::vector<size_t> memorySizes;              
-    std::vector<size_t> smallMemorySizes;         
-    std::vector<size_t> largeMemorySizes;         
-    
-    // Level-specific parameters (from test_levels.txt)
-    std::map<std::string, std::vector<size_t>> levelMemorySizes;  
-    std::map<std::string, std::vector<int>> levelBlockSizes;      
-    
-    std::vector<int> blockSizes;                   
-    std::vector<int> gridSizes;                    
-    std::vector<dim3> blockDims2D;                 
-    std::vector<dim3> blockDims3D;                 
-    
-    std::vector<std::string> dataTypes;            
-    std::vector<size_t> dataTypeSizes;             
-    std::vector<int> streamCounts;                 
-    
-    // Runtime Configuration
-    bool enableExtendedTests = false;              
-    bool enableMultiGPUTests = false;              
-    bool enablePeerAccessTests = false;            
-    std::string testMode = "standard";             
-    std::string currentTestLevel = "";             
-    
-    int defaultIterations = 1000;                  
-    int defaultWarmups = 100;                      
-    
+    /**
+     * @brief Initialize parameter store from generated compile-time constants
+     * Called once at test startup by event listener
+     */
     void initialize();
-    void clear();
-    std::vector<size_t> getMemorySizesForDevice(int deviceId) const;
-    bool isFeatureSupported(const std::string& feature) const;
-    int getOptimalBlockSize(int deviceId) const;
-    void printConfiguration() const;
-    bool loadLevelConfig(const std::string& level);
+
+    /**
+     * @brief Load parameters for a specific level
+     * Called by event listener when [level_X] tag is detected
+     * @param level Level name (e.g., "level_0", "level_1")
+     */
+    void loadLevelConfig(const std::string& level);
+
+    /**
+     * @brief Get memory sizes for current test level
+     * @return Vector of memory sizes in bytes
+     */
     const std::vector<size_t>& getMemorySizesForCurrentLevel() const;
+
+    /**
+     * @brief Get block sizes for current test level
+     * @return Vector of block sizes
+     */
     const std::vector<int>& getBlockSizesForCurrentLevel() const;
+
+    /**
+     * @brief Get iterations for current test level
+     * @return Number of iterations
+     */
+    int getIterationsForCurrentLevel() const;
+
+    /**
+     * @brief Get warmup iterations for current test level
+     * @return Number of warmup iterations
+     */
+    int getWarmupsForCurrentLevel() const;
+
+    /**
+     * @brief Get maximum memory for current test level
+     * @return Maximum memory in bytes
+     */
+    size_t getMaxMemoryForCurrentLevel() const;
+
+    /**
+     * @brief Clear all stored data
+     */
+    void clear();
+
+    /**
+     * @brief Current test level (set by event listener)
+     */
+    std::string currentTestLevel;
 
 private:
     TestParameterStore() = default;
+    ~TestParameterStore() = default;
     TestParameterStore(const TestParameterStore&) = delete;
     TestParameterStore& operator=(const TestParameterStore&) = delete;
+
+    /**
+     * @brief Level-specific parameters (loaded from compile-time constants)
+     */
+    std::map<std::string, std::vector<size_t>> levelMemorySizes;
+    std::map<std::string, std::vector<int>> levelBlockSizes;
+    std::map<std::string, int> levelIterations;
+    std::map<std::string, int> levelWarmups;
+    std::map<std::string, size_t> levelMaxMemory;
     
-    std::map<std::string, bool> supportedFeatures_;
-    
-    void detectDeviceCapabilities();
-    void loadEnvironmentConfig();
-    void loadCentralizedLevelConfig();
-    void populateDefaultParameters();
+    /**
+     * @brief Fallback parameters (if no level specified)
+     */
+    std::vector<size_t> defaultMemorySizes;
+    std::vector<int> defaultBlockSizes;
+    int defaultIterations = 1000;
+    int defaultWarmups = 100;
+    size_t defaultMaxMemory = 2147483648; // 2GB
 };
-
-struct DeviceCapabilities {
-    bool hasUnifiedMemory = false;          
-    bool hasPeerAccess = false;             
-    bool hasCooperativeGroups = false;      
-    bool hasGraphMemory = false;            
-    int maxThreadsPerBlock = 0;             
-    int maxGridSize[3] = {0, 0, 0};         
-    size_t sharedMemPerBlock = 0;           
-    size_t totalGlobalMem = 0;              
-    int multiProcessorCount = 0;            
-    int warpSize = 0;                       
-    std::string gcnArchName;                
-    
-    static DeviceCapabilities& get() {
-        static DeviceCapabilities caps;
-        return caps;
-    }
-    
-    void initialize(int deviceId = 0);
-    void print() const;
-
-private:
-    DeviceCapabilities() = default;
-};
-

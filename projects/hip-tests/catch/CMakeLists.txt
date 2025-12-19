@@ -254,6 +254,71 @@ foreach(__offload_arch ${OFFLOAD_ARCH_LIST})
     list(REMOVE_DUPLICATES  hip_gpu_arch_list)
 endforeach()
 
+# ==============================================================================
+# Generate configuration headers from YAML
+# ==============================================================================
+# Check for PyYAML
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import yaml"
+    RESULT_VARIABLE PY_YAML_RESULT
+    ERROR_QUIET
+)
+if(NOT PY_YAML_RESULT EQUAL 0)
+    message(FATAL_ERROR "PyYAML is required to parse hip_tests_config.yaml. Please install: pip install pyyaml")
+endif()
+
+# Set paths
+set(CONFIG_PARSER_SCRIPT ${CMAKE_SOURCE_DIR}/hipTestMain/parse_config.py)
+set(HIP_TESTS_CONFIG_YAML ${CMAKE_SOURCE_DIR}/hipTestMain/config/hip_tests_config.yaml)
+set(HIP_TESTS_CONFIG_HEADER ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}/hip_tests_config.hh)
+set(HIP_TEST_PARAMETERS_HEADER ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/${CATCH_INCLUDE_DIR}/hip_test_parameters.hh)
+
+# Determine platform and OS
+if(WIN32)
+    set(CONFIG_OS "windows")
+    set(CONFIG_ARCH "windows")
+else()
+    set(CONFIG_OS "linux")
+    # Use first arch from list
+    list(GET hip_gpu_arch_list 0 CONFIG_ARCH)
+endif()
+
+message(STATUS "Generating test configuration headers from YAML...")
+message(STATUS "  YAML config: ${HIP_TESTS_CONFIG_YAML}")
+message(STATUS "  Platform: ${HIP_PLATFORM}, OS: ${CONFIG_OS}, Arch: ${CONFIG_ARCH}")
+
+# Generate both headers at build time
+add_custom_command(
+    OUTPUT ${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER}
+    COMMAND "${Python_EXECUTABLE}" "${CONFIG_PARSER_SCRIPT}"
+            "${HIP_TESTS_CONFIG_YAML}"
+            "${HIP_PLATFORM}"
+            "${CONFIG_OS}"
+            "${CONFIG_ARCH}"
+            "${HIP_TESTS_CONFIG_HEADER}"
+            "${HIP_TEST_PARAMETERS_HEADER}"
+    DEPENDS ${HIP_TESTS_CONFIG_YAML} ${CONFIG_PARSER_SCRIPT}
+    COMMENT "Generating hip_tests_config.hh and hip_test_parameters.hh from YAML"
+    VERBATIM
+)
+
+# Create custom target to ensure headers are generated
+add_custom_target(hip_tests_config_generation
+    DEPENDS ${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER}
+)
+
+# Mark as generated files
+set_source_files_properties(
+    ${HIP_TESTS_CONFIG_HEADER} 
+    ${HIP_TEST_PARAMETERS_HEADER}
+    PROPERTIES GENERATED TRUE
+)
+
+message(STATUS "Configuration headers will be generated at build time")
+
+# ==============================================================================
+# Old config system (JSON-based, kept for backward compatibility)
+# ==============================================================================
 if(WIN32)
     set(configToUse "config_amd_windows")
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})

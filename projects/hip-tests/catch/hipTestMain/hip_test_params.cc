@@ -20,239 +20,105 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <hip_test_params.hh>
-#include <hip_test_config_loader.hh>
+#include "hip_test_params.hh"
+#include "hip_test_parameters.hh"  // Generated header with compile-time constants
 #include <iostream>
-#include <algorithm>
-#include <cstdlib>
 
 void TestParameterStore::initialize() {
-    std::cout << "[TestParameterStore] Initializing test parameters..." << std::endl;
-    //detectDeviceCapabilities();
-    loadEnvironmentConfig();
-    loadCentralizedLevelConfig();
-    populateDefaultParameters();
-    printConfiguration();
-}
-
-void TestParameterStore::loadCentralizedLevelConfig() {
-    std::string centralizedFile = ConfigFileLoader::findConfigFile("test_levels.txt");
+    std::cout << "\n[TestParameterStore] Initializing from compile-time constants..." << std::endl;
     
-    if (!centralizedFile.empty()) {
-        std::cout << "  [Centralized Config] Loading from: " << centralizedFile << std::endl;
+    // Load all level parameters from generated compile-time constants
+    auto allParams = TestParameters::initializeLevelParameters();
+    
+    for (const auto& [levelName, params] : allParams) {
+        levelMemorySizes[levelName] = params.memory_sizes;
+        levelBlockSizes[levelName] = params.block_sizes;
+        levelIterations[levelName] = params.iterations;
+        levelWarmups[levelName] = params.warmups;
+        levelMaxMemory[levelName] = params.max_memory;
         
-        std::map<std::string, int> levelIterations;
-        std::map<std::string, int> levelWarmups;
-        
-        if (ConfigFileLoader::loadCentralizedLevelConfig(
-                centralizedFile, 
-                levelMemorySizes, 
-                levelBlockSizes,
-                levelIterations,
-                levelWarmups)) {
-            
-            std::cout << "    Successfully loaded centralized level config" << std::endl;
-            std::cout << "    Levels defined: ";
-            for (const auto& pair : levelMemorySizes) {
-                std::cout << pair.first << " ";
-            }
-            std::cout << std::endl;
-            return;
-        }
+        std::cout << "[TestParameterStore]   " << levelName << ": "
+                  << params.memory_sizes.size() << " memory sizes, "
+                  << params.block_sizes.size() << " block sizes, "
+                  << params.iterations << " iterations" << std::endl;
     }
     
-    std::cout << "  [Centralized Config] Not found, will load per-level configs as needed" << std::endl;
-}
-
-void TestParameterStore::detectDeviceCapabilities() {
-    int deviceCount = 0;
-    hipError_t err = hipGetDeviceCount(&deviceCount);
-    if (err != hipSuccess) {
-        std::cerr << "[TestParameterStore] Failed to get device count: " 
-                  << hipGetErrorString(err) << std::endl;
-        return;
-    }
-    
-    std::cout << "  Detected " << deviceCount << " device(s)" << std::endl;
-    
-    for (int i = 0; i < deviceCount; i++) {
-        deviceIds.push_back(i);
-        
-        hipDeviceProp_t prop;
-        err = hipGetDeviceProperties(&prop, i);
-        if (err != hipSuccess) {
-            std::cerr << "[TestParameterStore] Failed to get properties for device " 
-                      << i << ": " << hipGetErrorString(err) << std::endl;
-            continue;
-        }
-        
-        deviceArchs.push_back(prop.gcnArchName);
-        deviceMemorySizes[i] = prop.totalGlobalMem;
-        deviceComputeCapabilities[i] = prop.major * 10 + prop.minor;
-        deviceMaxThreadsPerBlock[i] = prop.maxThreadsPerBlock;
-        
-        std::cout << "    Device " << i << ": " << prop.name << std::endl;
-        std::cout << "      Arch: " << prop.gcnArchName << std::endl;
-        std::cout << "      Memory: " << (prop.totalGlobalMem / (1024 * 1024)) << " MB" << std::endl;
-        
-        if (prop.managedMemory) {
-            supportedFeatures_["managed_memory"] = true;
-        }
-        if (prop.cooperativeLaunch) {
-            supportedFeatures_["cooperative_launch"] = true;
-        }
-    }
-    
-    if (deviceCount > 1) {
-        int canAccess = 0;
-        err = hipDeviceCanAccessPeer(&canAccess, 0, 1);
-        if (err == hipSuccess && canAccess) {
-            supportedFeatures_["peer_access"] = true;
-            enablePeerAccessTests = true;
-            std::cout << "  Peer Access: Supported" << std::endl;
-        }
-        enableMultiGPUTests = true;
-    }
-}
-
-void TestParameterStore::loadEnvironmentConfig() {
-    const char* testModeEnv = std::getenv("HIP_TEST_MODE");
-    if (testModeEnv) {
-        testMode = testModeEnv;
-        std::cout << "  Test Mode: " << testMode << std::endl;
-    }
-    
-    const char* extendedEnv = std::getenv("HIP_EXTENDED_TESTS");
-    if (extendedEnv && std::string(extendedEnv) == "1") {
-        enableExtendedTests = true;
-        std::cout << "  Extended Tests: Enabled" << std::endl;
-    }
-}
-
-void TestParameterStore::populateDefaultParameters() {
-    if (testMode == "quick") {
-        memorySizes = {1024, 1024 * 1024, 10 * 1024 * 1024};
-        blockSizes = {64, 256};
-    } else if (testMode == "extended") {
-        memorySizes = {1024, 64 * 1024, 1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024};
-        blockSizes = {32, 64, 128, 256, 512, 1024};
+    // Set defaults (use level_0 as fallback if available, otherwise hardcoded)
+    if (levelMemorySizes.count("level_0")) {
+        defaultMemorySizes = levelMemorySizes["level_0"];
+        defaultBlockSizes = levelBlockSizes["level_0"];
+        defaultIterations = levelIterations["level_0"];
+        defaultWarmups = levelWarmups["level_0"];
     } else {
-        memorySizes = {1024, 64 * 1024, 1024 * 1024, 10 * 1024 * 1024};
-        blockSizes = {64, 128, 256, 512};
+        // Hardcoded fallback if no levels defined
+        defaultMemorySizes = {1024, 1048576, 10485760};  // 1K, 1M, 10M
+        defaultBlockSizes = {64, 256};
+        std::cout << "[TestParameterStore] Warning: No level_0 defined, using hardcoded defaults" << std::endl;
     }
     
-    gridSizes = {1, 16, 64, 256};
-    streamCounts = {2, 4, 8};
+    std::cout << "[TestParameterStore] Initialization complete - "
+              << allParams.size() << " levels loaded\n" << std::endl;
 }
 
-void TestParameterStore::clear() {
-    deviceIds.clear();
-    deviceArchs.clear();
-    deviceMemorySizes.clear();
-    memorySizes.clear();
-    blockSizes.clear();
-    levelMemorySizes.clear();
-    levelBlockSizes.clear();
-}
-
-std::vector<size_t> TestParameterStore::getMemorySizesForDevice(int deviceId) const {
-    auto it = deviceMemorySizes.find(deviceId);
-    if (it == deviceMemorySizes.end()) return memorySizes;
-    
-    size_t deviceMem = it->second;
-    std::vector<size_t> suitableSizes;
-    for (auto size : memorySizes) {
-        if (size < deviceMem / 2) suitableSizes.push_back(size);
-    }
-    return suitableSizes.empty() ? memorySizes : suitableSizes;
-}
-
-bool TestParameterStore::isFeatureSupported(const std::string& feature) const {
-    auto it = supportedFeatures_.find(feature);
-    return it != supportedFeatures_.end() && it->second;
-}
-
-int TestParameterStore::getOptimalBlockSize(int deviceId) const {
-    auto it = deviceMaxThreadsPerBlock.find(deviceId);
-    if (it != deviceMaxThreadsPerBlock.end()) {
-        int maxThreads = it->second;
-        if (maxThreads >= 256) return 256;
-        if (maxThreads >= 128) return 128;
-        return 64;
-    }
-    return 256;
-}
-
-void TestParameterStore::printConfiguration() const {
-    std::cout << "\n[TestParameterStore] Configuration Summary:" << std::endl;
-    std::cout << "  Devices: " << deviceIds.size() << std::endl;
-    std::cout << "  Test Mode: " << testMode << std::endl;
-    std::cout << "  Multi-GPU Tests: " << (enableMultiGPUTests ? "Yes" : "No") << std::endl;
-    
-    if (!levelMemorySizes.empty()) {
-        std::cout << "\n  Level-specific configs:" << std::endl;
-        for (const auto& pair : levelMemorySizes) {
-            std::cout << "    " << pair.first << ": " << pair.second.size() << " memory sizes" << std::endl;
-        }
-    }
-    std::cout << std::endl;
-}
-
-bool TestParameterStore::loadLevelConfig(const std::string& level) {
-    if (level.empty()) return false;
-    
-    std::cout << "  [Level Config] Loading parameters for: " << level << std::endl;
+void TestParameterStore::loadLevelConfig(const std::string& level) {
     currentTestLevel = level;
     
-    if (levelMemorySizes.count(level) > 0 || levelBlockSizes.count(level) > 0) {
-        std::cout << "    Using parameters from centralized config" << std::endl;
-        return true;
+    if (levelMemorySizes.count(level)) {
+        std::cout << "[TestParameterStore] Activating level: " << level << std::endl;
+        std::cout << "  Memory sizes: " << levelMemorySizes[level].size() 
+                  << " (" << levelMemorySizes[level][0] << " bytes to "
+                  << levelMemorySizes[level][levelMemorySizes[level].size()-1] << " bytes)" << std::endl;
+        std::cout << "  Block sizes: " << levelBlockSizes[level].size() 
+                  << " (" << levelBlockSizes[level][0] << " to "
+                  << levelBlockSizes[level][levelBlockSizes[level].size()-1] << ")" << std::endl;
+        std::cout << "  Iterations: " << levelIterations[level] << std::endl;
+    } else {
+        std::cout << "[TestParameterStore] Warning: Level '" << level 
+                  << "' not found, using defaults" << std::endl;
     }
-    
-    return false;
 }
 
 const std::vector<size_t>& TestParameterStore::getMemorySizesForCurrentLevel() const {
-    if (!currentTestLevel.empty()) {
-        auto it = levelMemorySizes.find(currentTestLevel);
-        if (it != levelMemorySizes.end() && !it->second.empty()) {
-            return it->second;
-        }
+    if (!currentTestLevel.empty() && levelMemorySizes.count(currentTestLevel)) {
+        return levelMemorySizes.at(currentTestLevel);
     }
-    return memorySizes;
+    return defaultMemorySizes;
 }
 
 const std::vector<int>& TestParameterStore::getBlockSizesForCurrentLevel() const {
-    if (!currentTestLevel.empty()) {
-        auto it = levelBlockSizes.find(currentTestLevel);
-        if (it != levelBlockSizes.end() && !it->second.empty()) {
-            return it->second;
-        }
+    if (!currentTestLevel.empty() && levelBlockSizes.count(currentTestLevel)) {
+        return levelBlockSizes.at(currentTestLevel);
     }
-    return blockSizes;
+    return defaultBlockSizes;
 }
 
-void DeviceCapabilities::initialize(int deviceId) {
-    hipDeviceProp_t prop;
-    hipError_t err = hipGetDeviceProperties(&prop, deviceId);
-    if (err != hipSuccess) {
-        std::cerr << "[DeviceCapabilities] Failed to get device properties" << std::endl;
-        return;
+int TestParameterStore::getIterationsForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelIterations.count(currentTestLevel)) {
+        return levelIterations.at(currentTestLevel);
     }
-    
-    hasUnifiedMemory = (prop.managedMemory == 1);
-    hasCooperativeGroups = (prop.cooperativeLaunch == 1);
-    maxThreadsPerBlock = prop.maxThreadsPerBlock;
-    totalGlobalMem = prop.totalGlobalMem;
-    multiProcessorCount = prop.multiProcessorCount;
-    warpSize = prop.warpSize;
-    gcnArchName = prop.gcnArchName;
+    return defaultIterations;
 }
 
-void DeviceCapabilities::print() const {
-    std::cout << "[Device Capabilities]" << std::endl;
-    std::cout << "  Architecture: " << gcnArchName << std::endl;
-    std::cout << "  Total Memory: " << (totalGlobalMem / (1024 * 1024)) << " MB" << std::endl;
-    std::cout << "  Max Threads/Block: " << maxThreadsPerBlock << std::endl;
+int TestParameterStore::getWarmupsForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelWarmups.count(currentTestLevel)) {
+        return levelWarmups.at(currentTestLevel);
+    }
+    return defaultWarmups;
 }
 
+size_t TestParameterStore::getMaxMemoryForCurrentLevel() const {
+    if (!currentTestLevel.empty() && levelMaxMemory.count(currentTestLevel)) {
+        return levelMaxMemory.at(currentTestLevel);
+    }
+    return defaultMaxMemory;
+}
+
+void TestParameterStore::clear() {
+    currentTestLevel.clear();
+    levelMemorySizes.clear();
+    levelBlockSizes.clear();
+    levelIterations.clear();
+    levelWarmups.clear();
+    levelMaxMemory.clear();
+    std::cout << "[TestParameterStore] Cleared all parameters" << std::endl;
+}

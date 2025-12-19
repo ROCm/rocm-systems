@@ -25,8 +25,18 @@ endif()
 set(MAIN_SRC
     main.cc
     hip_test_context.cc
-    hip_test_features.cc)
+    hip_test_features.cc
+    hip_test_params.cc
+    hip_test_listener.cc)
 add_library(Main_Object EXCLUDE_FROM_ALL OBJECT ${MAIN_SRC})
 set_source_files_properties(${MAIN_SRC} PROPERTIES LANGUAGE HIP)
 #set_property(TARGET Main_Object PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
 target_link_libraries(Main_Object PRIVATE Catch2::Catch2)
+
+# Ensure Main_Object depends on generated config headers
+add_dependencies(Main_Object hip_tests_config_generation)
+
+# Add include directory for generated headers
+target_include_directories(Main_Object PRIVATE 
+    ${CMAKE_CURRENT_BINARY_DIR}/../${CATCH_INCLUDE_DIR}
+)

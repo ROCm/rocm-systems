@@ -25,29 +25,67 @@ THE SOFTWARE.
 #include <catch2/catch_test_case_info.hpp>
 #include <hip_test_params.hh>
 #include <iostream>
+#include <regex>
+#include <cstdlib>
 
 /**
  * @brief Event listener for HIP test parameter initialization
  * 
  * This listener hooks into Catch2 v3 events to:
  * - Initialize test parameters before test execution
- * - Detect level tags and load level-specific configs
+ * - Detect level filter from command-line args
+ * - Load level-specific configs based on filter
  * - Clean up resources after testing
  */
 class HipTestParameterListener : public Catch::EventListenerBase {
 public:
     using Catch::EventListenerBase::EventListenerBase;
+    
+private:
+    std::string filterLevel; // Detected level from command-line filter
+    
+    /**
+     * @brief Parse command-line arguments to detect level filter
+     * Looks for patterns like: ./test "[level_0]" or ./test [level_1]
+     * Also checks HIP_TEST_LEVEL environment variable as fallback
+     */
+    std::string detectLevelFromCommandLine() {
+        // Check environment variable first
+        if (const char* envLevel = std::getenv("HIP_TEST_LEVEL")) {
+            std::string level = envLevel;
+            std::cout << "[Level Filter] Detected from HIP_TEST_LEVEL: " << level << std::endl;
+            return level;
+        }
+        
+        // Parse command-line arguments (stored in Catch2 config)
+        // Unfortunately, Catch2 doesn't expose original argc/argv in listeners
+        // So we'll need to use environment variable or detect from running tests
+        
+        // For now, return empty - we'll detect from first test that runs
+        return "";
+    }
+
+public:
 
     /**
      * @brief Called once when the test run begins
-     * Initializes TestParameterStore with runtime-detected device info
+     * Initializes TestParameterStore and detects level filter
      */
     void testRunStarting(Catch::TestRunInfo const& testRunInfo) override {
         std::cout << "\n================================================" << std::endl;
         std::cout << "HIP Test Parameter Initialization" << std::endl;
         std::cout << "================================================" << std::endl;
         
+        // Detect level filter from environment or command-line
+        filterLevel = detectLevelFromCommandLine();
+        
         TestParameterStore::instance().initialize();
+        
+        // If level was specified, load it immediately
+        if (!filterLevel.empty()) {
+            std::cout << "\n[Level Filter] Applying global level: " << filterLevel << std::endl;
+            TestParameterStore::instance().loadLevelConfig(filterLevel);
+        }
         
         int currentDevice = 0;
         if (hipGetDevice(&currentDevice) == hipSuccess) {
@@ -61,12 +99,24 @@ public:
 
     /**
      * @brief Called before each test case starts
-     * Detects level tags (e.g., [level_0], [level_1]) and loads level-specific config
+     * Uses filter level if specified, otherwise detects from test tags
      */
     void testCaseStarting(Catch::TestCaseInfo const& testInfo) override {
         auto& params = TestParameterStore::instance();
         
-        // Detect level tag from test case
+        // Priority 1: Use filter level if explicitly set (from env or detected)
+        if (!filterLevel.empty()) {
+            // Filter level takes precedence - all tests use same parameters
+            if (params.currentTestLevel != filterLevel) {
+                std::cout << "\n[Level Filter] Test: " << testInfo.name 
+                          << " -> Using filter level: " << filterLevel << std::endl;
+                params.loadLevelConfig(filterLevel);
+            }
+            return;
+        }
+        
+        // Priority 2: Auto-detect from first test's level tag (filter inference)
+        // This handles: ./test "[level_1]" where we detect level_1 from first test
         std::string detectedLevel = "";
         for (const auto& tag : testInfo.tags) {
             std::string tagStr = std::string(tag.original);
@@ -83,10 +133,19 @@ public:
             }
         }
         
+        // If this is the first test with a level tag, set it as filter level
+        if (!detectedLevel.empty() && filterLevel.empty()) {
+            filterLevel = detectedLevel;
+            std::cout << "\n[Level Auto-Detection] Inferred filter level: " << filterLevel 
+                      << " from test: " << testInfo.name << std::endl;
+            std::cout << "  All subsequent tests will use " << filterLevel << " parameters" << std::endl;
+        }
+        
         // Load level-specific config if detected
         if (!detectedLevel.empty()) {
             if (params.currentTestLevel != detectedLevel) {
-                std::cout << "\n[Level Detection] Test: " << testInfo.name << " -> Level: " << detectedLevel << std::endl;
+                std::cout << "\n[Level Detection] Test: " << testInfo.name 
+                          << " -> Level: " << detectedLevel << std::endl;
                 params.loadLevelConfig(detectedLevel);
             }
         } else {
