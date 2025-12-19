@@ -367,10 +367,6 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
   const amd::Kernel* kernel = function->kernel();
 
-  if (kernel == nullptr) {
-    assert(false && "kernel was unexpectedly nullptr");
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
   const device::Kernel::WorkGroupInfo* wrkGrpInfo = kernel->getDeviceKernel(device)->workGroupInfo();
   if (bCalcPotentialBlkSz == false) {
     if (inputBlockSize <= 0) {
@@ -494,10 +490,6 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
   if (function == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
-  }
-
-  if (function->kernel() == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   hipDeviceProp_t prop = {0};

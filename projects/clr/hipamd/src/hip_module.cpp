@@ -220,7 +220,6 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   if (kernel == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
-
   device::Kernel* d_kernel =
       (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
 
@@ -360,10 +359,6 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
 
-  if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-
   size_t globalWorkOffset[3] = {0};
   amd::NDRangeContainer ndrange(3, globalWorkOffset, launch_params.global_.Data(),
                                 launch_params.local_.Data());
@@ -467,11 +462,6 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
-
-  if (kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-
   amd::ScopedLock lock(DEBUG_HIP_KERNARG_COPY_OPT ? nullptr : &function->dflock_);
 
   hipError_t status =

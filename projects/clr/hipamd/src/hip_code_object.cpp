@@ -282,6 +282,7 @@ FatBinaryInfo** StatCO::addFatBinary(const void* data, bool initialized, bool& s
   }
 
   hipError_t err = digestFatBinary(data, modules_[data]);
+
   success = (err == hipSuccess);
   return &modules_[data];
 }
