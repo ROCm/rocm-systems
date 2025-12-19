@@ -108,47 +108,47 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   }
 
  private:
-  
- Float16 getNextAfter(Float16 from, Float16 direction) const {
-  constexpr int16_t signbit_float16 = 0x8000;
+  Float16 getNextAfter(Float16 from, Float16 direction) const {
+    constexpr int16_t signbit_float16 = 0x8000;
 
-   // Encode inputs as 16-bit integers
-   const int16_t from_bits = convertFloat16toInt16(from);
-   const int16_t direction_bits = convertFloat16toInt16(direction);
+    // Encode inputs as 16-bit integers
+    const int16_t from_bits = convertFloat16toInt16(from);
+    const int16_t direction_bits = convertFloat16toInt16(direction);
 
-   // Special cases
-   if (from_bits == direction_bits) return direction_bits;
-   if (std::abs(from_bits) ==  static_cast<int16_t>(0) &&std::abs(direction_bits) == static_cast<int16_t>(0)) return direction;
+    // Special cases
+    if (from_bits == direction_bits) return direction_bits;
+    if (std::abs(from_bits) == static_cast<int16_t>(0) &&
+        std::abs(direction_bits) == static_cast<int16_t>(0))
+      return direction;
 
-   // Map to a monotonic ordering over signed magnitude. Makes integer comparisons reflect numeric
-   // ordering across sign.
-   const int16_t from_ordered =
-       (from_bits < 0) ? signbit_float16 - from_bits : from_bits;
-   const int16_t direction_ordered =
-       (direction_bits < 0) ?signbit_float16 - direction_bits : direction_bits;
+    // Map to a monotonic ordering over signed magnitude. Makes integer comparisons reflect numeric
+    // ordering across sign.
+    const int16_t from_ordered = (from_bits < 0) ? signbit_float16 - from_bits : from_bits;
+    const int16_t direction_ordered =
+        (direction_bits < 0) ? signbit_float16 - direction_bits : direction_bits;
 
-   // Decide whether to move up or down by one ULP
-   const int16_t step = (from_ordered < direction_ordered) ? 1 : -1;
+    // Decide whether to move up or down by one ULP
+    const int16_t step = (from_ordered < direction_ordered) ? 1 : -1;
 
-   // Take one step
-   const int16_t after_step_ordered = from_ordered + step;
+    // Take one step
+    const int16_t after_step_ordered = from_ordered + step;
 
-   // Map back from ordered space to raw Float16 bits.
-   int16_t next_bits = (after_step_ordered < 0) ? signbit_float16 - after_step_ordered
-                                           : after_step_ordered;
+    // Map back from ordered space to raw Float16 bits.
+    int16_t next_bits =
+        (after_step_ordered < 0) ? signbit_float16 - after_step_ordered : after_step_ordered;
 
-   // Handle boundary behavior for the most-negative edge case.
-   if (from_ordered == -1 && (from_ordered < direction_ordered)) {
-     next_bits = signbit_float16;
-   }
+    // Handle boundary behavior for the most-negative edge case.
+    if (from_ordered == -1 && (from_ordered < direction_ordered)) {
+      next_bits = signbit_float16;
+    }
 
-   return convertInt16toFloat16(next_bits);
+    return convertInt16toFloat16(next_bits);
   }
 
   Float16 step(Float16 start, Float16 direction, uint64_t steps) const {
     Float16 result = start;
     for (uint64_t i = 0; i < steps; ++i) {
-       result = getNextAfter(result, direction);
+      result = getNextAfter(result, direction);
     }
     return result;
   }
@@ -158,7 +158,7 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
     out << std::scientific << std::setprecision(float16_max_digits) << num;
   }
 
-   static Float16 convertInt16toFloat16(int16_t d) {
+  static Float16 convertInt16toFloat16(int16_t d) {
     Float16 i;
     std::memcpy(&i, &d, sizeof(int16_t));
     return i;
