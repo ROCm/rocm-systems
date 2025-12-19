@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <hip/hip_runtime.h>
+#include <cstdint>
 #include <hip_test_common.hh>
 
 #include <cstring>
@@ -69,8 +70,6 @@ template <typename T, typename Matcher> class ValidatorBase : public MatcherBase
   bool nan = false;
 };
 
-__global__ void getNextAfter(Float16 from, Float16 direction, uint64_t steps, Float16* out);
-
 struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   Float16WithinUlpsMatcher(Float16 target, uint64_t ulps) : m_target(target), m_ulps(ulps) {}
 
@@ -81,16 +80,16 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
       return false;
     }
 
-    auto lc = convert(matchee);
-    auto rc = convert(m_target);
+    auto value_bits = convertFloat16toInt16(matchee);
+    auto target_bits = convertFloat16toInt16(m_target);
 
-    if ((lc < 0) != (rc < 0)) {
-      // Potentially we can have +0 and -0
+    // If signs differ, handle the special +0 vs -0 case explicitly.
+    if ((value_bits < 0) != (target_bits < 0)) {
       return matchee == m_target;
     }
 
-    auto ulpDiff = std::abs(lc - rc);
-    return static_cast<uint64_t>(ulpDiff) <= m_ulps;
+    auto ulp_diff = std::abs(value_bits - target_bits);
+    return static_cast<uint64_t>(ulp_diff) <= m_ulps;
   }
 
   std::string describe() const override {
@@ -112,17 +111,72 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
   }
 
  private:
+  
+ Float16 getNextAfter(Float16 from, Float16 direction) const {
+   static constexpr int16_t signbit_float16 = 0x8000;
+
+   // Encode inputs as 16-bit integers
+   const int16_t from_bits = convertFloat16toInt16(from);
+   const int16_t direction_bits = convertFloat16toInt16(direction);
+
+   // Special cases
+   if (from_bits == direction_bits) return direction_bits;
+   if (std::abs(from_bits) ==  static_cast<int16_t>(0) &&std::abs(direction_bits) == static_cast<int16_t>(0)) return direction;
+
+   // Map to a monotonic ordering over signed magnitude. Makes integer comparisons reflect numeric
+   // ordering across sign.
+   const int16_t from_ordered =
+       (from_bits < 0) ? signbit_float16 - from_bits : from_bits;
+   const int16_t direction_ordered =
+       (direction_bits < 0) ?signbit_float16 - direction_bits : direction_bits;
+
+   // Decide whether to move up or down by one ULP
+   const int16_t step = (from_ordered < direction_ordered) ? 1 : -1;
+
+   // Take one step
+   const int16_t after_step_ordered = from_ordered + step;
+
+   // Map back from ordered space to raw Float16 bits.
+   int16_t next_bits = (after_step_ordered < 0) ? signbit_float16 - after_step_ordered
+                                           : after_step_ordered;
+
+   // Handle boundary behavior for the most-negative edge case.
+   if (from_ordered == -1 && (from_ordered < direction_ordered)) {
+     next_bits = signbit_float16;
+   }
+
+   return convertInt16toFloat16(next_bits);
+
+
+  //  int16_t ix = convertFloat16toInt16(from);
+  //  int16_t mx = static_cast<int16_t>(signbit_float16) - ix;
+  //  mx = ix < static_cast<int16_t>(0) ? mx : ix;
+  //  int16_t iy = convertFloat16toInt16(direction);
+  //  int16_t my = static_cast<int16_t>(signbit_float16) - iy;
+
+
+  //  my = iy < static_cast<int16_t>(0) ? my : iy;
+
+
+  //  int16_t t = mx + (mx < my ? static_cast<int16_t>(1) : static_cast<int16_t>(-1));
+  //  int16_t r = static_cast<int16_t>(signbit_float16) - t;
+
+  //  r = t < static_cast<int16_t>(0) ? r : t;
+  //  r = (mx == static_cast<int16_t>(-1) && mx < my) ? static_cast<int16_t>(signbit_float16) : r;
+
+  //  r = (ix == iy || (convertFloat16toInt16(std::abs(from)) |
+  //                    convertFloat16toInt16(std::abs(direction))) == static_cast<int16_t>(0))
+  //          ? iy
+  //          : r;
+
+  //  return convertInt16toFloat16(r);
+  }
+
   Float16 step(Float16 start, Float16 direction, uint64_t steps) const {
-    Float16* outManagedMem;
-    HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&outManagedMem), sizeof(Float16)));
-    *outManagedMem = start;
-
-
-    getNextAfter<<<1, 1>>>(start, direction, steps, outManagedMem);
-    HIP_CHECK(hipDeviceSynchronize());
-
-    Float16 result = *outManagedMem;
-    HIP_CHECK(hipFree(outManagedMem));
+    Float16 result = start;
+    for (uint64_t i = 0; i < steps; ++i) {
+       result = getNextAfter(result, direction);
+    }
     return result;
   }
 
@@ -131,7 +185,13 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
     out << std::scientific << std::setprecision(float16MaxDigits) << num;
   }
 
-  static int16_t convert(Float16 d) {
+   static Float16 convertInt16toFloat16(int16_t d) {
+    Float16 i;
+    std::memcpy(&i, &d, sizeof(int16_t));
+    return i;
+  }
+
+  static int16_t convertFloat16toInt16(Float16 d) {
     uint16_t i;
     std::memcpy(&i, &d, sizeof(Float16));
     return i;

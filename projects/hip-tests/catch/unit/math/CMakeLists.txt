@@ -34,7 +34,6 @@ set(TEST_SRC
   casting_half2int_funcs.cc
   casting_int2half_funcs.cc
   casting_half_float_funcs.cc
-  validators.cc
 )
 
 if(HIP_PLATFORM MATCHES "nvidia")
