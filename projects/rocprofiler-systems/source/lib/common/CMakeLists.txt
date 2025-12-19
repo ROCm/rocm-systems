@@ -23,6 +23,7 @@ target_sources(
         ${CMAKE_CURRENT_BINARY_DIR}/defines.h
         ${CMAKE_CURRENT_SOURCE_DIR}/delimit.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/environment.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/filesystem.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/join.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
@@ -47,6 +48,11 @@ target_include_directories(
 target_compile_definitions(
     rocprofiler-systems-common-library
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>
+)
+
+target_link_libraries(
+    rocprofiler-systems-common-library
+    INTERFACE rocprofiler-systems-ghc-filesystem
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

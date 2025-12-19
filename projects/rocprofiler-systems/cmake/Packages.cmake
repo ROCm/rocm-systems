@@ -689,9 +689,10 @@ include(NlohmannJson)
 #
 # ----------------------------------------------------------------------------------------#
 
+include(GhcFilesystem)
+
 if(ROCPROFSYS_BUILD_TESTING)
     include(GTest)
-    include(GhcFilesystem)
 endif()
 
 # ----------------------------------------------------------------------------------------#

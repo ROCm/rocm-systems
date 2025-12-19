@@ -27,6 +27,7 @@
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
+#include "common/filesystem.hpp"
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
@@ -238,31 +239,30 @@ remove_if_exists(const std::string& fname)
 data::directory_files_t
 list_dir_files(const std::string& _path)
 {
+    namespace fs = rocprofsys::common::fs;
+
     if(_path.empty())
     {
         return {};
     }
 
-    auto dir_deleter = [](DIR* d) {
-        if(d) closedir(d);
-    };
-
-    std::unique_ptr<DIR, decltype(dir_deleter)> dir(opendir(_path.c_str()), dir_deleter);
-
-    if(!dir)
+    std::error_code ec;
+    if(!fs::exists(_path, ec) || !fs::is_directory(_path, ec))
     {
         ROCPROFSYS_THROW("Error opening directory: %s", _path.c_str());
     }
 
     data::directory_files_t result{};
-    dirent*                 entry;
 
-    while((entry = readdir(dir.get())) != nullptr)
+    for(const auto& entry : fs::directory_iterator(_path, ec))
     {
-        if(std::string(entry->d_name) != "." && std::string(entry->d_name) != "..")
+        if(ec)
         {
-            result.emplace_back(entry->d_name);
+            ROCPROFSYS_WARNING(0, "Error iterating directory: %s\n",
+                               ec.message().c_str());
+            break;
         }
+        result.emplace_back(entry.path().filename().string());
     }
 
     return result;

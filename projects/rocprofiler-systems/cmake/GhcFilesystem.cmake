@@ -22,7 +22,7 @@
 
 include_guard(GLOBAL)
 
-message(STATUS "Setting up ghc::filesystem for tests")
+message(STATUS "Setting up ghc::filesystem")
 
 include(FetchContent)
 
@@ -52,7 +52,7 @@ target_link_libraries(rocprofiler-systems-ghc-filesystem INTERFACE ghc_filesyste
 
 target_compile_definitions(
     rocprofiler-systems-ghc-filesystem
-    INTERFACE ROCPROFSYS_TESTS_HAS_GHC_LIB_FILESYSTEM=1
+    INTERFACE ROCPROFSYS_HAS_GHC_LIB_FILESYSTEM=1
 )
 
 message(STATUS "ghc::filesystem configured successfully using FetchContent")
