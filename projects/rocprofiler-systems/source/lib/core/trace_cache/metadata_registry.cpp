@@ -23,6 +23,8 @@
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
 #include "core/debug.hpp"
+#include <logger/debug.hpp>
+
 #include <algorithm>
 #include <cstdint>
 
@@ -832,6 +834,7 @@ bool
 metadata_registry::save_to_file(const std::string&                         filepath,
                                 const std::vector<std::shared_ptr<agent>>& _agents) const
 {
+    LOG_DEBUG("Saving metadata registry to file: {}", filepath);
     try
     {
         auto json        = to_json(*this, _agents);
@@ -840,15 +843,18 @@ metadata_registry::save_to_file(const std::string&                         filep
         std::ofstream file(filepath);
         if(!file.is_open())
         {
+            LOG_WARNING("Failed to open file for writing: {}", filepath);
             ROCPROFSYS_WARNING(1, "Error opening file for writing: %s", filepath.c_str());
             return false;
         }
 
         file << json_string;
         file.close();
+        LOG_INFO("Metadata registry saved successfully to: {}", filepath);
         return true;
     } catch(const std::exception& e)
     {
+        LOG_ERROR("Exception while saving metadata to file {}: {}", filepath, e.what());
         ROCPROFSYS_WARNING(1, "Error saving metadata to file: %s", e.what());
         return false;
     }
@@ -858,11 +864,13 @@ bool
 metadata_registry::load_from_file(const std::string&                   filepath,
                                   std::vector<std::shared_ptr<agent>>& _agents)
 {
+    LOG_DEBUG("Loading metadata registry from file: {}", filepath);
     try
     {
         std::ifstream file(filepath);
         if(!file.is_open())
         {
+            LOG_WARNING("Failed to open file for reading: {}", filepath);
             ROCPROFSYS_WARNING(1, "Error opening file for reading: %s", filepath.c_str());
             return false;
         }
@@ -872,9 +880,12 @@ metadata_registry::load_from_file(const std::string&                   filepath,
         file.close();
 
         rocprofsys::trace_cache::from_json(*this, _agents, json);
+        LOG_INFO("Metadata registry loaded successfully from: {}", filepath);
         return true;
     } catch(const std::exception& e)
     {
+        LOG_ERROR("Exception while loading metadata from file {}: {}", filepath,
+                  e.what());
         ROCPROFSYS_WARNING(1, "Error loading metadata from file: %s", e.what());
         return false;
     }

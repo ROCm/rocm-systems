@@ -32,6 +32,7 @@
 #include "core/debug.hpp"
 
 #include "library/runtime.hpp"
+#include <logger/debug.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -439,6 +440,9 @@ process_buffered_storage(
     const std::shared_ptr<data::processor_config_t>& _processor_config,
     const std::string& _storage_filename, const data::enabled_formats_t& _enabled_formats)
 {
+    LOG_DEBUG("Processing buffered storage: {} for pid={}", _storage_filename,
+              _processor_config->_pid);
+
     auto _processor_coordinator = std::make_shared<sample_processor_t>();
     auto processor_storage =
         configure_processors(_processor_coordinator, _processor_config, _enabled_formats);
@@ -448,12 +452,16 @@ process_buffered_storage(
     try
     {
         _parser.load(_processor_coordinator);
-
+        LOG_TRACE("Successfully loaded buffered storage: {}", _storage_filename);
     } catch(const std::runtime_error& exp)
     {
+        LOG_WARNING("Error parsing buffered storage {}: {}", _storage_filename,
+                    exp.what());
         ROCPROFSYS_WARNING(1, "Error parsing buffered storage: %s\n", exp.what());
     }
     _processor_coordinator->finalize_processing();
+
+    LOG_DEBUG("Finished processing buffered storage: {}", _storage_filename);
 }
 
 std::vector<std::shared_ptr<data::processor_config_t>>
@@ -489,12 +497,15 @@ multithreaded_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
     const data::enabled_formats_t&                                _enabled_formats)
 {
+    LOG_DEBUG("Starting multithreaded processing with {} configs",
+              _processor_configs.size());
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     std::vector<std::thread> processing_threads;
     processing_threads.reserve(_processor_configs.size());
     for(const auto& processor_config : _processor_configs)
     {
+        LOG_TRACE("Spawning processing thread for pid={}", processor_config->_pid);
         processing_threads.emplace_back(
             process_buffered_storage, processor_config,
             utility::get_buffered_storage_filename(processor_config->_ppid,
@@ -502,10 +513,12 @@ multithreaded_processing(
             _enabled_formats);
     }
 
+    LOG_TRACE("Waiting for {} processing threads to complete", processing_threads.size());
     for(auto& thread : processing_threads)
     {
         thread.join();
     }
+    LOG_DEBUG("Multithreaded processing completed");
 }
 
 void
@@ -513,13 +526,17 @@ sequential_processing(
     const std::vector<std::shared_ptr<data::processor_config_t>>& _processor_configs,
     const data::enabled_formats_t&                                _enabled_formats)
 {
+    LOG_DEBUG("Starting sequential processing with {} configs",
+              _processor_configs.size());
     for(const auto& processor_config : _processor_configs)
     {
+        LOG_TRACE("Processing config for pid={}", processor_config->_pid);
         process_buffered_storage(processor_config,
                                  utility::get_buffered_storage_filename(
                                      processor_config->_ppid, processor_config->_pid),
                                  _enabled_formats);
     }
+    LOG_DEBUG("Sequential processing completed");
 }
 
 void
@@ -551,24 +568,34 @@ cache_manager::get_instance()
 void
 cache_manager::post_process_bulk()
 {
+    LOG_INFO("Starting trace cache bulk post-processing");
+
     if(!is_root_process())
     {
+        LOG_DEBUG("Not root process, skipping bulk post-processing");
         return;
     }
 
     if(m_storage.is_running())
     {
+        LOG_WARNING(
+            "Post-processing called without previously shutting down cache storage");
         ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
                               "cache storage. Calling shutdown explicitly..\n");
         shutdown();
     }
 
     const auto root_pid = get_root_process_id();
+    LOG_DEBUG("Root process ID: {}", root_pid);
+
     const auto temp_directory_content =
         filesystem_utils::list_dir_files(trace_cache::tmp_directory);
+    LOG_TRACE("Found {} files in temp directory", temp_directory_content.size());
 
     const auto cache_files =
         filesystem_utils::get_cache_files(root_pid, temp_directory_content);
+    LOG_DEBUG("Found {} cache file pairs to process", cache_files.size());
+
     const data::enabled_formats_t enabled_formats;
     enabled_formats.print();
 
@@ -579,6 +606,7 @@ cache_manager::post_process_bulk()
         getpid(), root_pid, m_metadata,
         std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
+    LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
     processing_utils::dispatch_processing(processor_configs, enabled_formats);
 
     if(enabled_formats.is_perfetto_enabled())
@@ -625,12 +653,16 @@ cache_manager::post_process_bulk()
     }
 
     filesystem_utils::clear_cache_files(cache_files);
+
+    LOG_INFO("Trace cache bulk post-processing completed");
 }
 
 void
 cache_manager::shutdown()
 {
+    LOG_DEBUG("Shutting down cache manager storage");
     m_storage.shutdown();
+    LOG_TRACE("Cache manager storage shutdown complete");
 }
 
 }  // namespace trace_cache

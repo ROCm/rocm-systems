@@ -27,6 +27,8 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
+#include <logger/debug.hpp>
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -64,12 +66,16 @@ public:
 
         if(_type_processing == nullptr)
         {
+            LOG_CRITICAL("TypeProcessing is nullptr");
             throw std::runtime_error("TypeProcessing is nullptr");
         }
+
+        LOG_DEBUG("Loading storage from file: {}", m_filename);
 
         std::ifstream ifs(m_filename, std::ios::binary);
         if(!ifs.good())
         {
+            LOG_ERROR("Failed to open file for reading: {}", m_filename);
             std::stringstream ss;
             ss << "Error opening file for reading: " << m_filename << "\n";
             throw std::runtime_error(ss.str());
@@ -91,6 +97,7 @@ public:
         {
             if(!ifs.good())
             {
+                LOG_ERROR("Stream not in good state while parsing file: {}", m_filename);
                 throw std::runtime_error(
                     std::string("Stream not in good state, stopping parse. File: ") +
                     m_filename + "\n");
@@ -114,6 +121,8 @@ public:
 
             if(ifs.fail())
             {
+                LOG_ERROR("Bad read at byte {} in file: {}",
+                          static_cast<int>(ifs.tellg()), m_filename);
                 throw std::runtime_error(
                     std::string("Bad read while consuming buffered storage. Filename: ") +
                     m_filename + " Bytes read: " +
@@ -122,6 +131,7 @@ public:
 
             if(header.type == TypeIdentifierEnum::fragmented_space)
             {
+                LOG_TRACE("Skipping fragmented space in storage");
                 continue;
             }
 
@@ -139,11 +149,13 @@ public:
             }
             else
             {
+                LOG_TRACE("Unknown sample type encountered, skipping");
                 continue;
             }
         }
 
         ifs.close();
+        LOG_INFO("Storage parsing complete from {}", m_filename);
     }
 
 private:

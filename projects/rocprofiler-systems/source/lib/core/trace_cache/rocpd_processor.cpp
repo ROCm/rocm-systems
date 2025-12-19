@@ -33,6 +33,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
+#include <logger/debug.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -607,13 +608,17 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 void
 rocpd_processor_t::prepare_for_processing()
 {
+    LOG_DEBUG("Preparing rocpd processor for processing");
     post_process_metadata();
+    LOG_TRACE("Rocpd processor prepared for processing");
 }
 
 void
 rocpd_processor_t::finalize_processing()
 {
+    LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
@@ -622,8 +627,10 @@ rocpd_processor_t::post_process_metadata()
 #if ROCPROFSYS_USE_ROCM > 0
     if(!get_use_rocpd())
     {
+        LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;
     }
+    LOG_DEBUG("Post-processing metadata for rocpd");
     ROCPROFSYS_DEBUG("Post processing metadata..\n");
     auto n_info = node_info::get_instance();
 

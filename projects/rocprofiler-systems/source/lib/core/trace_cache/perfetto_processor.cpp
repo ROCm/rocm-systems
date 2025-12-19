@@ -35,6 +35,7 @@
 #include "trace_cache/storage_parser.hpp"
 
 #include <cstdint>
+#include <logger/debug.hpp>
 #include <nlohmann/json.hpp>
 
 #include <memory>
@@ -260,23 +261,30 @@ perfetto_processor_t::initialize_perfetto()
 {
     static std::once_flag init_flag;
     std::call_once(init_flag, []() {
+        LOG_DEBUG("Initializing perfetto tracing backend");
         auto args               = ::perfetto::TracingInitArgs{};
         args.backends           = ::perfetto::kInProcessBackend;
         args.shmem_size_hint_kb = config::get_perfetto_shmem_size_hint();
 
         ::perfetto::Tracing::Initialize(args);
-        ::perfetto::TrackEvent::Register();  // Only register once globally!
+        ::perfetto::TrackEvent::Register();
+        LOG_TRACE("Perfetto tracing backend initialized");
     });
 }
 
 void
 perfetto_processor_t::setup_perfetto()
 {
+    LOG_DEBUG("Setting up perfetto configuration for pid={}", m_process_id);
+
     auto  track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
     auto& cfg             = m_session_config;
 
     auto perfetto_buffer_size = config::get_perfetto_buffer_size();
     auto flush_period         = config::get_perfetto_flush_period();
+
+    LOG_TRACE("Perfetto buffer size: {} KB, flush period: {} ms", perfetto_buffer_size,
+              flush_period);
 
     auto _policy =
         config::get_perfetto_fill_policy() == "discard"
@@ -288,6 +296,7 @@ perfetto_processor_t::setup_perfetto()
 
     for(const auto& itr : config::get_disabled_categories())
     {
+        LOG_TRACE("Disabling perfetto track event category: {}", itr);
         ROCPROFSYS_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
                              itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
@@ -296,18 +305,27 @@ perfetto_processor_t::setup_perfetto()
     cfg.set_flush_period_ms(flush_period);
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-    ds_cfg->set_name("track_event");  // this MUST be track_event
+    ds_cfg->set_name("track_event");
     ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+
+    LOG_TRACE("Perfetto configuration setup complete");
 }
 
 void
 perfetto_processor_t::start_session()
 {
-    if(config::get_perfetto_backend() != "inprocess") return;
+    if(config::get_perfetto_backend() != "inprocess")
+    {
+        LOG_TRACE("Perfetto backend is not 'inprocess', skipping session start");
+        return;
+    }
+
+    LOG_DEBUG("Starting perfetto tracing session for pid={}", m_process_id);
 
     if(!m_tracing_session)
     {
         m_tracing_session = ::perfetto::Tracing::NewTrace();
+        LOG_TRACE("Created new perfetto trace");
     }
 
     ROCPROFSYS_VERBOSE(2,
@@ -320,20 +338,29 @@ perfetto_processor_t::start_session()
         m_tmp_file = config::get_tmp_file(_base, "proto");
         m_tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
         temp_fd = m_tmp_file->fd;
+        LOG_TRACE("Using temp file for perfetto trace: {}", m_tmp_file->filename);
     }
     m_tracing_session->Setup(m_session_config, temp_fd);
     m_tracing_session->StartBlocking();
+
+    LOG_INFO("Perfetto tracing session started for pid={}", m_process_id);
 }
 
 void
 perfetto_processor_t::stop_session()
 {
-    if(!m_tracing_session) return;
+    if(!m_tracing_session)
+    {
+        LOG_TRACE("No active perfetto session to stop");
+        return;
+    }
 
+    LOG_DEBUG("Stopping perfetto tracing session for pid={}", m_process_id);
     ROCPROFSYS_VERBOSE(2, "Stopping perfetto post-processing session...\n");
     ::perfetto::TrackEvent::Flush();
     m_tracing_session->FlushBlocking();
     m_tracing_session->StopBlocking();
+    LOG_TRACE("Perfetto tracing session stopped");
 }
 
 char_vec_t
@@ -435,21 +462,29 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
 void
 perfetto_processor_t::prepare_for_processing()
 {
+    LOG_DEBUG("Preparing perfetto processor for pid={}", m_process_id);
     initialize_perfetto();
     setup_perfetto();
     start_session();
+    LOG_TRACE("Perfetto processor prepared for processing");
 }
 
 void
 perfetto_processor_t::finalize_processing()
 {
+    LOG_DEBUG("Finalizing perfetto processor for pid={}", m_process_id);
     bool _perfetto_output_error = false;
     flush(_perfetto_output_error);
 
     if(_perfetto_output_error)
     {
+        LOG_ERROR("Perfetto trace generation failed for pid={}", m_process_id);
         ROCPROFSYS_WARNING(0, "Perfetto trace generation failed for process: %lu\n",
                            m_process_id);
+    }
+    else
+    {
+        LOG_INFO("Perfetto processing finalized successfully for pid={}", m_process_id);
     }
 }
 
