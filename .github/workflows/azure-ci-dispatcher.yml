@@ -16,19 +16,6 @@ name: Trigger Azure CI
 
 on:
   pull_request_target:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    branches:
-      - develop
-      - staging
-      - main
-      - release-staging/rocm-rel-7.*
-      - user/dsclear/shorten_pr_checks_for_docs_changes
-      - user/dsclear/shorten_pr_checks_for_docs_bin_feeder
-      - user/dsclear/shorten_pr_checks_for_docs_text_feeder
     paths-ignore:  # Do not trigger full tests on documentation-only changes
       - '**.txt'
       - '**.md'
