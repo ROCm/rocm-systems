@@ -108,7 +108,6 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
     {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
     {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
-    {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
 };
 
 double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
@@ -388,13 +387,6 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     types[i] = DOUBLE;  // Default type
     statuses[i] = RDC_ST_OK;
 
-    // Handle special case: RDC_FI_PROF_KFD_ID doesn't need sampling
-    if (field == RDC_FI_PROF_KFD_ID) {
-      types[i] = INTEGER;
-      values[i].l_int = agents[agent_index].gpu_id;
-      continue;
-    }
-
     // Get metric name for this field
     auto field_it = field_to_metric.find(field);
     if (field_it == field_to_metric.end()) {
@@ -442,9 +434,7 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     } catch (const std::exception& e) {
       RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
       for (size_t i = 0; i < fields.size(); i++) {
-        if (fields[i].field_id != RDC_FI_PROF_KFD_ID) {
           statuses[i] = RDC_ST_BAD_PARAMETER;
-        }
       }
       return RDC_ST_BAD_PARAMETER;
     }
@@ -455,11 +445,6 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   // Process results for each field
   for (size_t i = 0; i < fields.size(); i++) {
     const auto& field = fields[i].field_id;
-
-    // Skip fields that already have values set (like RDC_FI_PROF_KFD_ID)
-    if (field == RDC_FI_PROF_KFD_ID) {
-      continue;
-    }
 
     // Skip fields that had errors earlier
     if (statuses[i] != RDC_ST_OK) {
@@ -558,11 +543,6 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
         return RDC_ST_BAD_PARAMETER;
       }
       output->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
-      break;
-
-    case RDC_FI_PROF_KFD_ID:
-      *type = INTEGER;
-      output->l_int = agents[agent_index].gpu_id;
       break;
 
     default:
