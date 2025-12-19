@@ -234,6 +234,7 @@ def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
         nargs="+",
         action="append",
         help="\t\tSpecify the directory/directories of profiling data.",
+        default=".",
     )
     parser_obj.add_argument(
         "-o",
@@ -359,7 +360,8 @@ def main() -> None:
 
     # Suppress help for all actions in the rocprof-compute parser and copied actions
     for action in parser_obj._actions:
-        action.help = argparse.SUPPRESS
+        if not isinstance(action, argparse._HelpAction):
+            action.help = argparse.SUPPRESS
 
     remove_subparsers(parser_obj)
     add_parser_args(parser_obj)
