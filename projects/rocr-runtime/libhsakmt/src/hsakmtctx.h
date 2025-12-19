@@ -740,6 +740,17 @@ hsaKmtAllocQueueGWSCtx(
     HSAuint32          *firstGWS       //OUT
     );
 
+/**
+  Gets GPU and CPU clock counters for particular Node
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetClockCountersCtx(
+    HsaKFDContext     *ctx,           //IN
+    HSAuint32         NodeId,         //IN
+    HsaClockCounters  *Counters);     //OUT
+
 /* Helper functions for calling KFD SVM ioctl */
 HSAKMT_STATUS
 HSAKMTAPI
