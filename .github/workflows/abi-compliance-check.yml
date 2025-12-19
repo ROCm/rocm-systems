@@ -128,6 +128,22 @@ jobs:
           echo "Displaying Major ABI compliance check logs (if any)"
           find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
 
+      - name: Label PR on Major ABI Breakage
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          if [ -f $GITHUB_WORKSPACE/major_abi_status.txt ]; then
+            source $GITHUB_WORKSPACE/major_abi_status.txt
+            if [ "$abi_exit_code" -ne 0 ]; then
+              echo "Major ABI check failed, adding 'MAJOR ABI BREAKAGE' label to PR #${{ github.event.pull_request.number }}"
+              gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
+            else
+              echo "Major ABI check passed, removing 'MAJOR ABI BREAKAGE' label if present"
+              gh pr edit ${{ github.event.pull_request.number }} --remove-label "MAJOR ABI BREAKAGE" || true
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload Major ABI Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -288,6 +304,22 @@ jobs:
         run: |
           echo "Displaying Minor ABI compliance check logs (if any)"
           find logs -type f -name "*.txt" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No .txt logs found in logs/ directory."
+
+      - name: Label PR on Minor ABI Breakage
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          if [ -f $GITHUB_WORKSPACE/minor_abi_status.txt ]; then
+            source $GITHUB_WORKSPACE/minor_abi_status.txt
+            if [ "$abi_exit_code" -ne 0 ]; then
+              echo "Minor ABI check failed, adding 'MINOR ABI BREAKAGE' label to PR #${{ github.event.pull_request.number }}"
+              gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
+            else
+              echo "Minor ABI check passed, removing 'MINOR ABI BREAKAGE' label if present"
+              gh pr edit ${{ github.event.pull_request.number }} --remove-label "MINOR ABI BREAKAGE" || true
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Minor ABI Report
         if: always()
