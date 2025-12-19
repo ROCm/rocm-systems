@@ -104,6 +104,14 @@ class Analyzer(OmniAnalyze_Base):
             f"large number of dispatches.{Colors.ENDC}"
         )
 
+        # FIXME: Currently only supports single path input
+        if len(args.path[0]) > 1:
+            print(
+                f"{Colors.RED}Warning: Multiple paths provided. "
+                f"Only the first path will be processed for dumping values."
+                f"{Colors.ENDC}"
+            )
+
         for path_info in args.path:
             # create 'mega dataframe'
             raw_pmc = file_io.create_df_pmc(
@@ -237,9 +245,7 @@ def add_parser_args(parser_obj: argparse.ArgumentParser) -> None:
         dest="path",
         required=False,
         metavar="",
-        nargs="+",
-        action="append",
-        help="\t\tSpecify the directory/directories of profiling data.",
+        help="\t\tSpecify the directory of profiling data.",
     )
     parser_obj.add_argument(
         "-o",
@@ -378,9 +384,7 @@ def main() -> None:
         sys.exit(1)
 
     # Convert paths to absolute paths
-    args.path = [
-        list(map(lambda x: str(Path(x).absolute()), path)) for path in args.path
-    ]
+    args.path = [[str(Path(args.path).absolute())]]
 
     analyzer = Analyzer(args, supported_archs)
     analyzer.pre_processing()
