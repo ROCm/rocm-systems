@@ -26,8 +26,6 @@ THE SOFTWARE.
 
 #include <hip/hip_cooperative_groups.h>
 
-#include <random>
-
 namespace cg = cooperative_groups;
 
 #define MATH_UNARY_KERNEL_DEF(func_name)                                                           \

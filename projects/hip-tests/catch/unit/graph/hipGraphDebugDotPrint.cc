@@ -29,14 +29,13 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
-#include <numeric>
-
 #define N 1024
 
 #ifdef __linux__
 #include <unistd.h>
 #include <fstream>
 #include <iterator>
+#include <algorithm>
 #include <string>
 
 __device__ int globalIn[N];

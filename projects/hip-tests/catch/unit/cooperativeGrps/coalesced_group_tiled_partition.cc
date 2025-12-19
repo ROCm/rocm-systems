@@ -20,7 +20,6 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
-#include <random>
 #include <bitset>
 #include <optional>
 #include <resource_guards.hh>

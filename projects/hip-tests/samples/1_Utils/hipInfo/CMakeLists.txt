@@ -17,10 +17,13 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-project(hipInfo)
 
-# flag is set to ON in compute build for windows
-option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
+# hipcc.bat fails to qualify as a valid compiler for CMAKE_CXX_COMPILER_ID = ROCMClang
+# so  the simple compiler test is skipped and forced to use hipcc.bat as compiler
+set(CMAKE_C_COMPILER_WORKS 1)
+set(CMAKE_CXX_COMPILER_WORKS 1)
+
+project(hipInfo)
 
 cmake_minimum_required(VERSION 3.10)
 if(UNIX)
@@ -35,11 +38,21 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
+# flag is set to ON in compute build for windows
+option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
+
+# need to set hip-path for windows
+# since clang and hip are two different folders during build/install step
+if (WIN32 AND HIPINFO_INTERNAL_BUILD)
+     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
+endif()
+
 # Find hip
 find_package(hip)
 
 # Set compiler and linker
+set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
+set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
@@ -59,7 +72,7 @@ target_include_directories(hipInfo PRIVATE ../../common)
 # when hipInfo is built as part of compute project
 # hipInfo.exe will be installed to install/hip/bin path
 if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-  install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION ${CMAKE_INSTALL_PREFIX})
+     install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION .)
 endif()
 
 if(TARGET build_utils)

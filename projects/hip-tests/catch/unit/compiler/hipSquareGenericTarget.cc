@@ -99,17 +99,17 @@ TEST_CASE("Unit_test_generic_target_in_regular_fatbin") {
 #ifdef GENERIC_COMPRESSED
 TEST_CASE("Unit_test_generic_target_only_in_compressed_fatbin") {
 #ifdef __linux__
-  const char* cmd =
+  char* cmd =
       "chmod  u+x ./hipSquareGenericTargetOnlyCompressed && ./hipSquareGenericTargetOnlyCompressed";
 #else
-  const char* cmd = "hipSquareGenericTargetOnlyCompressed.exe";
+  char* cmd = "hipSquareGenericTargetOnlyCompressed.exe";
 #endif
 #else  // else GENERIC_COMPRESSED
-TEST_CASE("Unit_test_generic_target_only_in_regular_fatbin") {
+TEST_CASE("Unit_test_generic_target_only_in_regular_fatbin ") {
 #ifdef __linux__
-  const char* cmd = "chmod  u+x ./hipSquareGenericTargetOnly && ./hipSquareGenericTargetOnly";
+  char* cmd = "chmod  u+x ./hipSquareGenericTargetOnly && ./hipSquareGenericTargetOnly";
 #else
-  const char* cmd = "hipSquareGenericTargetOnly.exe";
+  char* cmd = "hipSquareGenericTargetOnly.exe";
 #endif
 #endif  // GENERIC_COMPRESSED
 

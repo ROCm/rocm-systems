@@ -22,19 +22,18 @@ set(TEST_SRC
     hipGetDeviceProp.cc
 )
 
-
+set (PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
 if(HIP_PLATFORM MATCHES "nvidia")
-    set(PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
-else()
-    set(PLATFORM_DEFINE __HIP_PLATFORM_AMD__)
+    set (PLATFORM_DEFINE __HIP_PLATFORM_NVIDIA__)
 endif()
 
 # Creating Custom object file
 add_custom_target(devprop_c_custom
-    COMMAND ${CMAKE_C_COMPILER}
-            -c -Wno-deprecated-declarations -x c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
-            -I${HIP_INCLUDE_DIR}
+    COMMAND ${HIP_PATH}/bin/hipcc
+            -c -Wno-deprecated-declarations ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
+            -I${HIP_PATH}/include
             -D${PLATFORM_DEFINE}
+            --hip-path=${HIP_PATH}
             -o hipGetDeviceProp.o
     BYPRODUCTS hipGetDeviceProp.o
 )
