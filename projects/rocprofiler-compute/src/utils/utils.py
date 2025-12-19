@@ -1092,7 +1092,8 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             "Thread_Id"
         ].values,
         "Grid_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
+            kernel_data
+            .iloc[counter_data["dispatch_id"] - 1][
                 ["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]
             ]
             .prod(axis=1)
@@ -1105,7 +1106,8 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             "Kernel_Name"
         ].values,
         "Workgroup_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
+            kernel_data
+            .iloc[counter_data["dispatch_id"] - 1][
                 ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
             ]
             .prod(axis=1)
