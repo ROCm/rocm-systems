@@ -43,21 +43,14 @@ is_hsa_initialized()
     return _v;
 }
 
-// The function returns the atomic pointer to the active PC sampling service.
-// The nullptr means the PC sampling service is inactive.
-atomic_pc_sampling_service_t&
-get_active_pc_sampling_service()
-{
-    static auto _v = atomic_pc_sampling_service_t{nullptr};
-    return _v;
-}
+// Global map for O(1) agent ownership checking and lookups
+// Maps agent ID to the PC sampling session configured for that agent
+using global_pc_sampling_sessions_map_t = std::unordered_map<rocprofiler_agent_id_t, std::shared_ptr<PCSAgentSession>>;
 
-// The function returns the atomic pointer to the configured pc sampling service.
-// The nullptr means the PC sampling service is not configured.
-atomic_pc_sampling_service_t&
-get_configured_pc_sampling_service()
+common::Synchronized<global_pc_sampling_sessions_map_t>&
+get_global_pc_sampling_sessions()
 {
-    static auto _v = atomic_pc_sampling_service_t{nullptr};
+    static auto _v = common::Synchronized<global_pc_sampling_sessions_map_t>{};
     return _v;
 }
 
@@ -66,14 +59,12 @@ start_service(const context::context* ctx)
 {
     auto* service = ctx->pc_sampler.get();
 
-    context::pc_sampling_service* _expected = nullptr;
-    // If there is no active pc_sampling_service, mark `service` as activated.
-    bool success = get_active_pc_sampling_service().compare_exchange_strong(_expected, service);
-
-    if(!success)
+    // CAS to mark service as enabled
+    bool expected = false;
+    if(!service->enabled.compare_exchange_strong(expected, true))
     {
-        // Some other context is active at the moment.
-        return ROCPROFILER_STATUS_ERROR;
+        // Service already started
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_STARTED;
     }
 
     if(is_hsa_initialized().load())
@@ -89,10 +80,12 @@ stop_service(const context::context* ctx)
 {
     auto* service = ctx->pc_sampler.get();
 
-    if(get_active_pc_sampling_service().load() != service)
+    // CAS to mark service as disabled
+    bool expected = true;
+    if(!service->enabled.compare_exchange_strong(expected, false))
     {
-        // Some other service is activated at the moment.
-        return ROCPROFILER_STATUS_ERROR;
+        // Service not started
+        return ROCPROFILER_STATUS_ERROR_SERVICE_NOT_STARTED;
     }
 
     if(is_hsa_initialized().load())
@@ -100,10 +93,7 @@ stop_service(const context::context* ctx)
         hsa::pc_sampling_service_stop(service);
     }
 
-    // No active PC sampling services
-    bool success = get_active_pc_sampling_service().compare_exchange_strong(service, nullptr);
-
-    return (success) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR;
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
@@ -117,41 +107,47 @@ post_hsa_init_start_active_service()
         return;
     }
 
-    // If the PC sampling service is not configured on any of the agents, return.
-    if(!get_configured_pc_sampling_service().load()) return;
+    // Check if any PC sampling is configured
+    {
+        auto locked = get_global_pc_sampling_sessions().rlock();
+        if(locked->empty()) return;  // No PC sampling configured
+    }
 
+    // Configure PC sampling on the ROCr level for all services (only once)
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
-        // Configure PC sampling on the ROCr level only once.
-        hsa::pc_sampling_service_finish_configuration(get_configured_pc_sampling_service().load());
+        // Collect all unique services from the global sessions map
+        std::unordered_set<context::pc_sampling_service*> services_to_configure;
+        {
+            auto locked = get_global_pc_sampling_sessions().rlock();
+            for(const auto& [_, agent_session] : *locked)
+            {
+                auto* ctx = rocprofiler::context::get_registered_context(agent_session->context_id);
+                if(ctx && ctx->pc_sampler)
+                {
+                    services_to_configure.insert(ctx->pc_sampler.get());
+                }
+            }
+        }
+
+        // Configure each service on the ROCr level
+        for(auto* service : services_to_configure)
+        {
+            hsa::pc_sampling_service_finish_configuration(service);
+        }
+
+        // Mark HSA as initialized
+        is_hsa_initialized().store(true);
+
+        // Start any services that are already enabled
+        for(auto* service : services_to_configure)
+        {
+            if(service->enabled.load())
+            {
+                hsa::pc_sampling_service_start(service);
+            }
+        }
     });
-
-    // Theoretically, the remainder of the function
-    // can execute concurrently with start_context/stop_context.
-
-    context::pc_sampling_service* _expected   = nullptr;
-    void*                         invalid_ptr = reinterpret_cast<void*>(0xDEADBEEF);
-    context::pc_sampling_service* pseudo_sevice =
-        static_cast<context::pc_sampling_service*>(invalid_ptr);
-
-    if(get_active_pc_sampling_service().compare_exchange_strong(_expected, pseudo_sevice))
-    {
-        // At this point, we prevented any `start_context` instance from activating the service.
-        is_hsa_initialized().store(true);
-        // Now, allow `start_context` to active the service.
-        get_active_pc_sampling_service().compare_exchange_strong(pseudo_sevice, nullptr);
-    }
-    else
-    {
-        // Someone already called `start_context` that activated service.
-        // The pointer to this service is written inside `_expected`.
-        // Start PC sampling service on the HSA level in the name of the
-        // `start_context` caller.
-        hsa::pc_sampling_service_start(_expected);
-        // Although the caller of the `start_context` might try calling the hsa_start,
-        // it will fail, which is fine, since the service is eventually started.
-        is_hsa_initialized().store(true);
-    }
 }
 
 rocprofiler_status_t
@@ -187,46 +183,43 @@ configure_pc_sampling_service(context::context*                ctx,
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     }
 
-    // The restriction we agreed at the moment is that at most one context
-    // can have PC sampling service configured, meaning
-    // at most one instance of the `context::pc_sampling_service` can be configured
-    // This `pc_sampling_service` contains at most one configuration per agent.
-    context::pc_sampling_service* expected = nullptr;
-    // Try registering the new instance of the `pc_sampling_service`.
-    if(!get_configured_pc_sampling_service().compare_exchange_strong(expected,
-                                                                     ctx->pc_sampler.get()))
-    {
-        // A `pc_sampling_service` instance has already been configured.
-        // Note: the `expected` contains the pointer to the configured `pc_sampling_service`
-        // instance.
-        if(expected != ctx->pc_sampler.get())
-        {
-            // Someone tried configuring a new `pc_sampling_service instance`, which we do not
-            // allow. Invalidate the `pc_sampling_service` from the `ctx` and return an error.
-            ctx->pc_sampler = nullptr;
-            // TODO: new status code needed
-            return ROCPROFILER_STATUS_ERROR;
-        }
-        // Someone is trying to enable PC sampling on another agent, and we allow registering
-        // new agent inside `pc_sampling_service` instance.
-    }
-
     // calling KFD to check if the configuration is actually supported at the moment
     uint32_t ioctl_pcs_id;
     auto     ioctl_status = ioctl::ioctl_pcs_create(agent, method, unit, interval, &ioctl_pcs_id);
     if(ioctl_status != ROCPROFILER_STATUS_SUCCESS) return ioctl_status;
 
-    ctx->pc_sampler->agent_sessions[agent->id] = std::make_unique<PCSAgentSession>();
+    // Create a new session for this agent
+    auto session = std::make_shared<PCSAgentSession>();
 
-    auto* session         = ctx->pc_sampler->agent_sessions[agent->id].get();
-    session->agent        = agent;
-    session->method       = method;
-    session->unit         = unit;
-    session->interval     = interval;
-    session->buffer_id    = buffer_id;
-    session->ioctl_pcs_id = ioctl_pcs_id;
-    session->parser       = std::make_unique<PCSamplingParserContext>();
-    session->cid_manager  = std::make_unique<PCSCIDManager>(session->parser.get());
+    // Check if this agent is already configured by another context and register the session
+    {
+        auto locked = get_global_pc_sampling_sessions().wlock();
+
+        if(auto it = locked->find(agent->id); it != locked->end())
+        {
+            // Agent already configured by another context
+            ctx->pc_sampler = nullptr;
+            return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+        }
+
+        // Fully initialize the session under the lock before making it visible
+        session->context_id  = rocprofiler_context_id_t{.handle = ctx->context_idx};
+        session->agent       = agent;
+        session->method      = method;
+        session->unit        = unit;
+        session->interval    = interval;
+        session->buffer_id   = buffer_id;
+        session->ioctl_pcs_id = ioctl_pcs_id;
+        session->parser      = std::make_unique<PCSamplingParserContext>();
+        session->cid_manager = std::make_unique<PCSCIDManager>(session->parser.get());
+
+        // Register session in global map
+        (*locked)[agent->id] = session;
+
+        // Register session in context map (shared ownership)
+        // Keeping this under the same lock ensures atomicity of the entire operation
+        ctx->pc_sampler->agent_sessions[agent->id] = session;
+    }
 
     ROCP_ERROR << "PC sampling session with id: " << session->ioctl_pcs_id
                << " hsa been created!\n";
@@ -237,15 +230,22 @@ configure_pc_sampling_service(context::context*                ctx,
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
 {
-    auto* service = get_configured_pc_sampling_service().load();
-    if(service)
+    auto locked = get_global_pc_sampling_sessions().rlock();
+    // If the agent_id is in the global sessions map,
+    // then the PC sampling service is configured on this agent.
+    return locked->find(agent_id) != locked->end();
+}
+
+PCSAgentSession*
+get_agent_session(rocprofiler_agent_id_t agent_id)
+{
+    auto locked = get_global_pc_sampling_sessions().rlock();
+    auto it = locked->find(agent_id);
+    if(it != locked->end())
     {
-        // If the agent_id is in the service->agent_sessions map,
-        // then the PC sampling service is configured on this agent.
-        return service->agent_sessions.find(agent_id) != service->agent_sessions.end();
+        return it->second.get();
     }
-    // The PC sampling service is not configured on this agent
-    return false;
+    return nullptr;
 }
 
 rocprofiler_status_t
@@ -260,8 +260,8 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
         rocprofiler_context_id_t{.handle = buff->context_id});
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    auto* service = get_configured_pc_sampling_service().load();
-    if(service && ctx->pc_sampler.get() == service)
+    auto* service = ctx->pc_sampler.get();
+    if(service)
     {
         rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
         // The context `ctx` (that holds the buffer with `buffer_id`)
@@ -288,15 +288,15 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
 rocprofiler_status_t
 flush_all_agent_buffers()
 {
-    auto* service = get_configured_pc_sampling_service().load();
-    if(!service) return ROCPROFILER_STATUS_ERROR;
+    auto locked = get_global_pc_sampling_sessions().rlock();
+    if(locked->empty()) return ROCPROFILER_STATUS_ERROR;
 
     rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
     // Loop over all agents that have PC sampling service configured
     // and drain their internal buffers.
     // NOTE: one SDK buffer can consume data from multiple agents
     // (multiple HSA runtime buffers)
-    for(const auto& [_, agent_session] : service->agent_sessions)
+    for(const auto& [_, agent_session] : *locked)
     {
         status = flush_internal_agent_buffers(agent_session->buffer_id);
         if(status != ROCPROFILER_STATUS_SUCCESS)

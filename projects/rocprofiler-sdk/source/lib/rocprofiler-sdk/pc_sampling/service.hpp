@@ -40,11 +40,6 @@ namespace rocprofiler
 {
 namespace pc_sampling
 {
-using atomic_pc_sampling_service_t = std::atomic<context::pc_sampling_service*>;
-
-atomic_pc_sampling_service_t&
-get_configured_pc_sampling_service();
-
 rocprofiler_status_t
 start_service(const context::context* ctx);
 
@@ -64,6 +59,9 @@ configure_pc_sampling_service(context::context*                ctx,
 
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id);
+
+PCSAgentSession*
+get_agent_session(rocprofiler_agent_id_t agent_id);
 
 rocprofiler_status_t
 flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id);

@@ -95,9 +95,7 @@ flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code
 
     // The PC sampling service is configured on the agent,
     // so flush its PC sampling buffer
-    // TODO: Creating a function that gives the buffer_id based on the agent_id?
-    const auto* pcs_service     = get_configured_pc_sampling_service().load();
-    const auto* agent_session   = pcs_service->agent_sessions.at(agent_id).get();
+    const auto* agent_session   = get_agent_session(agent_id);
     auto        agent_buffer_id = agent_session->buffer_id;
 
     // flush internal PC sampling buffers
