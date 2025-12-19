@@ -849,7 +849,7 @@ typedef struct {
 /**
  * @brief Power Cap Information
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_window} @endcond
  */
 typedef struct {
     uint64_t power_cap;          //!< current power cap Units uW {@linux_bm} or W {@host}
@@ -2193,7 +2193,7 @@ typedef struct {
  * Place-holder "variant" for functions that have don't have any variants,
  * but do have monitors or sensors.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 typedef enum {
     AMDSMI_VIRTUALIZATION_MODE_UNKNOWN = 0,  //!< Unknown Virtualization Mode
