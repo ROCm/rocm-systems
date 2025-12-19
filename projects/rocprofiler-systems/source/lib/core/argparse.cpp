@@ -216,6 +216,20 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     _parser.start_group("DEBUG OPTIONS", "");
 
+    if(_data.environ_filter("log_level", _data))
+    {
+        _parser.add_argument({ "--log-level" }, "Log level")
+            .max_count(1)
+            .dtype("string")
+            .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL",
+                           p.get<std::string>("log-level"));
+            });
+
+        _data.processed_environs.emplace("log_level");
+    }
+
     if(_data.environ_filter("monochrome", _data))
     {
         _parser.add_argument({ "--monochrome" }, "Disable colorized output")
@@ -234,10 +248,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.environ_filter("debug", _data))
     {
-        _parser.add_argument({ "--debug" }, "Debug output")
+        _parser
+            .add_argument({ "--debug" },
+                          "[DEPRICATED Use --log-level=debug] Debug output")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+                // update_env(_data, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug");
             });
 
         _data.processed_environs.emplace("debug");
@@ -245,13 +262,16 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.environ_filter("verbose", _data))
     {
-        _parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+        _parser
+            .add_argument({ "-v", "--verbose" },
+                          "[DEPRICATED Use --log-level=trace] Verbose output")
             .count(1)
             .dtype("integral")
             .action([&](parser_t& p) {
                 auto _v       = p.get<int>("verbose");
                 _data.verbose = _v;
-                update_env(_data, "ROCPROFSYS_VERBOSE", _v);
+                // update_env(_data, "ROCPROFSYS_VERBOSE", _v);
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL", "trace");
             });
 
         _data.processed_environs.emplace("verbose");
