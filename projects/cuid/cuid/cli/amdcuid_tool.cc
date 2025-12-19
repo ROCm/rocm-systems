@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -23,6 +45,23 @@
  * - Update CUID files
  * - Monitor device changes (future daemon mode)
  */
+
+inline const char* cuid_status_to_string(amdcuid_status_t status) {
+    switch (status) {
+        case AMDCUID_STATUS_SUCCESS: return "SUCCESS";
+        case AMDCUID_STATUS_FILE_NOT_FOUND: return "FILE_NOT_FOUND";
+        case AMDCUID_STATUS_DEVICE_NOT_FOUND: return "DEVICE_NOT_FOUND";
+        case AMDCUID_STATUS_INVALID_ARGUMENT: return "INVALID_ARGUMENT";
+        case AMDCUID_STATUS_PERMISSION_DENIED: return "PERMISSION_DENIED";
+        case AMDCUID_STATUS_UNSUPPORTED: return "UNSUPPORTED";
+        case AMDCUID_STATUS_WRONG_DEVICE_TYPE: return "WRONG_DEVICE_TYPE";
+        case AMDCUID_STATUS_INSUFFICIENT_SIZE: return "INSUFFICIENT_SIZE";
+        case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND: return "AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND";
+        case AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR: return "AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR";
+        case AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED: return "AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED";
+        default: return "UNKNOWN_ERROR";
+    }
+}
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n";
@@ -50,32 +89,6 @@ void print_usage(const char* program_name) {
     std::cout << "  " << program_name << " --query-device /sys/class/drm/renderD128\n\n";
 }
 
-const char* device_type_to_string(amdcuid_device_type_t type) {
-    switch (type) {
-        case AMDCUID_DEVICE_TYPE_PLATFORM: return "PLATFORM";
-        case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
-        case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
-        case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
-        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
-        case AMDCUID_DEVICE_TYPE_STORAGE: return "STORAGE";
-        case AMDCUID_DEVICE_TYPE_MEMORY: return "MEMORY";
-        case AMDCUID_DEVICE_TYPE_OTHER: return "OTHER";
-        default: return "UNKNOWN";
-    }
-}
-
-std::string cuid_to_string(const amdcuid& id) {
-    char uuid_str[37];
-    snprintf(uuid_str, sizeof(uuid_str),
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             id.bytes[0], id.bytes[1], id.bytes[2], id.bytes[3],
-             id.bytes[4], id.bytes[5],
-             id.bytes[6], id.bytes[7],
-             id.bytes[8], id.bytes[9],
-             id.bytes[10], id.bytes[11], id.bytes[12], id.bytes[13], id.bytes[14], id.bytes[15]);
-    return std::string(uuid_str);
-}
-
 std::string format_timestamp(time_t timestamp) {
     char buffer[64];
     struct tm* tm_info = localtime(&timestamp);
@@ -93,7 +106,7 @@ int generate_cuid_files(const std::string& key_file,
     amdcuid_status_t status = mgr.init(AMDCUID_DEVICE_TYPE_SET_ALL);
     
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to initialize device manager" << std::endl;
+        std::cerr << "Error: Failed to initialize device manager: " << cuid_status_to_string(status) << std::endl;
         return 1;
     }
     
@@ -108,7 +121,7 @@ int generate_cuid_files(const std::string& key_file,
     );
     
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to generate CUID files" << std::endl;
+        std::cerr << "Error: Failed to generate CUID files; error status: " << cuid_status_to_string(status) << std::endl;
         return 1;
     }
     
@@ -122,30 +135,30 @@ int list_devices(bool show_primary, const std::string* filter_type = nullptr) {
     amdcuid_status_t status = mgr.init(AMDCUID_DEVICE_TYPE_SET_ALL);
     
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to initialize device manager" << std::endl;
+        std::cerr << "Error: Failed to initialize device manager; error status: " << cuid_status_to_string(status) << std::endl;
         return 1;
     }
     
-    const auto& devices = mgr.devices();
+    // const auto& devices = mgr.devices();
     
-    if (devices.empty()) {
+    
+    
+    // Group devices by type
+    std::map<amdcuid_device_type_t, std::vector<std::shared_ptr<AmdCuidDevice>>> grouped;
+    mgr.get_grouped_devices(grouped);
+
+    if (grouped.empty()) {
         std::cout << "No devices found." << std::endl;
         return 0;
     }
     
-    std::cout << "Discovered " << devices.size() << " device(s):\n" << std::endl;
-    
-    // Group devices by type
-    std::map<amdcuid_device_type_t, std::vector<std::shared_ptr<AmdCuidDevice>>> grouped;
-    for (const auto& device : devices) {
-        grouped[device->type()].push_back(device);
-    }
+    std::cout << "Discovered " << grouped.size() << " device(s):\n" << std::endl;
     
     // Display devices
     for (const auto& kv : grouped) {
         amdcuid_device_type_t type = kv.first;
         const std::vector<std::shared_ptr<AmdCuidDevice>>& device_list = kv.second;
-        std::string type_str = device_type_to_string(type);
+        std::string type_str = AmdCuidUtilities::device_type_to_string(type);
         
         // Case-insensitive type filter comparison
         if (filter_type) {
@@ -168,12 +181,12 @@ int list_devices(bool show_primary, const std::string* filter_type = nullptr) {
             device->get_primary_cuid(primary_id);
             
             if (show_primary) {
-                std::cout << "\n  Primary CUID:   " << cuid_to_string(primary_id);
+                std::cout << "\n  Primary CUID:   " << AmdCuidUtilities::get_cuid_as_string(&primary_id);
             }
             
             // Get secondary CUID (would need HMAC key in real implementation)
             // For now, just show primary
-            std::cout << "\n  CUID:           " << cuid_to_string(primary_id);
+            std::cout << "\n  CUID:           " << AmdCuidUtilities::get_cuid_as_string(&primary_id);
             
             // Show device-specific info
             if (type == AMDCUID_DEVICE_TYPE_GPU) {
@@ -210,13 +223,19 @@ int list_from_file(const std::string& file_path, bool show_primary) {
     
     amdcuid_status_t status = cuid_file.load();
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to load CUID file" << std::endl;
+        std::cerr << "Error: Failed to load CUID file; error status: " << cuid_status_to_string(status) << std::endl;
         return 1;
     }
     
-    const auto& entries = cuid_file.get_entries();
+    // const auto& entries = cuid_file.get_entries();
     
-    if (entries.empty()) {
+
+    
+    // Group by type
+    std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
+    cuid_file.get_grouped_entries(grouped);
+
+    if (grouped.empty()) {
         std::cout << "No entries found in CUID file." << std::endl;
         return 0;
     }
@@ -224,16 +243,10 @@ int list_from_file(const std::string& file_path, bool show_primary) {
     std::cout << "CUID File: " << file_path << std::endl;
     std::cout << "Type: " << (cuid_file.is_privileged() ? "Privileged" : "Unprivileged") << "\n" << std::endl;
     
-    // Group by type
-    std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
-    for (const auto& entry : entries) {
-        grouped[entry.device_type].push_back(entry);
-    }
-    
     for (const auto& kv : grouped) {
         amdcuid_device_type_t type = kv.first;
         const std::vector<CuidFileEntry>& entry_list = kv.second;
-        std::string type_str = device_type_to_string(type);
+        std::string type_str = AmdCuidUtilities::device_type_to_string(type);
         std::cout << "---- " << type_str << " CUIDs ----" << std::endl;
         
         for (const auto& entry : entry_list) {
@@ -244,9 +257,9 @@ int list_from_file(const std::string& file_path, bool show_primary) {
             }
             
             if (show_primary && cuid_file.is_privileged()) {
-                std::cout << "\n  Primary CUID:   " << cuid_to_string(entry.primary_cuid);
+                std::cout << "\n  Primary CUID:   " << AmdCuidUtilities::get_cuid_as_string(&entry.primary_cuid);
             }
-            std::cout << "\n  CUID:           " << cuid_to_string(entry.secondary_cuid);
+            std::cout << "\n  CUID:           " << AmdCuidUtilities::get_cuid_as_string(&entry.secondary_cuid);
             
             if (!entry.device_node.empty()) {
                 std::cout << "\n  Device Node:    " << entry.device_node;
@@ -283,7 +296,7 @@ int query_device(const std::string& identifier) {
     
     amdcuid_status_t status = cuid_file.load();
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Error: Failed to load CUID file" << std::endl;
+        std::cerr << "Error: Failed to load CUID file; error status: " << cuid_status_to_string(status) << std::endl;
         return 1;
     }
     
@@ -294,8 +307,8 @@ int query_device(const std::string& identifier) {
     status = cuid_file.find_by_device_node(identifier, entry);
     if (status == AMDCUID_STATUS_SUCCESS) {
         std::cout << "Device Found:" << std::endl;
-        std::cout << "  Type:           " << device_type_to_string(entry.device_type) << std::endl;
-        std::cout << "  CUID:           " << cuid_to_string(entry.secondary_cuid) << std::endl;
+        std::cout << "  Type:           " << AmdCuidUtilities::device_type_to_string(entry.device_type) << std::endl;
+        std::cout << "  CUID:           " << AmdCuidUtilities::get_cuid_as_string(&entry.secondary_cuid) << std::endl;
         std::cout << "  Device Node:    " << entry.device_node << std::endl;
         if (!entry.bdf.empty()) {
             std::cout << "  BDF:            " << entry.bdf << std::endl;
@@ -308,8 +321,8 @@ int query_device(const std::string& identifier) {
     status = cuid_file.find_by_package_core_id(identifier, entry);
     if (status == AMDCUID_STATUS_SUCCESS) {
         std::cout << "Device Found:" << std::endl;
-        std::cout << "  Type:           " << device_type_to_string(entry.device_type) << std::endl;
-        std::cout << "  CUID:           " << cuid_to_string(entry.secondary_cuid) << std::endl;
+        std::cout << "  Type:           " << AmdCuidUtilities::device_type_to_string(entry.device_type) << std::endl;
+        std::cout << "  CUID:           " << AmdCuidUtilities::get_cuid_as_string(&entry.secondary_cuid) << std::endl;
         std::cout << "  Package:Core:   " << entry.package_core_id << std::endl;
         std::cout << "  Last Update:    " << format_timestamp(entry.last_update) << std::endl;
         return 0;

@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include "cuid_nic.h"
 #include "cuid_util.h"
 #include "pci_util.h"
@@ -181,4 +203,22 @@ amdcuid_status_t AmdCuidNic::get_primary_cuid(amdcuid& id) const {
 
 const amdcuid_nic_info& AmdCuidNic::get_info() const {
     return m_info;
+}
+
+amdcuid_status_t AmdCuidNic::get_vendor_id(uint16_t& vendor_id) const {
+    vendor_id = m_info.header.fields.nic.vendor_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t AmdCuidNic::get_revision_id(uint8_t& revision_id) const {
+    revision_id = m_info.header.fields.nic.revision_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t AmdCuidNic::get_bdf(std::string& bdf) const {
+    if (m_info.bdf.empty()) {
+        return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    bdf = m_info.bdf;
+    return AMDCUID_STATUS_SUCCESS;
 }

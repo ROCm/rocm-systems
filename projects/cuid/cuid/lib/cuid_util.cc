@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include "cuid_util.h"
 #include <dirent.h>
 #include <sys/types.h>
@@ -115,7 +137,6 @@ amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primar
 amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
                                  uint8_t component_type, amdcuid* id) {
-    // amdcuid id = {};
 
     // Build 122-bit value in little-endian order
     uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)
@@ -169,12 +190,12 @@ amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number,
     return AMDCUID_STATUS_SUCCESS;
 }
 
-char* AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
+std::string AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
     // Format as UUIDv8 string: 8-4-4-4-12 hex digits from id->bytes[16]
     // UUID: xxxxxxxx-xxxx-8xxx-yxxx-xxxxxxxxxxxx
-    static char uuid_str[37]; // 36 chars + null
+    char uuid_str[37]; // 36 chars + null
     // Format the bytes into a UUID string
-    snprintf(uuid_str, 37,
+    snprintf(uuid_str, sizeof(uuid_str),
              "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
              id->bytes[0], id->bytes[1], id->bytes[2], id->bytes[3],
              id->bytes[4], id->bytes[5],
@@ -182,7 +203,7 @@ char* AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
              id->bytes[8], id->bytes[9],
              id->bytes[10], id->bytes[11], id->bytes[12], id->bytes[13], id->bytes[14], id->bytes[15]);
 
-    return uuid_str;
+    return std::string(uuid_str);
 }
 
 amdcuid_status_t AmdCuidUtilities::uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid) {
@@ -216,4 +237,18 @@ amdcuid_status_t AmdCuidUtilities::uuid_string_to_uint8(const std::string& uuid_
     }
 
     return AMDCUID_STATUS_SUCCESS;
+}
+
+std::string AmdCuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
+    switch (type) {
+        case AMDCUID_DEVICE_TYPE_PLATFORM: return "PLATFORM";
+        case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
+        case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
+        case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
+        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
+        case AMDCUID_DEVICE_TYPE_STORAGE: return "STORAGE";
+        case AMDCUID_DEVICE_TYPE_MEMORY: return "MEMORY";
+        case AMDCUID_DEVICE_TYPE_OTHER: return "OTHER";
+        default: return "UNKNOWN";
+    }
 }

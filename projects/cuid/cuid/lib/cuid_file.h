@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #ifndef CUID_FILE_H
 #define CUID_FILE_H
 
@@ -51,7 +73,7 @@ public:
     amdcuid_status_t add_entry(const CuidFileEntry& entry);
     
     const std::vector<CuidFileEntry>& get_entries() const { return entries_; }
-    
+
     amdcuid_status_t find_by_device_node(const std::string& device_node, CuidFileEntry& entry) const;
     amdcuid_status_t find_by_package_core_id(const std::string& package_core_id, CuidFileEntry& entry) const;
     amdcuid_status_t find_by_device_type(amdcuid_device_type_t device_type, CuidFileEntry& entry) const;
@@ -66,15 +88,16 @@ public:
      */
     bool is_privileged() const { return is_privileged_; }
 
+    // static utility to group entries by device type
+    void get_grouped_entries(std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>>& grouped) const;
+
 private:
     std::string file_path_;
     bool is_privileged_;
     std::vector<CuidFileEntry> entries_;
     
     // Helper functions
-    std::string device_type_to_string(amdcuid_device_type_t type) const;
     amdcuid_device_type_t string_to_device_type(const std::string& str) const;
-    std::string cuid_to_string(const amdcuid& id) const;
     amdcuid string_to_cuid(const std::string& str) const;
     std::string trim(const std::string& str) const;
     bool parse_section_header(const std::string& line, amdcuid_device_type_t& type, uint32_t& index) const;

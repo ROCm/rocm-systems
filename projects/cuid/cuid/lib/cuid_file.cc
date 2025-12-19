@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include "cuid_file.h"
 #include "cuid_util.h"
 #include "cuid_device.h"
@@ -36,20 +58,6 @@ std::string CuidFile::trim(const std::string& str) const {
     return str.substr(first, last - first + 1);
 }
 
-std::string CuidFile::device_type_to_string(amdcuid_device_type_t type) const {
-    switch (type) {
-        case AMDCUID_DEVICE_TYPE_PLATFORM: return "PLATFORM";
-        case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
-        case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
-        case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
-        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
-        case AMDCUID_DEVICE_TYPE_STORAGE: return "STORAGE";
-        case AMDCUID_DEVICE_TYPE_MEMORY: return "MEMORY";
-        case AMDCUID_DEVICE_TYPE_OTHER: return "OTHER";
-        default: return "UNKNOWN";
-    }
-}
-
 amdcuid_device_type_t CuidFile::string_to_device_type(const std::string& str) const {
     if (str == "PLATFORM") return AMDCUID_DEVICE_TYPE_PLATFORM;
     if (str == "CPU") return AMDCUID_DEVICE_TYPE_CPU;
@@ -60,18 +68,6 @@ amdcuid_device_type_t CuidFile::string_to_device_type(const std::string& str) co
     if (str == "MEMORY") return AMDCUID_DEVICE_TYPE_MEMORY;
     if (str == "OTHER") return AMDCUID_DEVICE_TYPE_OTHER;
     return AMDCUID_DEVICE_TYPE_UNKNOWN;
-}
-
-std::string CuidFile::cuid_to_string(const amdcuid& id) const {
-    char uuid_str[37];
-    snprintf(uuid_str, sizeof(uuid_str),
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             id.bytes[0], id.bytes[1], id.bytes[2], id.bytes[3],
-             id.bytes[4], id.bytes[5],
-             id.bytes[6], id.bytes[7],
-             id.bytes[8], id.bytes[9],
-             id.bytes[10], id.bytes[11], id.bytes[12], id.bytes[13], id.bytes[14], id.bytes[15]);
-    return std::string(uuid_str);
 }
 
 amdcuid CuidFile::string_to_cuid(const std::string& str) const {
@@ -246,19 +242,19 @@ amdcuid_status_t CuidFile::save() {
         for (const auto& entry : grouped[type]) {
             // Write section header
             if (entry.device_type == AMDCUID_DEVICE_TYPE_PLATFORM) {
-                file << "[" << device_type_to_string(entry.device_type) << "]\n";
+                file << "[" << AmdCuidUtilities::device_type_to_string(entry.device_type) << "]\n";
             } else {
-                file << "[" << device_type_to_string(entry.device_type) 
+                file << "[" << AmdCuidUtilities::device_type_to_string(entry.device_type) 
                      << ":" << entry.device_index << "]\n";
             }
             
             // Write primary CUID (privileged file only)
             if (is_privileged_) {
-                file << "primary_cuid=" << cuid_to_string(entry.primary_cuid) << "\n";
+                file << "primary_cuid=" << AmdCuidUtilities::get_cuid_as_string(&entry.primary_cuid) << "\n";
             }
             
             // Write secondary CUID
-            file << "secondary_cuid=" << cuid_to_string(entry.secondary_cuid) << "\n";
+            file << "secondary_cuid=" << AmdCuidUtilities::get_cuid_as_string(&entry.secondary_cuid) << "\n";
             
             // Write device-specific fields
             if (!entry.device_node.empty()) {
@@ -360,6 +356,14 @@ amdcuid_status_t CuidFile::find_by_secondary_cuid(const amdcuid& secondary_cuid,
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
+void CuidFile::get_grouped_entries(std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>>& grouped) const{
+    grouped.clear();
+    for (const auto& entry : entries_) {
+        grouped[entry.device_type].push_back(entry);
+    }
+}
+
+
 // ============================================================================
 // CuidFileGenerator Implementation
 // ============================================================================
@@ -408,7 +412,7 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         amdcuid_status_t status = device->get_primary_cuid(primary_id);
         if (status != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Warning: Failed to get primary CUID for device type " 
-                      << entry.device_type << std::endl;
+                      << entry.device_type << " status: " << status << std::endl;
             continue;
         }
         entry.primary_cuid = primary_id;
@@ -418,7 +422,7 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
         status = AmdCuidUtilities::generate_secondary_cuid(&primary_id, &secondary_id, &hmac);
         if (status != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Warning: Failed to generate secondary CUID for device type " 
-                      << entry.device_type << std::endl;
+                      << entry.device_type << " status: " << status << std::endl;
             continue;
         }
         entry.secondary_cuid = secondary_id;
