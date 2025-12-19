@@ -110,7 +110,7 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
  private:
   
  Float16 getNextAfter(Float16 from, Float16 direction) const {
-   static constexpr int16_t signbit_float16 = 0x8000;
+  constexpr int16_t signbit_float16 = 0x8000;
 
    // Encode inputs as 16-bit integers
    const int16_t from_bits = convertFloat16toInt16(from);
