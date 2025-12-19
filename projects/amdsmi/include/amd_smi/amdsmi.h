@@ -849,7 +849,7 @@ typedef struct {
 /**
  * @brief Power Cap Information
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_window} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 typedef struct {
     uint64_t power_cap;          //!< current power cap Units uW {@linux_bm} or W {@host}
