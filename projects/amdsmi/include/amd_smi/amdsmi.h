@@ -39,7 +39,7 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * @brief Initialization flags TEST TEST TEST
+ * @brief Initialization flags
  *
  * Initialization flags may be OR'd together and passed to ::amdsmi_init().
  *
