@@ -29,6 +29,7 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include <cstdint>
 #include <stack>
 
 namespace amd::roc {
@@ -342,7 +343,7 @@ class VirtualGPU : public device::VirtualDevice {
   void profilingBegin(amd::Command& command, bool sdmaProfiling = false);
   void profilingEnd(bool clearHwEvent = false);
 
-  void updateCommandsState(amd::Command* list) const;
+  void updateCommandsState(amd::Command* list, uint64_t callback_signal_end_ts = 0) const;
 
   void submitReadMemory(amd::ReadMemoryCommand& cmd);
   void submitWriteMemory(amd::WriteMemoryCommand& cmd);

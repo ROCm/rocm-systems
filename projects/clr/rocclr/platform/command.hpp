@@ -100,6 +100,8 @@ class Event : public RuntimeObject {
  protected:
   static const EventWaitList nullWaitList;
 
+  mutable uint64_t callback_signal_end_ts_;
+
   struct ProfilingInfo {
     ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
       if (enabled) {
@@ -159,6 +161,10 @@ class Event : public RuntimeObject {
   void SetProfiling() {
     EnableProfiling();
     profilingInfo_.marker_ts_ = true;
+  }
+
+  void SetCallbackSignalEndTs(uint64_t ts) {
+    callback_signal_end_ts_ = ts;
   }
 
   //! Return the context for this event.

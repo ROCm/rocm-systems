@@ -37,6 +37,7 @@
 
 #include <simde/x86/avx.h>
 #include <simde/x86/sse2.h>
+#include <cstdint>
 #if defined(SIMDE_VERSION_MAJOR) &&                                                                \
     ((SIMDE_VERSION_MAJOR > 0) || (SIMDE_VERSION_MAJOR == 0 && SIMDE_VERSION_MINOR >= 7))
 
@@ -311,8 +312,15 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   bool isBlocking = ts->GetBlocking();
 
+  uint64_t signal_end_ts = 0;
+  if (callback_signal.handle != 0 && isBlocking) {
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu->dev().getBackendDevice(), callback_signal, &time);
+    signal_end_ts = time.end;
+    //ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CALLBACK, "Callback signal: %p, start: %lu, end: %lu", callback_signal, time.start, time.end);
+  }
   // Update the batch, since signal is complete
-  gpu->updateCommandsState(ts->command().GetBatchHead());
+  gpu->updateCommandsState(ts->command().GetBatchHead(), signal_end_ts);
 
   // Reset API callback signal. It will release AQL queue and start commands processing
   if (callback_signal.handle != 0 && isBlocking) {
@@ -2109,7 +2117,7 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
 }
 
 // ================================================================================================
-void VirtualGPU::updateCommandsState(amd::Command* list) const {
+void VirtualGPU::updateCommandsState(amd::Command* list, uint64_t callback_signal_end_ts) const {
   Timestamp* ts = nullptr;
 
   amd::Command* current = list;
@@ -2175,8 +2183,12 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
     }
 
     if (current->status() == CL_SUBMITTED) {
+      if (callback_signal_end_ts != 0) {
+        current->SetCallbackSignalEndTs(callback_signal_end_ts);
+      }
       current->setStatus(CL_RUNNING, startTimeStamp);
       current->setStatus(CL_COMPLETE, endTimeStamp);
+      current->SetCallbackSignalEndTs(0);
     } else if (current->status() != CL_COMPLETE) {
       LogPrintfError("Unexpected command status - %d.", current->status());
     }

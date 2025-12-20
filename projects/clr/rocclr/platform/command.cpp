@@ -28,6 +28,7 @@
 #include "platform/memory.hpp"
 #include "platform/agent.hpp"
 #include "os/alloc.hpp"
+#include "utils/debug.hpp"
 
 #include <atomic>
 #include <cstring>
@@ -42,7 +43,8 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
       hw_event_(nullptr),
       notify_event_(nullptr),
       device_(&queue.device()),
-      profilingInfo_(profilingEnabled) {
+      profilingInfo_(profilingEnabled),
+      callback_signal_end_ts_(0) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
   notified_.clear();
 }
@@ -53,7 +55,8 @@ Event::Event()
       status_(CL_SUBMITTED),
       hw_event_(nullptr),
       notify_event_(nullptr),
-      device_(nullptr) {
+      device_(nullptr),
+      callback_signal_end_ts_(0) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
   notified_.clear();
 }
@@ -223,6 +226,16 @@ void Event::processCallbacks(int32_t status) const {
       // invoke the callback function.
       CallBackFunction callback = entry->callback_.exchange(NULL);
       if (callback != NULL) {
+        auto duration = std::chrono::steady_clock::now().time_since_epoch();
+        auto nanosec = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+        if (callback_signal_end_ts_ != 0) {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CALLBACK,
+                  "Callback triggered: fn: %p, ts: %lu, delay: %.3f us",
+                  callback, nanosec, (nanosec - callback_signal_end_ts_)/1000.0);
+        } else {
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CALLBACK,
+                  "Callback triggered: fn: %p, ts: %lu", callback, nanosec);
+        }
         callback(event, status, entry->data_);
       }
     }

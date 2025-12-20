@@ -20,6 +20,7 @@
 
 #pragma once
 #include <algorithm>
+#include <chrono>
 #include <queue>
 #include <stack>
 #include <iostream>
@@ -2481,6 +2482,8 @@ class GraphHostNode : public GraphNode {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
               "EnqueueCommands: NodeParams_.fn=%p, NodeParams_.userData=%p", NodeParams_.fn,
               NodeParams_.userData);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CALLBACK,
+              "Callback registered: fn: %p", GraphHostNode::Callback);
       commands_[0]->enqueue();
       // Add the new barrier to stall the stream, until the callback is done
       amd::Command::EventWaitList eventWaitList;

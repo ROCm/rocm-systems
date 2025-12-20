@@ -68,6 +68,7 @@ enum LogMask {
   LOG_TS = 524288,        //!< (0x80000) Timestamp details
   LOG_COMGR = 1048576,    //!< (0x100000) Comgr path information print
   LOG_KERN2 = 2097152,    //!< (0x200000) More detailed kernel info shader name
+  LOG_CALLBACK = 4194304,    //!< (0x400000) Signal host callback
   LOG_ALWAYS = -1         //!< (0xFFFFFFFF) Log always even mask flag is zero
 };
 
