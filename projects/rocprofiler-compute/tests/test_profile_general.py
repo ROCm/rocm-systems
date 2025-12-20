@@ -2779,3 +2779,107 @@ def test_iteration_multiplexing_all_counter_accuracy(
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
+
+
+def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
+    """
+    Test profiling a PyTorch application with --torch-operators option.
+    Verifies that all required files are generated and counter values are valid.
+    """
+    pytest.importorskip("torch", reason="Skipping torch test since PyTorch is not installed")
+    
+    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
+    
+    # Create a simple torch app for testing
+    torch_app_path = Path(workload_dir) / "test_torch_app.py"
+    torch_app_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    model = SimpleNet()
+    if torch.cuda.is_available():
+        model = model.cuda()
+        x = torch.randn(5, 10).cuda()
+    else:
+        x = torch.randn(5, 10)
+    
+    # Run a few iterations
+    for i in range(5):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+    
+    print("Training completed")
+"""
+    
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+    
+    # Profile with --torch-operators option
+    options = ["--torch-operators", "--format-rocprof-output","csv","--no-native-tool", "--", "python3", str(torch_app_path)]
+    returncode = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app"
+    )
+    
+    # Verify files are generated
+    # 1. Check basic CSV files
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
+    
+    # 2. Check torch trace output
+    torch_trace_csv = Path(workload_dir) / "torch_test_app_torch_trace.csv"
+    assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
+    
+    # 3. Check torch operators directory
+    torch_operators_dir = Path(workload_dir) / "torch_operators"
+    assert torch_operators_dir.exists(), "torch_operators directory not created"
+    assert torch_operators_dir.is_dir(), "torch_operators is not a directory"
+    
+    # 4. Verify torch trace CSV has expected columns
+    torch_trace_df = pd.read_csv(torch_trace_csv)
+    required_columns = ["Function", "Kernel_Name", "Counter_Name", "Counter_Value"]
+    for col in required_columns:
+        assert col in torch_trace_df.columns, f"Required column '{col}' missing from torch trace"
+    
+    # 5. Verify torch trace has data
+    assert len(torch_trace_df) > 0, "Torch trace CSV is empty"
+    
+    # 6. Verify counter values are valid (non-negative)
+    counter_values = torch_trace_df["Counter_Value"]
+    assert all(counter_values >= 0), "Found negative counter values"
+    assert not all(counter_values == 0), "All counter values are zero"
+    
+    # 7. Check per-operator CSV files exist
+    operator_csv_files = list(torch_operators_dir.glob("*.csv"))
+    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
+    
+    # 8. Verify per-operator CSV structure
+    for op_csv in operator_csv_files:
+        op_df = pd.read_csv(op_csv)
+        assert "Operator_Name" in op_df.columns, f"Operator_Name missing in {op_csv.name}"
+        assert "Context_Id" in op_df.columns, f"Context_Id missing in {op_csv.name}"
+        assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
+    
+    
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
