@@ -49,6 +49,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def get_profiler_options(self) -> list[str]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
+        if args.torch_operators and "--torch-operators" not in app_cmd:
+            app_cmd.append("--torch-operators")
 
         if args.kokkos_trace:
             trace_option = "--kokkos-trace"

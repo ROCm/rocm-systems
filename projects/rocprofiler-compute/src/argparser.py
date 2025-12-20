@@ -245,8 +245,7 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help=argparse.SUPPRESS,
-        # help="\t\t\tTorch Operators, maps operators to counter values.",
+        help="\t\t\tTorch Operators, maps operators to counter values.",
     )
 
     profile_group.add_argument(

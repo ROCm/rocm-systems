@@ -3,8 +3,19 @@ ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators
 Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 """
 
+import os
 import sys
-sys.path.insert(0, '/home/ggottipa/rocm-systems/rocprofiler-sdk-build/lib/python3.10/site-packages')
+
+rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
+python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+candidate_paths = [
+    f"{rocm_root}/lib/{python_version}/site-packages",
+    f"{rocm_root}/libexec/rocprofiler-sdk/python",
+]
+
+for candidate in candidate_paths:
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
 
 import torch
 import torch.nn.functional as F
