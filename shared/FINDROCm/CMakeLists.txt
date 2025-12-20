@@ -15,7 +15,7 @@ include(GNUInstallDirs)
 
 # Set default ROCM_PATH if not defined
 if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory")
+  message(STATUS "ROCM_PATH NOT SET")
 endif()
 
 # Print build configuration

@@ -9,7 +9,7 @@ set -e
 
 # Default configuration
 BUILD_DIR="build"
-INSTALL_PREFIX="/opt/rocm"
+INSTALL_PREFIX="/opt/AMD"
 
 # Color output
 RED='\033[0;31m'
@@ -47,7 +47,6 @@ EOF
 
 # Parse command line arguments
 CLEAN_BUILD=0
-ROCM_PATH="/opt/rocm"
 
 while [[ $# -gt 0 ]]; do
     case $1 in

@@ -44,7 +44,7 @@ function(FINDROCm_find_component component)
     if(component STREQUAL "rocr-runtime")
         set(package_name "hsa-runtime64")
     endif()
-    
+   
     # Try to find the component package
     find_package(${package_name} QUIET CONFIG
         PATHS 

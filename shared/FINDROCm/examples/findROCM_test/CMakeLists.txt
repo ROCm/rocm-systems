@@ -13,7 +13,7 @@ project(FINDROCmTestApp VERSION 1.0.0)
 ################################################################################
 # Find ROCm
 ################################################################################
-find_package(FINDROCm REQUIRED)
+find_package(FINDROCm REQUIRED PATHS /opt/AMD)
 if(FINDROCm_FOUND)
   message(STATUS "========================================")
   message(STATUS "FINDROCm Test Application")

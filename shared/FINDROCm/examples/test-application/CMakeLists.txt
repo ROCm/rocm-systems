@@ -20,7 +20,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ################################################################################
 
 # Option 1: Find with specific components (recommended)
-find_package(FINDROCm REQUIRED COMPONENTS
+find_package(FINDROCm REQUIRED PATHS /opt/AMD COMPONENTS
     rocm-core
     rocr-runtime
     rocprofiler-sdk
