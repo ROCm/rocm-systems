@@ -68,6 +68,7 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -634,6 +635,29 @@ def test_path(binary_handler_profile_rocprof_compute):
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_path_rocflop(
+    binary_handler_profile_rocprof_compute,
+):
+    # Test whether multiprocess workloads like rocflop are handled correctly
+    workload_dir = test_utils.get_output_dir()
+    options = ["--block", "2.1.1"]
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="rocflop",
+    )
+    pmc_perf_df = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)[
+        "pmc_perf.csv"
+    ]
+    # Ensure non zero length of df
+    assert len(pmc_perf_df) > 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
