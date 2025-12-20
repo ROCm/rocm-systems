@@ -208,10 +208,12 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_handle_type_t handle
   size_t metadata_size = 0;
   void* metadata;
   auto fd = fdn;
-  hsa_resource_handle_t resourceHandle = {.type = handleType, .handle = fd};
-  hsa_status_t status =
-      Hsa::interop_map_buffer(1, &agent, resourceHandle, &size, &interop_deviceMemory_,
-                              &metadata_size, (const void**)&metadata);
+  uint32_t flags = 0;
+  if (handleType == HSA_HANDLE_TYPE_KMT) {
+    flags |= HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
+  }
+  hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
+                                                &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
           size);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_);  // + out.buf_offset;
