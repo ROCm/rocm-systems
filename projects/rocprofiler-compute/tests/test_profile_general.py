@@ -2780,7 +2780,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
 
-
+@pytest.mark.torch_ops
 def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-operators option.
@@ -2788,11 +2788,14 @@ def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     """
     pytest.importorskip("torch", reason="Skipping torch test since PyTorch is not installed")
     
-    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
     
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    BUILD_DIR = Path(os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build"))
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
     # Create a simple torch app for testing
-    torch_app_path = Path(workload_dir) / "test_torch_app.py"
-    torch_app_path.parent.mkdir(parents=True, exist_ok=True)
+    helper_dir = BUILD_DIR / "tmp" / "torch_ops"
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    torch_app_path = helper_dir / "test_torch_app.py"
     
     torch_app_code = """
 import torch
@@ -2841,7 +2844,8 @@ if __name__ == "__main__":
         roof=False,
         app_name="torch_test_app"
     )
-    
+    assert returncode == 0, "Profiling the torch application failed"
+
     # Verify files are generated
     # 1. Check basic CSV files
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
@@ -2883,3 +2887,4 @@ if __name__ == "__main__":
     
     
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    print("test_torch_operators_profile completed successfully")
