@@ -16,6 +16,8 @@
 
 #define PUBLIC_API __attribute__((visibility("default")))
 
+constexpr int SPM_DRAIN_TIMEOUT_MS = 5;
+
 
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);
@@ -43,6 +45,11 @@ struct spm_state_t : public spm_set_dest_buffer_args {
     std::mutex work_mutex{};
     std::condition_variable work_cond{};
     std::atomic<bool> data_ready{};
+
+    std::atomic<bool> draining_requested{false};
+    std::atomic<bool> draining_done{false};
+    std::mutex drain_mutex{};
+    std::condition_variable drain_cond{};
 
     std::atomic<int> signal_data_loss{};
     std::atomic<bool> stop_prod_thread{};
@@ -74,7 +81,8 @@ public:
         s->stop_cons_thread = false;
         s->stop_prod_thread = false;
 
-        status = hsa_amd_spm_acquire(s->hsa_agent);
+        // this is to be done in SDK
+        // status = hsa_amd_spm_acquire(s->hsa_agent);
         CHECKHSA(status, return);
 
         // This non-blocking (timeout = 0) HsaSpmSetDestBuffer() call will clear up all the
@@ -99,7 +107,8 @@ public:
         if (producer_thread.joinable()) producer_thread.join();
         if (consumer_thread.joinable()) consumer_thread.join();
 
-        hsa_amd_spm_release(this->agent);
+        // this is to be done in SDK
+        // hsa_amd_spm_release(this->agent);
     }
 
     hsa_status_t status = HSA_STATUS_ERROR;
@@ -368,6 +377,37 @@ PUBLIC_API hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle)
     return b ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
 }
 
+PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle){
+
+    auto s = aqlprofile::spm::spm_state_map->query(handle);
+    if (!s) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+
+    // Drain the counters. Send a signal to producer thread to start draining. 
+    // We don't want to stop the threads, we simply signal the thread to start 
+    // draining. And we wait for the drain to complete.
+
+    // Set the draining request flag
+    {
+        std::lock_guard<std::mutex> lock(s->drain_mutex);
+        s->draining_requested = true;
+        s->draining_done = false;
+    }
+
+    // Wait for draining to complete with timeout
+    std::unique_lock<std::mutex> lock(s->drain_mutex);
+    bool completed = s->drain_cond.wait_for(lock, std::chrono::milliseconds(SPM_DRAIN_TIMEOUT_MS), 
+        [&s]() { return s->draining_done.load(); });
+
+    if (!completed) {
+        // Timeout occurred
+        s->draining_requested = false; // Cancel the request
+        return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+
+}
+
 PUBLIC_API void aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
     aqlprofile::spm::spm_state_map->remove(handle);
@@ -394,6 +434,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
     hsa_status_t status = HSA_STATUS_SUCCESS;
     spm_set_dest_buffer_args args = *s;
     bool exiting = false;
+    bool draining = false;
     int count_down = 0;
 
     consumer_thread_handle_t consumer_handle(s);
@@ -409,6 +450,12 @@ static void producer(std::shared_ptr<spm_state_t> s)
         // SPM counters are drained (args.size_copied == 0) which could be at least one
         // HsaSpmSetDestBuffer() call or maybe more than one.
         if (s->stop_prod_thread) exiting = true;
+
+        // Check if draining is requested
+        if (s->draining_requested.load() && !draining) {
+            draining = true;
+            count_down = 0;  // Reset countdown for draining
+        }
 
         if (HsaSpmSetDestBuffer(args) != HSA_STATUS_SUCCESS)
         {
@@ -442,7 +489,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
             consumer_handle.notify();
         }
 
-        if (exiting)
+        if (exiting || draining)
         {
             // Forced exit: This happens when we want to stop SPM but not the app. This should be
             // improved by getting the hint from caller instead of a hardcoded number. Will consider this
@@ -456,6 +503,17 @@ static void producer(std::shared_ptr<spm_state_t> s)
             // HsaSpmSetDestBuffer() call if s->stop_prod_thread is set after the HsaSpmSetDestBuffer()
             // call from this loop!
             //
+            if (draining) { // draining case
+                // Signal that draining is complete
+                {
+                    std::lock_guard<std::mutex> lock(s->drain_mutex);
+                    s->draining_done = true;
+                    s->draining_requested = false; // Reset for next drain request
+                }
+                s->drain_cond.notify_all();
+                draining = false; // Reset draining state
+            }
+            else // exiting case
             break;
         }
         if (s->stop_cons_thread) break;
