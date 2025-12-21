@@ -136,30 +136,7 @@ project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/Rade
 # this must go after project()
 include(GNUInstallDirs)
 
-# NB: CMAKE_<LANG>_FLAGS are initialized from environment (CXXFLAGS et al.)
-# during project(). Setting them before project() discards env and toolchain
-# defaults. Cf. CMAKE_<LANG>_FLAGS_INIT for toolchain overrides.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
-set(CMAKE_CXX_FLAGS_DEBUG
-    "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
-    CACHE STRING
-    "Flags for Debug builds"
-)
-set(CMAKE_CXX_FLAGS_RELEASE
-    "${CMAKE_CXX_FLAGS_RELEASE} -O2 -s -DNDEBUG"
-    CACHE STRING
-    "Flags for Release builds"
-)
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
-    "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG"
-    CACHE STRING
-    "Flags for RelWithDebInfo builds"
-)
-set(CMAKE_CXX_FLAGS_MINSIZEREL
-    "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG"
-    CACHE STRING
-    "Flags for MinSizeRel builds"
-)
+add_compile_options(-Wall -Wextra)
 
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
