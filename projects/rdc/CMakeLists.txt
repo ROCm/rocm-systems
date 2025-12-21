@@ -196,9 +196,9 @@ mark_as_advanced(
     CPACK_GENERATOR
 )
 
-# check if libcap exists
-# needed for sys/capabilities.h
-find_library(LIB_CAP NAMES cap REQUIRED)
+# needed for sys/capability.h
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBCAP REQUIRED IMPORTED_TARGET libcap)
 
 if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     message(

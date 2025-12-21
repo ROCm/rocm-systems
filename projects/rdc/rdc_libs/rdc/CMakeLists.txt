@@ -71,7 +71,7 @@ set(RDC_LIB_INC_LIST
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
-target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi cap)
+target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi PkgConfig::LIBCAP)
 target_include_directories(
     ${RDC_LIB}
     PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include" "${AMD_SMI_INCLUDE_DIR}"

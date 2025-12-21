@@ -97,7 +97,7 @@ target_link_libraries(
     pthread
     rt
     gRPC::grpc++
-    cap
+    PkgConfig::LIBCAP
     dl
     amd_smi
     rdc_bootstrap
