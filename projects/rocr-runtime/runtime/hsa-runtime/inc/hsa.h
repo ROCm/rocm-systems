@@ -5703,12 +5703,11 @@ typedef enum {
 } hsa_handle_type_t;
 
 /**
- * @brief Container for a system dependent resource handle.
+ * @brief Enumeration of interop map flags.
  */
-typedef struct hsa_resource_handle_s {
-  hsa_handle_type_t type;  //!< Type of the handle
-  hsa_handle_t handle;     //!< Platform dependent handle
-} hsa_resource_handle_t;
+typedef enum hsa_interop_map_flag_e : uint32_t {
+    HSA_INTEROP_MAP_FLAG_KMT_HANDLE = (1u << 0),
+} hsa_interop_map_flag_t;
 
 /**
  * @brief Platform-independent container for a Windows LUID.

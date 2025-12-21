@@ -867,8 +867,8 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
-                                 hsa_resource_handle_t interop_handle, size_t* size, void** ptr,
+hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
+                                 hsa_handle_type_t handle_type, size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
   constexpr int tinyArraySize = 8;
   HsaGraphicsResourceInfo info;
@@ -876,13 +876,12 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
 
-  static_assert(sizeof(HSAint64) >= sizeof(interop_handle.handle),
-                "HSAint64 too small for interop_handle");
+  static_assert(sizeof(HSAint64) >= sizeof(handle), "HSAint64 too small for interop_handle");
   HSAint64 resource_handle =
 #ifdef _WIN32
-      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle.handle));
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(handle));
 #else
-      static_cast<HSAint64>(interop_handle.handle);
+      static_cast<HSAint64>(handle);
 #endif
 
   if (num_agents > tinyArraySize) {
@@ -901,7 +900,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
   }
 
   const HSA_REGISTER_MEM_FLAGS regFlags = {
-      .ui32 = {.kmtHandle = (interop_handle.type == HSA_HANDLE_TYPE_KMT)}};
+      .ui32 = {.kmtHandle = (handle_type == HSA_HANDLE_TYPE_KMT)}};
 
   auto status =
       hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, regFlags);
