@@ -474,7 +474,15 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
     // Hardware doorbell supports AQL semantics.
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc64__)
     _mm_sfence();
+#elif defined(__aarch64__)
+    __asm__ __volatile__ ("\tdmb oshst" : : : "memory");
+#elif defined(__riscv64)
+    __asm__ __volatile__ ("\tfence ow, ow" : : : "memory");
+#else
+    #error "Please add support for your architecture"
+#endif
     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
@@ -1559,7 +1567,15 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
   if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc64__)
     _mm_sfence();
+#elif defined(__aarch64__)
+    __asm__ __volatile__ ("\tdmb oshst" : : : "memory");
+#elif defined(__riscv64)
+    __asm__ __volatile__ ("\tfence ow, ow" : : : "memory");
+#else
+  #error "Please add support for your architecture"
+#endif
   }
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 

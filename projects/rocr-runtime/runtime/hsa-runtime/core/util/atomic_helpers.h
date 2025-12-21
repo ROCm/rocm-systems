@@ -224,7 +224,15 @@ static __forceinline void PreFence(std::memory_order order) {
     case std::memory_order_release:
     case std::memory_order_seq_cst:
     case std::memory_order_acq_rel:
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc64__)
       _mm_sfence();
+#elif defined(__aarch64__)
+      __asm__ __volatile__ ("\tdmb oshst" : : : "memory");
+#elif defined(__riscv64)
+      __asm__ __volatile__ ("\tfence ow, ow" : : : "memory");
+#else
+  #error "Please add support for your architecture"
+#endif
     default:;
   }
 #endif

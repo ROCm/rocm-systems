@@ -901,7 +901,15 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_release);
   if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc64__)
     _mm_sfence();
+#elif defined(__aarch64__)
+    __asm__ __volatile__ ("\tdmb oshst" : : : "memory");
+#elif defined(__riscv64)
+    __asm__ __volatile__ ("\tfence ow, ow" : : : "memory");
+#else
+  #error "Please add support for your architecture"
+#endif
   }
 #if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
