@@ -2695,9 +2695,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
 ):
-    workload_dir = test_utils.get_output_dir(
-        param_id="no_iter_mplx", clean_existing=False
-    )
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     # These metrics should cover the L1 cache stochastic counters
     options = ["--block", "16.1", "16.3"]
     _ = binary_handler_profile_rocprof_compute(
@@ -2714,9 +2712,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--block", "16.1", "16.3", "--iteration-multiplexing", "kernel"]
-    workload_dir = test_utils.get_output_dir(
-        param_id="iter_mplx_kernel", clean_existing=False
-    )
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -2737,9 +2733,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = test_utils.get_output_dir(
-        param_id="iter_mplx_params", clean_existing=False
-    )
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
