@@ -114,13 +114,16 @@ class TestTranspose:
         transpose_env: dict[str, str],
     ):
         """Test transpose runs successfully without instrumentation."""
-        runner = BaselineRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = BaselineRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -140,13 +143,16 @@ class TestTranspose:
         env = transpose_env.copy()
         if use_rocpd:
             env["ROCPROFSYS_USE_ROCPD"] = "ON"
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=env,
-            timeout=120,
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                env=env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -217,14 +223,17 @@ class TestTranspose:
         subtests,
     ):
         """Test transpose with binary rewrite instrumentation."""
-        runner = BinaryRewriteRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            rewrite_args=self.REWRITE_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = BinaryRewriteRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                rewrite_args=self.REWRITE_ARGS,
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         rewrite_result = runner.rewrite()
         assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
@@ -248,14 +257,17 @@ class TestTranspose:
         subtests,
     ):
         """Test transpose with runtime instrumentation."""
-        runner = RuntimeInstrumentRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            instrument_args=self.RUNTIME_ARGS,
-            env=transpose_env,
-            timeout=480,  # Runtime instrumentation is slower
-        )
+        try:
+            runner = RuntimeInstrumentRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                instrument_args=self.RUNTIME_ARGS,
+                env=transpose_env,
+                timeout=480,  # Runtime instrumentation is slower
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -273,13 +285,16 @@ class TestTranspose:
         transpose_env: dict[str, str],
     ):
         """Test transpose with rocprof-sys-run wrapper."""
-        runner = SysRunRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=transpose_env,
-            timeout=300,
-        )
+        try:
+            runner = SysRunRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                env=transpose_env,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -305,14 +320,17 @@ class TestTransposeTwoKernels:
         transpose_env: dict[str, str],
     ):
         """Test transpose with minimal kernel configuration."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                run_args=self.RUN_ARGS,
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -325,14 +343,17 @@ class TestTransposeTwoKernels:
         transpose_env: dict[str, str],
     ):
         """Test transpose two kernels with sys-run."""
-        runner = SysRunRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=300,
-        )
+        try:
+            runner = SysRunRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                run_args=self.RUN_ARGS,
+                env=transpose_env,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -367,14 +388,17 @@ class TestTransposeLoops:
         transpose_env: dict[str, str],
     ):
         """Test transpose loops configuration with sampling."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                run_args=self.RUN_ARGS,
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -387,15 +411,18 @@ class TestTransposeLoops:
         transpose_env: dict[str, str],
     ):
         """Test transpose with loop instrumentation via binary rewrite."""
-        runner = BinaryRewriteRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            rewrite_args=self.REWRITE_ARGS,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = BinaryRewriteRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                rewrite_args=self.REWRITE_ARGS,
+                run_args=self.RUN_ARGS,
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         # Check rewrite phase
         rewrite_result = runner.rewrite()
@@ -445,13 +472,16 @@ class TestTransposeROCProfiler:
         subtests,
     ):
         """Test transpose with ROCProfiler counters via sampling."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=rocprofiler_env,
-            timeout=120,
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                env=rocprofiler_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -481,14 +511,17 @@ class TestTransposeROCProfiler:
         gpu_info: GPUInfo,
     ):
         """Test transpose with ROCProfiler counters via binary rewrite."""
-        runner = BinaryRewriteRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            rewrite_args=self.REWRITE_ARGS,
-            env=rocprofiler_env,
-            timeout=120,
-        )
+        try:
+            runner = BinaryRewriteRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                rewrite_args=self.REWRITE_ARGS,
+                env=rocprofiler_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -526,14 +559,17 @@ class TestTransposeParametrized:
         block_rows: int,
     ):
         """Test transpose with different iteration and tile configurations."""
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            run_args=[str(iterations), str(tile_dim), str(block_rows)],
-            env=transpose_env,
-            timeout=120,
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                run_args=[str(iterations), str(tile_dim), str(block_rows)],
+                env=transpose_env,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 
@@ -558,14 +594,17 @@ class TestTransposeParametrized:
         runner_kwargs: dict,
     ):
         """Test different instrumentation modes produce valid output."""
-        runner = runner_class(
-            config=rocprof_config,
-            target="transpose",
-            output_dir=test_output_dir,
-            env=transpose_env,
-            timeout=120,
-            **runner_kwargs,
-        )
+        try:
+            runner = runner_class(
+                config=rocprof_config,
+                target="transpose",
+                output_dir=test_output_dir,
+                env=transpose_env,
+                timeout=120,
+                **runner_kwargs,
+            )
+        except FileNotFoundError:
+            pytest.skip("transpose not built")
 
         result = runner.run()
 

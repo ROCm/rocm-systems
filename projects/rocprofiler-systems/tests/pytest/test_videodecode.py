@@ -87,13 +87,16 @@ class TestVideoDecode:
                 video_decode_rules.append(rules_dir / "amd-smi-rules.json")
 
 
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="videodecode",
-            output_dir=test_output_dir,
-            env=env,
-            run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="videodecode",
+                output_dir=test_output_dir,
+                env=env,
+                run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
+            )
+        except FileNotFoundError:
+            pytest.skip("videodecode not built")
         result = runner.run()
         assert result.success, f"Video decode sampling failed: {result.test_output}"
 
@@ -138,12 +141,15 @@ class TestVideoDecode:
         video_decode_env: dict[str, str],
     ):
         """Test video decode with rocprof-sys-run."""
-        runner = SysRunRunner(
-            config=rocprof_config,
-            target="videodecode",
-            output_dir=test_output_dir,
-            env=video_decode_env,
-            run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
-        )
+        try:
+            runner = SysRunRunner(
+                config=rocprof_config,
+                target="videodecode",
+                output_dir=test_output_dir,
+                env=video_decode_env,
+                run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "videos"), "-t", "1"],
+            )
+        except FileNotFoundError:
+            pytest.skip("videodecode not built")
         result = runner.run()
         assert result.success, f"Video decode sys-run failed: {result.test_output}"

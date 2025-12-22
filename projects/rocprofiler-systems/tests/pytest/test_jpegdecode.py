@@ -87,13 +87,16 @@ class TestJPEGDecode:
                 rules_dir = rocprof_config.rocprofsys_tests_dir / "rocpd-validation-rules" / "jpeg-decode"
                 jpeg_decode_rules.append(rules_dir / "amd-smi-rules.json")
 
-        runner = SamplingRunner(
-            config=rocprof_config,
-            target="jpegdecode",
-            output_dir=test_output_dir,
-            env=env,
-            run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
-        )
+        try:
+            runner = SamplingRunner(
+                config=rocprof_config,
+                target="jpegdecode",
+                output_dir=test_output_dir,
+                env=env,
+                run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
+            )
+        except FileNotFoundError:
+            pytest.skip("jpegdecode not built")
         result = runner.run()
         assert result.success, f"JPEG decode sampling failed: {result.test_output}"
 
@@ -138,12 +141,15 @@ class TestJPEGDecode:
         jpeg_decode_env: dict[str, str],
     ):
         """Test JPEG decode with rocprof-sys-run."""
-        runner = SysRunRunner(
-            config=rocprof_config,
-            target="jpegdecode",
-            output_dir=test_output_dir,
-            env=jpeg_decode_env,
-            run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
-        )
+        try:
+            runner = SysRunRunner(
+                config=rocprof_config,
+                target="jpegdecode",
+                output_dir=test_output_dir,
+                env=jpeg_decode_env,
+                run_args=["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"],
+            )
+        except FileNotFoundError:
+            pytest.skip("jpegdecode not built")
         result = runner.run()
         assert result.success, f"JPEG decode sys-run failed: {result.test_output}"
