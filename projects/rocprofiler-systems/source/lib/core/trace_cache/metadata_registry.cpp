@@ -450,7 +450,7 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
     });
 
     fill_from_json("strings", [&_registry](const auto& item) {
-        _registry.add_string(item.template get<std::string_view>());
+        _registry.add_string(item.template get<std::string>());
     });
 
 #if ROCPROFSYS_USE_ROCM
