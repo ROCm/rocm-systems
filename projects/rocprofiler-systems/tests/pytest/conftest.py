@@ -104,11 +104,13 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 _no_output_enabled = False
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     """Suppress failure details when --no-output is specified."""
     if _no_output_enabled and report.failed:
-        report.longrepr = None
+        # Use empty string instead of None to remain compatible with junitxml plugin
+        report.longrepr = ""
 
 
 def pytest_collection_modifyitems(
