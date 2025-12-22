@@ -7,10 +7,6 @@ import sys
 import time
 from pathlib import Path
 
-# ============================================================
-# PATH RESOLUTION
-# ============================================================
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 # .../rocprofiler-compute/tools/config_management
 

@@ -28,16 +28,11 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-try:
-    from . import utils as cm_utils
-except Exception:
-    repo_root = Path(__file__).resolve().parents[1]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    try:
-        import config_management.utils as cm_utils  # type: ignore
-    except Exception:
-        import utils as cm_utils  # type: ignore
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 
 def normalize_panel_id(panel_id: Optional[int]) -> Optional[int]:

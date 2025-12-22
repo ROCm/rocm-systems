@@ -36,21 +36,15 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-try:
-    from . import utils_ruamel as cm_utils
-except Exception:
-    repo_root = Path(__file__).resolve().parents[1]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    try:
-        import config_management.utils_ruamel as cm_utils  # type: ignore
-    except Exception:
-        import utils_ruamel as cm_utils  # type: ignore
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from ruamel.yaml.comments import CommentedMap
+from config_management import utils_ruamel as cm_utils  # noqa: E402
+from ruamel.yaml.comments import CommentedMap  # noqa: E402
 
 
-def load_yaml_ordered(path: Path) -> Any:
+def load_yaml_roundtrip(path: Path) -> Any:
     return cm_utils.load_yaml(path, round_trip=True)
 
 
@@ -269,8 +263,8 @@ def generate_arch_delta(base_dir: Path, new_dir: Path) -> CommentedMap:
         if not new_file.exists():
             continue
 
-        base_config = load_yaml_ordered(base_file)
-        new_config = load_yaml_ordered(new_file)
+        base_config = load_yaml_roundtrip(base_file)
+        new_config = load_yaml_roundtrip(new_file)
 
         diff = diff_panel(base_config, new_config)
         if not diff:

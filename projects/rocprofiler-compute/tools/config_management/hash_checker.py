@@ -43,19 +43,11 @@ from pathlib import Path
 
 import yaml
 
-try:
-    from . import hash_manager  # type: ignore
-except Exception:
-    import importlib.util
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # tools/
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-    _HERE = Path(__file__).resolve().parent
-    _SPEC = importlib.util.spec_from_file_location(
-        "hash_manager", str(_HERE / "hash_manager.py")
-    )
-    hash_manager = importlib.util.module_from_spec(_SPEC)  # type: ignore[assignment]
-    assert _SPEC and _SPEC.loader is not None
-    _SPEC.loader.exec_module(hash_manager)  # type: ignore[attr-defined]
-# ---------------------------------------------------------------------------
+from config_management import hash_manager  # noqa: E402
 
 # Subproject root: .../projects/rocprofiler-compute
 SUBROOT = Path(__file__).resolve().parents[2]
