@@ -1091,75 +1091,58 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     for native_filename in glob.glob(
         f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
     ):
-        pid = Path(native_filename).stem.split("_")[0]
         counter_data = pd.read_csv(native_filename, index_col=False)
-        # Group by on counter_data based on dispatch_id and
-        # counter_id and sum the counter_value
-        counter_data = counter_data.groupby(
-            ["dispatch_id", "counter_name"], as_index=False
-        ).agg({"counter_value": "sum"})
+        # Group by on dispatch_id and counter_id and sum the counter_value,
+        # Other rows in group have the same value, so take the first one
+        groupby_cols = ["dispatch_id", "counter_name"]
+        agg_dict = {
+            col: "first" for col in counter_data.columns if col not in groupby_cols
+        }
+        # Overwrite counter_value aggregation to sum
+        agg_dict["counter_value"] = "sum"
+        counter_data = counter_data.groupby(groupby_cols, as_index=False).agg(agg_dict)
+
+        pid = Path(native_filename).stem.split("_")[0]
         kernel_data_filename = glob.glob(
             f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
         )[0]
         kernel_data = pd.read_csv(kernel_data_filename)
+
+        # Merge counter_data with kernel_data on kernel_id
+        merged_data = pd.merge(
+            counter_data,
+            kernel_data,
+            left_on="kernel_id",
+            right_on="Kernel_Id",
+            how="left",
+        )
+
         rocprofv3_counter_data = pd.DataFrame({
-            "Correlation_Id": counter_data["dispatch_id"],
-            "Dispatch_Id": counter_data["dispatch_id"],
-            "Agent_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Agent_Id"
-            ].values,
-            "Queue_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Queue_Id"
-            ].values,
-            "Process_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Thread_Id"
-            ].values,
-            "Thread_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Thread_Id"
-            ].values,
+            "Correlation_Id": merged_data["dispatch_id"],
+            "Dispatch_Id": merged_data["dispatch_id"],
+            "Agent_Id": merged_data["Agent_Id"],
+            "Queue_Id": merged_data["Queue_Id"],
+            "Process_Id": merged_data["Thread_Id"],
+            "Thread_Id": merged_data["Thread_Id"],
             "Grid_Size": (
-                kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                    ["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]
-                ]
-                .prod(axis=1)
-                .values
+                merged_data[["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]].prod(axis=1)
             ),
-            "Kernel_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Kernel_Id"
-            ].values,
-            "Kernel_Name": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Kernel_Name"
-            ].values,
+            "Kernel_Id": merged_data["Kernel_Id"],
+            "Kernel_Name": merged_data["Kernel_Name"],
             "Workgroup_Size": (
-                kernel_data.iloc[counter_data["dispatch_id"] - 1][
+                merged_data[
                     ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
-                ]
-                .prod(axis=1)
-                .values
+                ].prod(axis=1)
             ),
-            "LDS_Block_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "LDS_Block_Size"
-            ].values,
-            "Scratch_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Scratch_Size"
-            ].values,
-            "VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "VGPR_Count"
-            ].values,
-            "Accum_VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Accum_VGPR_Count"
-            ].values,
-            "SGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "SGPR_Count"
-            ].values,
-            "Counter_Name": counter_data["counter_name"],
-            "Counter_Value": counter_data["counter_value"],
-            "Start_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "Start_Timestamp"
-            ].values,
-            "End_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                "End_Timestamp"
-            ].values,
+            "LDS_Block_Size": merged_data["LDS_Block_Size"],
+            "Scratch_Size": merged_data["Scratch_Size"],
+            "VGPR_Count": merged_data["VGPR_Count"],
+            "Accum_VGPR_Count": merged_data["Accum_VGPR_Count"],
+            "SGPR_Count": merged_data["SGPR_Count"],
+            "Counter_Name": merged_data["counter_name"],
+            "Counter_Value": merged_data["counter_value"],
+            "Start_Timestamp": merged_data["Start_Timestamp"],
+            "End_Timestamp": merged_data["End_Timestamp"],
         })
         rocprofv3_counter_data.to_csv(
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
