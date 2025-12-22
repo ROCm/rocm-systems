@@ -144,3 +144,7 @@ endif()
 if(ROCCLR_ENABLE_PAL)
   include(ROCclrPAL)
 endif()
+
+find_package(SIMDe REQUIRED)
+target_link_libraries(rocclr PUBLIC ${SIMDE_TARGET})
+

@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "cuda_runtime.h"
+#include "rccl_compat.h"
 
 void
 GatherGetCollByteCount(size_t* sendcount, size_t* recvcount, size_t* paramcount,
@@ -61,8 +62,10 @@ GatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw
 
 testResult_t
 GatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
-              ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream)
+              ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+              void* bias = nullptr)
 {
+    (void) bias;
     int nRanks;
     NCCLCHECK(ncclCommCount(comm, &nRanks));
     int rank;
@@ -85,8 +88,8 @@ GatherRunColl(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type,
     return testSuccess;
 }
 
-struct testColl gatherTest = { "Gather", GatherGetCollByteCount, GatherInitData,
-                               GatherGetBw, GatherRunColl };
+struct testColl gatherTest = { "Gather",    GatherGetCollByteCount, GatherInitData,
+                               GatherGetBw, GatherRunColl,          nullptr };
 
 void
 GatherGetBuffSize(size_t* sendcount, size_t* recvcount, size_t count, int nranks)
