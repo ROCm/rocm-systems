@@ -120,6 +120,7 @@ postfork_child()
     {
         LOG_ERROR("Child process {} believes it is the root process {}",
                   process::get_id(), get_root_process_id());
+        std::exit(1);
     }
 
     set_state(State::Finalized);

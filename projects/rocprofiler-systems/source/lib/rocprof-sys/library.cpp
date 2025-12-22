@@ -1045,7 +1045,7 @@ rocprofsys_finalize_hidden(void)
 
     // Flush any pending region cache entries (e.g., main entry point that wasn't
     // explicitly stopped before finalization)
-    ROCPROFSYS_DEBUG_F("Flushing pending region cache entries...\n");
+    LOG_DEBUG("Flushing pending region cache entries...");
     rocprofsys_flush_pending_region_cache_hidden();
 
     bool _perfetto_output_error = false;

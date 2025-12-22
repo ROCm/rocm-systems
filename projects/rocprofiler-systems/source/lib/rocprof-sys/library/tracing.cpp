@@ -84,10 +84,12 @@ copy_timemory_hash_ids()
     if(_hmain == nullptr)
     {
         LOG_CRITICAL("no main timemory hash ids");
+        std::exit(1);
     }
     if(_amain == nullptr)
     {
         LOG_CRITICAL("no main timemory hash aliases");
+        std::exit(1);
     }
 
     // combine all the hash and alias info into one container
@@ -172,6 +174,7 @@ thread_init()
                              if(_tinfo) return JOIN("", *_tinfo);
                              return std::string{ "no thread_info" };
                          }());
+            std::exit(1);
         }
 
         if(_tidx > 0) threading::set_thread_name(JOIN(" ", "Thread", _tidx).c_str());
@@ -185,10 +188,12 @@ thread_init()
         if(get_timemory_hash_ids(_tidx) == nullptr)
         {
             LOG_CRITICAL("no timemory hash ids pointer for thread {}", _tidx);
+            std::exit(1);
         }
         if(get_timemory_hash_aliases(_tidx) == nullptr)
         {
             LOG_CRITICAL("no timemory hash aliases pointer for thread {}", _tidx);
+            std::exit(1);
         }
 
         record_thread_start_time();

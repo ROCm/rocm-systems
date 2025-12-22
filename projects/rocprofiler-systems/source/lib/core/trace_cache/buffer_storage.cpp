@@ -92,7 +92,7 @@ flush_worker_t::start(const pid_t& current_pid)
         LOG_TRACE("Flush worker thread exiting");
     });
 
-    LOG_INFO("Flush worker started successfully for pid={}", current_pid);
+    LOG_DEBUG("Flush worker started successfully for pid={}", current_pid);
 }
 void
 flush_worker_t::stop(const pid_t& current_pid)
@@ -130,7 +130,7 @@ flush_worker_t::stop(const pid_t& current_pid)
             LOG_TRACE("Flush worker thread joined successfully");
         }
 
-        LOG_INFO("Flush worker stopped for pid={}", current_pid);
+        LOG_DEBUG("Flush worker stopped for pid={}", current_pid);
     }
     else
     {

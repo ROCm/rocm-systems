@@ -321,6 +321,7 @@ configure(bool _setup, int64_t _tid)
             {
                 LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
                           *_perf_error);
+                std::exit(1);
             }
         }
         else if(get_causal_backend() == CausalBackend::Timer)
@@ -328,6 +329,7 @@ configure(bool _setup, int64_t _tid)
             if(!_activate_timer_backend())
             {
                 LOG_ERROR("Timer backend for causal profiling failed to activate");
+                std::exit(1);
             }
         }
         else if(get_causal_backend() == CausalBackend::Auto)
@@ -345,7 +347,8 @@ configure(bool _setup, int64_t _tid)
 
                 if(!_activate_timer_backend())
                 {
-                    LOG_ERROR("Timer backend for causal profiling failed to activate\n");
+                    LOG_ERROR("Timer backend for causal profiling failed to activate");
+                    std::exit(1);
                 }
 
                 config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",

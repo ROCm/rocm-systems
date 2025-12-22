@@ -155,7 +155,7 @@ public:
         }
 
         ifs.close();
-        LOG_INFO("Storage parsing complete from {}", m_filename);
+        LOG_DEBUG("Storage parsing complete from {}", m_filename);
     }
 
 private:
