@@ -1307,7 +1307,7 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
 @demarcate
 def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
-    # marker api trace csv files are generated for each process    
+    # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
         f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
     )
