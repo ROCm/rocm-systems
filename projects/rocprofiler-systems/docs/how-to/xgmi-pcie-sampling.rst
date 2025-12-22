@@ -55,8 +55,8 @@ These metrics help identify GPU-to-GPU communication patterns and bandwidth util
 
 .. note::
 
-   XGMI metrics are only available on systems with multiple GPUs connected via XGMI links. 
-   The availability depends on the system topology and GPU architecture. If unsupported or not 
+   XGMI metrics are only available on systems with multiple GPUs connected via XGMI links.
+   The availability depends on the system topology and GPU architecture. If unsupported or not
    available, the values will be reported as N/A in the output.
 
 PCIe metrics

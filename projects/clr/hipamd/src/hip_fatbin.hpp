@@ -86,8 +86,9 @@ class FatBinaryInfo {
 
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
-  std::shared_ptr<UniqueFD> ufd_;  //!< Unique file descriptor
-  amd::Monitor fb_lock_{true};     //!< Lock for the fat binary access
+  std::shared_ptr<UniqueFD> ufd_;                         //!< Unique file descriptor
+  amd::Monitor fb_lock_{true};                            //!< Lock for the fat binary access
+  std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };
 
 };  // namespace hip

@@ -31,9 +31,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+from scipy.stats import zscore
 
 # Globals
 
@@ -64,6 +66,8 @@ config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
+config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
+config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -458,6 +462,150 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 
     if config["METRIC_COMPARE"]:
         baseline_compare_metric(test_name, workload_dir, args)
+
+
+def are_stochastic_counters_similar(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the stochastic counter values are similar. Returns True if all test dataframes
+    have similar counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    stochastic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                ".*REQ_sum$",
+                ".*REQ_.*_sum$",
+                ".*READ_sum$",
+                ".*WRITE_sum$",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+
+        # Warmup values aren't ignored as they do not significantly impact
+        # the analysis for stochastic counters and leaves too few data points
+        # for baseline.
+        if any(
+            re.match(pattern, counter_name) for pattern in stochastic_counter_patterns
+        ):
+            # Remove outliers using Z-score method
+            z_score_threshold = 2.0
+
+            test_z_scores_list = [
+                np.abs(zscore(test_counters)) for test_counters in test_counters_list
+            ]
+            test_counters_list_trimmed = [
+                test_counters[test_z_scores < z_score_threshold]
+                for test_counters, test_z_scores in zip(
+                    test_counters_list, test_z_scores_list
+                )
+            ]
+
+            baseline_mean = baseline_counters.mean()
+            baseline_std = baseline_counters.std()
+            upper_bound = baseline_mean + 3 * baseline_std
+            lower_bound = baseline_mean - 3 * baseline_std
+
+            for test_counters in test_counters_list_trimmed:
+                if test_counters.between(lower_bound, upper_bound).all() is False:
+                    return False
+
+    return True
+
+
+def are_deterministic_counters_equal(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the deterministic counter values are equal. Returns True if all test dataframes
+    have equal counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    deterministic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                "SQ_INSTS_.*",
+                "SPI_CS\\d_NUM_THREADGROUPS",
+                "SPI_CS\\d_WAVE",
+                "SQ_WAVES",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+        if any(
+            re.match(pattern, counter_name)
+            for pattern in deterministic_counter_patterns
+        ):
+            if (
+                all([
+                    test_counters.unique().size == 1
+                    for test_counters in test_counters_list
+                ])
+                and baseline_counters.unique().size == 1
+                and all([
+                    test_counters.values[0] == baseline_counters.values[0]
+                    for test_counters in test_counters_list
+                ])
+            ):
+                continue
+
+            return False
+
+    return True
 
 
 # --
@@ -1032,49 +1180,59 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
 
 
 @pytest.mark.roofline_2
-def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
+@pytest.mark.parametrize(
+    "options,expected_files,test_id",
+    [
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
+            ["empirRoof_gpu-0_FP32.pdf"],
+            "FP32_datatype",
+        ),
+        (
+            ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
+            ["empirRoof_gpu-0_FP16.pdf"],
+            "FP16_datatype",
+        ),
+        (
+            ["--device", "0", "--roof-only", "--kernel", "KERNEL_NAME_PLACEHOLDER"],
+            ["EXPECTED_FILE_PLACEHOLDER"],
+            "kernel_filter",
+        ),
+    ],
+    ids=["FP32_datatype", "FP16_datatype", "kernel_filter"],
+)
+def test_roof_plot_modes(
+    binary_handler_profile_rocprof_compute, options, expected_files, test_id
+):
     if soc in ("MI100"):
-        assert True
+        pytest.skip("Skipping roofline test for MI100")
         return
 
+    # Handle dynamic kernel name substitution for the kernel_filter test case
+    options = [
+        config["kernel_name_1"] if opt == "KERNEL_NAME_PLACEHOLDER" else opt
+        for opt in options
+    ]
     # Test `--kernel` filtering outputs are present and labelled correctly
     filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
-
-    plot_configurations = [
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            "expected_files": ["empirRoof_gpu-0_FP32.pdf"],
-        },
-        {
-            "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
-        },
-        {
-            "options": [
-                "--device",
-                "0",
-                "--roof-only",
-                "--kernel",
-                config["kernel_name_1"],
-            ],
-            "expected_files": [filter_empirRoof],
-        },
+    expected_files = [
+        filter_empirRoof if f == "EXPECTED_FILE_PLACEHOLDER" else f
+        for f in expected_files
     ]
 
-    for config_test in plot_configurations:
-        workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id=test_id)
 
-        returncode = binary_handler_profile_rocprof_compute(
-            config, workload_dir, config_test["options"], check_success=False, roof=True
-        )
-        assert returncode == 0
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+    assert returncode == 0
 
-        for expected_file in config_test["expected_files"]:
-            expected_path = os.path.join(workload_dir, expected_file)
-            if os.path.exists(expected_path):
-                assert os.path.getsize(expected_path) > 0
+    for expected_file in expected_files:
+        expected_path = os.path.join(workload_dir, expected_file)
+        if os.path.exists(expected_path):
+            assert os.path.getsize(expected_path) > 0
 
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.roofline_2
@@ -2072,52 +2230,43 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
+
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+    try:
+        # Start workload
+        process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_no_delay,
+        }
 
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+        # Run profiler (might fail / timeout / throw)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
         )
-        process_workload.kill()
-        process_workload.wait()
 
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate results
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    assert test_utils.check_file_pattern(
-        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2129,38 +2278,43 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
 def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_compute):
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
+
     # TODO: temp fix for sdk defautly disable attach/detach,
     # remove after it sets default to enable
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(
-        [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
-    )
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_with_delay
-
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
-
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+    try:
+        # Start workload with sleep mode enabled
+        process_workload = subprocess.Popen(
+            [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
         )
-        process_workload.kill()
-        process_workload.wait()
 
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_with_delay,
+        }
+
+        # Main profiling call (can fail or hang)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
+        )
+
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate output
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
         inspect.stack()[0][3],
@@ -2168,15 +2322,11 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
         file_dict,
     )
 
-    assert test_utils.check_file_pattern(
-        "- 3.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 4.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
+    # Check profiling_config.yaml block entries
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    assert test_utils.check_file_pattern("- 3.1.1", config_file)
+    assert test_utils.check_file_pattern("- 4.1.1", config_file)
+    assert test_utils.check_file_pattern("- 5.1.1", config_file)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2192,31 +2342,35 @@ def test_live_attach_detach_singlepath_launch_stats(
     env = os.environ.copy()
     env["ROCP_TOOL_ATTACH"] = "1"
 
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+    process_workload = None
 
-    attach_detach = dict()
-    attach_detach["attach_pid"] = process_workload.pid
-    attach_detach["attach-duration-msec"] = attach_detach_interval_msec_no_delay
+    try:
+        # Start workload
+        process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
 
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_hip_dynamic_shared",
-        attach_detach_para=attach_detach,
-    )
+        attach_detach = {
+            "attach_pid": process_workload.pid,
+            "attach-duration-msec": attach_detach_interval_msec_no_delay,
+        }
 
-    # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        print(
-            f"rocprof-compute has detached and finished, "
-            f"killing workload process (pid={process_workload.pid})..."
+        # Profiling step (may fail)
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_hip_dynamic_shared",
+            attach_detach_para=attach_detach,
         )
-        process_workload.kill()
-        process_workload.wait()
 
+    finally:
+        if process_workload and process_workload.poll() is None:
+            print(f"[finally] killing workload pid={process_workload.pid}")
+            process_workload.kill()
+            process_workload.wait()
+
+    # Validate CSVs & output correctness
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
         inspect.stack()[0][3],
@@ -2224,30 +2378,20 @@ def test_live_attach_detach_singlepath_launch_stats(
         file_dict,
     )
 
-    assert test_utils.check_file_pattern(
-        "- 7.1.0", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.1", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.2", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.5", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.6", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.7", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.8", f"{workload_dir}/profiling_config.yaml"
-    )
-    assert test_utils.check_file_pattern(
-        "- 7.1.9", f"{workload_dir}/profiling_config.yaml"
-    )
+    # Check that launch-stat sets were applied
+    config_file = f"{workload_dir}/profiling_config.yaml"
+    for tag in [
+        "7.1.0",
+        "7.1.1",
+        "7.1.2",
+        "7.1.5",
+        "7.1.6",
+        "7.1.7",
+        "7.1.8",
+        "7.1.9",
+    ]:
+        assert test_utils.check_file_pattern(f"- {tag}", config_file)
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2371,7 +2515,7 @@ class TestSetsIntegration:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_profiler_options(binary_handler_profile_rocprof_compute):
     options = ["--no-native-tool", "--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2381,7 +2525,7 @@ def test_profiler_options(binary_handler_profile_rocprof_compute):
     assert code == 1
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2411,7 +2555,7 @@ def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing", "kernel"]
     workload_dir = test_utils.get_output_dir()
@@ -2441,7 +2585,7 @@ def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel_launch_params(
     binary_handler_profile_rocprof_compute,
 ):
@@ -2468,6 +2612,100 @@ def test_iteration_multiplexing_kernel_launch_params(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_deterministic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    assert are_deterministic_counters_equal(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_stochastic
+def test_iteration_multiplexing_stochastic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir(param_id="no_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+
+    assert are_stochastic_counters_similar(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

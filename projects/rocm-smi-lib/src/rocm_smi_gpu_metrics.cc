@@ -1854,7 +1854,7 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_m
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  auto copy_data_from_internal_metrics_tbl = [&]() 
+  auto copy_data_from_internal_metrics_tbl = [&]()
   {
     AMGpuMetricsPublicLatest_t metrics_public_init{};
 
@@ -2051,7 +2051,7 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_m
      << " |";
   LOG_TRACE(ss);
 
-  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);  
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 };
 
 AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v17_t::copy_internal_to_external_metrics()

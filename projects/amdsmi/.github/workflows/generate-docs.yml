@@ -75,9 +75,9 @@ jobs:
           # 📚 Documentation Generated Successfully!
 
           ## 🚀 Quick Start
-          
+
           1. **📥 Download** the artifact `documentation-${{ steps.get_branch_info.outputs.sanitized_name }}`
-          2. **📂 Extract** the ZIP file 
+          2. **📂 Extract** the ZIP file
           3. **🖱️ Double-click** `index.html`
           4. **✅ Done!** Documentation opens with full formatting in your browser
           EOF

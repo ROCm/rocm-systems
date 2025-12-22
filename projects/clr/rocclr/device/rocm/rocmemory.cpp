@@ -269,11 +269,11 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   const auto& glenv = owner()->getContext().glenv();
   if (glenv->isEGL()) {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_EGL, glenv->getEglDpy(),
                              glenv->getEglOrigCtx()))
       return false;
   } else {
-    if (!MesaInterop::Export(in, out, MesaInterop::MESA_INTEROP_GLX, glenv->getDpy(),
+    if (!GlInterop::Export(in, out, GlInterop::MESA_INTEROP_GLX, glenv->getDpy(),
                              glenv->getOrigCtx()))
       return false;
   }
@@ -1606,4 +1606,3 @@ amd::Image* Image::FindView(cl_image_format format) const {
 }
 
 }  // namespace amd::roc
-

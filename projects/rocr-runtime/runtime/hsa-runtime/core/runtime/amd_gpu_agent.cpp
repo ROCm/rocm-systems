@@ -1713,6 +1713,10 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_PM4_EMULATION:
       *((bool*)value) = properties_.Capability2.ui32.AqlEmulationPm4_;
       break;
+    case HSA_AMD_AGENT_INFO_LUID:
+      static_cast<hsa_luid_t*>(value)->low = properties_.LuidLowPart;
+      static_cast<hsa_luid_t*>(value)->high = properties_.LuidHighPart;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

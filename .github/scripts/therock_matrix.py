@@ -6,7 +6,7 @@ subtree_to_project_map = {
     'projects/clr': 'all', 
     'projects/hip': 'all', 
     'projects/hip-tests': 'all', 
-    'projects/hipother': 'core', 
+    'projects/hipother': 'all', 
     'projects/rdc': 'rdc', 
     'projects/rocm-core': 'core', 
     'projects/rocm-smi-lib': 'core', 
