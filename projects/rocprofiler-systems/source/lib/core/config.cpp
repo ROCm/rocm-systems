@@ -1698,18 +1698,19 @@ print_settings(bool _include_env)
 
     if(_include_env)
     {
-        std::cerr << tim::log::info;
-        tim::print_env(std::cerr, [_is_rocprofsys_option](const std::string& _v) {
+        std::stringstream _ss1{};
+        tim::print_env(_ss1, [_is_rocprofsys_option](const std::string& _v) {
             auto _is_omni_opt = _is_rocprofsys_option(_v, std::set<std::string>{});
             if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
             return (_is_omni_opt && _v.find("ROCPROFSYS_SIGNAL_") != 0);
         });
-        std::cerr << tim::log::flush;
+
+        LOG_INFO("{}", _ss1.str());
     }
 
-    print_settings(std::cerr, _is_rocprofsys_option);
-
-    fprintf(stderr, "\n");
+    std::stringstream _ss2{};
+    print_settings(_ss2, _is_rocprofsys_option);
+    LOG_INFO("{}", _ss2.str());
 }
 
 std::string&
