@@ -3,9 +3,9 @@ This dictionary is used to map specific file directory changes to the correspond
 """
 subtree_to_project_map = {
     'projects/aqlprofile': 'profiler', 
-    'projects/clr': 'full-build', 
-    'projects/hip': 'full-build', 
-    'projects/hip-tests': 'full-build', 
+    'projects/clr': 'all', 
+    'projects/hip': 'all', 
+    'projects/hip-tests': 'all', 
     'projects/hipother': 'core', 
     'projects/rdc': 'rdc', 
     'projects/rocm-core': 'core', 
@@ -16,7 +16,7 @@ subtree_to_project_map = {
     'projects/rocprofiler-sdk': 'profiler', 
     'projects/rocprofiler-systems': 'profiler', 
     'projects/rocprofiler': 'profiler', 
-    'projects/rocr-runtime': 'full-build', 
+    'projects/rocr-runtime': 'all', 
     'projects/roctracer': 'profiler'
 }
 
@@ -30,10 +30,6 @@ project_map = {
         "project_to_test": "rocprofiler-tests",
     },
     "all": {
-        "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "project_to_test": "hip-tests, rocprofiler-tests",
-    },
-    "full-build": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "project_to_test": "hip-tests, rocprofiler-tests",
     }
