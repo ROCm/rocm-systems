@@ -22,6 +22,7 @@
 
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "common.hpp"
+#include "config.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/common_types.hpp"
@@ -32,7 +33,6 @@
 #include "perfetto.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
-#include "trace_cache/storage_parser.hpp"
 
 #include <cstdint>
 #include <logger/debug.hpp>
@@ -177,8 +177,7 @@ write_sampling_track_data(const struct backtrace_region_sample& _sample,
                 }
             } catch(const std::exception& e)
             {
-                ROCPROFSYS_VERBOSE_F(2, "Failed to parse call_stack JSON: %s\n",
-                                     e.what());
+                LOG_WARNING("Failed to parse call_stack JSON: {}", e.what());
             }
         }
         annotate_perfetto(ctx, annotations);
@@ -297,8 +296,6 @@ perfetto_processor_t::setup_perfetto()
     for(const auto& itr : config::get_disabled_categories())
     {
         LOG_TRACE("Disabling perfetto track event category: {}", itr);
-        ROCPROFSYS_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
-                             itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
     }
 
@@ -328,9 +325,6 @@ perfetto_processor_t::start_session()
         LOG_TRACE("Created new perfetto trace");
     }
 
-    ROCPROFSYS_VERBOSE(2,
-                       "Starting perfetto post-processing session with cached data...\n");
-
     int temp_fd = -1;
     if(config::get_use_tmp_files())
     {
@@ -356,7 +350,6 @@ perfetto_processor_t::stop_session()
     }
 
     LOG_DEBUG("Stopping perfetto tracing session for pid={}", m_process_id);
-    ROCPROFSYS_VERBOSE(2, "Stopping perfetto post-processing session...\n");
     ::perfetto::TrackEvent::Flush();
     m_tracing_session->FlushBlocking();
     m_tracing_session->StopBlocking();
@@ -374,9 +367,8 @@ perfetto_processor_t::get_session_data()
 
         if(!_fdata)
         {
-            ROCPROFSYS_VERBOSE(-1,
-                               "Error! perfetto temp trace file '%s' could not be read",
-                               m_tmp_file->filename.c_str());
+            LOG_ERROR("Perfetto temp trace file '{}' could not be read",
+                      m_tmp_file->filename);
             return char_vec_t{ m_tracing_session->ReadTraceBlocking() };
         }
 
@@ -388,10 +380,12 @@ perfetto_processor_t::get_session_data()
         auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
         ::fclose(_fdata);
 
-        ROCPROFSYS_CI_THROW(
-            _fnum_read != _fnum_elem,
-            "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
-            _fnum_read, m_tmp_file->filename.c_str(), _fnum_elem);
+        if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+        {
+            throw std::runtime_error(fmt::format(
+                "Error! read {} elements from perfetto trace file '{}'. Expected {}",
+                _fnum_read, m_tmp_file->filename, _fnum_elem));
+        }
     }
     else
     {
@@ -444,9 +438,8 @@ perfetto_processor_t::flush(bool& _perfetto_output_error)
     }
     else
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
+        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                  _filename.c_str());
     }
 
     if(m_tmp_file)
@@ -479,8 +472,6 @@ perfetto_processor_t::finalize_processing()
     if(_perfetto_output_error)
     {
         LOG_ERROR("Perfetto trace generation failed for pid={}", m_process_id);
-        ROCPROFSYS_WARNING(0, "Perfetto trace generation failed for process: %lu\n",
-                           m_process_id);
     }
     else
     {
@@ -695,8 +686,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
                 }
             } catch(const std::exception& e)
             {
-                ROCPROFSYS_VERBOSE_F(2, "Failed to parse call_stack JSON: %s\n",
-                                     e.what());
+                LOG_ERROR("Failed to parse call_stack JSON: {}", e.what());
             }
         }
 
@@ -951,9 +941,8 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     }
     else
     {
-        ROCPROFSYS_VERBOSE_F(2,
-                             "Unknown PMC event category_enum_id: %zu for track '%s'\n",
-                             _pmc.category_enum_id, _track_name.c_str());
+        LOG_WARNING("Unknown PMC event category_enum_id: {} for track '{}'",
+                    _pmc.category_enum_id, _track_name);
     }
 }
 
@@ -1237,9 +1226,8 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
     // Dispatch based on category_enum_id using the category type mapping
     if(!dispatch_in_time_sample(_sample.category_enum_id, _sample, m_use_annotations))
     {
-        ROCPROFSYS_VERBOSE_F(
-            2, "Unknown in_time_sample category_enum_id: %zu, using user category\n",
-            _sample.category_enum_id);
+        LOG_DEBUG("Unknown in_time_sample category_enum_id: {}, using user category",
+                  _sample.category_enum_id);
         write_in_time_sample_data(category::user{}, _sample, m_use_annotations);
     }
 }

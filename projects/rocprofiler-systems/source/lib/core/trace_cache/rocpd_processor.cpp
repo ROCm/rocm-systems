@@ -24,7 +24,6 @@
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
@@ -631,7 +630,6 @@ rocpd_processor_t::post_process_metadata()
         return;
     }
     LOG_DEBUG("Post-processing metadata for rocpd");
-    ROCPROFSYS_DEBUG("Post processing metadata..\n");
     auto n_info = node_info::get_instance();
 
     m_data_processor->insert_node_info(

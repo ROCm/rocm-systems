@@ -22,8 +22,9 @@
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
-#include "core/debug.hpp"
 #include <logger/debug.hpp>
+
+#include "core/config.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -469,7 +470,7 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     if(!_agents.empty())
     {
-        ROCPROFSYS_WARNING(0, "Given agents vector is not empty. Clearing it..");
+        LOG_WARNING("Given agents vector is not empty. Clearing it..");
         _agents.clear();
     }
 
@@ -761,21 +762,30 @@ metadata_registry::overwrite_callback_names(
             modified_ops[i] = extract_operations(i);
         }
 
-        ROCPROFSYS_CI_THROW(modified_ops.find(callback_kind) != modified_ops.end(),
-                            "Overwriting a previously overwritten entry is forbidden");
+        if(get_is_continuous_integration() &&
+           modified_ops.find(callback_kind) != modified_ops.end())
+        {
+            throw std::runtime_error(
+                "Overwriting a previously overwritten entry is forbidden");
+        }
 
-        ROCPROFSYS_CI_THROW(!modified_ops.empty() &&
-                                callback_kind >= modified_ops.begin()->first,
-                            "Category must have a larger enum value than all previously "
-                            "modified_ops categories");
+        if(get_is_continuous_integration() && !modified_ops.empty() &&
+           callback_kind >= modified_ops.begin()->first)
+        {
+            throw std::runtime_error(
+                "Category must have a larger enum value than all previously "
+                "modified_ops categories");
+        }
 
         // Overwrite desired category
         auto operation_names = extract_operations(callback_kind);
         for(const auto& [index, new_value] : category_info.second)
         {
-            ROCPROFSYS_CI_THROW(index < 0 ||
-                                    static_cast<size_t>(index) >= operation_names.size(),
-                                "Index is invalid");
+            if(get_is_continuous_integration() &&
+               (index < 0 || static_cast<size_t>(index) >= operation_names.size()))
+            {
+                throw std::runtime_error("Index is invalid");
+            }
             operation_names[index] = new_value;
         }
         modified_ops[callback_kind] = std::move(operation_names);
@@ -789,8 +799,10 @@ metadata_registry::overwrite_callback_names(
     {
         auto renaming_entry = modified_ops.find(i);
 
-        ROCPROFSYS_CI_THROW(renaming_entry == modified_ops.end(),
-                            "A category that needs to be emplaced is missing");
+        if(get_is_continuous_integration() && renaming_entry == modified_ops.end())
+        {
+            throw std::runtime_error("A category that needs to be emplaced is missing");
+        }
 
         const auto& operations_vec = renaming_entry->second;
         m_callback_tracing_info.emplace(i, category_names.at(i).data());
@@ -844,7 +856,6 @@ metadata_registry::save_to_file(const std::string&                         filep
         if(!file.is_open())
         {
             LOG_WARNING("Failed to open file for writing: {}", filepath);
-            ROCPROFSYS_WARNING(1, "Error opening file for writing: %s", filepath.c_str());
             return false;
         }
 
@@ -855,7 +866,6 @@ metadata_registry::save_to_file(const std::string&                         filep
     } catch(const std::exception& e)
     {
         LOG_ERROR("Exception while saving metadata to file {}: {}", filepath, e.what());
-        ROCPROFSYS_WARNING(1, "Error saving metadata to file: %s", e.what());
         return false;
     }
 }
@@ -871,7 +881,6 @@ metadata_registry::load_from_file(const std::string&                   filepath,
         if(!file.is_open())
         {
             LOG_WARNING("Failed to open file for reading: {}", filepath);
-            ROCPROFSYS_WARNING(1, "Error opening file for reading: %s", filepath.c_str());
             return false;
         }
 
@@ -886,7 +895,6 @@ metadata_registry::load_from_file(const std::string&                   filepath,
     {
         LOG_ERROR("Exception while loading metadata from file {}: {}", filepath,
                   e.what());
-        ROCPROFSYS_WARNING(1, "Error loading metadata from file: %s", e.what());
         return false;
     }
 }

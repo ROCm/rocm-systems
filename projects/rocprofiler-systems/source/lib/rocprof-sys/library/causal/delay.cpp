@@ -77,11 +77,9 @@ compute_sleep_for_overhead()
         _stats += (_diff - _val);
     }
 
-    ROCPROFSYS_BASIC_VERBOSE(2,
-                             "[causal] overhead of std::this_thread::sleep_for(...) "
-                             "invocation = %6.3f usec +/- %e\n",
-                             _stats.get_mean() / units::usec,
-                             _stats.get_stddev() / units::usec);
+    LOG_TRACE("[causal] overhead of std::this_thread::sleep_for(...) "
+              "invocation = {} usec +/- {} usec",
+              _stats.get_mean() / units::usec, _stats.get_stddev() / units::usec);
 
     tim::manager::instance()->add_metadata([_stats](auto& ar) {
         ar(tim::cereal::make_nvp("causal thread sleep overhead [nsec]", _stats));

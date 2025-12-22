@@ -22,7 +22,6 @@
 
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/utility.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
@@ -76,14 +75,15 @@ pthread_mutex_gotcha::get_hashes()
             else
             {
                 if(_skip.count(i) > 0) continue;
-                ROCPROFSYS_VERBOSE(
-                    1,
-                    "WARNING!!! pthread_mutex_gotcha tool id at index %zu was empty!\n",
-                    i);
+                LOG_WARNING("pthread_mutex_gotcha tool id at index {} was empty!", i);
             }
-            ROCPROFSYS_CI_FAIL(
-                _id.empty() || _init.at(i) == 0,
-                "pthread_mutex_gotcha tool id at index %zu has no hash value\n", i);
+            // TODO:
+            // ROCPROFSYS_CI_FAIL(
+            //     _id.empty() || _init.at(i) == 0,
+            //     "pthread_mutex_gotcha tool id at index %zu has no hash value\n", i);
+            LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value", i);
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            std::exit(1);
         }
         return _init;
     }();
@@ -183,7 +183,7 @@ pthread_mutex_gotcha::operator()(uintptr_t&&, int (*_callee)(Args...),
         {
             if(m_data)
             {
-                ROCPROFSYS_PRINT("Warning! nullptr to %s\n", m_data->tool_id.c_str());
+                LOG_WARNING("nullptr to {}", m_data->tool_id);
             }
             return EINVAL;
         }

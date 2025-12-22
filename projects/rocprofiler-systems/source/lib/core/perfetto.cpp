@@ -272,9 +272,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     }
     else if(dmp::rank() == 0)
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
+        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                  _filename);
     }
 
     // Merge the output files, if rank 0
