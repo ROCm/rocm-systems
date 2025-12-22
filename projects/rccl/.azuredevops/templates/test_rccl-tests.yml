@@ -1,0 +1,77 @@
+steps:
+  - task: Bash@3
+    displayName: RCCL-Tests
+    env:
+      BINARIES_DIR: $(Build.BinariesDirectory)
+      PIPELINE_WORKSPACE: $(Pipeline.Workspace)
+    inputs:
+      targetType: inline
+      script: |
+        echo "Submitting test job..."
+        TEST_JOB_ID=$(sbatch --export=ALL --parsable $(Build.SourcesDirectory)/.azuredevops/slurm/test_rccl-tests.sh)
+        echo "Submitted test job: $TEST_JOB_ID"
+        echo "##vso[task.setvariable variable=TEST_JOB_ID]$TEST_JOB_ID"
+
+        echo "Waiting for test job to start..."
+        while squeue -j $TEST_JOB_ID 2>/dev/null | grep -q $TEST_JOB_ID; do
+          echo "##[section]Test job $TEST_JOB_ID is still running..."
+          sleep 60
+        done
+
+        echo "Waiting for final status via sacct..."
+        LOOP_COUNT=0
+        MAX_LOOPS=120  # Maximum of 120 loops (120 minutes)
+        while true; do
+          STATE=$(sacct -j "$TEST_JOB_ID" --format=JobID,State --noheader | awk '$1 ~ /\.batch$/ { print $2; exit }' | xargs)
+          echo "##[section]Test job state: $STATE"
+          if [[ "$STATE" == "COMPLETED" ]]; then
+            break
+          elif [[ "$STATE" =~ ^(FAILED|CANCELLED|TIMEOUT)$ ]]; then
+            echo "Test failed with state $STATE"
+            break
+          fi
+          sleep 60
+          LOOP_COUNT=$((LOOP_COUNT + 1))
+          if [ $LOOP_COUNT -ge $MAX_LOOPS ]; then
+            echo "Time limit reached while waiting for final status."
+            exit 1  # Exit with an error code if time limit is reached
+          fi
+        done
+
+        echo "Checking test result json for failures..."
+        TEST_JSON=$(find "$(Pipeline.Workspace)" -name 'rccl-tests*.json')
+        if [ -z "$TEST_JSON" ]; then
+          echo "##vso[task.logissue type=error]No $TEST_JSON file(s) found"
+          echo "##vso[task.complete result=Failed;]DONE"
+          exit 1
+        fi
+
+        #echo "Checking test result XML for failures..."
+        #TEST_XML=$(find "$(Pipeline.Workspace)" -name 'rccl-tests_output.xml' | head -n1)
+        #if [ -z "$TEST_XML" ]; then
+        #  echo "##vso[task.logissue type=error]No $TES_XML file found"
+        #  echo "##vso[task.complete result=Failed;]DONE"
+        #  exit 1
+        #fi
+
+        #if grep -q 'failures="[^0]' "$TEST_XML"; then
+        #  echo "##vso[task.logissue type=error]Test failures detected in $TEST_XML"
+        #  echo "##vso[task.complete result=Failed;]DONE"
+        #  exit 1
+        #else
+        #  echo "No test failures detected."
+        #fi
+  - task: Bash@3
+    displayName: Test Logs
+    condition: always()
+    inputs:
+      targetType: inline
+      script: |
+        cat rccl-tests-${TEST_JOB_ID}.out || echo "No log found"
+#  - task: PublishTestResults@2
+#    displayName: 'Publish Results'
+#    condition: succeededOrFailed()
+#    inputs:
+#      searchFolder: $(Pipeline.Workspace)
+#      testResultsFormat: JUnit
+#      testResultsFiles: '**/rccl-tests_output.xml'

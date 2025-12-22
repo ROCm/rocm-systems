@@ -1267,120 +1267,6 @@ def gen_sysinfo(
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
 
 
-def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
-    from utils import specs
-
-    rocm_ver = int(mspec.rocm_version[:1])
-
-    target_binary: dict[str, Any] = {
-        "rocm_ver": rocm_ver,
-        "distro": "override",
-        "path": None,
-    }
-
-    # Create distro ID list based off of ID (a string, containing a single distro)
-    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
-    # from the system /etc/os-release file
-    os_release = Path("/etc/os-release").read_text()
-    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
-    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
-    id_list = id_list.split() + [id]
-
-    if "ROOFLINE_BIN" in os.environ.keys():
-        rooflineBinary = os.environ["ROOFLINE_BIN"]
-        if Path(rooflineBinary).exists():
-            console_warning(
-                "roofline",
-                f"Detected user-supplied binary --> ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-            # distro stays marked as override and path value is substituted in
-            target_binary["path"] = rooflineBinary
-            return target_binary
-        else:
-            console_error(
-                "roofline",
-                "user-supplied path to binary not accessible --> "
-                f"ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-
-    # check that the system OS is based off of one of the following distributions
-    elif "azurelinux" in id_list:
-        distro = "azurelinux"
-
-    elif "debian" in id_list:
-        distro = "22.04"
-
-    elif ("fedora" in id_list) or ("tencentos" in id_list):
-        distro = "platform:el8"
-
-    elif "suse" in id_list:
-        distro = "15.6"
-
-    else:
-        console_error(
-            "roofline", "Cannot find a valid binary for your operating system"
-        )
-
-    # distro gets assigned, to follow default roofline bin location and nomenclature
-    target_binary["distro"] = distro
-    return target_binary
-
-
-def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
-    """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
-    console_log("roofline", "No roofline data found. Generating...")
-
-    distro_map = {
-        "platform:el8": "rhel8",
-        "15.6": "sles15sp6",
-        "22.04": "ubuntu22_04",
-        "azurelinux": "azurelinux3",
-    }
-
-    binary_paths: list[str] = []
-
-    target_binary = detect_roofline(mspec)
-    if target_binary["distro"] == "override":
-        binary_paths.append(target_binary["path"])
-    else:
-        # check two potential locations for roofline binaries due to differences in
-        # development usage vs formal install
-        potential_paths = [
-            config.rocprof_compute_home / "utils" / "rooflines" / "roofline",
-            config.rocprof_compute_home.parent.parent / "bin" / "roofline",
-        ]
-
-        for directory in potential_paths:
-            path_to_binary = (
-                f"{directory}-{distro_map[target_binary['distro']]}"
-                f"-rocm{target_binary['rocm_ver']}"
-            )
-            binary_paths.append(path_to_binary)
-
-    # Distro is valid but cant find rocm ver
-    found = False
-    for binary_path in binary_paths:
-        if Path(binary_path).exists():
-            found = True
-            path_to_binary = binary_path
-            break
-
-    if not found:
-        console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
-
-    my_args = [
-        path_to_binary,
-        "-o",
-        f"{args.path}/roofline.csv",
-        "-d",
-        str(args.device),
-    ]
-    if args.quiet:
-        my_args += "--quiet"
-
-    subprocess.run(my_args, check=True)
-
-
 def get_submodules(package_name: str) -> list[str]:
     """List all submodules for a target package"""
     import importlib
@@ -1498,10 +1384,6 @@ def merge_counters_iteration_multiplex(
         "Kernel_ID",
     ]
 
-    expired_column_index = [
-        "Dispatch_ID",
-    ]
-
     result_dfs: list[pd.DataFrame] = []
 
     # TODO: will need to optimize to avoid this conversion to single index format
@@ -1533,30 +1415,32 @@ def merge_counters_iteration_multiplex(
 
         pd.set_option("display.max_columns", None)
 
+        # Reset Dispatch_ID
+        dispatch_id_counter = 0
+
         for name, group in unique_occurences:
             # Create a dictionary to store the merged row for the current group
             merged_row: dict[str, Any] = {}
 
             # Process non-counter columns
-            for col in [
-                col
-                for col in non_counter_column_index
-                if col not in expired_column_index
-            ]:
+            for col in non_counter_column_index:
                 if col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
-                    merged_row["Median_Time"] = median_delta_time
-                    merged_row["Mean_Time"] = delta_time.mean()
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
+                if col == "Dispatch_ID":
+                    # Assign new Dispatch_ID
+                    merged_row[col] = dispatch_id_counter
+                    dispatch_id_counter += 1
                 elif pd.api.types.is_numeric_dtype(group[col]):
                     # For other non-counter numeric columns, take the median value
                     merged_row[col] = group[col].median()
                     if pd.api.types.is_integer_dtype(group[col]):
                         merged_row[col] = merged_row[col].astype(int)
                 else:
-                    # For other non-counter columns, take the first occurrence (0th row)
+                    # For other non-counter non-numeric columns,
+                    # take the first occurrence (0th row)
+                    # Only Kernel_Name should be non-numeric here
                     merged_row[col] = group.iloc[0][col]
 
             # Process counter columns (assumed to be all columns not in
@@ -1565,16 +1449,19 @@ def merge_counters_iteration_multiplex(
                 col for col in group.columns if col not in non_counter_column_index
             ]
             for counter_col in counter_columns:
-                # for counter columns, take the first non-none (or non-nan) value
-                current_valid_counter_group = group[group[counter_col].notna()]
-                first_valid_value = (
-                    current_valid_counter_group.iloc[0][counter_col]
-                    if len(current_valid_counter_group) > 0
-                    else None
-                )
-                merged_row[counter_col] = first_valid_value
-
-            merged_row["Count"] = group["Dispatch_ID"].nunique()
+                # For counter columns, calculate median only across non-NaN values
+                # Preserve original data type
+                valid_values = group[counter_col].dropna()
+                if not valid_values.empty:
+                    median_value = valid_values.median()
+                    # Preserve original data type - check if all
+                    # non-null values are integers
+                    if (valid_values == valid_values.astype(int)).all():
+                        merged_row[counter_col] = int(median_value)
+                    else:
+                        merged_row[counter_col] = median_value
+                else:
+                    merged_row[counter_col] = None
 
             # Append the merged row to the result list
             result_data.append(merged_row)
@@ -1657,9 +1544,8 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
                     merged_row[col] = group["Start_Timestamp"].median()
                 elif col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
                 else:
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]

@@ -103,7 +103,8 @@ endif()
 set(_test_openmp_env "OMP_PROC_BIND=spread" "OMP_PLACES=threads" "OMP_NUM_THREADS=2")
 
 set(_base_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -114,7 +115,8 @@ set(_base_environment
 )
 
 set(_flat_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_COUT_OUTPUT=ON"
@@ -144,7 +146,8 @@ set(_lock_environment
 )
 
 set(_perfetto_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=OFF"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -156,7 +159,8 @@ set(_perfetto_environment
 )
 
 set(_timemory_environment
-    "ROCPROFSYS_TRACE=OFF"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=OFF"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -177,7 +181,8 @@ set(_causal_environment
 )
 
 set(_python_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -190,7 +195,8 @@ set(_python_environment
 )
 
 set(_attach_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -204,7 +210,8 @@ set(_attach_environment
 )
 
 set(_rccl_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
@@ -217,7 +224,8 @@ set(_rccl_environment
 )
 
 set(_window_environment
-    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -1329,6 +1337,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    set(_EXIST_FILES_TESTS "")
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
@@ -1337,6 +1346,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         )
+        list(APPEND _EXIST_FILES_TESTS "validate-${TEST_NAME}-${_FILE}-exists")
     endforeach()
 
     if(TEST_TIMEMORY_FILE)
@@ -1432,6 +1442,18 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${TEST_PROPERTIES}
         )
     endforeach()
+
+    # Set properties for file existence validation tests
+    foreach(_TEST ${_EXIST_FILES_TESTS})
+        set_tests_properties(
+            ${_TEST}
+            PROPERTIES
+                TIMEOUT ${TEST_TIMEOUT}
+                LABELS "${TEST_LABELS}"
+                DEPENDS "${TEST_DEPENDS};${TEST_NAME}"
+                FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
+        )
+    endforeach()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
@@ -1456,7 +1478,8 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
 
     if(NOT TEST_ENVIRONMENT)
         set(TEST_ENVIRONMENT
-            "ROCPROFSYS_TRACE=ON"
+            "ROCPROFSYS_TRACE_LEGACY=OFF"
+            "ROCPROFSYS_TRACE_CACHED=ON"
             "ROCPROFSYS_PROFILE=ON"
             "ROCPROFSYS_USE_SAMPLING=ON"
             "ROCPROFSYS_TIME_OUTPUT=OFF"

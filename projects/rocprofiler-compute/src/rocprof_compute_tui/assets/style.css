@@ -287,37 +287,6 @@ InstantButton.menu-item.-active {
     background: $accent-darken-2;
 }
 
-/* InstantMenuButton styling replacing MenuButton */
-InstantMenuButton {
-    background: $surface;
-    color: $text;
-    min-width: 10;
-    height: auto;
-    padding: 0 1;
-    border: none;
-    width: auto;
-    align: center middle;
-    content-align: center middle;
-}
-
-InstantMenuButton:hover {
-    background: $primary-background-lighten-1;
-    color: $text-accent;
-}
-
-InstantMenuButton:focus {
-    background: $primary-background;
-}
-
-InstantMenuButton.-active {
-    background: $primary-background-darken-1;
-}
-
-InstantMenuButton.selected {
-    background: $primary-background;
-    color: $text-accent;
-}
-
 #dropdown-container {
     width: 100%;
     height: auto;
@@ -382,22 +351,9 @@ Terminal {
     }
 }
 
-#bottom-container {
-    height: 4fr;
-    border: none;
-    margin-top: 2;
-    overflow-x: auto;
-    overflow-y: auto;
-}
-
-.mem-chart,
-.roofline-plot {
+.mem-chart 
     width: auto;
     min-width: 100;
     overflow-x: auto;
     overflow-y: auto;
-}
-
-.vstack {
-    layout: vertical;
 }

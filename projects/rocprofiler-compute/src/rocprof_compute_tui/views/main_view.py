@@ -29,6 +29,7 @@ Contains the main view layout and organization for the application.
 """
 
 import threading
+import traceback
 from pathlib import Path
 from typing import Any, Optional
 
@@ -122,6 +123,7 @@ class MainView(Horizontal):
         All UI updates are marshalled back onto the main thread.
         """
 
+        # Capture selected path at the beginning to avoid races
         selected = self.selected_path
 
         # -----------------------------
@@ -168,8 +170,6 @@ class MainView(Horizontal):
             sysinfo_path = selected / "sysinfo.csv"
             if not sysinfo_path.exists():
                 # Let the UI thread handle the error and reset state
-                import traceback
-
                 error = FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
                 tb = traceback.format_exc()
 
@@ -216,8 +216,6 @@ class MainView(Horizontal):
             )
 
         except Exception as e:  # noqa: BLE001
-            import traceback
-
             tb = traceback.format_exc()
             error_msg = f"Analysis failed: {str(e)}"
 
@@ -261,12 +259,9 @@ class MainView(Horizontal):
         in_ui_thread = threading.get_ident() == app._thread_id
 
         def apply() -> None:
-            view = getattr(self, "center_tabs", None)
-            if view is None:
-                return
-            kernel_view = view.get_kernel_view()
-            if kernel_view is not None:
-                kernel_view.update_view(message, log_level)
+            view = self.query_one("#kernel-view")
+            if view:
+                view.update_view(message, log_level)
 
         if in_ui_thread:
             apply()

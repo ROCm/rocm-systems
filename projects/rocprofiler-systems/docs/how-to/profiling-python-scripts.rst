@@ -56,7 +56,7 @@ environment variable.
    .. code-block:: shell
 
       export LD_LIBRARY_PATH=:/opt/venv/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
-   
+
 Running ROCm Systems Profiler on a Python script
 ================================================
 

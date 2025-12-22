@@ -20,7 +20,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 ##############################################################################
 """
 ROCm Compute Profiler TUI - Main Application with Analysis Methods
@@ -136,26 +135,6 @@ class RocprofTUIApp(App):
 
         self.notify(f"Selected: {selected_dir}", severity="information")
         self.main_view.run_analysis()
-
-    from textual import on
-    from textual.events import Key
-
-    @on(Key)
-    def dump_dom_key(self, event: Key) -> None:
-        if event.key == "w":
-            dbg("\n================ DOM DUMP ================\n")
-            self.dump_dom()
-            dbg("\n==========================================\n")
-
-    def dump_dom(self, widget=None, depth=0) -> None:  # noqa: ANN001
-        if widget is None:
-            widget = self
-
-        prefix = " " * depth
-        dbg(f"{prefix}- {widget.__class__.__name__}(id={widget.id})")
-
-        for child in widget.children:
-            self.dump_dom(child, depth + 2)
 
 
 def run_tui(

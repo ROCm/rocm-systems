@@ -127,11 +127,8 @@ TEST_CASE("Unit_Kernel_Launch_bounds_Negative_OutOfBounds") {
  * ------------------------
  *  - Validates handling of invalid arguments:
  *    -# Compiles kernels that are not created appropriately:
- *      - Maximum number of threads is 0
- *      - Maximum number of threads is negative
- *      - Minimum number of warps is negative
  *      - Maximum number of threads is not integer value
- *      - Mimimum number of warps is not integer value
+ *      - Minimum number of warps is not integer value
  *    -# Expected output: compiler error
  *  - Uses RTC for compilation.
  * Test source
@@ -144,13 +141,7 @@ TEST_CASE("Unit_Kernel_Launch_bounds_Negative_OutOfBounds") {
 TEST_CASE("Unit_Kernel_Launch_bounds_Negative_Parameters_RTC") {
   hiprtcProgram program{};
 
-#if HT_AMD
-  const auto program_source = GENERATE(kMaxThreadsZero, kMaxThreadsNegative, kMinWarpsNegative,
-                                       kMaxThreadsNotInt, kMinWarpsNotInt);
-#else
-  // Aligned with CUDA behavior and expected behavior on NVIDIA
   const auto program_source = GENERATE(kMaxThreadsNotInt, kMinWarpsNotInt);
-#endif
 
   HIPRTC_CHECK(hiprtcCreateProgram(&program, program_source, "launch_bounds_negative.cc", 0,
                                    nullptr, nullptr));

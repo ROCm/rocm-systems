@@ -39,12 +39,12 @@ For more information, refer to `<https://github.com/ROCm/rocm_smi_lib>`__.
 
      * :doc:`Use C++ in ROCm SMI <how-to/use-cpp>`
      * :doc:`Use Python in ROCm SMI <how-to/use-python>`
-   
 
-  .. grid-item-card:: Tutorials    
+
+  .. grid-item-card:: Tutorials
 
      * :doc:`C++ <tutorials/cpp_tutorials>`
-     * :doc:`Python <tutorials/python_tutorials>`  
+     * :doc:`Python <tutorials/python_tutorials>`
 
 
 To contribute to the documentation, refer to `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

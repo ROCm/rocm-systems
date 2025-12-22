@@ -569,12 +569,16 @@ class Runtime {
   struct AsyncEventsInfo;
   struct AsyncEventsControl {
     AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    void Start();
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread thread_;
     bool exit;
-  };
+
+    private:
+    AsyncEventsInfo* info_;
+    os::Thread thread_;
+ };
 
   struct AsyncEvents {
     void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
@@ -682,13 +686,13 @@ class Runtime {
   };
 
   struct AsyncEventsInfo {
-    bool monitor_exceptions;
-    AsyncEventsControl control;
-    AsyncEvents events;
-    ConcurrentAsyncEvents new_events;
-
     AsyncEventsInfo(bool exceptions);
     ~AsyncEventsInfo();
+
+    bool monitor_exceptions;
+    AsyncEvents events;
+    ConcurrentAsyncEvents new_events;
+    AsyncEventsControl control;
   };
 
   struct PrefetchRange;
@@ -894,7 +898,7 @@ class Runtime {
 
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
-  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::map<uint64_t, size_t> ipc_sock_server_conns_;
   KernelMutex ipc_sock_server_lock_;
 
  private:

@@ -233,7 +233,7 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
-    FAIL_REGEX "ROCPROFSYS_TRACE|ROCPROFSYS_ABORT_FAIL_REGEX"
+    FAIL_REGEX "ROCPROFSYS_TRACE_LEGACY|ROCPROFSYS_TRACE_CACHED|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 string(
@@ -270,7 +270,7 @@ rocprofiler_systems_add_bin_test(
          txt json xml --force
     TIMEOUT 45
     LABELS "rocprofiler-systems-avail"
-    ENVIRONMENT "ROCPROFSYS_TRACE=OFF;ROCPROFSYS_PROFILE=ON"
+    ENVIRONMENT "ROCPROFSYS_TRACE_LEGACY=OFF;ROCPROFSYS_TRACE_CACHED=OFF;ROCPROFSYS_PROFILE=ON"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}tweak\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}tweak\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}tweak\\\.cfg'(.*)"
 )

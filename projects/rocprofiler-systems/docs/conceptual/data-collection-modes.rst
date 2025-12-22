@@ -176,7 +176,17 @@ Primary collection modes
 Trace mode (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true`` or ``ROCPROFSYS_MODE=trace`` setting.
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_MODE=trace`` or by enabling one of the trace backend options.
+
+ROCm Systems Profiler provides two trace backend modes:
+
+- **Cached Mode (default, recommended)**: ``ROCPROFSYS_TRACE_CACHED=true`` or ``--trace`` / ``-T`` enables deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
+
+- **Legacy Mode**: ``ROCPROFSYS_TRACE_LEGACY=true`` or ``--trace-legacy`` / ``-L`` enables direct mode where trace data is written immediately during execution. This mode provides real-time trace generation but has higher runtime overhead compared to cached mode.
+
+.. note::
+
+   The ``ROCPROFSYS_TRACE`` environment variable is deprecated and has been renamed to ``ROCPROFSYS_TRACE_LEGACY``. For new workflows, use ``ROCPROFSYS_TRACE_CACHED`` (default) or ``ROCPROFSYS_TRACE_LEGACY`` explicitly.
 
 Additional configuration options to control the tracing behavior include:
 
@@ -244,8 +254,8 @@ Sampling types:
 To enable sampling:
 
 1. Use ``rocprof-sys-sample`` (auto-enables sampling).
-2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``. 
-3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``. 
+2. Set ``ROCPROFSYS_USE_SAMPLING=ON`` and ``ROCPROFSYS_MODE=sampling``.
+3. Use ``-S`` or ``--sample`` with ``rocprof-sys-run``.
 4. Use ``-M sampling`` or ``--mode sampling`` with ``rocprof-sys-instrument``. Use of ``rocprof-sys-sample`` is **recommended** over ``rocprof-sys-instrument -M sampling`` when binary instrumentation is not necessary. For more details, see :doc:`Sampling the call stack <../how-to/sampling-call-stack>`.
 
 Causal mode

@@ -248,7 +248,6 @@ class MenuBar(Container):
 
                 app.notify("Running analysis…", severity="information")
                 app.main_view.run_analysis()
-                app.notify("Analysis completed", severity="information")
             else:
                 app.log("Directory selection cancelled")
                 app.notify("Directory selection cancelled", severity="information")

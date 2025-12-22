@@ -41,4 +41,9 @@ enum HwQueueEngine : uint32_t {
   Unknown = 5
 };
 
+//! Returns true if the engine is an SDMA engine (any type)
+inline bool IsSdmaEngine(HwQueueEngine engine) {
+  return engine >= HwQueueEngine::SdmaRead && engine <= HwQueueEngine::SdmaInter;
+}
+
 }  // namespace amd::roc
