@@ -643,8 +643,6 @@
         "Unit_Device___fma_rn_Accuracy_Positive",
         "SWDEV-450909: Test failed in stress testing",
         "Unit_RTC_LinkDestroy_Default",
-        "=== SWDEV-457316 Below tests are disabled temporarily to avoid combined PSDB ===",
-        "Unit_hipGraphAddMemFreeNode_Negative_NotSupported",
         "=== SWDEV-454245, SWDEV-454247 : Below tests fail on 29/03/24 ===",
         "Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads",
         "Unit_hipStreamBeginCaptureToGraph_CaptureDepGraph",

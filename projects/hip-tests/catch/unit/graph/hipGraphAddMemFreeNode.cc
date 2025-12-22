@@ -168,8 +168,6 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
     HIP_CHECK_ERROR(hipGraphClone(&cloned_graph, graph2), hipErrorNotSupported);
   }
 
-  // hipGraphAddChildGraphNode/hipGraphRemoveDependencies should not allow to add child graph if it
-  // contains a alloc, free or conditional node
   SECTION("Use graph in a child node") {
     hipGraph_t parent_graph;
     HIP_CHECK(hipGraphCreate(&parent_graph, 0));
