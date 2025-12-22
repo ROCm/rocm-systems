@@ -72,8 +72,11 @@ compute_sleep_for_overhead()
         int64_t _end = tracing::now();
         if(i < _nwarm) continue;
         auto _diff = (_end - _beg);
-        ROCPROFSYS_CONDITIONAL_THROW(
-            _diff < _val, "Error! sleep_for(%zu) [nanoseconds] >= %zu", _val, _diff);
+        if(_diff < _val)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! sleep_for({}) [nanoseconds] >= {}", _val, _diff));
+        }
         _stats += (_diff - _val);
     }
 

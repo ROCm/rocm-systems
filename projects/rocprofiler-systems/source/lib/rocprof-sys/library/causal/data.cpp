@@ -388,8 +388,8 @@ save_line_info_impl(std::ostream&                           _ofs,
     auto _write_impl = [&_ofs, &_info](const binary::binary_info& _data) {
         for(const auto& itr : _data.mappings)
         {
-            _ofs << itr.pathname << " [" << as_hex(itr.load_address) << " - "
-                 << as_hex(itr.last_address) << "]\n";
+            _ofs << itr.pathname << " [" << fmt::format("0x{:X}", itr.load_address)
+                 << " - " << fmt::format("0x{:X}", itr.last_address) << "]\n";
         }
 
         auto _emitted_dwarf_addresses = std::set<uintptr_t>{};
@@ -397,7 +397,7 @@ save_line_info_impl(std::ostream&                           _ofs,
         {
             auto _addr     = itr.address;
             auto _addr_off = itr.address + itr.load_address;
-            _ofs << "    " << as_hex(_addr_off) << " [" << as_hex(_addr)
+            _ofs << "    " << _addr_off.as_hex() << " [" << _addr.as_hex()
                  << "] :: " << itr.file;
             if(itr.line > 0) _ofs << ":" << itr.line;
             if(!itr.func.empty())
@@ -419,7 +419,7 @@ save_line_info_impl(std::ostream&                           _ofs,
             {
                 for(const auto& ditr : itr.dwarf_info)
                 {
-                    _ofs << "        " << as_hex(ditr.address) << " :: " << ditr.file
+                    _ofs << "        " << ditr.address.as_hex() << " :: " << ditr.file
                          << ":" << ditr.line;
                     _ofs << "\n";
                     _emitted_dwarf_addresses.emplace(ditr.address.low);
@@ -432,7 +432,7 @@ save_line_info_impl(std::ostream&                           _ofs,
             for(const auto& itr : _data.debug_info)
             {
                 if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
-                _ofs << "    " << as_hex(itr.address) << " :: " << itr.file << ":"
+                _ofs << "    " << itr.address.as_hex() << " :: " << itr.file << ":"
                      << itr.line;
                 _ofs << "\n";
             }
@@ -582,7 +582,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 for(const auto& itr : _eligible_pc_hist)
                 {
                     _eligible << "    " << std::setw(8) << itr.second
-                              << " :: " << as_hex(itr.first) << "\n";
+                              << " :: " << fmt::format("0x{:X}", itr.first) << "\n";
                 }
 
                 auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
@@ -606,7 +606,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                         {
                             _sample << "    " << std::setw(8) << itr.second
                                     << " :: " << std::setw(5) << std::boolalpha
-                                    << _is_eligible << " :: " << as_hex(itr.first) << " "
+                                    << _is_eligible
+                                    << " :: " << fmt::format("0x{:X}", itr.first) << " "
                                     << _linfo->location << ":" << _linfo->lineno << " ["
                                     << rocprofsys::utility::demangle(_linfo->name)
                                     << "]\n";
@@ -615,7 +616,8 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                                 _sample
                                     << "    " << std::setw(8) << itr.second
                                     << " :: " << std::setw(5) << std::boolalpha
-                                    << _is_eligible << " :: " << as_hex(itr.first) << " "
+                                    << _is_eligible
+                                    << " :: " << fmt::format("0x{:X}", itr.first) << " "
                                     << iitr.location << ":" << iitr.line << " ["
                                     << rocprofsys::utility::demangle(iitr.name) << "]\n";
                             }
@@ -832,12 +834,14 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 {
                     if(ROCPROFSYS_UNLIKELY(config::get_debug()))
                     {
-                        LOG_WARNING(
-                            "[{}][{}][{}] [{}] {} [{}:{}][{}][{}]", as_hex(_lookup_addr),
-                            as_hex(_addr), as_hex(_sym_addr),
-                            (_location.empty()) ? "" : _location,
-                            rocprofsys::utility::demangle(itr.func), itr.file, itr.line,
-                            itr.address.as_string(), itr.address.size());
+                        LOG_WARNING("[{}][{}][{}] [{}] {} [{}:{}][{}][{}]",
+                                    fmt::format("0x{:X}", _lookup_addr),
+                                    fmt::format("0x{:X}", _addr),
+                                    fmt::format("0x{:X}", _sym_addr),
+                                    (_location.empty()) ? "" : _location,
+                                    rocprofsys::utility::demangle(itr.func), itr.file,
+                                    itr.line, itr.address.as_string(),
+                                    itr.address.size());
                     }
                 }
             }
@@ -895,12 +899,13 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
 
             // make sure the address is in the coarse grained mapped regions
             // before performing an exhaustive search
-            bool _is_mapped = std::find_if(litr.mappings.begin(), litr.mappings.end(),
-                                                  [_addr](const auto& mitr) {
-                                               return address_range_t{ mitr.load_address,
-                                                                       mitr.last_address }
-                                                   .contains(_addr);
-                                           }) != litr.mappings.end();
+            bool _is_mapped =
+                std::find_if(litr.mappings.begin(), litr.mappings.end(),
+                                    [_addr](const auto& mitr) {
+                                 return binary::address_range{ mitr.load_address,
+                                                               mitr.last_address }
+                                     .contains(_addr);
+                             }) != litr.mappings.end();
 
             if(!_is_mapped) return;
 
@@ -937,7 +942,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                             throw std::runtime_error(
                                 fmt::format("Error! debug line info ipaddr ({}) is not "
                                                           "contained in symbol ipaddr ({})",
-                                                   as_hex(itr.ipaddr()), as_hex(_ipaddr)));
+                                                   itr.ipaddr().as_hex(), _ipaddr.as_hex()));
                         if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
                     }
                     utility::combine(_local_data, _debug_data);
