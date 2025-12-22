@@ -121,8 +121,7 @@ struct Float16WithinUlpsMatcher : MatcherBase<Float16> {
         std::abs(direction_bits) == static_cast<int16_t>(0))
       return direction;
 
-    // Map to a monotonic ordering over signed magnitude. Makes integer comparisons reflect numeric
-    // ordering across sign.
+    // Makes integer comparisons reflect numeric ordering across sign.
     const int16_t from_ordered = (from_bits < 0) ? signbit_float16 - from_bits : from_bits;
     const int16_t direction_ordered =
         (direction_bits < 0) ? signbit_float16 - direction_bits : direction_bits;
