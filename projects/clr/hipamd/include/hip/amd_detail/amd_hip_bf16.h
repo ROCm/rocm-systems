@@ -362,8 +362,8 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
     __bf16_2 __xy_bf162;
   };
 #else
-  /* GCC does not support anonymous structs within unions (Clang allows this as an extension).
-     Expose x and y directly instead. */
+  /* GCC does not support anonymous structs with members that have non-trivial constructors (Clang
+  allows this as an extension). Expose x and y directly instead. */
   __hip_bfloat16 x;
   __hip_bfloat16 y;
 #endif
