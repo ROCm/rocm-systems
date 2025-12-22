@@ -562,7 +562,7 @@ cache_manager::get_instance()
 void
 cache_manager::post_process_bulk()
 {
-    LOG_INFO("Starting trace cache bulk post-processing");
+    LOG_TRACE("Starting trace cache bulk post-processing");
 
     if(!is_root_process())
     {
@@ -645,7 +645,7 @@ cache_manager::post_process_bulk()
 
     filesystem_utils::clear_cache_files(cache_files);
 
-    LOG_INFO("Trace cache bulk post-processing completed");
+    LOG_TRACE("Trace cache bulk post-processing completed");
 }
 
 void

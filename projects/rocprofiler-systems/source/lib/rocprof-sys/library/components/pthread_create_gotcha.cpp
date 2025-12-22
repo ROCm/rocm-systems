@@ -545,8 +545,7 @@ is_rocm_internal_thread(void* func_ptr)
     Dl_info info;
     if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr)
     {
-        ROCPROFSYS_VERBOSE(4, "dladdr failed or returned no filename for func_ptr=%p\n",
-                           func_ptr);
+        LOG_TRACE("dladdr failed or returned no filename for func_ptr={:p}", func_ptr);
         return false;
     }
 

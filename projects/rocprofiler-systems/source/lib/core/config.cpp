@@ -1902,8 +1902,9 @@ get_use_sampling()
     static auto _v = get_config()->find("ROCPROFSYS_USE_SAMPLING");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
-    ROCPROFSYS_THROW("Error! sampling was enabled but rocprof-sys was not built with "
-                     "libunwind support");
+    throw std::runtime_error(
+        "Error! sampling was enabled but rocprof-sys was not built with "
+        "libunwind support");
     static bool _v = false;
     return _v;
 #endif
@@ -2184,38 +2185,26 @@ get_perfetto_output_filename()
         _val = _val.substr(0, _pos_ext);
     }
 
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] Parsed: dir='%s', basename='%s', ext='%s'\n",
-        _dir.c_str(), _val.c_str(), _ext.c_str());
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] settings::output_path()='%s'\n",
-        settings::output_path().c_str());
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] settings::output_prefix()='%s'\n",
-        settings::output_prefix().c_str());
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}'", _dir, _val, _ext);
+    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
+    LOG_DEBUG("settings::output_prefix()='{}'", settings::output_prefix());
 
     auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
                                                    settings::default_process_suffix(),
                                                    false, _dir };
     _val      = settings::compose_output_filename(_val, _ext, _cfg);
 
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] After compose_output_filename: '%s'\n",
-        _val.c_str());
+    LOG_DEBUG("After compose_output_filename: '{}'", _val);
 
     if(!_val.empty() && _val.at(0) != '/')
     {
         auto _result =
             settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
-        ROCPROFSYS_BASIC_VERBOSE_F(
-            2, "[get_perfetto_output_filename] Path is relative, prepending PWD: '%s'\n",
-            _result.c_str());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
 
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename] Path is absolute, returning: '%s'\n",
-        _val.c_str());
+    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
     return _val;
 }
 
@@ -2475,18 +2464,12 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
     auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 
-    ROCPROFSYS_BASIC_VERBOSE_F(2,
-                               "[get_perfetto_output_filename_with_suffix] Initial "
-                               "ROCPROFSYS_PERFETTO_FILE='%s', suffix='%s'\n",
-                               _val.c_str(), std::string{ suffix }.c_str());
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
 
     // If absolute path is provided, return it as-is
     if(!_val.empty() && _val.at(0) == '/')
     {
-        ROCPROFSYS_BASIC_VERBOSE_F(
-            2,
-            "[get_perfetto_output_filename_with_suffix] Absolute path, returning: '%s'\n",
-            _val.c_str());
+        LOG_DEBUG("Absolute path, returning: '{}'", _val);
         return _val;
     }
 
@@ -2512,14 +2495,9 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     bool _explicitly_set =
         (_v->second->get_environ_updated() || _v->second->get_config_updated());
 
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2,
-        "[get_perfetto_output_filename_with_suffix] Parsed: dir='%s', basename='%s', "
-        "ext='%s', explicitly_set=%s\n",
-        _dir.c_str(), _val.c_str(), _ext.c_str(), _explicitly_set ? "true" : "false");
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2, "[get_perfetto_output_filename_with_suffix] settings::output_path()='%s'\n",
-        settings::output_path().c_str());
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
+              _ext, _explicitly_set);
+    LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
 
     auto _cfg = settings::compose_filename_config{
         !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
@@ -2530,26 +2508,17 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     _val = settings::compose_output_filename(_val, _ext, _cfg);
 
-    ROCPROFSYS_BASIC_VERBOSE_F(2,
-                               "[get_perfetto_output_filename_with_suffix] After "
-                               "compose_output_filename: '%s'\n",
-                               _val.c_str());
+    LOG_DEBUG("After compose_output_filename: '{}'", _val);
 
     if(!_val.empty() && _val.at(0) != '/')
     {
         auto _result =
             settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
-        ROCPROFSYS_BASIC_VERBOSE_F(2,
-                                   "[get_perfetto_output_filename_with_suffix] Path is "
-                                   "relative, prepending PWD: '%s'\n",
-                                   _result.c_str());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
 
-    ROCPROFSYS_BASIC_VERBOSE_F(
-        2,
-        "[get_perfetto_output_filename_with_suffix] Path is absolute, returning: '%s'\n",
-        _val.c_str());
+    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
     return _val;
 }
 

@@ -66,14 +66,14 @@ address_range::as_string(int _depth) const
 std::string
 address_range::as_hex() const
 {
-    const auto _width       = 16;
+    const auto c_width      = 16;
     const auto _as_hex_util = [](auto _v, size_t _width) {
         return fmt::format("0x{:0{}x}", _v, _width);
     };
 
-    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, _width),
-                                      _as_hex_util(high, _width))
-                        : _as_hex_util(low, _width);
+    return (is_range()) ? fmt::format("{}-{}", _as_hex_util(low, c_width),
+                                      _as_hex_util(high, c_width))
+                        : _as_hex_util(low, c_width);
 }
 
 uintptr_t

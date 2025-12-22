@@ -337,7 +337,7 @@ perfetto_processor_t::start_session()
     m_tracing_session->Setup(m_session_config, temp_fd);
     m_tracing_session->StartBlocking();
 
-    LOG_INFO("Perfetto tracing session started for pid={}", m_process_id);
+    LOG_TRACE("Perfetto tracing session started for pid={}", m_process_id);
 }
 
 void
@@ -475,7 +475,7 @@ perfetto_processor_t::finalize_processing()
     }
     else
     {
-        LOG_INFO("Perfetto processing finalized successfully for pid={}", m_process_id);
+        LOG_DEBUG("Perfetto processing finalized successfully for pid={}", m_process_id);
     }
 }
 

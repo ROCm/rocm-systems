@@ -242,7 +242,8 @@ perf_event::get_count() const
     uint64_t count;
     if(read(m_fd, &count, sizeof(uint64_t)) != sizeof(uint64_t))
     {
-        LOG_WARNING("Failed to read event count from perf_event file");
+        LOG_CRITICAL("Failed to read event count from perf_event file");
+        std::exit(1);
     }
     return count;
 }
@@ -256,7 +257,8 @@ perf_event::start() const
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) == -1)
         {
-            LOG_WARNING("Failed to start perf event: {}", strerror(errno));
+            LOG_CRITICAL("Failed to start perf event: {}", strerror(errno));
+            std::exit(1);
         }
     }
     return (m_fd != -1);
@@ -271,7 +273,8 @@ perf_event::stop() const
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) == -1)
         {
-            LOG_WARNING("Failed to stop perf event: {}", strerror(errno));
+            LOG_CRITICAL("Failed to stop perf event: {}", strerror(errno));
+            std::exit(1);
         }
     }
     return (m_fd != -1);
@@ -309,20 +312,23 @@ perf_event::set_ready_signal(int sig) const
     // Set the perf_event file to async
     if(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) == -1)
     {
-        LOG_WARNING("Failed to set perf_event file to async mode: {}", strerror(errno));
+        LOG_CRITICAL("Failed to set perf_event file to async mode: {}", strerror(errno));
+        std::exit(1);
     }
 
     // Set the notification signal for the perf file
     if(fcntl(m_fd, F_SETSIG, sig) == -1)
     {
-        LOG_WARNING("Failed to set perf_event file signal: {}", strerror(errno));
+        LOG_CRITICAL("Failed to set perf_event file signal: {}", strerror(errno));
+        std::exit(1);
     }
 
     // Set the current thread as the owner of the file (to target signal delivery)
     if(fcntl(m_fd, F_SETOWN, gettid()) == -1)
     {
-        LOG_WARNING("Failed to set the owner of the perf_event file: {}",
-                    strerror(errno));
+        LOG_CRITICAL("Failed to set the owner of the perf_event file: {}",
+                     strerror(errno));
+        std::exit(1);
     }
 }
 
@@ -454,7 +460,7 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
 uint64_t
 perf_event::record::get_ip() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::ip))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::ip))
     {
         LOG_CRITICAL("Record does not have an ip field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -466,7 +472,7 @@ perf_event::record::get_ip() const
 uint64_t
 perf_event::record::get_pid() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
     {
         LOG_CRITICAL("Record does not have a `pid` field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -478,7 +484,7 @@ perf_event::record::get_pid() const
 uint64_t
 perf_event::record::get_tid() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
     {
         LOG_CRITICAL("Record does not have a `tid` field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -490,7 +496,7 @@ perf_event::record::get_tid() const
 uint64_t
 perf_event::record::get_time() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::time))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::time))
     {
         LOG_CRITICAL("Record does not have a 'time' field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -502,7 +508,7 @@ perf_event::record::get_time() const
 uint64_t
 perf_event::record::get_period() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::period))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::period))
     {
         LOG_CRITICAL("Record does not have a 'period' field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -514,7 +520,7 @@ perf_event::record::get_period() const
 uint32_t
 perf_event::record::get_cpu() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::cpu))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::cpu))
     {
         LOG_CRITICAL("Record does not have a 'cpu' field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));
@@ -526,7 +532,7 @@ perf_event::record::get_cpu() const
 container::c_array<uint64_t>
 perf_event::record::get_callchain() const
 {
-    if(is_sample() && m_source != nullptr && m_source->is_sampling(sample::callchain))
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::callchain))
     {
         LOG_CRITICAL("Record does not have a callchain field ({}|{:p})", is_sample(),
                      static_cast<const void*>(m_source));

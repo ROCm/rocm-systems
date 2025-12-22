@@ -2068,7 +2068,6 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
             LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_SET, phase = "
-                      " operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                       "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id={}",
                       (unsigned long) stream_id.handle);
             stream_id_push(stream_id);

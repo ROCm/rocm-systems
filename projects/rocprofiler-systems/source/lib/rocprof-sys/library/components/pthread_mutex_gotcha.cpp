@@ -77,13 +77,14 @@ pthread_mutex_gotcha::get_hashes()
                 if(_skip.count(i) > 0) continue;
                 LOG_WARNING("pthread_mutex_gotcha tool id at index {} was empty!", i);
             }
-            // TODO:
-            // ROCPROFSYS_CI_FAIL(
-            //     _id.empty() || _init.at(i) == 0,
-            //     "pthread_mutex_gotcha tool id at index %zu has no hash value\n", i);
-            LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value", i);
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-            std::exit(1);
+
+            if(get_is_continuous_integration() && (_id.empty() || _init.at(i) == 0))
+            {
+                LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value",
+                             i);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::exit(1);
+            }
         }
         return _init;
     }();
