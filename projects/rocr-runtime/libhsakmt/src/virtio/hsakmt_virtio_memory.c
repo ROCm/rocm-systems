@@ -992,9 +992,9 @@ int vhsakmt_handle_to_resid(vhsakmt_device_handle dev, uint32_t handle,
   return 0;
 }
 
-HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
-    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags) {
   CHECK_VIRTIO_KFD_OPEN();
 
   vhsakmt_device_handle dev = vhsakmt_dev();
@@ -1022,6 +1022,8 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
   req->reg_ghd_to_nodes.GraphicsResourceHandle = bo_handle;
   req->reg_ghd_to_nodes.res_handle = res_id;
 #endif
+
+  req->reg_ghd_to_nodes.flag = RegisterFlags.Value;
 
   memcpy(req->payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
 
@@ -1066,8 +1068,34 @@ free_out:
   return r;
 }
 
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
+    HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  HSA_REGISTER_MEM_FLAGS flags = {0};
+
+  return vhsaKmtRegisterGraphicsHandleToNodesExt(GraphicsResourceHandle, GraphicsResourceInfo,
+                                                 NumberOfNodes, NodeArray, flags);
+}
+
 static int vhsakmt_export_dmabuf(vhsakmt_device_handle dev, uint32_t bo_handle, int* dmabuf_fd) {
   return drmPrimeHandleToFD(dev->vgdev->fd, bo_handle, DRM_CLOEXEC | DRM_RDWR, dmabuf_fd);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtMapGraphicHandle(HSAuint32 NodeId, HSAuint64 GraphicDeviceHandle,
+                                                HSAuint64 GraphicResourceHandle,
+                                                HSAuint64 GraphicResourceOffset,
+                                                HSAuint64 GraphicResourceSize,
+                                                HSAuint64* FlatMemoryAddress) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapGraphicHandle(HSAuint32 NodeId, HSAuint64 FlatMemoryAddress,
+                                                  HSAuint64 SizeInBytes) {
+  return vhsaKmtUnmapMemoryToGPU(VHSA_UINT64_TO_VPTR(FlatMemoryAddress));
 }
 
 HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,

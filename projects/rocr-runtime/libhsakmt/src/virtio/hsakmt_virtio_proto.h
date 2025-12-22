@@ -549,7 +549,7 @@ typedef struct _gl_inter_req_reg_ghd_to_nodes {
   uint64_t GraphicsResourceHandle;
   uint64_t NumberOfNodes;  // NodeArray in payload
   uint32_t res_handle;
-  uint32_t pad;
+  uint32_t flag;
 } gl_inter_req_reg_ghd_to_nodes;
 VHSAKMT_STATIC_ASSERT_SIZE(_gl_inter_req_reg_ghd_to_nodes)
 

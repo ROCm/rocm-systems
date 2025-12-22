@@ -112,9 +112,19 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type
                                            void* QueueAddress, HSAuint64 QueueSizeInBytes,
                                            HsaEvent* Event, HsaQueueResource* QueueResource);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDestroyQueue(HSA_QUEUEID QueueId);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
+    HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodes(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtMapGraphicHandle(HSAuint32 NodeId, HSAuint64 GraphicDeviceHandle,
+                                                HSAuint64 GraphicResourceHandle,
+                                                HSAuint64 GraphicResourceOffset,
+                                                HSAuint64 GraphicResourceSize,
+                                                HSAuint64* FlatMemoryAddress);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapGraphicHandle(HSAuint32 NodeId, HSAuint64 FlatMemoryAddress,
+                                                  HSAuint64 SizeInBytes);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                   int* DMABufFd, HSAuint64* Offset);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
