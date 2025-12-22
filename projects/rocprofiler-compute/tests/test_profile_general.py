@@ -37,6 +37,8 @@ import pandas as pd
 import pytest
 import test_utils
 from scipy.stats import zscore
+from glob import glob
+import random
 
 # Runtime config options
 config = {}
@@ -2787,7 +2789,7 @@ def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     Verifies that all required files are generated and counter values are valid.
     """
     pytest.importorskip("torch", reason="Skipping torch test since PyTorch is not installed")
-    
+    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
     
     REPO_ROOT = Path(__file__).resolve().parents[2]
     BUILD_DIR = Path(os.environ.get("ROCPROFILER_COMPUTE_BUILD_DIR", REPO_ROOT / "build"))
@@ -2833,15 +2835,25 @@ if __name__ == "__main__":
     
     with open(torch_app_path, "w") as f:
         f.write(torch_app_code)
-    
+
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+
     # Profile with --torch-operators option
-    options = ["--torch-operators", "--format-rocprof-output","csv","--no-native-tool", "--", "python3", str(torch_app_path)]
+    options = [
+        "--torch-operators",
+        "--format-rocprof-output",
+        "csv",
+        "--no-native-tool",
+        "--device",
+        "-1"
+    ]
+
     returncode = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="torch_test_app"
     )
     assert returncode == 0, "Profiling the torch application failed"
@@ -2852,7 +2864,9 @@ if __name__ == "__main__":
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
     
     # 2. Check torch trace output
-    torch_trace_csv = Path(workload_dir) / "torch_test_app_torch_trace.csv"
+    torch_trace_csvs = glob(workload_dir+"/*_torch_trace.csv")
+    assert len(torch_trace_csvs) == 13, "Torch trace CSV files are less than expected."
+    torch_trace_csv = Path(random.choice(torch_trace_csvs))
     assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
     
     # 3. Check torch operators directory
@@ -2887,4 +2901,4 @@ if __name__ == "__main__":
     
     
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    print("test_torch_operators_profile completed successfully")
+    

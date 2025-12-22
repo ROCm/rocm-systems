@@ -1,3 +1,29 @@
+##############################################################################
+# MIT License
+#
+# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
+
 """
 ROCTX Injection Wrapper - Auto-discovers and intercepts ALL PyTorch operators
 Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
@@ -5,6 +31,7 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 
 import os
 import sys
+from utils.logger import console_debug, console_error, console_log, console_warning
 
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
@@ -70,7 +97,7 @@ def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
 def inject_roctx_into_torch():
     """Monkey-patch PyTorch operations to add ROCTX markers."""
     
-    print("🔧 Auto-discovering PyTorch operations to wrap...")
+    console_log("🔧 Auto-discovering PyTorch operations to wrap...")
     
     # Auto-discover functions from key modules
     all_operations = {}
@@ -93,8 +120,8 @@ def inject_roctx_into_torch():
     except:
         pass
     
-    print(f"Found {len(all_operations)} operations to wrap")
-    print("🔧 Injecting ROCTX markers into PyTorch operations...")
+    console_log(f"Found {len(all_operations)} operations to wrap")
+    console_log("🔧 Injecting ROCTX markers into PyTorch operations...")
     
     wrapped_count = 0
     failed_count = 0
@@ -108,14 +135,14 @@ def inject_roctx_into_torch():
             
             # Print first 20 and last 5 for visibility
             if wrapped_count <= 20 or wrapped_count > len(all_operations) - 5:
-                print(f"  ✓ Wrapped: {full_name}")
+                console_log(f"  ✓ Wrapped: {full_name}")
             elif wrapped_count == 21:
-                print(f"  ... (wrapping {len(all_operations) - 25} more operations)")
+                console_log(f"  ... (wrapping {len(all_operations) - 25} more operations)")
                 
         except Exception as e:
             failed_count += 1
             if failed_count <= 5:  # Only show first few failures
-                print(f"  ✗ Failed to wrap {full_name}: {e}")
+                console_warning(f"  ✗ Failed to wrap {full_name}: {e}")
     
     # Wrap tensor methods
     original_backward = torch.Tensor.backward
@@ -132,12 +159,12 @@ def inject_roctx_into_torch():
     torch.Tensor.backward = backward_with_roctx
 
     wrapped_count += 1
-    print(f"  ✓ Wrapped: torch.Tensor.backward")
+    console_log(f"  ✓ Wrapped: torch.Tensor.backward")
     
-    print(f"✅ Wrapped {wrapped_count} operations with ROCTX markers")
+    console_log(f"✅ Wrapped {wrapped_count} operations with ROCTX markers")
     if failed_count > 0:
-        print(f"⚠️  Failed to wrap {failed_count} operations (likely not patchable)")
-    print()
+        console_warning(f"⚠️  Failed to wrap {failed_count} operations (likely not patchable)")
+    
 
 
 def inject_roctx_into_optimizer():
@@ -154,7 +181,7 @@ def inject_roctx_into_optimizer():
             rangePop()
     
     Optimizer.step = step_with_roctx
-    print("✅ Wrapped optimizer.step() with ROCTX markers\n")
+    console_log("✅ Wrapped optimizer.step() with ROCTX markers\n")
 
 
 def inject_roctx_into_model():
@@ -185,32 +212,26 @@ def inject_roctx_into_model():
             rangePop()
     
     nn.Module.__call__ = call_with_roctx
-    print("✅ Wrapped nn.Module forward() with ROCTX markers\n")
+    console_log("✅ Wrapped nn.Module forward() with ROCTX markers\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python inject_roctx.py <script.py> [script_args...]")
+        console_log("Usage: python inject_roctx.py <script.py> [script_args...]")
         sys.exit(1)
     
     # Get target script and its arguments
     target_script = sys.argv[1]
     script_args = sys.argv[2:]
     
-    print("=" * 70)
-    print("ROCTX Auto-Injection Wrapper")
-    print("=" * 70)
-    print(f"Target script: {target_script}")
-    print(f"Arguments: {' '.join(script_args)}\n")
     
     # Inject ROCTX markers BEFORE importing the target script
     inject_roctx_into_torch()
     inject_roctx_into_optimizer()
     inject_roctx_into_model()
     
-    print("=" * 70)
-    print("Starting target script with ROCTX instrumentation...")
-    print("=" * 70)
-    print()
+    console_log("=" * 70)
+    console_log("Starting target script with ROCTX instrumentation...")
+    console_log("=" * 70)
     
     # Modify sys.argv so the target script sees correct arguments
     sys.argv = [target_script] + script_args
