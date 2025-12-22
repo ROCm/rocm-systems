@@ -39,6 +39,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
@@ -47,25 +48,27 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
 )
 
 set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/common_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/debug.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/gpu_metrics.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
@@ -77,9 +80,6 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
 )
 
 add_library(rocprofiler-systems-core-library STATIC)
@@ -123,6 +123,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
@@ -132,23 +133,11 @@ target_link_libraries(
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
 )
 
-file(GLOB ROCPD_SCHEMA_FILES "${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/schema/*.sql")
-
-foreach(_SRC ${ROCPD_SCHEMA_FILES})
-    cmake_path(GET _SRC FILENAME _BASE)
-    configure_file(
-        ${_SRC}
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        COPYONLY
-    )
-    install(
-        FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/${_BASE}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-        COMPONENT core
-    )
-endforeach()
-
 set_target_properties(
     rocprofiler-systems-core-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

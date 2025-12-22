@@ -30,6 +30,7 @@ The HIP documentation is organized into the following categories:
 :::{grid-item-card} Programming guide
 
 * {doc}`./understand/programming_model`
+* {doc}`./understand/performance_optimization`
 * {doc}`./understand/hardware_implementation`
 * {doc}`./understand/compilers`
 * {doc}`./how-to/performance_guidelines`
@@ -38,8 +39,7 @@ The HIP documentation is organized into the following categories:
 * {doc}`./how-to/hip_runtime_api`
 * {doc}`./how-to/hip_cpp_language_extensions`
 * {doc}`./how-to/kernel_language_cpp_support`
-* [HIP porting guide](./how-to/hip_porting_guide)
-* [HIP porting: driver API guide](./how-to/hip_porting_driver_api)
+* {doc}`./how-to/hip_porting_guide`
 * {doc}`./how-to/hip_rtc`
 * {doc}`./understand/amd_clr`
 
@@ -64,8 +64,10 @@ The HIP documentation is organized into the following categories:
 * [HIP basic examples](https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic)
 * [HIP examples](https://github.com/ROCm/rocm-examples)
 * [SAXPY tutorial](./tutorial/saxpy)
+* [GPU programming patterns](./tutorial/programming-patterns)
 * [Reduction tutorial](./tutorial/reduction)
 * [Cooperative groups tutorial](./tutorial/cooperative_groups_tutorial)
+* [HIP Graph API tutorial](./tutorial/graph_api)
 
 :::
 

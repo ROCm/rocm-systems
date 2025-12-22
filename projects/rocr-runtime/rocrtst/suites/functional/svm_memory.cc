@@ -301,6 +301,16 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
 
 void SvmMemoryTestBasic::TestCreateDestroy(void) {
   hsa_status_t err;
+
+  // Check if SVM is supported by the ROCr runtime
+  bool svm_supported = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+  
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping CreateDestroy test ***" << std::endl;
+    return;
+  }
+
   std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
 
   if (verbosity() > 0) {
@@ -324,6 +334,16 @@ void SvmMemoryTestBasic::TestCreateDestroy(void) {
 
 void SvmMemoryTestBasic::TestSVMPrefetch(void) {
   hsa_status_t err;
+
+  // Check if SVM is supported by the ROCr runtime
+  bool svm_supported = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, &svm_supported);
+  
+  if (err != HSA_STATUS_SUCCESS || !svm_supported) {
+    std::cout << "  *** SVM is not supported - skipping SVMPrefetch test ***" << std::endl;
+    return;
+  }
+
   std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
 
   if (verbosity() > 0) {

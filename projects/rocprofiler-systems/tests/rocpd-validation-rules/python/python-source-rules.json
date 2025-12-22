@@ -1,0 +1,105 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for python-builtin tests",
+            "name": "top",
+            "required_columns": [
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'main_loop' has a total of 5 calls.",
+                    "error_message": "'main_loop' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT total_calls FROM top WHERE name = 'main_loop';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'run' has a total of 3 calls.",
+                    "error_message": "'run' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT total_calls FROM top WHERE name = 'run';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'inefficient' has a total of 3 calls.",
+                    "error_message": "'inefficient' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT total_calls FROM top WHERE name = 'inefficient';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '_sum' has a total of 3 calls.",
+                    "error_message": "'_sum' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT total_calls FROM top WHERE name = '_sum';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'fib' has a total of 3 calls.",
+                    "error_message": "'fib' does not have 24 total calls, as expected.",
+                    "expected_result": 24,
+                    "query": "SELECT total_calls FROM top WHERE name = 'fib';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that percentages sum to 100.",
+                    "error_message": "Percentages do not sum to 100.",
+                    "expected_result": 100,
+                    "query": "SELECT ROUND(SUM(percentage), 1) FROM top;"
+                }
+            ]
+        },
+        {
+            "commit": "",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'main_loop' has a total of 5 calls.",
+                    "error_message": "'main_loop' does not have 5 total calls, as expected.",
+                    "expected_result": 5,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'main_loop';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'run' has a total of 3 calls.",
+                    "error_message": "'run' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'run';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'inefficient' has a total of 3 calls.",
+                    "error_message": "'inefficient' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'inefficient';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that '_sum' has a total of 3 calls.",
+                    "error_message": "'_sum' does not have 3 total calls, as expected.",
+                    "expected_result": 3,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = '_sum';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify that 'fib' has a total of 24 calls.",
+                    "error_message": "'fib' does not have 24 total calls, as expected.",
+                    "expected_result": 24,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'fib';"
+                }
+            ]
+        }
+    ]
+}

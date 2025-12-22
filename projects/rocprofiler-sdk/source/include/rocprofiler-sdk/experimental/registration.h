@@ -67,7 +67,7 @@ typedef void (*rocprofiler_tool_detach_t)(void* tool_data);
  * attach/detach, and data.
  *
  * This is an experimental extension of ::rocprofiler_tool_configure_result_t that adds support for
- * runtime attachment and detachment of tools. The `tool_reattach` and `tool_detach` function
+ * runtime attachment and detachment of tools. The `tool_attach` and `tool_detach` function
  * pointers allow tools to handle dynamic attachment scenarios where they may need to suspend and
  * resume profiling operations.
  *

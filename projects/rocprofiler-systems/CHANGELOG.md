@@ -4,16 +4,48 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+
+### Added
+
+- Documentation for `ROCPROFSYS_TRACE_CACHED` configuration option and its performance benefits.
+- Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
+
+### Changed
+
+- `ROCPROFSYS_TRACE_CACHED` is now the default perfetto tracing mode for improved performance.
+- Renamed `ROCPROFSYS_TRACE` to `ROCPROFSYS_TRACE_LEGACY` (with backward compatibility).
+- `--trace` / `-T` CLI flag now uses cached mode by default.
+- Added `--trace-legacy` / `-L` CLI flag for direct tracing mode.
+
+### Deprecated
+
+- `ROCPROFSYS_TRACE` environment variable (use `ROCPROFSYS_TRACE_LEGACY` for direct mode).
+- `ROCPROFSYS_USE_PERFETTO` environment variable (use `ROCPROFSYS_TRACE_LEGACY`).
+
 ## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
 
 ### Added
 
+- Profiling and metric collection capabilities for XGMI and PCIe data.
+- How-to document for XGMI and PCIe sampling and monitoring.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
-- Added tracing of VAAPI, MPI and host events inside `rocpd` output database.
+- Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
 
 ### Changed
 
 - Improved Fortran main function detection to ensure `rocprof-sys-instrument` uses the Fortran program main function instead of the C wrapper.
+
+### Resolved issues
+
+- Fixed a crash when running `rocprof-sys-python` with ROCPROFSYS_USE_ROCPD enabled.
+- Fixed an issue where kernel/memory-copy events could appear on the wrong Perfetto track (e.g., queue track when stream grouping was requested) because _group_by_queue state leaked between records.
+
+## ROCm Systems Profiler 1.2.1 for ROCm 7.1.1
+
+### Resolved issues
+
+- Fixed an issue of OpenMP Tools (OMPT) events, GPU performance counters, VA-API, MPI, and host events failing to be collected in the `rocpd` output.
 
 ## ROCm Systems Profiler 1.2.0 for ROCm 7.1.0
 

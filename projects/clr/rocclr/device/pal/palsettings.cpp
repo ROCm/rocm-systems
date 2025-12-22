@@ -58,8 +58,6 @@ Settings::Settings() {
 
   hostMemDirectAccess_ = HostMemDisable;
 
-  libSelector_ = amd::LibraryUndefined;
-
   // By default use host blit
   blitEngine_ = BlitEngineHost;
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
@@ -119,10 +117,8 @@ Settings::Settings() {
       std::min(static_cast<uint64_t>(GPU_MAX_SUBALLOC_SIZE) * Ki, subAllocationChunkSize_);
 
   maxCmdBuffers_ = 12;
-  useLightning_ = amd::IS_HIP ? true : ((!flagIsDefault(GPU_ENABLE_LC)) ? GPU_ENABLE_LC : false);
   enableWgpMode_ = false;
   enableWave32Mode_ = false;
-  hsailExplicitXnack_ = false;
   lcWavefrontSize64_ = true;
   enableHwP2P_ = false;
   imageBufferWar_ = false;
@@ -135,7 +131,7 @@ Settings::Settings() {
                                                           : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_CLR_GRAPH_PACKET_CAPTURE = false;  // disable graph performance optimizations for PAL
+  DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING = 0;  // disable graph performance optimizations for PAL
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,
@@ -152,7 +148,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   }
 
   enableXNACK_ = (isa.xnack() == amd::Isa::Feature::Enabled);
-  hsailExplicitXnack_ = enableXNACK_;
   bool useWavefront64 = false;
 
   std::string appName = {};
@@ -171,6 +166,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     // Fall through for Navi2x ...
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
+    case Pal::AsicRevision::Krackan1:
     case Pal::AsicRevision::Phoenix1:
     case Pal::AsicRevision::Phoenix2:
     case Pal::AsicRevision::HawkPoint1:
@@ -192,11 +188,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::Navi14:
     case Pal::AsicRevision::Navi12:
     case Pal::AsicRevision::Navi10:
-      useLightning_ = GPU_ENABLE_LC;
       enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-      if (useLightning_) {
-        enableWave32Mode_ = true;
-      }
+      enableWave32Mode_ = true;
       if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
         enableWave32Mode_ = GPU_ENABLE_WAVE32_MODE;
       }
@@ -211,9 +204,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       enableHwP2P_ = true;
       enableCoopGroups_ = IS_LINUX;
       enableCoopMultiDeviceGroups_ = IS_LINUX;
-      if (useLightning_) {
-        singleFpDenorm_ = true;
-      }
+      singleFpDenorm_ = true;
       enableExtension(ClKhrFp16);
       threadTraceEnable_ = AMD_THREAD_TRACE_ENABLE;
       // Cache line size is 64 bytes
@@ -221,7 +212,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
       // L1 cache size is 16KB
       cacheSize_ = 16 * Ki;
 
-      libSelector_ = amd::GPU_Library_CI;
       if (LP64_SWITCH(false, true)) {
         oclVersion_ =
             !reportAsOCL12Device ? XCONCAT(OpenCL, XCONCAT(OPENCL_MAJOR, OPENCL_MINOR)) : OpenCL12;
@@ -279,11 +269,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     enableExtension(ClAmdCopyBufferP2P);
   }
 
-  if (!useLightning_) {
-    enableExtension(ClAmdPopcnt);
-    enableExtension(ClAmdVec3);
-    enableExtension(ClAmdPrintf);
-  }
   // Enable some platform extensions
   enableExtension(ClAmdDeviceAttributeQuery);
 
@@ -304,12 +289,6 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
   if (doublePrecision_) {
     // Enable KHR double precision extension
     enableExtension(ClKhrFp64);
-  }
-
-  if (!useLightning_) {
-    // Enable AMD double precision extension
-    doublePrecision_ = true;
-    enableExtension(ClAmdFp64);
   }
 
   if (palProp.gpuMemoryProperties.busAddressableMemSize > 0) {

@@ -20,7 +20,6 @@
 
 #include "os/os.hpp"
 #include "utils/flags.hpp"
-#include "aclTypes.h"
 #include "device/pal/palprogram.hpp"
 #include "device/pal/palblit.hpp"
 #include "utils/options.hpp"
@@ -67,7 +66,7 @@ bool Segment::gpuAddressOffset(uint64_t offAddr, size_t* offset) {
   return true;
 }
 
-bool Segment::alloc(HSAILProgram& prog, amdgpu_hsa_elf_segment_t segment, size_t size, size_t align,
+bool Segment::alloc(pal::Program& prog, amdgpu_hsa_elf_segment_t segment, size_t size, size_t align,
                     bool zero) {
   if (prog.isNull()) {
     LogError("[OCL] cannot create a mem object on an offline device!");
@@ -174,8 +173,9 @@ bool Segment::freeze(bool destroySysmem) {
   return result;
 }
 
-HSAILProgram::HSAILProgram(Device& device, amd::Program& owner)
-    : Program(device, owner),
+// ================================================================================================
+Program::Program(Device& device, amd::Program& owner)
+    : device::Program(device, owner),
       rawBinary_(nullptr),
       kernels_(nullptr),
       codeSegGpu_(nullptr),
@@ -186,10 +186,11 @@ HSAILProgram::HSAILProgram(Device& device, amd::Program& owner)
       loaderContext_(this) {
   assert(device.isOnline());
   loader_ = amd::hsa::loader::Loader::Create(&loaderContext_);
+  isHIP_ = (owner.language() == amd::Program::HIP);
 }
 
-HSAILProgram::HSAILProgram(NullDevice& device, amd::Program& owner)
-    : Program(device, owner),
+Program::Program(NullDevice& device, amd::Program& owner)
+    : device::Program(device, owner),
       rawBinary_(nullptr),
       kernels_(nullptr),
       codeSegGpu_(nullptr),
@@ -201,26 +202,14 @@ HSAILProgram::HSAILProgram(NullDevice& device, amd::Program& owner)
   assert(!device.isOnline());
   isNull_ = true;
   loader_ = amd::hsa::loader::Loader::Create(&loaderContext_);
+  isHIP_ = (owner.language() == amd::Program::HIP);
 }
 
-HSAILProgram::~HSAILProgram() {
+Program::~Program() {
   // Destroy internal static samplers
   for (auto& it : staticSamplers_) {
     delete it;
   }
-#if defined(WITH_COMPILER_LIB)
-  if (rawBinary_ != nullptr) {
-    amd::Hsail::FreeMem(binaryElf_, rawBinary_);
-  }
-  acl_error error;
-  // Free the elf binary
-  if (binaryElf_ != nullptr) {
-    error = amd::Hsail::BinaryFini(binaryElf_);
-    if (error != ACL_SUCCESS) {
-      LogWarning("Error while destroying the acl binary \n");
-    }
-  }
-#endif  // defined(WITH_COMPILER_LIB)
   releaseClBinary();
   if (executable_) {
     loader_->DestroyExecutable(executable_);
@@ -233,15 +222,6 @@ HSAILProgram::~HSAILProgram() {
   }
 }
 
-
-inline static std::vector<std::string> splitSpaceSeparatedString(char* str) {
-  std::string s(str);
-  std::stringstream ss(s);
-  std::istream_iterator<std::string> beg(ss), end;
-  std::vector<std::string> vec(beg, end);
-  return vec;
-}
-
 inline static std::string GetUriFromMemoryAddress(const void* memory, size_t size) {
   int pid = amd::Os::getProcessId();
   std::ostringstream uri_stream;
@@ -250,100 +230,7 @@ inline static std::string GetUriFromMemoryAddress(const void* memory, size_t siz
   return uri_stream.str();
 }
 
-bool HSAILProgram::createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                                 bool internalKernel) {
-#if defined(WITH_COMPILER_LIB)
-  // ACL_TYPE_CG stage is not performed for offline compilation
-  executable_ = loader_->CreateExecutable(HSA_PROFILE_FULL, nullptr);
-  if (executable_ == nullptr) {
-    buildLog_ += "Error: Executable for AMD HSA Code Object isn't created.\n";
-    return false;
-  }
-  size_t size = binSize;
-  hsa_code_object_t code_object;
-  code_object.handle = reinterpret_cast<uint64_t>(binary);
-
-  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
-  auto uri = GetUriFromMemoryAddress(binary, binSize);
-  hsa_status_t status = executable_->LoadCodeObject(agent, code_object, nullptr, uri);
-  if (status != HSA_STATUS_SUCCESS) {
-    buildLog_ += "Error: AMD HSA Code Object loading failed.\n";
-    return false;
-  }
-  status = loader_->FreezeExecutable(executable_, nullptr);
-  if (status != HSA_STATUS_SUCCESS) {
-    buildLog_ += "Error: AMD HSA Code Object freeze failed.\n";
-    return false;
-  }
-
-  size_t kernelNamesSize = 0;
-  acl_error errorCode = amd::Hsail::QueryInfo(palNullDevice().compiler(), binaryElf_,
-                                              RT_KERNEL_NAMES, nullptr, nullptr, &kernelNamesSize);
-  if (errorCode != ACL_SUCCESS) {
-    buildLog_ += "Error: Querying of kernel names size from the binary failed.\n";
-    return false;
-  }
-  if (kernelNamesSize > 0) {
-    std::vector<char> kernelNames(kernelNamesSize);
-    errorCode = amd::Hsail::QueryInfo(palNullDevice().compiler(), binaryElf_, RT_KERNEL_NAMES,
-                                      nullptr, kernelNames.data(), &kernelNamesSize);
-    if (errorCode != ACL_SUCCESS) {
-      buildLog_ += "Error: Querying of kernel names from the binary failed.\n";
-      return false;
-    }
-    std::vector<std::string> vKernels = splitSpaceSeparatedString(kernelNames.data());
-    for (const auto& it : vKernels) {
-      std::string kernelName(it);
-
-      HSAILKernel* aKernel = new HSAILKernel(kernelName, this, internalKernel);
-      addKernel(aKernel);
-
-      if (!aKernel->init()) {
-        buildLog_ += "Error: Kernel initialization failed.\n";
-        return false;
-      }
-
-      aKernel->setUniformWorkGroupSize(useUniformWorkGroupSize);
-    }
-  }
-
-  DestroySegmentCpuAccess();
-#endif  // defined(WITH_COMPILER_LIB)
-  return true;
-}
-
-bool HSAILProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc, size_t foffset,
-                              std::string uri) {
-#if defined(WITH_COMPILER_LIB)
-  if (!device().isOnline()) {
-    return true;
-  }
-
-  bool dynamicParallelism = false;
-  for (auto& kit : kernels()) {
-    HSAILKernel* aKernel = static_cast<HSAILKernel*>(kit.second);
-    if (!aKernel->postLoad()) {
-      return false;
-    }
-    dynamicParallelism |= aKernel->dynamicParallelism();
-    // Find max scratch regs used in the program. It's used for scratch buffer preallocation
-    // with dynamic parallelism, since runtime doesn't know which child kernel will be called
-    maxScratchRegs_ =
-        std::max(static_cast<uint>(aKernel->workGroupInfo()->scratchRegs_), maxScratchRegs_);
-    maxVgprs_ = std::max(static_cast<uint>(aKernel->workGroupInfo()->usedVGPRs_), maxVgprs_);
-  }
-
-  // Allocate kernel table for device enqueuing
-  if (!isNull() && dynamicParallelism && !allocKernelTable()) {
-    return false;
-  }
-#endif  // defined(WITH_COMPILER_LIB)
-  return true;
-}
-
-bool HSAILProgram::createBinary(amd::option::Options* options) { return true; }
-
-bool HSAILProgram::allocKernelTable() {
+bool Program::allocKernelTable() {
   if (isNull()) {
     // Cannot create a kernel table for offline devices.
     return false;
@@ -359,7 +246,7 @@ bool HSAILProgram::allocKernelTable() {
   } else {
     size_t* table = reinterpret_cast<size_t*>(kernels_->map(nullptr, pal::Resource::WriteOnly));
     for (auto& it : kernels()) {
-      HSAILKernel* kernel = static_cast<HSAILKernel*>(it.second);
+      pal::Kernel* kernel = static_cast<pal::Kernel*>(it.second);
       table[kernel->index()] = static_cast<size_t>(kernel->gpuAqlCode());
     }
     kernels_->unmap(nullptr);
@@ -367,41 +254,9 @@ bool HSAILProgram::allocKernelTable() {
   return true;
 }
 
-void HSAILProgram::fillResListWithKernels(VirtualGPU& gpu) const { gpu.addVmMemory(&codeSegGpu()); }
+void Program::fillResListWithKernels(VirtualGPU& gpu) const { gpu.addVmMemory(&codeSegGpu()); }
 
-#if defined(WITH_COMPILER_LIB)
-const aclTargetInfo& HSAILProgram::info() {
-  acl_error err;
-  info_ = amd::Hsail::GetTargetInfo(palNullDevice().settings().use64BitPtr_ ? "hsail64" : "hsail",
-                                    device().isa().hsailName(), &err);
-  if (err != ACL_SUCCESS) {
-    LogWarning("aclGetTargetInfo failed");
-  }
-  return info_;
-}
-#endif
-
-bool HSAILProgram::saveBinaryAndSetType(type_t type) {
-#if defined(WITH_COMPILER_LIB)
-  // Write binary to memory
-  if (rawBinary_ != nullptr) {
-    // Free memory containing rawBinary
-    amd::Hsail::FreeMem(binaryElf_, rawBinary_);
-    rawBinary_ = nullptr;
-  }
-  size_t size = 0;
-  if (amd::Hsail::WriteToMem(binaryElf_, &rawBinary_, &size) != ACL_SUCCESS) {
-    buildLog_ += "Failed to write binary to memory \n";
-    return false;
-  }
-  setBinary(static_cast<char*>(rawBinary_), size);
-  // Set the type of binary
-  setType(type);
-#endif  // defined(WITH_COMPILER_LIB)
-  return true;
-}
-
-bool HSAILProgram::defineGlobalVar(const char* name, void* dptr) {
+bool Program::defineGlobalVar(const char* name, void* dptr) {
   if (!device().isOnline()) {
     return false;
   }
@@ -419,7 +274,7 @@ bool HSAILProgram::defineGlobalVar(const char* name, void* dptr) {
   return true;
 }
 
-bool HSAILProgram::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
+bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
                                       const char* global_name) const {
   if (!device().isOnline()) {
     return false;
@@ -528,6 +383,107 @@ bool HSAILProgram::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_p
   return true;
 }
 
+bool Program::createBinary(amd::option::Options* options) {
+  if (!clBinary()->createElfBinary(options->oVariables->BinEncrypt, type())) {
+    LogError("Failed to create ELF binary image!");
+    return false;
+  }
+  return true;
+}
+
+bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
+                                     bool internalKernel) {
+  // Skip metadata look-up and kernel creation for assembly and internal kernel.
+  // @note: Runtime compiles only the second level trap handler from assembly
+  if ((owner()->language() != amd::Program::Assembly) || !internal_) {
+    // Find the size of global variables from the binary
+    if (!FindGlobalVarSize(binary, binSize)) {
+      buildLog_ += "Error: Cannot Find Global Var Sizes\n";
+      return false;
+    }
+
+    for (const auto& kernelMeta : kernelMetadataMap_) {
+      auto kernelName = kernelMeta.first;
+      auto kernel = new pal::Kernel(kernelName, this, internalKernel);
+      if (kernel == nullptr) {
+        return false;
+      }
+      if (!kernel->init()) {
+        buildLog_ += "[ROC][Kernel] Could not get Code Prop Meta Data \n";
+        return false;
+      }
+      addKernel(kernel);
+
+      if (codeObjectVer() < 5) {
+        kernel->setUniformWorkGroupSize(useUniformWorkGroupSize);
+      }
+    }
+  }
+  executable_ = loader_->CreateExecutable(HSA_PROFILE_FULL, nullptr);
+  if (executable_ == nullptr) {
+    LogError("Error: Executable for AMD HSA Code Object isn't created.");
+    return false;
+  }
+
+  hsa_code_object_t code_object;
+  code_object.handle = reinterpret_cast<uint64_t>(binary);
+
+  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
+  auto uri = GetUriFromMemoryAddress(binary, binSize);
+  hsa_status_t status = executable_->LoadCodeObject(agent, code_object, nullptr, uri);
+  if (status != HSA_STATUS_SUCCESS) {
+    LogError("Error: AMD HSA Code Object loading failed.");
+    return false;
+  }
+
+  if (isInternal() && (owner()->language() == amd::Program::Assembly)) {
+    // Don't register trap handler with the debugger, since user shouldn't see this kernel
+    status = executable_->Freeze(nullptr);
+    trapHandler_ = true;
+  } else {
+    status = loader_->FreezeExecutable(executable_, nullptr);
+  }
+  if (status != HSA_STATUS_SUCCESS) {
+    LogError("Error: Freezing the executable failed.");
+    return false;
+  }
+  return true;
+}
+
+bool Program::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
+                                  size_t foffset, std::string uri) {
+  // Collect the information about compiled binary, except the trap handler
+  if (!isNull() && (palDevice().captureMgr() != nullptr) && !isTrapHandler()) {
+    apiHash_ = palDevice().captureMgr()->AddElfBinary(binary, binSize, binary, binSize,
+                                                      codeSegGpu_->iMem(), codeSegGpu_->offset());
+  }
+
+  for (auto& kit : kernels()) {
+    pal::Kernel* kernel = static_cast<pal::Kernel*>(kit.second);
+    if (!kernel->postLoad()) {
+      return false;
+    }
+    // Find max scratch regs used in the program. It's used for scratch buffer preallocation
+    // with dynamic parallelism, since runtime doesn't know which child kernel will be called
+    maxScratchRegs_ =
+        std::max(static_cast<uint>(kernel->workGroupInfo()->scratchRegs_), maxScratchRegs_);
+    maxVgprs_ = std::max(static_cast<uint>(kernel->workGroupInfo()->usedVGPRs_), maxVgprs_);
+  }
+  DestroySegmentCpuAccess();
+  return true;
+}
+
+uint64_t Program::GetTrapHandlerAddress() const {
+  uint64_t address = 0;
+  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
+  auto trap_sym = executable_->GetSymbol("trap_entry", &agent);
+  if (trap_sym != nullptr) {
+    trap_sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &address);
+  }
+  return address;
+}
+
+// ================================================================================================
 hsa_isa_t PALHSALoaderContext::IsaFromName(const char* name) {
   const amd::Isa* isa_p = amd::Isa::findIsa(name);
   return {amd::Isa::toHandle(isa_p)};
@@ -696,11 +652,9 @@ hsa_status_t PALHSALoaderContext::SamplerDestroy(hsa_agent_t agent,
   if (!sampler_handle.handle) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  // Samplers will be destroyed by the pal::HSAILProgam destructor.
+  // Samplers will be destroyed by the pal::Program destructor.
   return HSA_STATUS_SUCCESS;
 }
-
-#if defined(USE_COMGR_LIBRARY)
 
 static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec, hsa_executable_symbol_t hSymbol,
                                            void* data) {
@@ -727,117 +681,6 @@ static hsa_status_t GetKernelNamesCallback(hsa_executable_t hExec, hsa_executabl
     symbolNameList->push_back(std::string(name));
   }
   return HSA_STATUS_SUCCESS;
-}
-
-#endif  // defined(USE_COMGR_LIBRARY)
-
-bool LightningProgram::createBinary(amd::option::Options* options) {
-#if defined(USE_COMGR_LIBRARY)
-  if (!clBinary()->createElfBinary(options->oVariables->BinEncrypt, type())) {
-    LogError("Failed to create ELF binary image!");
-    return false;
-  }
-#endif  // defined(USE_COMGR_LIBRARY)
-  return true;
-}
-
-// ================================================================================================
-bool LightningProgram::createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                                     bool internalKernel) {
-#if defined(USE_COMGR_LIBRARY)
-  // Skip metadata look-up and kernel creation for assembly and internal kernel.
-  // @note: Runtime compiles only the second level trap handler from assembly
-  if ((owner()->language() != amd::Program::Assembly) || !internal_) {
-    // Find the size of global variables from the binary
-    if (!FindGlobalVarSize(binary, binSize)) {
-      buildLog_ += "Error: Cannot Find Global Var Sizes\n";
-      return false;
-    }
-
-    for (const auto& kernelMeta : kernelMetadataMap_) {
-      auto kernelName = kernelMeta.first;
-      auto kernel = new LightningKernel(kernelName, this, internalKernel);
-      if (kernel == nullptr) {
-        return false;
-      }
-      if (!kernel->init()) {
-        buildLog_ += "[ROC][Kernel] Could not get Code Prop Meta Data \n";
-        return false;
-      }
-      addKernel(kernel);
-
-      if (codeObjectVer() < 5) {
-        kernel->setUniformWorkGroupSize(useUniformWorkGroupSize);
-      }
-    }
-  }
-  executable_ = loader_->CreateExecutable(HSA_PROFILE_FULL, nullptr);
-  if (executable_ == nullptr) {
-    LogError("Error: Executable for AMD HSA Code Object isn't created.");
-    return false;
-  }
-
-  hsa_code_object_t code_object;
-  code_object.handle = reinterpret_cast<uint64_t>(binary);
-
-  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
-  auto uri = GetUriFromMemoryAddress(binary, binSize);
-  hsa_status_t status = executable_->LoadCodeObject(agent, code_object, nullptr, uri);
-  if (status != HSA_STATUS_SUCCESS) {
-    LogError("Error: AMD HSA Code Object loading failed.");
-    return false;
-  }
-
-  if (isInternal() && (owner()->language() == amd::Program::Assembly)) {
-    // Don't register trap handler with the debugger, since user shouldn't see this kernel
-    status = executable_->Freeze(nullptr);
-    trapHandler_ = true;
-  } else {
-    status = loader_->FreezeExecutable(executable_, nullptr);
-  }
-  if (status != HSA_STATUS_SUCCESS) {
-    LogError("Error: Freezing the executable failed.");
-    return false;
-  }
-#endif
-  return true;
-}
-
-// ================================================================================================
-bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
-                                  size_t foffset, std::string uri) {
-#if defined(USE_COMGR_LIBRARY)
-  // Collect the information about compiled binary, except the trap handler
-  if (!isNull() && (palDevice().captureMgr() != nullptr) && !isTrapHandler()) {
-    apiHash_ = palDevice().captureMgr()->AddElfBinary(binary, binSize, binary, binSize,
-                                                      codeSegGpu_->iMem(), codeSegGpu_->offset());
-  }
-
-  for (auto& kit : kernels()) {
-    LightningKernel* kernel = static_cast<LightningKernel*>(kit.second);
-    if (!kernel->postLoad()) {
-      return false;
-    }
-    // Find max scratch regs used in the program. It's used for scratch buffer preallocation
-    // with dynamic parallelism, since runtime doesn't know which child kernel will be called
-    maxScratchRegs_ =
-        std::max(static_cast<uint>(kernel->workGroupInfo()->scratchRegs_), maxScratchRegs_);
-    maxVgprs_ = std::max(static_cast<uint>(kernel->workGroupInfo()->usedVGPRs_), maxVgprs_);
-  }
-  DestroySegmentCpuAccess();
-#endif  // defined(USE_COMGR_LIBRARY)
-  return true;
-}
-
-// ================================================================================================
-uint64_t LightningProgram::GetTrapHandlerAddress() const {
-  uint64_t address = 0;
-  hsa_agent_t agent = {amd::Device::toHandle(&(device()))};
-  auto trap_sym = executable_->GetSymbol("trap_entry", &agent);
-  if (trap_sym != nullptr) {
-    trap_sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &address);
-  }
-  return address;
 }
 
 }  // namespace amd::pal

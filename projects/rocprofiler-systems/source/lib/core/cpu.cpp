@@ -166,7 +166,7 @@ query_cpu_agents()
         return;
     }
 
-    auto& _agent_manager = agent_manager::get_instance();
+    auto& _agent_manager = get_agent_manager_instance();
     auto  cpu_data       = get_cpu_info();
 
     for(auto& cpu : cpu_data)

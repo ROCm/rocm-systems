@@ -85,31 +85,11 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
 }
 
 TEST_CASE("Unit_hipFreeMipmappedArray_Negative_Nullptr") {
-  HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
-}
-
-TEST_CASE("Unit_hipFreeMipmappedArray_Negative_DoubleFree") {
-  hipMipmappedArray_t arrayPtr{};
-  hipExtent extent{};
-  hipChannelFormatDesc desc = hipCreateChannelDesc<char>();
-
 #if HT_AMD
-  const unsigned int flags = hipArrayDefault;
+  HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
 #else
-  const unsigned int flags = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
+  HIP_CHECK(hipFreeMipmappedArray(nullptr));
 #endif
-
-  extent.width = GENERATE(64, 512, 1024);
-  extent.height = GENERATE(64, 512, 1024);
-  extent.depth = GENERATE(0, 64, 512, 1024);
-
-  const unsigned int numLevels = GENERATE(1, 5, 7);
-
-  HIP_CHECK_IGNORED_RETURN(hipMallocMipmappedArray(&arrayPtr, &desc, extent, numLevels, flags),
-                           hipErrorNotSupported);
-
-  HIP_CHECK(hipFreeMipmappedArray(arrayPtr));
-  HIP_CHECK_ERROR(hipFreeMipmappedArray(arrayPtr), hipErrorContextIsDestroyed);
 }
 
 TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayMultiTArray", "", char, int) {

@@ -130,3 +130,8 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
           NUM_COMPUTE_UNITS: 28
           TARGET_GRAPHICS_VERSION: gfx1102
   ```
+- On `RHEL8.X` or similar distributions, there could be a missing dependency for `libsqlite3x-devel`. To workaround this for now, user can:
+  ```bash
+    sudo dnf install libsqlite3x-devel
+    sudo ln -s /lib64/libsqlite3.so /usr/local/lib/libsqlite3.so
+  ```

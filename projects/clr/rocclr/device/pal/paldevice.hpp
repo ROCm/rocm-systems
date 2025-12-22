@@ -38,7 +38,6 @@
 #include "device/pal/palappprofile.hpp"
 #include "device/pal/palcapturemgr.hpp"
 #include "device/pal/palsignal.hpp"
-#include "acl.h"
 #include "memory"
 
 #include <atomic>
@@ -58,16 +57,6 @@ namespace amd::pal {
 
 //! A nil device object
 class NullDevice : public amd::Device {
- protected:
-#if defined(WITH_COMPILER_LIB)
-  static Compiler* compiler_;
-#endif
-
- public:
-#if defined(WITH_COMPILER_LIB)
-  Compiler* compiler() const { return compiler_; }
-#endif
-
  public:
   static bool init(void);
 
@@ -264,15 +253,16 @@ class Device : public NullDevice {
     uint32_t index_;                 //!< HW queue index for scratch buffer access
     amd::Monitor queue_lock_;        //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
-    QueueRecycleInfo()
+    QueueRecycleInfo(const Device& dev)
         : counter_(1),
           engineType_(Pal::EngineTypeCompute),
           index_(0),
-          queue_lock_(true) /* Queue lock for sharing */ {}
+          queue_lock_(true) /* Queue lock for sharing */,
+          aql_packet_mgmt_(dev) {}
 
-    //! Returns the aql packet list
-    uintptr_t AqlPacketList() const {
-      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.aql_packets_);
+    //! Returns the MQD's read_dispatch_id's address.
+    uintptr_t DebuggerData() const {
+      return reinterpret_cast<uintptr_t>(&aql_packet_mgmt_.amd_queue_.read_dispatch_id);
     }
   };
 

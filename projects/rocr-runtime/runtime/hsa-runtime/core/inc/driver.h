@@ -232,6 +232,14 @@ public:
   virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
 
+  /// @brief Get Shareable Memory Handle for physical memory
+  /// @param[in] va virtual address
+  /// @param[in] mem  physical memory handle
+  /// @param[in] size size of memory allocated in bytes
+  /// @param[out] handle handle of the memory object
+  virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
+                                          core::ShareableHandle* handle) = 0;
+
   /// @brief Releases the object associated with the handle.
   ///
   /// @param[in] handle handle of the object to release
@@ -348,7 +356,7 @@ public:
 
   /// @brief Releases the residency of the memory
   /// @param[in] mem address of memory to be made unresident
-  /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
+  /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.

@@ -1,11 +1,13 @@
 {
     "required_tables": [
         {
-            "name": "kernel_summary",
+            "name": "top_kernels",
             "required_columns": [
                 "name",
-                "calls",
-                "DURATION (nsec)"
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
             ],
             "validation_queries": [
                 {
@@ -13,14 +15,14 @@
                     "description": "Check for null function names",
                     "error_message": "Found API calls with null function names",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM kernel_summary WHERE name IS NULL"
+                    "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL"
                 },
                 {
                     "comparison": "equals",
                     "description": "Check for 3 unique kernels",
                     "error_message": "Expecting 3 unique kernels",
                     "expected_result": 3,
-                    "query": "SELECT COUNT(*) as count FROM kernel_summary"
+                    "query": "SELECT COUNT(*) FROM top_kernels"
                 }
             ]
         },

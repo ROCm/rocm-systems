@@ -24,7 +24,6 @@ THE SOFTWARE.
 #include <tuple>
 #include <cmd_options.hh>
 #include <functional>
-#include <algorithm>
 
 #define NELEMS(array) (sizeof(array) / sizeof(array[0]))
 

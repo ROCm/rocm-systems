@@ -34,8 +34,6 @@ namespace hip {
 amd::Monitor hipArraySetLock{};
 std::unordered_set<hipArray*> hipArraySet;
 
-template <typename T> T ReturnPtrValue(T* ptr) { return (ptr != nullptr) ? *ptr : nullptr; }
-
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   auto memObj = amd::MemObjMap::FindMemObj(ptr, &offset);
@@ -111,8 +109,8 @@ hipError_t ihipFree(void* ptr) {
       // Wait on the device, associated with the current memory object during allocation
       g_devices[device_id]->SyncAllStreams();
 
-      // External mem is not svm.
-      if (memory_object->isInterop()) {
+      // Non SVM memory free, such as external memory
+      if (memory_object->getSvmPtr() == nullptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
@@ -172,15 +170,35 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   if (devPtr == nullptr || extMem == nullptr || bufferDesc == nullptr || bufferDesc->flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
-  const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
 
-  if (devMem == nullptr || ((bufferDesc->offset + bufferDesc->size) > devMem->size())) {
+  auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
+
+  // Validate bounds
+  if (bufferDesc->size > buf->getSize() ||
+      bufferDesc->offset > buf->getSize() - bufferDesc->size) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  *devPtr = reinterpret_cast<void*>(devMem->virtualAddress() + bufferDesc->offset);
-  amd::MemObjMap::AddMemObj(*devPtr, buf);
-  buf->retain();
+
+  // Create a buffer view
+  auto view = new (buf->getContext())
+      amd::Buffer(*buf, buf->getMemFlags(), bufferDesc->offset, bufferDesc->size);
+  if (view == nullptr || !view->create()) {
+    if (view) view->release();
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
+
+  // Create device memory for the current device
+  const device::Memory* devMem = view->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
+  if (devMem == nullptr) {
+    view->release();
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Map the device memory to the user pointer
+  *devPtr = reinterpret_cast<void*>(devMem->virtualAddress());
+  amd::MemObjMap::AddMemObj(*devPtr, view);
+  view->retain();
+
   HIP_RETURN(hipSuccess);
 }
 
@@ -732,7 +750,7 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
   } else if (flags == hipDeviceMallocFinegrained) {
     ihipFlags = CL_MEM_SVM_ATOMICS;
   } else if (flags == hipDeviceMallocUncached) {
-    ihipFlags = CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
+    ihipFlags = ROCCLR_MEM_HSA_UNCACHED;
   } else if (flags == hipDeviceMallocContiguous) {
     ihipFlags = ROCCLR_MEM_HSA_CONTIGUOUS | ROCCLR_MEM_HSA_UNCACHED;
   } else if (flags == hipMallocSignalMemory) {
@@ -1037,7 +1055,7 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
 
   if (!amd::Image::validateDimensions(devices, imageType, imageWidth, imageHeight, imageDepth,
                                       imageArraySize)) {
-    DevLogError("Image does not have valid dimensions");
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Image does not have valid dimensions");
     status = hipErrorInvalidValue;
     return nullptr;
   }
@@ -1287,7 +1305,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
   if (hostPtr == nullptr || sizeBytes == 0 ||
       flags & ~(hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterCoarseGrained |
-                hipExtHostRegisterUncached)) {
+                hipExtHostRegisterUncached | hipHostRegisterIoMemory)) {
     return hipErrorInvalidValue;
   } else {
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
@@ -1296,6 +1314,11 @@ hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags)
         return hipErrorInvalidValue;
       }
       memFlags |= ROCCLR_MEM_HSA_UNCACHED;
+    } else if (flags & hipHostRegisterIoMemory) {
+      if (IS_WINDOWS) {
+        return hipErrorInvalidValue;
+      }
+      memFlags |= ROCCLR_MEM_IO_MEMORY;
     }
 
     amd::Memory* mem =
@@ -3406,12 +3429,14 @@ hipError_t hipIpcCloseMemHandle(void* dev_ptr) {
 
   amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
-    DevLogPrintfError("Memory object for the ptr: 0x%x cannot be null \n", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Memory object for the ptr: 0x%x cannot be null \n", dev_ptr);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!amd_mem_obj->ipcShared()) {
-    DevLogPrintfError("Memory object for the ptr: 0x%x is not ipcShared \n", dev_ptr);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Memory object for the ptr: 0x%x is not ipcShared \n", dev_ptr);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -3474,7 +3499,8 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
     // getDeviceMemory can fail, hence validate the sanity of the mem obtained
     if (nullptr == devMem) {
-      DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
       HIP_RETURN(hipErrorMemoryAllocation);
     }
 
@@ -3529,6 +3555,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
                                     hipDeviceptr_t ptr) {
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
+  amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
   constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
 
   hipError_t status = hipSuccess;
@@ -3579,7 +3606,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
 
         // getDeviceMemory can fail, hence validate the sanity of the mem obtained
         if (nullptr == devMem) {
-          DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
           return hipErrorMemoryAllocation;
         }
         *reinterpret_cast<hipDeviceptr_t*>(data) =
@@ -3654,8 +3682,27 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE: {
-      // TODO: Unclear what to be done for this attribute
-      status = hipErrorNotSupported;
+      if (memObj) {
+        if (getMemoryType(memObj) == hipMemoryTypeHost) {
+	      // host pointer, pinned or registered memory
+          *reinterpret_cast<int*>(data) = 0;
+        } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
+          // managed allocation
+          *reinterpret_cast<int*>(data) = 0;
+        } else if (vaddr_mem_obj) {
+          // virtual memory allocation, mapped to a physical memory
+          if (vaddr_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
+            *reinterpret_cast<int*>(data) = 0;
+          }
+        } else {
+          // device pointer, allocated using cudaMalloc
+          *reinterpret_cast<int*>(data) = 1;
+        }
+      } else {
+        // must be a normal host pointer or virtual memory not backed to a physical memory
+        *reinterpret_cast<int*>(data) = 0;
+        status = hipErrorInvalidValue;
+      }
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {
@@ -3667,7 +3714,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
 
           // getDeviceMemory can fail, hence validate the sanity of the mem obtained
           if (nullptr == devMem) {
-            DevLogPrintfError("getDeviceMemory for ptr failed : %p", ptr);
+            ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+               "getDeviceMemory for ptr failed : %p", ptr);
             return hipErrorMemoryAllocation;
           }
           *reinterpret_cast<hipDeviceptr_t*>(data) =

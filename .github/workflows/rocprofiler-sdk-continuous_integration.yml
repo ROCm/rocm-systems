@@ -34,10 +34,10 @@ permissions:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
+  ROCM_VERSION: "7.1.1"
   PYTHON_VENV_PATH: "rocprofiler-sdk"
   PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
-  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
 
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
@@ -228,7 +228,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: env.ENABLE_ROCR_BUILD
+        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -245,7 +245,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: env.ENABLE_HIP_CLR_BUILD
+        if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
         shell: bash
         working-directory: projects
         run: |
@@ -312,7 +312,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
+          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
@@ -359,7 +359,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -375,7 +375,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
           ls -la
           ls -la ./build
@@ -390,7 +390,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
@@ -526,7 +526,7 @@ jobs:
           echo "✅ ROCProfiler-Register Installation complete!"
 
       - name: Build and Install ROCR-Runtime
-        if: env.ENABLE_ROCR_BUILD
+        if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
@@ -546,7 +546,7 @@ jobs:
           echo "✅ ROCR-Runtime Installation complete!"
 
       - name: Build and Install HIP
-        if: env.ENABLE_HIP_CLR_BUILD
+        if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
         shell: bash
         working-directory: projects
         run: |
@@ -769,7 +769,7 @@ jobs:
         echo "✅ ROCProfiler-Register Installation complete!"
 
     - name: Build and Install ROCR-Runtime
-      if: env.ENABLE_ROCR_BUILD
+      if: ${{ env.ENABLE_ROCR_BUILD == 'true' }}
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
@@ -786,7 +786,7 @@ jobs:
         echo "✅ ROCR-Runtime Installation complete!"
 
     - name: Build and Install HIP
-      if: env.ENABLE_HIP_CLR_BUILD
+      if: ${{ env.ENABLE_HIP_CLR_BUILD == 'true' }}
       shell: bash
       working-directory: projects
       run: |
@@ -834,6 +834,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         sudo sysctl -w vm.mmap_rnd_bits=28;
+        export PATH="$HOME/.local/bin:$PATH";
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
           --build-jobs 16

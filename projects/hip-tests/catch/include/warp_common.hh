@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/hip_fp16.h>
-#include <limits>
+#include <random>
 #include <cmath>
 #include <iostream>
 #include <ios>

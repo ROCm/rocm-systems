@@ -35,7 +35,7 @@ THE SOFTWARE.
 
 template <typename T>
 __global__ void surf1DLayeredKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   if (x < width) {
     surf1DLayeredread(outputData + x, surfaceObject, x * sizeof(T), 0);
@@ -45,7 +45,7 @@ __global__ void surf1DLayeredKernelR(hipSurfaceObject_t surfaceObject, T* output
 
 template <typename T>
 __global__ void surf1DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   if (x < width) {
     surf1DLayeredwrite(inputData[x], surfaceObject, x * sizeof(T), 0);
@@ -56,7 +56,7 @@ __global__ void surf1DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputD
 template <typename T> __global__ void surf1DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
                                                             hipSurfaceObject_t outputSurfObj,
                                                             int width) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   if (x < width) {
     T data;

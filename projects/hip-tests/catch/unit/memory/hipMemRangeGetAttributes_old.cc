@@ -291,13 +291,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst") {
     }
     REQUIRE(IfTestPassed);
 
-    // The following scenarios have been removed considering the nature of the
-    //  api. With Consultation with Maneesh Gupta, the following scenarios
-    //   have been removed.
-    // passing numAttributes as 4 while the attributes array has only 2 members
-    // passing numAttributes as 10 while the attributes array has only 2 members
-    // length of the list of dataSizes less than the number of
-    // attributes being probed
+    HIP_CHECK(hipFree(Hmm));
   } else {
     SUCCEED(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "

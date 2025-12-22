@@ -60,6 +60,7 @@ from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
 )
 from utils.utils import get_uuid, get_version
+import numpy as np
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -77,22 +78,7 @@ class db_analysis(OmniAnalyze_Base):
             )
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
-        self._pmc_df_per_workload = {
-            workload_path: rocpd_data.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
-            )
-            for workload_path in self._runs.keys()
-        }
-        self._top_kernels_per_workload = {
-            workload_path: pmc_df.assign(
-                duration=pmc_df["End_Timestamp"] - pmc_df["Start_Timestamp"]
-            )
-            .sort_values(by="duration", ascending=False)
-            .drop_duplicates("Kernel_Name")["Kernel_Name"]
-            .to_list()
-            for workload_path, pmc_df in self._pmc_df_per_workload.items()
-        }
-        console_debug("Collected dispatch data")
+        self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data()
         self._metrics_info_data_per_workload, self._values_data_per_workload = (
@@ -126,6 +112,7 @@ class db_analysis(OmniAnalyze_Base):
                 profiling_config_extdata=self._profiling_config,
             )
             Database.get_session().add(workload_obj)
+
             for pc_sample in self._pc_sampling_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -142,42 +129,6 @@ class db_analysis(OmniAnalyze_Base):
                         workload=workload_obj,
                     )
                 )
-            for dispatch in self._dispatch_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                Database.get_session().add(
-                    orm.Dispatch(
-                        dispatch_id=dispatch.dispatch_id,
-                        kernel_name=dispatch.kernel_name,
-                        gpu_id=dispatch.gpu_id,
-                        duration=dispatch.duration,
-                        workload=workload_obj,
-                    )
-                )
-            for metric in self._metrics_info_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                metric_obj = orm.Metric(
-                    name=metric.name,
-                    metric_id=metric.metric_id,
-                    description=metric.description,
-                    unit=metric.unit,
-                    table_name=metric.table_name,
-                    sub_table_name=metric.sub_table_name,
-                    workload=workload_obj,
-                )
-                Database.get_session().add(metric_obj)
-                for value in self._values_data_per_workload.get(
-                    workload_path, pd.DataFrame()
-                ).itertuples():
-                    if value.metric_id == metric.metric_id:
-                        Database.get_session().add(
-                            orm.Value(
-                                metric=metric_obj,
-                                value_name=value.value_name,
-                                value=value.value,
-                            )
-                        )
 
             for roofline_data in self._roofline_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -192,6 +143,63 @@ class db_analysis(OmniAnalyze_Base):
                         workload=workload_obj,
                     )
                 )
+
+            kernel_objs: dict[str, orm.Kernel] = {}
+            for dispatch in self._dispatch_data_per_workload.get(
+                workload_path, pd.DataFrame()
+            ).itertuples():
+                # Add kernel object and map it, if not already added
+                if dispatch.kernel_name not in kernel_objs:
+                    kernel_objs[dispatch.kernel_name] = orm.Kernel(
+                        kernel_name=dispatch.kernel_name,
+                        workload=workload_obj,
+                    )
+                    Database.get_session().add(kernel_objs[dispatch.kernel_name])
+
+                # Add dispatch object and link with kernel object
+                Database.get_session().add(
+                    orm.Dispatch(
+                        dispatch_id=dispatch.dispatch_id,
+                        gpu_id=dispatch.gpu_id,
+                        start_timestamp=dispatch.start_timestamp,
+                        end_timestamp=dispatch.end_timestamp,
+                        kernel=kernel_objs[dispatch.kernel_name],
+                    )
+                )
+
+            for metric in self._metrics_info_data_per_workload.get(
+                workload_path, pd.DataFrame()
+            ).itertuples():
+                kernel_names = (
+                    self._dispatch_data_per_workload[workload_path]["kernel_name"]
+                    .unique()
+                    .tolist()
+                )
+                for kernel_name in kernel_names:
+                    metric_obj = orm.Metric(
+                        name=metric.name,
+                        metric_id=metric.metric_id,
+                        description=metric.description,
+                        unit=metric.unit,
+                        table_name=metric.table_name,
+                        sub_table_name=metric.sub_table_name,
+                        kernel=kernel_objs[kernel_name],
+                    )
+                    Database.get_session().add(metric_obj)
+                    for value in self._values_data_per_workload.get(
+                        workload_path, pd.DataFrame()
+                    ).itertuples():
+                        if (
+                            value.metric_id == metric.metric_id
+                            and value.kernel_name == kernel_name
+                        ):
+                            Database.get_session().add(
+                                orm.Value(
+                                    metric=metric_obj,
+                                    value_name=value.value_name,
+                                    value=value.value,
+                                )
+                            )
 
             version = get_version(rocprof_compute_home)
             Database.get_session().add(
@@ -210,6 +218,34 @@ class db_analysis(OmniAnalyze_Base):
         Database.write()
         console_debug("Completed writing database")
         console_warning(f"Created file: {db_name}")
+
+    def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
+        pmc_df_per_workload: dict[str, pd.DataFrame] = {}
+        args = self.get_args()
+
+        for workload_path in self._runs.keys():
+            pmc_df = rocpd_data.process_rocpd_csv(
+                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
+            )
+
+            # Create multi index df with collection level as pmc_perf
+            raw_pmc = pd.concat([pmc_df], keys=["pmc_perf"], axis=1, copy=False)
+
+            if args.spatial_multiplexing:
+                raw_pmc = self.spatial_multiplex_merge_counters(
+                    raw_pmc
+                )
+
+            if self._profiling_config.get("iteration_multiplexing") is not None:
+                raw_pmc = self.iteration_multiplex_merge_counters(
+                    raw_pmc,
+                    policy=self._profiling_config["iteration_multiplexing"],
+                )
+
+            pmc_df_per_workload[workload_path] = raw_pmc["pmc_perf"]
+
+        console_debug("Collected dispatch data")
+        return pmc_df_per_workload
 
     def calc_roofline_ceilings(self) -> dict[str, dict[str, Any]]:
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
@@ -382,7 +418,7 @@ class db_analysis(OmniAnalyze_Base):
                 value,
             )
         try:
-            return eval(
+            eval_result = eval(
                 compile(value, "<string>", "eval"),
                 {},  # no globals
                 {
@@ -402,47 +438,89 @@ class db_analysis(OmniAnalyze_Base):
                     "to_sum": to_sum,
                 },
             )
+
+            # eval_result can be None if expression has None explicitly specified
+            # Do not give warning for this case and simply return None
+            if eval_result is None or "None" in value:
+                return None
+
+            # Only return None for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for downstream operations
+            # Note: pd.NA is not detected as scalar by np.isscalar()
+            is_scalar_na = (
+                eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            )
+
+            if is_scalar_na:
+                console_warning(
+                    f"Could not evaluate expression for {name}: {value} - likely due to missing "
+                    "counter data."
+                )
+                return None
+            else:
+                return eval_result
         except Exception as e:
             console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
             return None
+
+    @staticmethod
+    def per_kernel_calc_expressions(
+        kernel_name: str, pmc_df: pd.DataFrame, sys_info: dict, value_df: pd.DataFrame
+    ) -> pd.Series:
+        console_debug(f"Calculating expressions for kernel: {kernel_name}")
+        # Calculate PER_XCD variables first
+        for key, value in BUILD_IN_VARS.items():
+            if "PER_XCD" in key:
+                sys_info[key] = db_analysis.evaluate(
+                    key, value, pmc_df, sys_info, parse=True
+                )
+        # Variable dependent on PER_XCD variables
+        for key, value in BUILD_IN_VARS.items():
+            if "PER_XCD" not in key:
+                sys_info[key] = db_analysis.evaluate(
+                    key, value, pmc_df, sys_info, parse=True
+                )
+        # Evaluate expressions while printing warnings
+        return value_df.apply(
+            lambda row: db_analysis.evaluate(
+                f"{row['metric_id']} - {row['value_name']}",
+                row["value"],
+                pmc_df,
+                sys_info,
+            ),
+            axis=1,
+        )
 
     def calc_expressions(self) -> dict[str, pd.DataFrame]:
         values_data_per_workload = self._values_data_per_workload.copy()
 
         for workload_path in self._runs.keys():
-            pmc_df = self._pmc_df_per_workload[workload_path].copy()
+            kernel_names = (
+                self._dispatch_data_per_workload[workload_path]["kernel_name"]
+                .unique()
+                .tolist()
+            )
+            pmc_df = self._pmc_df_per_workload[workload_path]
+            value_df = self._values_data_per_workload[workload_path]
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             for key, value in self._roofline_ceilings_per_workload.get(
                 workload_path, {}
             ).items():
                 sys_info[f"{key}_empirical_peak"] = value
 
-            # Calculate PER_XCD variables first
-            for key, value in BUILD_IN_VARS.items():
-                if "PER_XCD" in key:
-                    sys_info[key] = db_analysis.evaluate(
-                        key, value, pmc_df, sys_info, parse=True
-                    )
-
-            # variable dependent on PER_XCD variables
-            for key, value in BUILD_IN_VARS.items():
-                if "PER_XCD" not in key:
-                    sys_info[key] = db_analysis.evaluate(
-                        key, value, pmc_df, sys_info, parse=True
-                    )
-
-            # Get name and print warning
-            values_data_per_workload[workload_path]["value"] = values_data_per_workload[
-                workload_path
-            ].apply(
-                lambda row: db_analysis.evaluate(
-                    f"{row['metric_id']} - {row['value_name']}",
-                    row["value"],
-                    pmc_df,
-                    sys_info,
-                ),
-                axis=1,
-            )
+            for kernel_name in kernel_names:
+                values_data_per_workload[workload_path].loc[
+                    value_df["kernel_name"] == kernel_name, "value"
+                ] = db_analysis.per_kernel_calc_expressions(
+                    kernel_name,
+                    # Filter pmc_df for current kernel
+                    pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                    # Pass a copy to prevent side-effects in multiprocessing
+                    sys_info.copy(),
+                    # Filter value_df for current kernel
+                    value_df.loc[value_df["kernel_name"] == kernel_name],
+                )
 
         console_debug("Calculated metric values")
         return values_data_per_workload
@@ -493,11 +571,17 @@ class db_analysis(OmniAnalyze_Base):
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
                 for metric_id, row in metric_df.iterrows()
             ])
+            kernel_names = (
+                self._dispatch_data_per_workload[workload_path]["kernel_name"]
+                .unique()
+                .tolist()
+            )
             values_df = pd.DataFrame([
                 {
                     "metric_id": metric_id,
                     "value_name": value_name,
                     "value": row[value_name].strip(),
+                    "kernel_name": kernel_name,
                 }
                 for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
                 if metric_df_id
@@ -507,6 +591,7 @@ class db_analysis(OmniAnalyze_Base):
                 for value_name in metric_df.drop(
                     columns=non_expression_columns, errors="ignore"
                 ).columns
+                for kernel_name in kernel_names
             ])
 
             metrics_info_data_per_workload[workload_path] = metrics_info_df
@@ -524,7 +609,8 @@ class db_analysis(OmniAnalyze_Base):
                     "dispatch_id": row.Dispatch_ID,
                     "kernel_name": row.Kernel_Name,
                     "gpu_id": row.GPU_ID,
-                    "duration": row.End_Timestamp - row.Start_Timestamp,
+                    "start_timestamp": row.Start_Timestamp,
+                    "end_timestamp": row.End_Timestamp,
                 }
                 for row in self._pmc_df_per_workload[workload_path].itertuples()
             ])
@@ -537,6 +623,14 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload = self._pmc_df_per_workload.copy()
 
         for workload_path, pmc_df in pmc_df_per_workload.items():
+            top_kernels = (
+                pmc_df.assign(
+                    duration=pmc_df["End_Timestamp"] - pmc_df["Start_Timestamp"]
+                )
+                .sort_values(by="duration", ascending=False)
+                .drop_duplicates("Kernel_Name")["Kernel_Name"]
+                .to_list()
+            )
             # Filter gpu_ids
             if self._runs[workload_path].filter_gpu_ids:
                 pmc_df = pmc_df.loc[
@@ -548,7 +642,7 @@ class db_analysis(OmniAnalyze_Base):
             if self._runs[workload_path].filter_kernel_ids:
                 pmc_df = pmc_df.loc[
                     pmc_df["Kernel_Name"].isin([
-                        self._top_kernels_per_workload[workload_path][id]
+                        top_kernels[id]
                         for id in self._runs[workload_path].filter_kernel_ids
                     ])
                 ]
@@ -589,6 +683,14 @@ class db_analysis(OmniAnalyze_Base):
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
             }
+            top_kernels = (
+                pmc_df.assign(
+                    duration=pmc_df["End_Timestamp"] - pmc_df["Start_Timestamp"]
+                )
+                .sort_values(by="duration", ascending=False)
+                .drop_duplicates("Kernel_Name")["Kernel_Name"]
+                .to_list()
+            )
 
             roofline_df = pd.DataFrame([
                 {
@@ -603,7 +705,7 @@ class db_analysis(OmniAnalyze_Base):
                         for metric_name in roofline_data_expressions
                     },
                 }
-                for kernel_name in self._top_kernels_per_workload[workload_path][
+                for kernel_name in top_kernels[
                     : self.get_args().max_stat_num
                 ]
             ])

@@ -69,12 +69,14 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/memory_region.h"
 #include "core/inc/signal.h"
+#include "core/util/lazy_ptr.h"
 #include "core/inc/svm_profiler.h"
 #include "core/inc/thunk_loader.h"
 #include "core/util/flag.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
 #include "core/util/utils.h"
+#include "core/util/mpsc_queue.hpp"
 
 #include "core/inc/amd_loader_context.hpp"
 #include "core/inc/amd_hsa_code.hpp"
@@ -345,7 +347,8 @@ class Runtime {
                                      hsa_amd_signal_handler handler, void* arg);
 
   hsa_status_t InteropMap(uint32_t num_agents, Agent** agents,
-                          int interop_handle, uint32_t flags, size_t* size,
+                          hsa_handle_t interop_handle,
+                          uint32_t flags, size_t* size,
                           void** ptr, size_t* metadata_size,
                           const void** metadata);
 
@@ -563,15 +566,19 @@ class Runtime {
     amdgpu_bo_handle ldrm_bo;
   };
 
+  struct AsyncEventsInfo;
   struct AsyncEventsControl {
-    AsyncEventsControl() : async_events_thread_(NULL) {}
+    AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    void Start();
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread async_events_thread_;
-    HybridMutex lock;
     bool exit;
-  };
+
+    private:
+    AsyncEventsInfo* info_;
+    os::Thread thread_;
+ };
 
   struct AsyncEvents {
     void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
@@ -593,6 +600,99 @@ class Runtime {
     std::vector<HsaEvent*> hsa_events_; //!< A list of HSA events for KFD wait
     std::vector<uint64_t> age_;         //!< The age list for KFD wait
     std::vector<void*> arg_;
+  };
+
+  // Event item structure to hold all signal information
+  struct AsyncEventItem {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+    hsa_amd_signal_handler handler;
+    void* arg;
+    HsaEvent* hsa_event;  //!< A list of HSA events for KFD wait
+    uint64_t age;         //!< The age list for KFD wait
+
+    AsyncEventItem() : signal{0}, cond(HSA_SIGNAL_CONDITION_EQ), value(0),
+                      handler(nullptr), arg(nullptr), hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t val,
+                    hsa_amd_signal_handler h, void* a)
+        : signal(sig), cond(c), value(val), handler(h), arg(a),
+          hsa_event(nullptr), age(0) {}
+
+    AsyncEventItem(const AsyncEventItem& other)
+        : signal(other.signal), cond(other.cond), value(other.value),
+          handler(other.handler), arg(other.arg), hsa_event(other.hsa_event), age(other.age) {}
+
+    void init(hsa_signal_t sig, hsa_signal_condition_t c, hsa_signal_value_t v, hsa_amd_signal_handler h, void* a) {
+        signal = sig;
+        cond = c;
+        value = v;
+        handler = h;
+        arg = a;
+    }
+    // Helper operator to convert signal to Signal* for easier access
+    Signal* operator->() {
+      if (signal.handle == 0) {
+        return nullptr;
+      }
+      return core::Signal::Convert(signal);
+    }
+  };
+
+  class AsyncEventsPool : private BaseShared {
+    public:
+      AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
+      ~AsyncEventsPool() { clear(); }
+
+      AsyncEventItem* alloc();
+      void free(AsyncEventItem* item);
+      void clear();
+
+    private:
+      static const size_t minblock_ = 4096 / sizeof(AsyncEventItem);
+      static const size_t preallocblocks_ = 512;
+      static const size_t maxblocksize_ = 1ULL << 28;
+      HybridMutex lock_;
+      std::vector<AsyncEventItem*> free_list_;
+      std::vector<std::pair<void*, size_t>> block_list_;
+      size_t block_size_;
+  };
+  // New concurrent events structure using lock-free queue
+  struct ConcurrentAsyncEvents {
+    ConcurrentAsyncEvents() {}
+
+    void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
+                  hsa_signal_value_t value, hsa_amd_signal_handler handler, void* arg);
+
+    void Clear();
+
+    size_t Size();
+
+    bool empty() { return event_queue_.empty(); }
+
+    //! Get all events for processing
+    bool GetAllEvents(std::vector<AsyncEventItem>& all_events);
+
+    //! Get single event for processing
+    bool GetEvent(AsyncEventItem& event);
+
+    //! Add events back to queue (for events that need to be kept)
+    void AddEventsBack(const std::vector<AsyncEventItem>& events);
+  private:
+    //AsyncEventItem Queue
+    ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
+    AsyncEventsPool asyncEventPool_;
+  };
+
+  struct AsyncEventsInfo {
+    AsyncEventsInfo(bool exceptions);
+    ~AsyncEventsInfo();
+
+    bool monitor_exceptions;
+    AsyncEvents events;
+    ConcurrentAsyncEvents new_events;
+    AsyncEventsControl control;
   };
 
   struct PrefetchRange;
@@ -744,15 +844,8 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  struct AsyncEventsInfo {
-    AsyncEventsControl control;
-    AsyncEvents events;
-    AsyncEvents new_events;
-    bool monitor_exceptions;
-  };
-
-  struct AsyncEventsInfo asyncSignals_;
-  struct AsyncEventsInfo asyncExceptions_;
+  lazy_ptr<AsyncEventsInfo> asyncSignals_;
+  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
 
   // System clock frequency.
   uint64_t sys_clock_freq_;
@@ -805,7 +898,7 @@ class Runtime {
 
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
-  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::map<uint64_t, size_t> ipc_sock_server_conns_;
   KernelMutex ipc_sock_server_lock_;
 
  private:

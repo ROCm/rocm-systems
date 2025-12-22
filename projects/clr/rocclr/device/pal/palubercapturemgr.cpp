@@ -57,9 +57,9 @@ UberTraceCaptureMgr* UberTraceCaptureMgr::Create(Pal::IPlatform* platform, const
   return mgr;
 }
 
-static void UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
-                                         GpuUtil::TraceSessionState newState,
-                                         void* pPrivateData)
+static void PAL_STDCALL UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSession,
+                                                     GpuUtil::TraceSessionState newState,
+                                                     void* pPrivateData)
 {
     UberTraceCaptureMgr* mgr = static_cast<UberTraceCaptureMgr*>(pPrivateData);
 
@@ -72,9 +72,10 @@ static void UberTraceStateChangeCallback(const GpuUtil::TraceSession& pTraceSess
         // boundary for end of detailed trace
 #if (PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 939)
         case GpuUtil::TraceSessionState::Postamble:
-#endif
+#else
         // boundary for end of trace
         case GpuUtil::TraceSessionState::Waiting:
+#endif
         {
             VirtualGPU* current_gpu = mgr->GetCurrentGPU();
             if (current_gpu != nullptr) {
@@ -216,7 +217,7 @@ bool UberTraceCaptureMgr::Init(Pal::IPlatform* platform) {
 }
 
 // ================================================================================================
-void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x,
+void UberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const pal::Kernel& kernel, size_t x,
                                       size_t y, size_t z) {
   // Wait for the driver to be resumed in case it's been paused.
   WaitForDriverResume();

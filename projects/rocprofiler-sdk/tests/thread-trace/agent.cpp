@@ -102,15 +102,33 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
-        // Check if we are testing for large buffers
-        static const char* var            = std::getenv("ATT_BUFFER_SIZE_MB");
-        static uint64_t    buffer_size_mb = (var ? atoi(var) : 96) * 1024ul * 1024ul;
+        uint64_t buffer_size_gb = 1;
 
-        std::vector<rocprofiler_thread_trace_parameter_t> parameters;
+        // Are we testing for larger buffers?
+        if(const char* var = std::getenv("ATT_LARGE_BUFFER_TEST"); var && atoi(var))
+        {
+            // To fully test this feature, we need >4GB per shader engine (>8GB total).
+            // Some RDNA GPUs only have 8GB of VRAM, so we have to use 5GB total = 2.5GB per SE.
+            uint64_t total_memory = 0;
+            for(uint32_t i = 0; i < agent->mem_banks_count; i++)
+                total_memory += agent->mem_banks[i].size_in_bytes;
+
+            // Check we have >11GB VRAM. If so, allocate 10GB.
+            if(total_memory > (11ul << 30))
+                buffer_size_gb = 10;
+            else
+                buffer_size_gb = 5;
+        }
+
+        uint64_t buffer_size_bytes = buffer_size_gb << 30;
+        if(agent->gfx_target_version / 10000 == 11u)
+            buffer_size_bytes = 255ul << 20;  // gfx11 limititation
+
+        auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {1}});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_size_mb}});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x1}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_size_bytes}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});
 
         static const bool extra_args =
             std::getenv("ATT_NODETAIL") ? std::stoi(std::getenv("ATT_NODETAIL")) != 0 : false;

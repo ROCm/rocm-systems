@@ -29,6 +29,8 @@ concurrency:
 
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+  ROCM_PATH: "/opt/rocm"
+  ROCM_VERSION: "7.0.0"
 
 jobs:
   build-docs:
@@ -71,8 +73,28 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: rocprofiler-mi3xx
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CORE_EXT_RUNNER: mi325
+      GPU_RUNNER: mi325
     steps:
+      - name: Install Latest Nightly ROCm
+        shell: bash
+        working-directory: /tmp
+        run: |
+          tar -xf ${{ env.ROCM_PATH }}-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
+          echo "ROCm installed to: ${{ env.ROCM_PATH }}"
+
       - name: Install os essentials
         timeout-minutes: 10
         shell: bash
@@ -82,12 +104,23 @@ jobs:
           apt-add-repository ppa:git-core/ppa
           apt-get update
           apt-get install -y git
+          echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           sparse-checkout: projects/rocprofiler-sdk
           submodules: true
           set-safe-directory: true
+
+      - name: Setup
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          rm -rf /usr/local/bin/git
+          ln -s /usr/bin/git /usr/local/bin/git
+          git --version
+
       - name: Create Docs Directory
         shell: bash
         working-directory: projects/rocprofiler-sdk/
@@ -96,6 +129,7 @@ jobs:
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           mkdir -p source/docs/_doxygen/rocprofiler-sdk
           mkdir -p source/docs/_doxygen/roctx
+
       - name: Install requirements
         timeout-minutes: 10
         shell: bash
@@ -109,17 +143,17 @@ jobs:
         timeout-minutes: 60
         shell: bash
         working-directory: projects/rocprofiler-sdk/
-        run:
-          export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
-          cmake -B build
-            -DROCPROFILER_DEP_ROCMCORE=ON
-            -DROCPROFILER_BUILD_DOCS=ON
-            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
-            -DCPACK_GENERATOR='DEB;RPM;TGZ'
-            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
-            -DPython3_EXECUTABLE=$(which python3)
-            .;
-          cmake --build build --target docs --parallel 4;
-          cmake --build build --target all --parallel 12;
-          cmake --build build --target install --parallel 12;
+        run: |
+          CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH} \
+          cmake -B build \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=ON \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
+            -DCPACK_GENERATOR='DEB;RPM;TGZ' \
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)" \
+            -DPython3_EXECUTABLE=$(which python3) \
+            .
+          cmake --build build --target docs --parallel 4
+          cmake --build build --target all --parallel 12
+          cmake --build build --target install --parallel 12
           cmake --build build --target package --parallel 12

@@ -21,7 +21,6 @@
 #pragma once
 
 #include "top.hpp"
-#include "library.hpp"
 #include "palDevice.h"
 
 /*! \addtogroup pal PAL Resource Implementation
@@ -63,7 +62,7 @@ class Settings : public device::Settings {
       uint imageSupport_ : 1;         //!< Report images support
       uint doublePrecision_ : 1;      //!< Enables double precision support
       uint use64BitPtr_ : 1;          //!< Use 64bit pointers on GPU
-      uint force32BitOcl20_ : 1;      //!< Force 32bit apps to take CLANG/HSAIL path on GPU
+      uint force32BitOcl20_ : 1;      //!< Force 32bit apps to take CLANG path on GPU
       uint imageDMA_ : 1;             //!< Enable direct image DMA transfers
       uint threadTraceEnable_ : 1;    //!< Thread trace enable
       uint svmAtomics_ : 1;           //!< SVM device atomics
@@ -107,8 +106,6 @@ class Settings : public device::Settings {
   uint64_t subAllocationMinSize_;    //!< Minimum size allowed for suballocations
   uint64_t subAllocationMaxSize_;    //!< Maximum size allowed with suballocations
   uint64_t subAllocationChunkSize_;  //!< Chunk size for suballocaitons
-
-  amd::LibrarySelector libSelector_;  //!< Select linking libraries for compiler
 
   size_t prepinnedMinSize_;  //!< minimal memory size for prepinned transfer
   uint32_t limit_blit_wg_;   //!< The number of workgroups for blit execution

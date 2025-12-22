@@ -49,10 +49,8 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   int* A_d;
-  int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
   unsigned int device_ordinal;
   int* dev_ptr{nullptr};
@@ -94,6 +92,8 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
         hipErrorInvalidValue);
   }
 #endif
+
+  HIP_CHECK(hipFree(A_d));
 }
 
 // Testcase verifies functional scenarios of hipDrvPointerGetAttributes API
@@ -104,10 +104,8 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   int* A_d;
-  int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
 
   SECTION("Passing device attributes to device pointer") {
@@ -165,13 +163,20 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
     int device_ordinal;
     void* data[2];
     int* host_ptr;
+    int* pinned_host_ptr;
     data[0] = (&host_ptr);
     data[1] = (&device_ordinal);
+
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&pinned_host_ptr), Nbytes, hipHostMallocDefault));
+
     hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_HOST_POINTER,
                                          HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
     HIP_CHECK(hipDrvPointerGetAttributes(2, attributes, data,
-                                         reinterpret_cast<hipDeviceptr_t>(A_Pinned_h)));
-    REQUIRE(host_ptr == A_Pinned_h);
+                                         reinterpret_cast<hipDeviceptr_t>(pinned_host_ptr)));
+    REQUIRE(host_ptr == pinned_host_ptr);
     REQUIRE(device_ordinal == deviceId);
+    HIP_CHECK(hipFreeHost(pinned_host_ptr));
   }
+
+  HIP_CHECK(hipFree(A_d));
 }

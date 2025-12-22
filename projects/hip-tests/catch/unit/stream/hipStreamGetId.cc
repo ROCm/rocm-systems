@@ -191,7 +191,7 @@ TEST_CASE("Unit_hipStreamGetId_MultipleThreads") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipStreamGetId_MultiDevice") {
+TEST_CASE("Unit_hipStreamGetId_MultiDevice", "[multigpu]") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {

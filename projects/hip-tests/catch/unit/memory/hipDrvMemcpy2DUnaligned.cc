@@ -269,7 +269,7 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic") {
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Device to Device") {

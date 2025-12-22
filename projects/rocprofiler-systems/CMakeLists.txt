@@ -214,15 +214,34 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from submodule"
                                OFF
 )
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_BOOST "Build boost from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
+                               OFF
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
+                               "Build nlohmann/json from submodule" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
-rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
-                               "Enable building sqlite3 library internally" OFF
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
+                               "Enable building sqlite3 library internally" ON
+)
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
+                               "Enable building googletest library internally" ON
 )
 
 if(ROCPROFSYS_USE_PAPI)

@@ -1,10 +1,10 @@
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
-if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
 else()
     message(
         FATAL_ERROR
-        "'amdclang++' compiler required to compile test binaries for ROCm platform."
+        "'amdclang++' compiler required to compile test binaries for ROCm platform. Found: ${CMAKE_HIP_COMPILER_ID}"
     )
 endif()
 
@@ -45,6 +45,7 @@ set_target_properties(
 set(MAT_MUL_MAX ../sample/mat_mul_max.hip)
 set_source_files_properties(${MAT_MUL_MAX} PROPERTIES LANGUAGE HIP)
 add_executable(mat_mul_max ${MAT_MUL_MAX})
+target_compile_options(mat_mul_max PRIVATE -g -O0)
 set_target_properties(
     mat_mul_max
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
@@ -56,5 +57,13 @@ add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
 target_include_directories(hip_dynamic_shared PRIVATE ../sample/dynamic_shared)
 set_target_properties(
     hip_dynamic_shared
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)
+
+set(LAPLACE_EQN_SOURCES ../sample/laplace_eqn.hip)
+set_source_files_properties(${LAPLACE_EQN_SOURCES} PROPERTIES LANGUAGE HIP)
+add_executable(laplace_eqn ${LAPLACE_EQN_SOURCES})
+set_target_properties(
+    laplace_eqn
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
