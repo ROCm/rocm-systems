@@ -337,10 +337,10 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
 };
 /**@}*/
 
-#if defined(__GNUC__)
-typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
-#else
+#if defined(__clang__) && defined(__HIP__)
 typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
+#else
+typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
 #endif
 
 /**
@@ -353,10 +353,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
   static_assert(sizeof(__hip_bfloat16[2]) == sizeof(__bf16_2));
 
  public:
-#if defined(__GNUC__)
-  __hip_bfloat16 x; /*! \brief raw representation of bfloat16 */
-  __hip_bfloat16 y; /*! \brief raw representation of bfloat16 */
-#else
+#if defined(__clang__) && defined(__HIP__)
   union {
     struct {
       __hip_bfloat16 x; /*! \brief raw representation of bfloat16 */
@@ -364,8 +361,12 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
     };
     __bf16_2 __xy_bf162;
   };
+#else
+  /* GCC does not support anonymous structs within unions (Clang allows this as an extension).
+     Expose x and y directly instead. */
+  __hip_bfloat16 x;
+  __hip_bfloat16 y;
 #endif
-
 
  public:
   /*! \brief create __hip_bfloat162 from __hip_bfloat162_raw */
@@ -381,7 +382,11 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
       : x(a), y(b) {}
 
   /*! \brief create __hip_bfloat162 from vector of __bf16_2 */
+#if defined(__clang__) && defined(__HIP__)
+  __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : __xy_bf162(in) {}
+#else
   __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : x{in[0]}, y{in[1]} {}
+#endif
 
   /*! \brief default constructor of __hip_bfloat162 */
   __BF16_HOST_DEVICE__ __hip_bfloat162() = default;
@@ -400,12 +405,22 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
   }
 
   /*! \brief return a vector of bf16 */
-  __BF16_HOST_DEVICE__ operator __bf16_2() const { return __bf16_2{x, y}; }
+  __BF16_HOST_DEVICE__ operator __bf16_2() const {
+#if defined(__clang__) && defined(__HIP__)
+    return __xy_bf162;
+#else
+    return __bf16_2{x, y};
+#endif
+  }
 
   /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ __hip_bfloat162& operator=(const __bf16_2 in) {
+#if defined(__clang__) && defined(__HIP__)
+    __xy_bf162 = in;
+#else
     x = __hip_bfloat16{in[0]};
     y = __hip_bfloat16{in[1]};
+#endif
     return *this;
   }
 
