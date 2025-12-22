@@ -181,8 +181,9 @@ ensure_finalization(bool _static_init = false)
         throw std::runtime_error(fmt::format(
             "Assignment of signal handler failed. signal handler is {:P}, expected "
             "{:P}",
-            as_hex(reinterpret_cast<void*>(config::set_signal_handler(nullptr))),
-            as_hex(reinterpret_cast<void*>(&finalization_handler))));
+            fmt::format("0x{:X}",
+                        reinterpret_cast<void*>(config::set_signal_handler(nullptr))),
+            fmt::format("0x{:X}", reinterpret_cast<void*>(&finalization_handler))));
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
@@ -542,7 +543,7 @@ rocprofsys_init_tooling_hidden(void)
     {
         throw std::runtime_error(
             fmt::format("{} called after rocprofsys_init_library() was explicitly called",
-                        ROCPROFSYS_FUNCTION));
+                        __FUNCTION__));
     }
 
     LOG_DEBUG("Instrumentation mode: {}", std::to_string(config::get_mode()));
@@ -1106,7 +1107,7 @@ rocprofsys_finalize_hidden(void)
             _push_count, _pop_count));
     }
 
-    debug::close_file();
+    // debug::close_file();
     config::finalize();
 
     LOG_DEBUG("Finalized: {}", _finalization.as_string());

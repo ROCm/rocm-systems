@@ -1575,7 +1575,8 @@ print_banner(std::ostream& _os)
     if(!_properties.empty())
         _version_info << join::join(join::array_config{ ", ", " (", ")" }, _properties);
 
-    LOG_INFO("{} {}", _banner, _version_info.str());
+    _os << _banner << "\n";
+    _os << _version_info.str() << "\n";
     _os << std::endl;
 }
 

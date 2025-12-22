@@ -367,9 +367,9 @@ experiment::as_string() const
     if(!config::get_causal_end_to_end())
         _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
             << _dur << " sec";
-    _ss << " :: experiment: " << as_hex(selection.address) << " ";
+    _ss << " :: experiment: " << fmt::format("0x{:X}", selection.address) << " ";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
-        _ss << "(symbol@" << as_hex(selection.symbol_address) << ") ";
+        _ss << "(symbol@" << fmt::format("0x{:X}", selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
         _ss << "[" << filepath::basename(selection.symbol.file) << ":"
             << selection.symbol.line << "]";
@@ -615,7 +615,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 throw std::runtime_error(fmt::format("Error! causal experiment selection "
                                                      "has no name: address={}, file={}, "
                                                      "line={}, func={}",
-                                                     as_hex(_line_info.address),
+                                                     _line_info.address.as_hex(),
                                                      _line_info.file, _line_info.line,
                                                      _line_info.func));
             }
@@ -662,7 +662,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         {
             ofs << "samples\tlocation=" << itr.get_identifier()
                 << "\tcount=" << itr.count;
-            if(config::get_debug()) ofs << "\taddress=" << as_hex(itr.address);
+            if(config::get_debug())
+                ofs << "\taddress=" << fmt::format("0x{:X}", itr.address);
             ofs << "\n";
         }
     }
