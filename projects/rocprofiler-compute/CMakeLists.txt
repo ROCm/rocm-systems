@@ -157,7 +157,11 @@ endif()
 # For build-time checks, use ${Python3_EXECUTABLE} (absolute path from find_package)
 # For runtime tests (add_test), use portable command that resolves from PATH
 # This allows tests to work when build/install folders are moved to different machines
-set(PYTHON_TEST_COMMAND "python3" CACHE STRING "Python command for running tests (portable)")
+set(PYTHON_TEST_COMMAND
+    "python3"
+    CACHE STRING
+    "Python command for running tests (portable)"
+)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
@@ -376,6 +380,14 @@ add_test(
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_iteration_multiplexing_stochastic
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_stochastic
+        --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -392,6 +404,7 @@ set_tests_properties(
     test_profile_live_attach_detach
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
+    test_profile_iteration_multiplexing_stochastic
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -634,6 +647,7 @@ install(
         "execute_process(
     COMMAND bash -c \"set -e
     cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
+    mkdir -p ${CMAKE_INSTALL_BINDIR}
     ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
     \")"
     COMPONENT main
