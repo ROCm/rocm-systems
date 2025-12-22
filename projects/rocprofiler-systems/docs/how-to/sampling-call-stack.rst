@@ -284,7 +284,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       LD_PRELOAD=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so.1.7.1
       ROCPROFSYS_CPU_FREQ_ENABLED=false
       ROCPROFSYS_PROFILE=true
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_AMD_SMI=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_SAMPLING=true
@@ -307,7 +307,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_KOKKOSP=true
       ROCPROFSYS_USE_MPIP=true
       ROCPROFSYS_USE_OMPT=true
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=true
       ROCPROFSYS_USE_AMD_SMI=true
@@ -337,7 +337,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_KOKKOSP=false
       ROCPROFSYS_USE_MPIP=false
       ROCPROFSYS_USE_OMPT=false
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=false
       ROCPROFSYS_USE_AMD_SMI=false
@@ -362,7 +362,7 @@ Here is the full output from the previous
    ROCPROFSYS_OUTPUT_PATH=rocprof-sys-output
    ROCPROFSYS_OUTPUT_PREFIX=%tag%
    ROCPROFSYS_PROFILE=true
-   ROCPROFSYS_TRACE=true
+   ROCPROFSYS_TRACE_CACHED=true
    ROCPROFSYS_TRACE_THREAD_LOCKS=false
    ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false
    ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false
