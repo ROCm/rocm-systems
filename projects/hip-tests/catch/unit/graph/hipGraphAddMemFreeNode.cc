@@ -143,8 +143,7 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
   HIP_CHECK(hipGraphCreate(&graph1, 0));
   HIP_CHECK(hipGraphCreate(&graph2, 0));
 
-  hipMemAllocNodeParams alloc_param;
-  memset(&alloc_param, 0, sizeof(alloc_param));
+  hipMemAllocNodeParams alloc_param{};
   alloc_param.bytesize = N;
   alloc_param.poolProps.allocType = hipMemAllocationTypePinned;
   alloc_param.poolProps.location.id = 0;
@@ -158,18 +157,19 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
 
   SECTION("More than one instantation of the graph exists") {
     hipGraphExec_t graph_exec1, graph_exec2;
-    HIP_CHECK(hipGraphInstantiate(&graph_exec1, graph2, nullptr, nullptr, 0));
-    HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec2, graph2, nullptr, nullptr, 0),
+    HIP_CHECK(hipGraphInstantiate(&graph_exec1, graph1, nullptr, nullptr, 0));
+    HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec2, graph1, nullptr, nullptr, 0),
                     hipErrorNotSupported);
     HIP_CHECK(hipGraphExecDestroy(graph_exec1));
   }
 
-#if HT_NVIDIA  // EXSWHTEC-352
   SECTION("Clone graph with mem free node") {
     hipGraph_t cloned_graph;
     HIP_CHECK_ERROR(hipGraphClone(&cloned_graph, graph2), hipErrorNotSupported);
   }
 
+  // hipGraphAddChildGraphNode/hipGraphRemoveDependencies should not allow to add child graph if it
+  // contains a alloc, free or conditional node
   SECTION("Use graph in a child node") {
     hipGraph_t parent_graph;
     HIP_CHECK(hipGraphCreate(&parent_graph, 0));
@@ -185,7 +185,6 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
     HIP_CHECK_ERROR(hipGraphRemoveDependencies(graph2, &free_node, &empty_node, 1),
                     hipErrorNotSupported);
   }
-#endif
 
   HIP_CHECK(hipGraphDestroy(graph1));
   HIP_CHECK(hipGraphDestroy(graph2));

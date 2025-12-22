@@ -1497,7 +1497,17 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
       (numDependencies > 0 && pDependencies == nullptr) || childGraph == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  // If the child graph has alloc/free nodes, we return an error
+  auto g = reinterpret_cast<hip::Graph*>(childGraph);
+  for (auto n : g->GetNodes()) {
+    if (n->GetType() == hipGraphNodeTypeMemAlloc || n->GetType() == hipGraphNodeTypeMemFree) {
+      HIP_RETURN(hipErrorNotSupported);
+    }
+  }
+
   hip::GraphNode* node = new hip::ChildGraphNode(reinterpret_cast<hip::Graph*>(childGraph));
+
   hipError_t status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
                                        reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                        numDependencies, false);
@@ -2179,6 +2189,14 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+
+  // If the graph has alloc/free nodes, we return an error
+  for (auto n : g->GetNodes()) {
+    if (n->GetType() == hipGraphNodeTypeMemAlloc || n->GetType() == hipGraphNodeTypeMemFree) {
+      HIP_RETURN(hipErrorNotSupported);
+    }
+  }
+
   for (size_t i = 0; i < numDependencies; i++) {
     if (toNode[i]->GetParentGraph() != g || fromNode[i]->GetParentGraph() != g ||
         fromNode[i]->RemoveEdgeDep(toNode[i]) == false) {
