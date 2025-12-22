@@ -44,6 +44,7 @@ from rocprofsys import (
     discover_build_config,
     GPUInfo,
     detect_gpu,
+    lookup_gpu_category,
     _get_rocm_version,
     _check_rocm_version,
 )
@@ -62,19 +63,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Shows both stdout and stderr from runner commands (default: False)",
+        help="Shows both stdout and stderr from runner commands even when tests pass (default: False)",
     )
     group.addoption(
         "--no-output",
         action="store_true",
         default=False,
-        help="Do not show any output from runner commands (default: False)",
+        help="Suppress all output including failure details - show only pass/fail (default: False)",
     )
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
     config.addinivalue_line(
         "markers", "gpu: mark test as requiring a GPU"
+    )
+    config.addinivalue_line(
+        "markers", "gpu_category_exclude(categories): exclude tests that require a specific GPU category (instinct, radeon, apu)"
     )
     config.addinivalue_line(
         "markers", "mpi: mark test as requiring MPI"
@@ -94,6 +98,17 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')"
     )
+    # Store --no-output flag for use in pytest_runtest_logreport
+    global _no_output_enabled
+    _no_output_enabled = config.getoption("--no-output", default=False)
+
+
+_no_output_enabled = False
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Suppress failure details when --no-output is specified."""
+    if _no_output_enabled and report.failed:
+        report.longrepr = None
 
 
 def pytest_collection_modifyitems(
@@ -127,6 +142,25 @@ def pytest_collection_modifyitems(
                     item.add_marker(pytest.mark.skip(
                         reason=f"ROCm {current_str} < required {min_version}"
                     ))
+
+        # Check gpu_category_exclude marker
+        gpu_category_marker = item.get_closest_marker("gpu_category_exclude")
+        if gpu_category_marker and gpu_info.available:
+            # Get excluded categories from marker args (can be multiple)
+            excluded_categories = set(gpu_category_marker.args)
+
+            # Get system GPU categories (check all detected architectures)
+            system_categories: set[str] = set()
+            for arch in gpu_info.architectures:
+                system_categories.update(lookup_gpu_category(arch))
+
+            # Skip if any system GPU category is in the excluded list
+            matching_categories = system_categories & excluded_categories
+            if matching_categories:
+                item.add_marker(pytest.mark.skip(
+                    reason=f"Test does not support GPU categories {excluded_categories}, "
+                           f"system has {system_categories}"
+                ))
 
 
 # ============================================================================
@@ -262,6 +296,11 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     except Exception as e:
         return [f"rocprofiler-systems: Configuration error - {e}"]
 
+    try:
+        gpuInfo = detect_gpu()
+    except Exception as e:
+        return [f"rocprofiler-systems: GPU detection error - {e}"]
+
     rocm_ver = _get_rocm_version()
     rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
 
@@ -273,6 +312,13 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  ROCm version:   {rocm_ver_str}",
         f"  ROCm path:      {rocprof_config.rocm_path}",
         f"  Is installed:   {rocprof_config.is_installed}",
+        "-" * 70,
+        "GPU Information:",
+        f"  Available:      {gpuInfo.available}",
+        f"  Architectures:  {gpuInfo.architectures}",
+        f"  Device count:   {gpuInfo.device_count}",
+        f"  Is Navi:        {gpuInfo.is_navi}",
+        f"  Is Mi300:       {gpuInfo.is_mi300}",
         "-" * 70,
         "Directories:",
         f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
@@ -359,17 +405,6 @@ def test_output_dir(
 def base_env(rocprof_config: RocprofsysConfig) -> dict[str, str]:
     """Base environment variables for test execution."""
     return rocprof_config.get_base_environment()
-
-
-@pytest.fixture
-def transpose_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Environment variables for transpose tests."""
-    env = base_env.copy()
-    env.update({
-        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
-    })
-    return env
-
 
 @pytest.fixture
 def flat_env(base_env: dict[str, str]) -> dict[str, str]:

@@ -25,6 +25,11 @@ endif()
 
 rocprofiler_systems_message(STATUS "Configuring OMPVV...")
 
+if(NOT ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_message(WARNING "No GPU targets detected/set. Disabling OMPVV offload tests...")
+    set(OMPVV_USE_OFFLOAD_TESTS FALSE)
+endif()
+
 # Master branch contains stable releases
 rocprofiler_systems_checkout_git_submodule(
   RELATIVE_PATH
@@ -63,9 +68,6 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
     elseif(TEST_TYPE STREQUAL "OFFLOAD")
         set(TARGET_PREFIX "openmp-vv-offload")
         set(FOFFLOADING_FLAGS "-fopenmp")
-        foreach(arch IN LISTS DEFAULT_GPU_TARGETS)
-            set(FOFFLOADING_FLAGS "${FOFFLOADING_FLAGS} --offload-arch=${arch}")
-        endforeach()
     else()
         rocprofiler_systems_message(FATAL_ERROR "Unknown TEST_TYPE - Only HOST and OFFLOAD supported")
     endif()
@@ -76,6 +78,12 @@ function(configure_ompvv_tests TEST_TYPE TEST_LIST_VAR)
         get_filename_component(TEST_NAME ${TEST} NAME_WE)
         string(REPLACE "_" "-" TARGET_NAME ${TEST_NAME})
         set(TARGET_NAME "${TARGET_PREFIX}-${TARGET_NAME}")
+
+        if(TARGET_PREFIX STREQUAL "openmp-vv-offload")
+            foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+                set(FOFFLOADING_FLAGS "${FOFFLOADING_FLAGS} --offload-arch=${arch}")
+            endforeach()
+        endif()
 
         set(CUSTOM_FFLAGS "-lm ${FOFFLOADING_FLAGS}")
         set(CUSTOM_FLINKFLAGS "-lm ${FOFFLOADING_FLAGS}")

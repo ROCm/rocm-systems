@@ -3,6 +3,11 @@
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+if(NOT ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_message(WARNING "No GPU targets detected/set. Disabling OpenMP target example...")
+    return()
+endif()
+
 if(NOT OMP_TARGET_COMPILER)
     find_program(
         amdclangpp_EXECUTABLE
@@ -36,7 +41,7 @@ set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 find_package(Threads REQUIRED)
 
 function(add_offload_flags tgt)
-    foreach(arch IN LISTS GPU_TARGETS)
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
         target_compile_options(${tgt} PRIVATE --offload-arch=${arch})
         target_link_options(${tgt} PUBLIC --offload-arch=${arch})
     endforeach()

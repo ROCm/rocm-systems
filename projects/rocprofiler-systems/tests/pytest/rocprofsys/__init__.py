@@ -56,7 +56,15 @@ from .validators import (
     validate_causal_json,
     validate_file_exists,
 )
-from .gpu import GPUInfo, detect_gpu, is_navi_architecture
+
+from .gpu import (
+    GPUInfo,
+    detect_gpu,
+    is_navi_architecture,
+    lookup_gpu_category,
+    get_target_gpu_arch,
+    is_mi300_architecture,
+)
 
 __all__ = [
     # Config
@@ -83,6 +91,8 @@ __all__ = [
     # GPU
     "GPUInfo",
     "detect_gpu",
+    "lookup_gpu_category",
+    "get_target_gpu_arch",
     "is_navi_architecture",
     "is_mi300_architecture",
 ]

@@ -101,8 +101,16 @@ rocprofiler_systems_add_test(
 # -------------------------------------------------------------------------------------- #
 
 if(ROCPROFSYS_USE_ROCM)
-    set(NAVI_REGEX "gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]")
-    rocprofiler_systems_get_gfx_archs(NAVI_DETECTED GFX_MATCH ${NAVI_REGEX} ECHO)
+    if(ROCPROFSYS_GFX_TARGETS)
+        foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+            rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORY)
+            if("instinct" IN_LIST GPU_CATEGORY)
+                continue()
+            endif()
+            set(NAVI_DETECTED TRUE)
+            break()
+        endforeach()
+    endif()
 
     if(NAVI_DETECTED)
         set(ROCPROFSYS_ROCM_EVENTS_TEST "SQ_WAVES")

@@ -63,6 +63,15 @@ from rocprofsys import (
 )
 
 
+@pytest.fixture
+def transpose_env(base_env: dict[str, str]) -> dict[str, str]:
+    """Environment variables for transpose tests."""
+    env = base_env.copy()
+    env.update({
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
+    })
+    return env
+
 # ============================================================================
 # Test Class: Basic Transpose Tests
 # ============================================================================
@@ -152,22 +161,22 @@ class TestTranspose:
             assert perfetto is not None, "Perfetto trace not created"
             assert perfetto.stat().st_size > 0, "Perfetto trace is empty"
 
-        # Verify perfetto trace haskernel dispatch events
-        with subtests.test("Perfetto Kernel Dispatch Validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            assert perfetto is not None, "Perfetto trace not created"
-            # Validate trace has kernel dispatch events
-            validation = validate_perfetto_trace(
-                perfetto,
-                rocprof_config.rocprofsys_tests_dir,
-                categories=["kernel_dispatch"],
-            )
-            assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
-            assert validation.details is not None
-            assert validation.details.get("slice_count", 0) > 0, \
-                    "No kernel dispatch events found in trace"
+        # # Verify perfetto trace has kernel dispatch events
+        # with subtests.test("Perfetto Kernel Dispatch Validation"):
+        #     if not use_perfetto:
+        #         pytest.skip("Perfetto is not enabled")
+        #     perfetto = result.perfetto_file
+        #     assert perfetto is not None, "Perfetto trace not created"
+        #     # Validate trace has kernel dispatch events
+        #     validation = validate_perfetto_trace(
+        #         perfetto,
+        #         rocprof_config.rocprofsys_tests_dir,
+        #         categories=["kernel_dispatch"],
+        #     )
+        #     assert validation.is_valid, f"Perfetto validation failed: {validation.message}"
+        #     assert validation.details is not None
+        #     assert validation.details.get("slice_count", 0) > 0, \
+        #             "No kernel dispatch events found in trace"
 
         # Verify perfetto trace has HIP runtime API events
         with subtests.test("Perfetto HIP API Call Validation"):

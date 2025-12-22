@@ -25,6 +25,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 
 @dataclass
@@ -58,7 +59,7 @@ class GPUInfo:
         if self.is_navi:
             return ["SQ_WAVES"]
         return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
-    
+
     @property
     def expected_counter_files(self) -> list[str]:
         """Get expected counter output files based on architecture."""
@@ -68,28 +69,25 @@ class GPUInfo:
 def detect_gpu() -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
-    Uses rocminfo and amd-smi to gather GPU information. Results are cached
-    for the lifetime of the process.
-
-    Returns:
-        GPUInfo with detected GPU information
+    Uses rocm_agent_enumerator to get the list of GPU architectures.
     """
     architectures: list[str] = []
     device_count = 0
 
-    rocminfo = shutil.which("rocminfo")
-    if rocminfo:
+    rocm_agent_enumerator = shutil.which("rocm_agent_enumerator")
+    if rocm_agent_enumerator:
         try:
             result = subprocess.run(
-                [rocminfo],
+                [rocm_agent_enumerator],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             if result.returncode == 0:
-                arch_matches = re.findall(r"gfx([0-9A-Fa-f]+)", result.stdout)
-                architectures = list(set(f"gfx{m}" for m in arch_matches))
-                device_count = len(architectures)
+                all_entries = result.stdout.strip().split('\n')
+                # gfx000 is the cpu, remove it
+                device_count = sum(1 for entry in all_entries if entry and entry != "gfx000")
+                architectures = list(set(entry for entry in all_entries if entry and entry != "gfx000"))
         except (subprocess.TimeoutExpired, OSError):
             pass
 
@@ -107,13 +105,103 @@ def detect_gpu() -> GPUInfo:
         is_mi300 = mi300,
     )
 
+def lookup_gpu_category(arch: str) -> list[str]:
+    """Lookup the GPU category for an architecture.
+
+    Note: Some architectures (e.g., gfx906) span multiple categories.
+
+    Args:
+        arch: Architecture string (e.g., 'gfx940', 'gfx94a')
+
+    Returns:
+        List of GPU categories the architecture belongs to (instinct, radeon, apu)
+    """
+    instinct_list = [
+        "gfx900",
+        "gfx906",  # MI50/MI60
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
+
+    # Also includes PRO GPUs
+    radeon_list = [
+        "gfx906",  # Radeon VII
+        "gfx1010",
+        "gfx1011",
+        "gfx1012",
+        "gfx1030",
+        "gfx1031",
+        "gfx1032",
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1200",
+        "gfx1201",
+        "gfx1202",
+    ]
+
+    apu_list = [
+        "gfx1035",
+        "gfx1036",
+        "gfx1103",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+    ]
+
+    categories: list[str] = []
+
+    if arch in instinct_list:
+        categories.append("instinct")
+    if arch in radeon_list:
+        categories.append("radeon")
+    if arch in apu_list:
+        categories.append("apu")
+
+    if not categories:
+        # Unknown architecture, default to instinct
+        categories.append("instinct")
+
+    return categories
+
+def get_target_gpu_arch(target_path: Path) -> list[str]:
+    """Uses llvm-objdump --offloading to get the GPU architectures the binary was compiled for.
+
+    Args:
+        target_path: Path to the binary to check
+
+    Returns:
+        List of GPU architectures the target was compiled for
+    """
+    target_archs: list[str] = []
+    llvm_objdump = shutil.which("llvm-objdump")
+    if llvm_objdump:
+        try:
+            result = subprocess.run(
+                [llvm_objdump, "--offloading", target_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    match = re.search(r'processor:\s*(gfx[0-9a-fA-F]+)', line)
+                    if match:
+                        target_archs.append(match.group(1))
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    return target_archs
+
 def is_navi_architecture(arch: str) -> bool:
     """Check if an architecture string represents NAVI GPU.
 
     NAVI includes gfx10xx, gfx11xx, and gfx12xx architectures.
 
     Args:
-        arch: Architecture string (e.g., 'gfx1100', 'gfx90a')
+        arch: Architecture string (e.g., 'gfx940', 'gfx94a')
 
     Returns:
         True if NAVI architecture

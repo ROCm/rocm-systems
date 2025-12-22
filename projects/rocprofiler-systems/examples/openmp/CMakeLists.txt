@@ -97,22 +97,6 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     )
 endif()
 
-set(DEFAULT_GPU_TARGETS
-    "gfx900"
-    "gfx906"
-    "gfx908"
-    "gfx90a"
-    "gfx942"
-    "gfx950"
-    "gfx1030"
-    "gfx1010"
-    "gfx1100"
-    "gfx1101"
-    "gfx1102"
-)
-
-set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
-
 if(ROCPROFSYS_USE_ROCM)
     add_subdirectory(external)
 else()

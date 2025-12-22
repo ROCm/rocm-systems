@@ -63,6 +63,15 @@ if(HIPCC_EXECUTABLE)
             hipMallocConcurrencyMproc
             PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/fork"
         )
+        # Specify GPU architectures to compile for
+        foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+            target_compile_options(
+                hipMallocConcurrencyMproc
+                PRIVATE --offload-arch=${arch}
+            )
+            target_link_options(hipMallocConcurrencyMproc PUBLIC --offload-arch=${arch})
+        endforeach()
+
         if(
             CMAKE_CXX_COMPILER_ID MATCHES "Clang"
             AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
