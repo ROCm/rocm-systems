@@ -18,11 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# FIXME: cjatin
-# This is a temp hack to pass it on windows since it has a char limit for
-# command line. Eventually we need to use rsp files with ninja on windows.
-# But this exposes several problems with hipcc and build system on windows.
-# While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
   hipGraphAddEmptyNode.cc
   hipGraphAddDependencies.cc
@@ -86,26 +81,7 @@ set(TEST_SRC
   hipGraphAddBatchMemOpNode.cc
   hipGraphBatchMemOpNodeSetParams.cc
   hipDrvGraphExecMemcpyNodeSetParams.cc
-  hipDrvGraphAddMemFreeNode.cc)
-
-if(HIP_PLATFORM MATCHES "amd")
-  set(AMD_SRC
-    hipStreamCaptureExtModuleLaunchKernel.cc
-    hipStreamBeginCaptureToGraph.cc
-    hipGetProcAddressGraphApis.cc
-    # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
-    hipGraphExecNodeSetParams.cc
-    hipGraphNodeSetParams.cc
-    hipGraphExecGetFlags.cc
-  )
-  set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
-endif()
-
-hip_add_exe_to_target(NAME GraphsTest1
-                      TEST_SRC ${TEST_SRC}
-                      TEST_TARGET_NAME build_tests)
-
-set(TEST_SRC
+  hipDrvGraphAddMemFreeNode.cc
   hipStreamGetCaptureInfo.cc
   hipStreamGetCaptureInfo_old.cc
   hipStreamEndCapture.cc
@@ -166,11 +142,17 @@ set(TEST_SRC
   hipDeviceSetGraphMemAttribute.cc
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
-  hipDrvGraphExecMemsetNodeSetParams.cc
-)
+  hipDrvGraphExecMemsetNodeSetParams.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
+    hipStreamCaptureExtModuleLaunchKernel.cc
+    hipStreamBeginCaptureToGraph.cc
+    hipGetProcAddressGraphApis.cc
+    # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
+    hipGraphExecNodeSetParams.cc
+    hipGraphNodeSetParams.cc
+    hipGraphExecGetFlags.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia
@@ -189,7 +171,7 @@ add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
-hip_add_exe_to_target(NAME GraphsTest2
+hip_add_exe_to_target(NAME GraphsTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
@@ -201,9 +183,9 @@ if(HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/
     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_dependencies(build_tests hipMatMul)
+  add_dependencies(GraphsTest hipMatMul)
   set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
 endif()
 
-add_dependencies(build_tests add_Kernel.code)
+add_dependencies(GraphsTest add_Kernel.code)

@@ -21,11 +21,6 @@
 # Common Tests - Test independent of all platforms
 set(COMMON_SHARED_SRC DriverContext.cc)
 
-# FIXME: cjatin
-# This is a temp hack to pass it on windows since it has a char limit for
-# command line. Eventually we need to use rsp files with ninja on windows.
-# But this exposes several problems with hipcc and build system on windows.
-# While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
     malloc.cc
     hipMemsetBasic.cc
@@ -97,71 +92,6 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
-    )
-
-if(UNIX)
-  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
-  hipMemPoolExportToShareableHandle.cc
-  hipMemPoolImportFromShareableHandle.cc
-  hipMemPoolImportPointer.cc)
-endif()
-
-if(HIP_PLATFORM MATCHES "amd")
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipMemPtrGetInfo.cc
-      hipPointerGetAttributes.cc
-      hipExtMallocWithFlags.cc
-      hipMallocMngdMultiThread.cc
-      hipMemVmm.cc
-      hipArray.cc
-      hipMemcpyDeviceToDeviceNoCU.cc
-      hipGetProcAddressMemoryApis.cc
-      # Will be enabled for NVIDIA after fix for SWDEV-551244
-      hipMemPrefetchAsync_v2.cc
-      hipMemAdvise_v2.cc)
-  if(UNIX)
-    # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
-    # For windows build error occurs undefined symbol: hipPointerSetAttribute
-    set(TEST_SRC ${TEST_SRC} hipPointerSetAttribute.cc)
-  endif()
-else()
-  set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
-endif()
-
-hip_add_exe_to_target(NAME MemoryTest1
-  TEST_SRC ${TEST_SRC}
-  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-
-if(UNIX)
-  # link libnuma for numa_available(), numa_max_node(), move_pages(), etc.
-  find_package(NUMA QUIET)
-  if(NUMA_FOUND)
-    set(NUMA "${NUMA_LIBRARIES}")
-  else()
-    find_library(NUMA NAMES numa REQUIRED)
-  endif()
-  target_link_libraries(MemoryTest1 ${NUMA})
-endif()
-
-if(HIP_PLATFORM MATCHES "amd")
-  set_source_files_properties(hipHostRegister_exe.cc PROPERTIES LANGUAGE HIP)
-  add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
-  set_target_properties(hipHostRegisterPerf PROPERTIES LINKER_LANGUAGE HIP)
-  add_dependencies(build_tests hipHostRegisterPerf)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
-  target_link_libraries(hipHostRegisterPerf hip::host hip::device)
-if(UNIX)
-  set_source_files_properties(hipMemAdvise_AlignedAllocMem_Exe.cc PROPERTIES LANGUAGE HIP)
-  add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
-  set_target_properties(hipMemAdviseTstAlignedAllocMem PROPERTIES LINKER_LANGUAGE HIP)
-  add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
-  target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
-endif()
-endif()
-
-set(TEST_SRC
     hipMemcpyFromSymbol.cc
     hipPtrGetAttribute.cc
     hipMemPoolApi.cc
@@ -223,17 +153,44 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
-    hipHostAlloc.cc)
+    hipHostAlloc.cc
+)
+
+if(UNIX)
+  set(TEST_SRC ${TEST_SRC}
+  hipMemPoolExportPointer.cc
+  hipMemPoolExportToShareableHandle.cc
+  hipMemPoolImportFromShareableHandle.cc
+  hipMemPoolImportPointer.cc)
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
+      hipMemPtrGetInfo.cc
+      hipPointerGetAttributes.cc
+      hipExtMallocWithFlags.cc
+      hipMallocMngdMultiThread.cc
+      hipMemVmm.cc
+      hipArray.cc
+      hipMemcpyDeviceToDeviceNoCU.cc
+      hipGetProcAddressMemoryApis.cc
+      # Will be enabled for NVIDIA after fix for SWDEV-551244
+      hipMemPrefetchAsync_v2.cc
+      hipMemAdvise_v2.cc
       # Test below currently doesn't work on NVIDIA, will update based on ticket response
       hipDrvMemcpy2DUnaligned.cc
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc
       hipArray3DGetDescriptor.cc)
+  if(UNIX)
+    # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
+    # For windows build error occurs undefined symbol: hipPointerSetAttribute
+    set(TEST_SRC ${TEST_SRC} hipPointerSetAttribute.cc)
+  endif()
+else()
+  set(TEST_SRC ${TEST_SRC} hipGetSymbolSizeAddress.cc)
 endif()
 
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST hipMallocArray.cc hipArrayCreate.cc) # tests not for gfx90a+
@@ -273,22 +230,43 @@ else()
   set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
 
-hip_add_exe_to_target(NAME MemoryTest2
+hip_add_exe_to_target(NAME MemoryTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "amd")
-set(TEST_SRC
-  inlineVar.cc
-  memoryCommon.cc
-)
+  set_source_files_properties(hipHostRegister_exe.cc PROPERTIES LANGUAGE HIP)
+  add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
+  set_target_properties(hipHostRegisterPerf PROPERTIES LINKER_LANGUAGE HIP)
+  add_dependencies(build_tests hipHostRegisterPerf)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
+  target_link_libraries(hipHostRegisterPerf hip::host hip::device)
+  if(UNIX)
+    set_source_files_properties(hipMemAdvise_AlignedAllocMem_Exe.cc PROPERTIES LANGUAGE HIP)
+    add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
+    set_target_properties(hipMemAdviseTstAlignedAllocMem PROPERTIES LINKER_LANGUAGE HIP)
+    add_dependencies(MemoryTest hipMemAdviseTstAlignedAllocMem)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
+    target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
+  endif()
+endif()
 
-#hip_add_exe_to_target(NAME InlineVarTest
-#  TEST_SRC ${TEST_SRC}
-#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-#
-#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+if(UNIX)
+  # link libnuma for numa_available(), numa_max_node(), move_pages(), etc.
+  find_package(NUMA QUIET)
+  if(NUMA_FOUND)
+    set(NUMA "${NUMA_LIBRARIES}")
+  else()
+    find_library(NUMA NAMES numa REQUIRED)
+  endif()
+  target_link_libraries(MemoryTest ${NUMA})
+endif()
+
+if(HIP_PLATFORM MATCHES "amd")
+  set(TEST_SRC
+    inlineVar.cc
+    memoryCommon.cc
+  )
 endif()
 
 set(TEST_SRC
@@ -304,6 +282,5 @@ hip_add_exe_to_target(NAME SVMAtomicTest
 
 if(HIP_PLATFORM MATCHES "nvidia")
   set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(MemoryTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
 endif()
