@@ -1370,12 +1370,53 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         return
     # Read and concatenate all torch trace files
     all_traces = []
+    required_columns = [
+        "Function",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+        "Start_Timestamp_function",
+        "End_Timestamp_function",
+        "Start_Timestamp_kernel",
+        "End_Timestamp_kernel",
+    ]
     for trace_file in torch_trace_files:
         try:
             df = pd.read_csv(trace_file)
-            all_traces.append(df[['Function', 'Kernel_Name', 'Counter_Name', 'Counter_Value', 'Start_Timestamp_function', 'End_Timestamp_function', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']])
+        except pd.errors.ParserError as e:
+            console_warning(f"Parser error while reading {trace_file}: {e}")
+            continue
+        except OSError as e:
+            console_warning(f"I/O error while reading {trace_file}: {e}")
+            continue
         except Exception as e:
-            console_warning(f"Error reading {trace_file}: {e}")
+            # Unexpected error; log full details for debugging
+            console_warning(
+                f"Unexpected error while reading {trace_file}: {e}\n{traceback.format_exc()}"
+            )
+            continue
+
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            console_warning(
+                f"Skipping {trace_file}: missing required columns {missing_columns}"
+            )
+            continue
+
+        all_traces.append(
+            df[
+                [
+                    "Function",
+                    "Kernel_Name",
+                    "Counter_Name",
+                    "Counter_Value",
+                    "Start_Timestamp_function",
+                    "End_Timestamp_function",
+                    "Start_Timestamp_kernel",
+                    "End_Timestamp_kernel",
+                ]
+            ]
+        )
     if not all_traces:
         console_warning("No valid torch trace data to consolidate.")
         return
