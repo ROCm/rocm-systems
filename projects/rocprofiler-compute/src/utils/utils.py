@@ -1422,7 +1422,7 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         return
     
     consolidated_df = pd.concat(all_traces, ignore_index=True)
-    sorted_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
+    consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = split_columns[0] if len(split_columns.columns) > 0 else None
