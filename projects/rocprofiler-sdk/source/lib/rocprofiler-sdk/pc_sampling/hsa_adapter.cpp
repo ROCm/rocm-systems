@@ -56,19 +56,18 @@ namespace
 const PCSAgentSession*
 get_pcs_session_of(hsa_agent_t hsa_agent)
 {
-    // Use global map for lookup
-    auto locked = get_global_pc_sampling_sessions().rlock();
-
-    // Linear search by hsa_agent.handle (O(n) where n is typically 1-4 GPUs)
-    for(const auto& [_, agent_session] : *locked)
-    {
-        if(agent_session->hsa_agent &&
-           agent_session->hsa_agent->handle == hsa_agent.handle)
-        {
-            return agent_session.get();
-        }
-    }
-    return nullptr;
+    return get_global_pc_sampling_sessions().rlock(
+        [hsa_agent](const auto& sessions) -> const PCSAgentSession* {
+            // Linear search by hsa_agent.handle (O(n) where n is typically 1-4 GPUs)
+            for(const auto& [_, agent_session] : sessions)
+            {
+                if(agent_session->hsa_agent && agent_session->hsa_agent->handle == hsa_agent.handle)
+                {
+                    return agent_session.get();
+                }
+            }
+            return nullptr;
+        });
 }
 
 // Called just before the dispatch packet is put inside the real hardware queue.

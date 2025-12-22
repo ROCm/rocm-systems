@@ -449,7 +449,7 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                                 interval,
                                                                 another_buff,
                                                                 0),
-                      ROCPROFILER_STATUS_ERROR);
+                      ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED);
         }
 
         ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_data->client_thread),

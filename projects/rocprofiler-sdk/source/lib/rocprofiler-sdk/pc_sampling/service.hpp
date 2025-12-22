@@ -27,7 +27,9 @@
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
+#    include "lib/common/synchronized.hpp"
 #    include "lib/rocprofiler-sdk/context/context.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 
 #    include <rocprofiler-sdk/fwd.h>
 #    include <rocprofiler-sdk/pc_sampling.h>
@@ -35,11 +37,21 @@
 #    include <hsa/hsa_api_trace.h>
 
 #    include <atomic>
+#    include <memory>
+#    include <unordered_map>
 
 namespace rocprofiler
 {
 namespace pc_sampling
 {
+// Global map for O(1) agent ownership checking and lookups
+// Maps agent ID to the PC sampling session configured for that agent
+using global_pc_sampling_sessions_map_t =
+    std::unordered_map<rocprofiler_agent_id_t, std::shared_ptr<PCSAgentSession>>;
+
+common::Synchronized<global_pc_sampling_sessions_map_t>&
+get_global_pc_sampling_sessions();
+
 rocprofiler_status_t
 start_service(const context::context* ctx);
 
