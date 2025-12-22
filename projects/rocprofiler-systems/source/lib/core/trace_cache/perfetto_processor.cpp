@@ -668,9 +668,40 @@ perfetto_processor_t::handle(const region_sample& _rs)
         annotate_perfetto(ctx, annotations);
     };
 
-    tracing::push_perfetto_ts(category::rocm{}, _name.c_str(), _beg_ts,
-                              ::perfetto::Flow::ProcessScoped(_corr_id), add_annotations);
-    tracing::pop_perfetto_ts(category::rocm{}, _name.c_str(), _end_ts);
+    auto emit_trace = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        tracing::push_perfetto_ts(CategoryT{}, _name.c_str(), _beg_ts,
+                                  ::perfetto::Flow::ProcessScoped(_corr_id),
+                                  add_annotations);
+        tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
+    };
+
+    auto try_category = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        if(_category == trait::name<CategoryT>::value)
+        {
+            emit_trace(category_tag);
+            return true;
+        }
+        return false;
+    };
+
+    bool dispatched =
+        (try_category(category::host{}) || try_category(category::user{}) ||
+         try_category(category::python{}) || try_category(category::mpi{}) ||
+         try_category(category::pthread{}) || try_category(category::kokkos{}) ||
+         try_category(category::rocm_hip_api{}) ||
+         try_category(category::rocm_hsa_api{}) ||
+         try_category(category::rocm_marker_api{}) ||
+         try_category(category::rocm_rccl{}) ||
+         try_category(category::rocm_rocdecode_api{}) ||
+         try_category(category::rocm_rocjpeg_api{}) || try_category(category::vaapi{}));
+
+    if(!dispatched)
+    {
+        // Default to rocm category for backward compatibility
+        emit_trace(category::rocm{});
+    }
 }
 
 void
@@ -894,32 +925,6 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
 void
 perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 {
-    // using amd_smi_gfx_track   = perfetto_counter_track<category::amd_smi_gfx_busy>;
-    // using amd_smi_umc_track   = perfetto_counter_track<category::amd_smi_umc_busy>;
-    // using amd_smi_mm_track    = perfetto_counter_track<category::amd_smi_mm_busy>;
-    // using amd_smi_temp_track  = perfetto_counter_track<category::amd_smi_temp>;
-    // using amd_smi_power_track = perfetto_counter_track<category::amd_smi_power>;
-    // using amd_smi_mem_track   = perfetto_counter_track<category::amd_smi_memory_usage>;
-    // using amd_smi_vcn_track   = perfetto_counter_track<category::amd_smi_vcn_activity>;
-    // using amd_smi_jpeg_track  =
-    // perfetto_counter_track<category::amd_smi_jpeg_activity>; using
-    // amd_smi_xgmi_link_width_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_link_width>;
-    // using amd_smi_xgmi_link_speed_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_link_speed>;
-    // using amd_smi_xgmi_read_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_read_data>;
-    // using amd_smi_xgmi_write_track =
-    //     perfetto_counter_track<category::amd_smi_xgmi_write_data>;
-    // using amd_smi_pcie_link_width_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_link_width>;
-    // using amd_smi_pcie_link_speed_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_link_speed>;
-    // using amd_smi_pcie_bandwidth_acc_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
-    // using amd_smi_pcie_bandwidth_inst_track =
-    //     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
-
     // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
     using gpu_metrics_t = gpu::gpu_metrics_t;
 
@@ -937,36 +942,6 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     auto _ts        = _amd_smi.timestamp;
     auto _device_id = _amd_smi.device_id;
 
-    // auto setup_tracks = [&]() {
-    //     if(amd_smi_gfx_track::exists(_device_id)) return;
-
-    //     auto make_track_name = [&](const char* metric) {
-    //         return JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric, "(S)");
-    //     };
-
-    //     if(is_busy_enabled)
-    //     {
-    //         amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
-    //         amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
-    //         amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
-    //     }
-    //     if(is_temp_enabled)
-    //     {
-    //         amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
-    //                                     "deg C");
-    //     }
-    //     if(is_power_enabled)
-    //     {
-    //         amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
-    //     }
-    //     if(is_mem_usage_enabled)
-    //     {
-    //         amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"),
-    //         "MB");
-    //     }
-    // };
-
-    // setup_tracks();
     setup_amd_smi_tracks(_device_id, is_busy_enabled, is_temp_enabled, is_power_enabled,
                          is_mem_usage_enabled);
 
@@ -1013,6 +988,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
 
         using Category = std::decay_t<decltype(category)>;
 
+        const char* metric_name = nullptr;
+        if constexpr(std::is_same_v<Category, category::amd_smi_vcn_activity>)
+            metric_name = "VCN Activity";
+        else if constexpr(std::is_same_v<Category, category::amd_smi_jpeg_activity>)
+            metric_name = "JPEG Activity";
+        else
+            metric_name = trait::name<Category>::value;
+
         for(size_t i = 0; i < data.size(); ++i)
         {
             const auto value = data[i];
@@ -1023,16 +1006,14 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
             {
                 // Per-XCP format
                 track_name = JOIN(
-                    " ", "GPU", JOIN("", '[', _device_id, ']'),
-                    trait::name<Category>::value,
+                    " ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                     JOIN("", "XCP_", _idx.value(), ": [", (i < 10 ? "0" : ""), i, ']'),
                     "(S)");
             }
             else
             {
                 // Device-level format
-                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'),
-                                  trait::name<Category>::value,
+                track_name = JOIN(" ", "GPU", JOIN("", '[', _device_id, ']'), metric_name,
                                   JOIN("", "[", (i < 10 ? "0" : ""), i, ']'), "(S)");
             }
 

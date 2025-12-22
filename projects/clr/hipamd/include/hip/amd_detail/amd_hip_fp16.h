@@ -99,7 +99,7 @@ struct __half {
   // CREATORS
   __HOST_DEVICE__
   __half() = default;
-  __HOST_DEVICE__ constexpr __half(const __half_raw& x) : data{x.data} {}
+  __HOST_DEVICE__ constexpr __half(const __half_raw& x) : __x{x.x} {}
 #if !defined(__HIP_NO_HALF_CONVERSIONS__)
   __HOST_DEVICE__
   __half(decltype(data) x) : data{x} {}

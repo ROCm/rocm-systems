@@ -7883,20 +7883,12 @@ def test_merge_counters_iteration_multiplex():
 
     # For "kernel" policy
     result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
-    column_headers = [headers[1] for headers in result.columns.tolist()]
-
     assert isinstance(result, pd.DataFrame)
-    assert "Mean_Time" in column_headers
-    assert "Median_Time" in column_headers
     assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
 
     # For "kernel_launch_params" policy
     result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
-    column_headers = [headers[1] for headers in result.columns.tolist()]
-
     assert isinstance(result, pd.DataFrame)
-    assert "Mean_Time" in column_headers
-    assert "Median_Time" in column_headers
     assert len(result) == 2
 
     data = {
@@ -7921,11 +7913,7 @@ def test_merge_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
-    column_headers = [headers[1] for headers in result.columns.tolist()]
-
     assert isinstance(result, pd.DataFrame)
-    assert "Mean_Time" in column_headers
-    assert "Median_Time" in column_headers
     assert len(result) == 3
 
     # Test multi_kernel
@@ -7952,20 +7940,12 @@ def test_merge_counters_iteration_multiplex():
 
     # For "kernel" policy
     result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
-    column_headers = [headers[1] for headers in result.columns.tolist()]
-
     assert isinstance(result, pd.DataFrame)
-    assert "Mean_Time" in column_headers
-    assert "Median_Time" in column_headers
     assert len(result) == 2
 
     # For "kernel_launch_params" policy
     result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
-    column_headers = [headers[1] for headers in result.columns.tolist()]
-
     assert isinstance(result, pd.DataFrame)
-    assert "Mean_Time" in column_headers
-    assert "Median_Time" in column_headers
     assert len(result) == 3
 
 

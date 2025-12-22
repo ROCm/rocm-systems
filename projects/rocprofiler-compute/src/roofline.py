@@ -184,7 +184,8 @@ class Roofline:
         df_list = df_pmc["Kernel_Name"].tolist()
 
         for idx in range(len(df_list)):
-            if df_list[idx].split("(")[0] not in args.kernel:
+            # If there is no any kernel match, drop the row
+            if not any([kernel in df_list[idx] for kernel in args.kernel]):
                 df_filtered.drop(index=idx, inplace=True)
 
         # Verify that final filtered kernel df matches the kernel list requested

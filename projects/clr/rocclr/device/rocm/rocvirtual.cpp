@@ -3226,8 +3226,8 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
     amd::Coord3D origin(offset);
     amd::Coord3D size(sizeBytes);
-    // Ensure memory ordering preceding the write
-    dispatchBarrierPacket(kBarrierPacketReleaseHeader);
+    // Add system scope to the write kernel for memory ordering
+    addSystemScope();
 
     bool result = blitMgr().streamOpsWrite(*memory, value, offset, sizeBytes);
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Writing value: 0x%lx", value);
