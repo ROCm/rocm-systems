@@ -1373,7 +1373,7 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
     for trace_file in torch_trace_files:
         try:
             df = pd.read_csv(trace_file)
-            all_traces.append(df[['Function', 'Kernel_Name', 'Counter_Name', 'Counter_Value','Start_Timestamp_function', 'End_Timestamp_function', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']])
+            all_traces.append(df[['Function', 'Kernel_Name', 'Counter_Name', 'Counter_Value', 'Start_Timestamp_function', 'End_Timestamp_function', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']])
         except Exception as e:
             console_warning(f"Error reading {trace_file}: {e}")
     if not all_traces:
