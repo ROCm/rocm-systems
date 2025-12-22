@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #pragma once
+#include "common/defines.h"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/amd_smi/amd_smi_sample.hpp"

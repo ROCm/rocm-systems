@@ -52,7 +52,7 @@ struct amd_smi_impl
     using SmiServiceFactory  = typename Config::SmiServiceFactory;
     using SettingsApi        = typename Config::SettingsApi;
     using PerfettoApi        = typename Config::PerfettoApi;
-    using RocpdApi           = typename Config::RocpdApi;
+    using CacheApi           = typename Config::RocpdApi;
     using smi_service        = typename SmiServiceFactory::smi_service;
     using processor_vector_t = typename smi_service::processor_vector_t;
     using processor_t        = typename smi_service::processor_t;
@@ -88,6 +88,8 @@ struct amd_smi_impl
                 return result;
             });
 
+        m_enabled_metrics = SettingsApi::get_enabled_metrics();
+
         ROCPROFSYS_VERBOSE_F(1, "Enabled %zu GPU processors for AMD SMI sampling\n",
                              m_gpu_processors.size());
 
@@ -100,16 +102,15 @@ struct amd_smi_impl
     void config()
     {
         auto _enabled_metrics = SettingsApi::get_enabled_metrics();
+        CacheApi::initialize_category_metadata();
 
-        RocpdApi::initialize_category_metadata();
-
-        std::for_each(
-            m_gpu_processors.begin(), m_gpu_processors.end(), [&](const auto& device) {
-                auto device_index = device->get_index();
-                PerfettoApi::setup_counter_tracks(device_index, _enabled_metrics);
-                RocpdApi::initialize_smi_tracks_metadata(device_index);
-                RocpdApi::initialize_smi_pmc_metadata(device_index);
-            });
+        for(const auto& device : m_gpu_processors)
+        {
+            auto device_index = device->get_index();
+            PerfettoApi::setup_counter_tracks(device_index, _enabled_metrics);
+            CacheApi::initialize_smi_tracks_metadata(device_index);
+            CacheApi::initialize_smi_pmc_metadata(device_index);
+        }
     }
 
     void sample(const get_timestamp_t& get_timestamp)
@@ -129,7 +130,7 @@ struct amd_smi_impl
                 auto _smi_metrics       = processor->get_smi_metrics();
                 auto _device_id         = processor->get_index();
 
-                RocpdApi::store_sample(_device_id, _supported_metrics, _enabled_metrics,
+                CacheApi::store_sample(_device_id, _supported_metrics, _enabled_metrics,
                                        _smi_metrics, _timestamp);
                 PerfettoApi::store_sample(_device_id, _smi_metrics, _timestamp);
                 ++it;
@@ -147,11 +148,9 @@ struct amd_smi_impl
 
     void post_process()
     {
-        auto _enabled_metrics = SettingsApi::get_enabled_metrics();
-
         for(const auto& processor : m_gpu_processors)
         {
-            PerfettoApi::post_process(processor->get_index(), _enabled_metrics,
+            PerfettoApi::post_process(processor->get_index(), m_enabled_metrics,
                                       processor->get_supported_metrics());
         }
     }
@@ -167,12 +166,12 @@ struct amd_smi_impl
             m_smi_service->shutdown();
             m_smi_service.reset();
         }
-        m_gpu_processors.clear();
     }
 
 private:
     processor_vector_t           m_gpu_processors;
     std::shared_ptr<smi_service> m_smi_service;
+    enabled_metric               m_enabled_metrics{};
 };
 
 #endif  // ROCPROFSYS_USE_ROCM > 0

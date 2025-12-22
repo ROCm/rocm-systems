@@ -178,30 +178,19 @@ struct rocpd_policy
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
     }
 
-    static void store_sample(size_t /*device_id*/,
-                             const enabled_metric& /*supported_metrics*/,
-                             const enabled_metric& /*enabled_metrics*/,
-                             const smi_metrics& /*metrics*/, unsigned long /*timestamp*/)
+    static void store_sample(size_t device_id, const enabled_metric& supported_metrics,
+                             const enabled_metric& enabled_metrics,
+                             const smi_metrics& metrics, unsigned long timestamp)
     {
         if(!get_use_rocpd())
         {
             return;
         }
-        /*
-                trace_cache::get_buffer_storage().store(trace_cache::amd_smi_sample{
-                    device_id, timestamp,
-                    static_cast<uint32_t>(enabled_metrics.value &
-           supported_metrics.value), serialize_smi_metrics(metrics) });
-        */
-    }
+        enabled_metric _enabled_metrics = { .value = enabled_metrics.value &
+                                                     supported_metrics.value };
 
-private:
-    static std::vector<uint8_t> serialize_smi_metrics(const smi_metrics& metrics)
-    {
-        auto                 metric_size = sizeof(metrics);
-        std::vector<uint8_t> result(metric_size);
-        std::memcpy(result.data(), &metrics, metric_size);
-        return result;
+        trace_cache::get_buffer_storage().store(trace_cache::amd_smi_sample{
+            _enabled_metrics, static_cast<uint32_t>(device_id), timestamp, metrics });
     }
 };
 

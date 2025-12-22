@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/amd_smi/common.hpp"
 #include <cstdint>
@@ -11,7 +10,7 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-struct amd_smi_sample
+struct amd_smi_sample : cacheable_t
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
         trace_cache::type_identifier_t::amd_smi_sample
@@ -36,23 +35,51 @@ template <>
 inline void
 serialize(uint8_t* buffer, const amd_smi_sample& item)
 {
-    trace_cache::utility::store_value(buffer, item.enabled_metric.value, item.device_id,
-                                      item.timestamp, item.metrics);
+    utility::store_value(
+        buffer, static_cast<uint32_t>(item.enabled_metric.value), item.device_id,
+        item.timestamp, item.metrics.average_socket_power,
+        item.metrics.current_socket_power, item.metrics.memory_usage,
+        item.metrics.hotspot_temperature, item.metrics.edge_temperature,
+        item.metrics.gfx_activity, item.metrics.umc_activity, item.metrics.mm_activity,
+        item.metrics.xcp_stats, item.metrics.xgmi_link_width,
+        item.metrics.xgmi_link_speed, item.metrics.xgmi_read_data_acc,
+        item.metrics.xgmi_write_data_acc, item.metrics.pcie_link_width,
+        item.metrics.pcie_link_speed, item.metrics.pcie_bandwidth_acc,
+        item.metrics.pcie_bandwidth_inst);
 }
 
 template <>
 inline amd_smi_sample
-deserialize(uint8_t*& /*buffer*/)
+deserialize(uint8_t*& buffer)
 {
     amd_smi_sample item;
+    utility::parse_value(
+        buffer, item.enabled_metric.value, item.device_id, item.timestamp,
+        item.metrics.average_socket_power, item.metrics.current_socket_power,
+        item.metrics.memory_usage, item.metrics.hotspot_temperature,
+        item.metrics.edge_temperature, item.metrics.gfx_activity,
+        item.metrics.umc_activity, item.metrics.mm_activity, item.metrics.xcp_stats,
+        item.metrics.xgmi_link_width, item.metrics.xgmi_link_speed,
+        item.metrics.xgmi_read_data_acc, item.metrics.xgmi_write_data_acc,
+        item.metrics.pcie_link_width, item.metrics.pcie_link_speed,
+        item.metrics.pcie_bandwidth_acc, item.metrics.pcie_bandwidth_inst);
     return item;
 }
 
 template <>
 inline size_t
-get_size(const amd_smi_sample& /*item*/)
+get_size(const amd_smi_sample& item)
 {
-    return 32;
+    return utility::get_size(
+        item.enabled_metric.value, item.device_id, item.timestamp,
+        item.metrics.average_socket_power, item.metrics.current_socket_power,
+        item.metrics.memory_usage, item.metrics.hotspot_temperature,
+        item.metrics.edge_temperature, item.metrics.gfx_activity,
+        item.metrics.umc_activity, item.metrics.mm_activity, item.metrics.xcp_stats,
+        item.metrics.xgmi_link_width, item.metrics.xgmi_link_speed,
+        item.metrics.xgmi_read_data_acc, item.metrics.xgmi_write_data_acc,
+        item.metrics.pcie_link_width, item.metrics.pcie_link_speed,
+        item.metrics.pcie_bandwidth_acc, item.metrics.pcie_bandwidth_inst);
 }
 
 }  // namespace trace_cache

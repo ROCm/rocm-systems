@@ -29,7 +29,6 @@
 #pragma once
 
 #include "core/components/fwd.hpp"
-#include "core/defines.hpp"
 #include "core/state.hpp"
 
 #include <cstdint>
