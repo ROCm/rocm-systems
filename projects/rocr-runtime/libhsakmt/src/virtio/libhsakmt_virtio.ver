@@ -10,6 +10,8 @@ vhsaKmtUnmapMemoryToGPU;
 vhsaKmtAvailableMemory;
 vhsaKmtMapMemoryToGPU;
 vhsaKmtRegisterMemoryWithFlags;
+vhsaKmtRegisterMemory;
+vhsaKmtRegisterMemoryToNodes;
 vhsaKmtDeregisterMemory;
 vhsaKmtGetVersion;
 vhsaKmtAcquireSystemProperties;

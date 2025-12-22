@@ -744,6 +744,26 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
   return rsp->ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemory(void* MemoryAddress, HSAuint64 MemorySizeInBytes) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  HsaMemFlags flags = {0};
+  flags.ui32.CoarseGrain = 1;
+  flags.ui32.ExtendedCoherent = 0;
+
+  return vhsaKmtRegisterMemoryWithFlags(MemoryAddress, MemorySizeInBytes, flags);
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryToNodes(void* MemoryAddress,
+                                                     HSAuint64 MemorySizeInBytes,
+                                                     HSAuint32 NumberOfNodes,
+                                                     HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  // Not used in ROCR so no implementation is performed here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
 static int vhsakmt_remove_clgl_bo(vhsakmt_device_handle dev, vhsakmt_bo_handle bo) {
   struct vhsakmt_ccmd_memory_rsp* rsp;
   struct vhsakmt_ccmd_memory_req req = {

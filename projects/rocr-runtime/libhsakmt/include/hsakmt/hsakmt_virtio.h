@@ -59,6 +59,10 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtMapMemoryToGPU(void* MemoryAddress, HSAuint64 Mem
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryWithFlags(void* MemoryAddress,
                                                        HSAuint64 MemorySizeInBytes,
                                                        HsaMemFlags MemFlags);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemory(void* MemoryAddress, HSAuint64 MemorySizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterMemoryToNodes(void* MemoryAddress,
+                                                     HSAuint64 MemorySizeInBytes,
+                                                     HSAuint32 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDeregisterMemory(void* MemoryAddress);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetVersion(HsaVersionInfo* v);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtAcquireSystemProperties(HsaSystemProperties* SystemProperties);
