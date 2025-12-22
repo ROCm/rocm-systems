@@ -1362,7 +1362,7 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
 
 @demarcate
 def consolidate_torch_trace_output(workload_dir: str) -> None:
-    # marker api trace csv files are generated for each process
+    # Consolidate torch operator trace CSV files from multiple processes
     console_log("Consolidating torch operator trace output...")
     # Find all torch trace CSV files in workload directory
     torch_trace_files = glob.glob(f"{workload_dir}/*_torch_trace.csv")
