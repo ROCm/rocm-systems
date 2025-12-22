@@ -27,7 +27,6 @@
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
@@ -46,6 +45,8 @@
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
+
+#include <logger/debug.hpp>
 
 #include <cstdlib>
 #include <sstream>
@@ -226,7 +227,7 @@ extern "C"
         {
             _standalone_initialized = true;
 
-            ROCPROFSYS_BASIC_VERBOSE_F(0, "Parsing arguments...\n");
+            LOG_DEBUG("Parsing arguments...");
             std::string _command_line = {};
             for(int i = 0; i < argc; ++i)
             {
@@ -256,10 +257,11 @@ extern "C"
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         tim::consume_parameters(devInfoCount, deviceInfo);
 
-        ROCPROFSYS_BASIC_VERBOSE_F(
-            0,
-            "Initializing rocprof-sys kokkos connector (sequence %d, version: %llu)... ",
-            loadSeq, (unsigned long long) interfaceVer);
+        (void) loadSeq;
+        (void) interfaceVer;
+        LOG_DEBUG(
+            "Initializing rocprof-sys kokkos connector (sequence {}, version: {})...",
+            loadSeq, interfaceVer);
 
         if(_standalone_initialized ||
            (!rocprofsys::config::settings_are_configured() &&
@@ -283,20 +285,22 @@ extern "C"
                     {
                         std::stringstream _libs_str{};
                         for(const auto& litr : _libs)
-                            _libs_str << "    " << litr << "\n";
-                        ROCPROFSYS_ABORT(
-                            "%s was invoked with librocprof-sys.so as the "
-                            "KOKKOS_TOOLS_LIBS.\n"
+                            _libs_str << "- " << litr << "\n";
+                        LOG_CRITICAL(
+                            "{} was invoked with librocprof-sys.so as the "
+                            "KOKKOS_TOOLS_LIBS."
                             "However, librocprof-sys-dl.so has already been loaded by "
-                            "the process.\nTo avoid duplicate collections culminating "
-                            "is an error, please set KOKKOS_TOOLS_LIBS=%s.\nLoaded "
-                            "libraries:\n%s",
-                            __FUNCTION__, itr.c_str(), _libs_str.str().c_str());
+                            "the process. To avoid duplicate collections culminating "
+                            "is an error, please set KOKKOS_TOOLS_LIBS={}.Loaded "
+                            "libraries: {}",
+                            __FUNCTION__, itr, _libs_str.str());
+                        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                        std::abort();
                     }
                 }
             }
 
-            ROCPROFSYS_BASIC_VERBOSE_F(0, "Initializing rocprof-sys (standalone)... ");
+            LOG_DEBUG("Initializing rocprof-sys (standalone)... ");
             auto _mode = tim::get_env<std::string>("ROCPROFSYS_MODE", "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
                                                          : _initialize_arguments.at(0);
@@ -339,15 +343,13 @@ extern "C"
         if(_standalone_initialized)
         {
             rocprofsys_pop_trace_hidden("kokkos_main");
-            ROCPROFSYS_VERBOSE_F(
-                0, "Finalizing kokkos rocprof-sys connector (standalone)...\n");
+            LOG_DEBUG("Finalizing kokkos rocprof-sys connector (standalone)...");
             rocprofsys_finalize_hidden();
         }
         else
         {
-            ROCPROFSYS_VERBOSE_F(0, "Finalizing kokkos rocprof-sys connector... ");
+            LOG_DEBUG("Finalizing kokkos rocprof-sys connector... ");
             kokkosp::cleanup();
-            if(rocprofsys::get_verbose() >= 0) fprintf(stderr, "Done\n");
         }
     }
 

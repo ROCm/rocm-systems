@@ -29,7 +29,6 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 
 #include "library/runtime.hpp"
 #include <logger/debug.hpp>
@@ -86,9 +85,9 @@ struct enabled_formats_t
             }
         }
 
-        ROCPROFSYS_PRINT(
-            "Generating [%s] format(s) with collected data from trace cache. This may "
-            "take a while..\n",
+        LOG_INFO(
+            "Generating [{}] format(s) with collected data from trace cache. This may "
+            "take a while..",
             ss.str().c_str());
 
         if(has_parallel_formats())
@@ -104,8 +103,7 @@ struct enabled_formats_t
                     first_parallel = false;
                 }
             }
-            ROCPROFSYS_PRINT("  - Using parallel processing for: %s\n",
-                             parallel_ss.str().c_str());
+            LOG_INFO("  - Using parallel processing for: {}", parallel_ss.str());
         }
 
         if(has_sequential_formats())
@@ -121,8 +119,8 @@ struct enabled_formats_t
                     first_sequential = false;
                 }
             }
-            ROCPROFSYS_PRINT("  - Using sequential processing for: %s\n",
-                             sequential_ss.str().c_str());
+            LOG_INFO("  - Using sequential processing for: {}",
+                     sequential_ss.str().c_str());
         }
     }
 
@@ -222,16 +220,16 @@ remove_if_exists(const std::string& fname)
         auto result = std::remove(fname.c_str());
         if(result == 0)
         {
-            ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
+            LOG_DEBUG("Removed file: {}", fname);
         }
         else if(errno == ENOENT)
         {
-            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
+            LOG_DEBUG("File does not exist: {}", fname);
         }
         else
         {
-            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
-                               fname.c_str(), errno, std::strerror(errno));
+            LOG_WARNING("Failed to remove file: {} (errno: {} - {})", fname, errno,
+                        std::strerror(errno));
         }
     }
 }
@@ -252,7 +250,7 @@ list_dir_files(const std::string& _path)
 
     if(!dir)
     {
-        ROCPROFSYS_THROW("Error opening directory: %s", _path.c_str());
+        throw std::runtime_error(fmt::format("Error opening directory: {}", _path));
     }
 
     data::directory_files_t result{};
@@ -318,14 +316,13 @@ get_cache_files(const pid_t&                   root_pid,
 void
 clear_cache_files(const data::mapped_cache_files_t& _cache_files)
 {
-    ROCPROFSYS_PRINT("Removing cached temporary files...\n");
+    LOG_DEBUG("Removing cached temporary files...");
     for(const auto& [_, files] : _cache_files)
     {
-        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n",
-                         files.buff_storage.c_str());
+        LOG_DEBUG("Removing cached temporary file: {}", files.buff_storage);
         filesystem_utils::remove_if_exists(files.buff_storage);
 
-        ROCPROFSYS_DEBUG("Removing cached temporary file: %s\n", files.metadata.c_str());
+        LOG_DEBUG("Removing cached temporary file: {}", files.metadata);
         filesystem_utils::remove_if_exists(files.metadata);
     }
 }
@@ -336,9 +333,8 @@ merge_perfetto_files(const std::vector<std::string>& perfetto_files,
 {
     if(perfetto_files.empty())
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
+        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                  _filename);
         return;
     }
 
@@ -363,7 +359,7 @@ merge_perfetto_files(const std::vector<std::string>& perfetto_files,
         std::ifstream ifs(file, std::ios::binary);
         if(!ifs)
         {
-            ROCPROFSYS_VERBOSE(-1, "Error opening '%s'...\n", file.c_str());
+            LOG_ERROR("Error opening '{}'...", file);
             continue;
         }
 
@@ -402,9 +398,8 @@ merge_perfetto_files(const std::vector<std::string>& perfetto_files,
     }
     else
     {
-        ROCPROFSYS_VERBOSE(
-            0, "perfetto trace data is empty. File '%s' will not be written...\n",
-            _filename.c_str());
+        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
+                  _filename);
     }
 }
 
@@ -457,7 +452,6 @@ process_buffered_storage(
     {
         LOG_WARNING("Error parsing buffered storage {}: {}", _storage_filename,
                     exp.what());
-        ROCPROFSYS_WARNING(1, "Error parsing buffered storage: %s\n", exp.what());
     }
     _processor_coordinator->finalize_processing();
 
@@ -579,9 +573,8 @@ cache_manager::post_process_bulk()
     if(m_storage.is_running())
     {
         LOG_WARNING(
-            "Post-processing called without previously shutting down cache storage");
-        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
-                              "cache storage. Calling shutdown explicitly..\n");
+            "Post-processing called without previously shutting down cache storage"
+            "cache storage. Calling shutdown explicitly..");
         shutdown();
     }
 
@@ -639,15 +632,13 @@ cache_manager::post_process_bulk()
         }
         else if(perfetto_files.size() > 1)
         {
-            ROCPROFSYS_VERBOSE(
-                0,
-                "Generated %zu separate perfetto trace files. "
-                "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.\n",
-                perfetto_files.size());
+            LOG_INFO("Generated {} separate perfetto trace files. "
+                     "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.",
+                     perfetto_files.size());
 
             for(const auto& file : perfetto_files)
             {
-                ROCPROFSYS_VERBOSE(1, "  - %s\n", file.c_str());
+                LOG_INFO("  - {}", file);
             }
         }
     }

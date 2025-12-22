@@ -252,10 +252,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--debug" },
                           "[DEPRICATED Use --log-level=debug] Debug output")
             .max_count(1)
-            .action([&](parser_t& p) {
-                // update_env(_data, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
-                update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug");
-            });
+            .action(
+                [&](parser_t&) { update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug"); });
 
         _data.processed_environs.emplace("debug");
     }

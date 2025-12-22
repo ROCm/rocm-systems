@@ -81,8 +81,14 @@ copy_timemory_hash_ids()
     // copy these over so that all hashes are known
     auto& _hmain = tim::hash::get_main_hash_ids();
     auto& _amain = tim::hash::get_main_hash_aliases();
-    ROCPROFSYS_REQUIRE(_hmain != nullptr) << "no main timemory hash ids";
-    ROCPROFSYS_REQUIRE(_amain != nullptr) << "no main timemory hash aliases";
+    if(_hmain == nullptr)
+    {
+        LOG_CRITICAL("no main timemory hash ids");
+    }
+    if(_amain == nullptr)
+    {
+        LOG_CRITICAL("no main timemory hash aliases");
+    }
 
     // combine all the hash and alias info into one container
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
@@ -159,11 +165,14 @@ thread_init()
         auto _tidx = (_tinfo && _tinfo->index_data) ? _tinfo->index_data->sequent_value
                                                     : threading::get_id();
 
-        ROCPROFSYS_REQUIRE(_tidx >= 0)
-            << "thread setup failed. thread info not initialized: " << [&_tinfo]() {
-                   if(_tinfo) return JOIN("", *_tinfo);
-                   return std::string{ "no thread_info" };
-               }();
+        if(_tidx < 0)
+        {
+            LOG_CRITICAL("thread setup failed. thread info not initialized: {}",
+                         [&_tinfo]() {
+                             if(_tinfo) return JOIN("", *_tinfo);
+                             return std::string{ "no thread_info" };
+                         }());
+        }
 
         if(_tidx > 0) threading::set_thread_name(JOIN(" ", "Thread", _tidx).c_str());
         thread_data<thread_bundle_t>::construct(
@@ -173,10 +182,14 @@ thread_init()
         get_timemory_hash_ids(_tidx)     = tim::get_hash_ids();
         get_timemory_hash_aliases(_tidx) = tim::get_hash_aliases();
 
-        ROCPROFSYS_REQUIRE(get_timemory_hash_ids(_tidx) != nullptr)
-            << "no timemory hash ids pointer for thread " << _tidx;
-        ROCPROFSYS_REQUIRE(get_timemory_hash_aliases(_tidx) != nullptr)
-            << "no timemory hash aliases pointer for thread " << _tidx;
+        if(get_timemory_hash_ids(_tidx) == nullptr)
+        {
+            LOG_CRITICAL("no timemory hash ids pointer for thread {}", _tidx);
+        }
+        if(get_timemory_hash_aliases(_tidx) == nullptr)
+        {
+            LOG_CRITICAL("no timemory hash aliases pointer for thread {}", _tidx);
+        }
 
         record_thread_start_time();
         return true;
