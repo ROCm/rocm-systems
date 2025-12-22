@@ -33,6 +33,7 @@
 #include "library/amd_smi/common.hpp"
 #include "library/thread_info.hpp"
 
+#include <mutex>
 #include <timemory/units.hpp>
 
 #include <algorithm>
@@ -302,6 +303,14 @@ struct perfetto_policy
                     }
                 }
             }
+
+            std::once_flag once_flag;
+            std::call_once(once_flag, [&]() {
+                printf("JPEG activity: %d, enabled: %d, supported: %d\n",
+                       _enabled_metrics.bits.jpeg_activity,
+                       enabled_metrics.bits.jpeg_activity,
+                       supported_metrics.bits.jpeg_activity);
+            });
 
             if(_enabled_metrics.bits.jpeg_activity &&
                !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())

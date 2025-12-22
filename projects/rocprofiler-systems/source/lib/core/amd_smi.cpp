@@ -68,10 +68,10 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     std::string default_metrics = "busy, temp, power, mem_usage";
     // No distinction between busy and activity shown in description
-    std::string jpeg_activity_support = "";
-    std::string vcn_activity_support  = "";
-    std::string xgmi_support          = "";
-    std::string pcie_support          = "";
+    std::string jpeg_activity_support;
+    std::string vcn_activity_support;
+    std::string xgmi_support;
+    std::string pcie_support;
 
     size_t device_count = gpu::get_processor_count();
     for(size_t i = 0; i < device_count; i++)

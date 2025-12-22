@@ -77,6 +77,26 @@ struct version
     std::string string_representation;
 };
 
+inline std::string
+to_string(const enabled_metric& metrics)
+{
+    std::stringstream ss;
+    ss << "[SMI enabled metrics] ";
+    ss << "Current socket power: " << metrics.bits.current_socket_power
+       << ", Average socket power: " << metrics.bits.average_socket_power
+       << ", Memory usage: " << static_cast<bool>(metrics.bits.memory_usage)
+       << ", Hotspot temperature: " << static_cast<bool>(metrics.bits.hotspot_temperature)
+       << ", Edge temperature: " << static_cast<bool>(metrics.bits.edge_temperature)
+       << ", GFX activity: " << static_cast<bool>(metrics.bits.gfx_activity)
+       << ", UMC activity: " << static_cast<bool>(metrics.bits.umc_activity)
+       << ", MM activity: " << static_cast<bool>(metrics.bits.mm_activity)
+       << ", VCN activity: " << static_cast<bool>(metrics.bits.vcn_activity)
+       << ", JPEG activity: " << static_cast<bool>(metrics.bits.jpeg_activity)
+       << ", XGMI: " << static_cast<bool>(metrics.bits.xgmi)
+       << ", PCIE: " << static_cast<bool>(metrics.bits.pcie) << "\n";
+    return ss.str();
+}
+
 #if ROCPROFSYS_USE_ROCM > 0
 
 // Ensure we have the correct max values defined

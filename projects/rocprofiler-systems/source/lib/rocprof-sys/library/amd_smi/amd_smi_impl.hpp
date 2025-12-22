@@ -93,6 +93,8 @@ struct amd_smi_impl
         ROCPROFSYS_VERBOSE_F(1, "Enabled %zu GPU processors for AMD SMI sampling\n",
                              m_gpu_processors.size());
 
+        printf("%s", to_string(m_enabled_metrics).c_str());
+
         for(const auto& processor : m_gpu_processors)
         {
             PerfettoApi::init_storage(processor->get_index());
