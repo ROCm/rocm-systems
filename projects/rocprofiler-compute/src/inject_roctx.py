@@ -88,8 +88,9 @@ def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
             if callable(attr) and not isinstance(attr, type):
                 full_name = f"{prefix}.{name}"
                 functions[full_name] = (module, name, attr)
-        except Exception:
-            pass
+        except Exception as e:
+            console_warning(type(e))
+            console_warning(f"  ✗ Could not access {prefix}.{name}: {e}")
     
     return functions
 
@@ -111,14 +112,16 @@ def inject_roctx_into_torch():
     # torch.linalg.* functions (matrix operations)
     try:
         all_operations.update(auto_discover_torch_functions(torch.linalg, 'torch.linalg'))
-    except:
-        pass
+    except Exception as e:
+        console_warning(type(e))
+        console_warning(f"  ✗ Could not access torch.linalg: {e}")
     
     # torch.fft.* functions (FFT operations)
     try:
         all_operations.update(auto_discover_torch_functions(torch.fft, 'torch.fft'))
     except:
-        pass
+        console_warning(type(e))
+        console_warning(f"  ✗ Could not access torch.fft")
     
     console_log(f"Found {len(all_operations)} operations to wrap")
     console_log("🔧 Injecting ROCTX markers into PyTorch operations...")

@@ -53,8 +53,23 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     ) -> dict[str, Union[str, list[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
-        if args.torch_operators and "--torch-operators" not in app_cmd:
-            app_cmd.append("--torch-operators")
+
+        if args.torch_operators:
+            # Verify torch installation if --torch-operators is used
+            try:
+                import torch
+            except ImportError:
+                console_error(
+                    "PyTorch is not installed or not properly configured.\n"
+                    "The --torch-operators option requires a valid PyTorch installation.\n"
+                    "Please install PyTorch and try again."
+                )
+                import sys
+                sys.exit(1)
+
+            if "--torch-operators" not in app_cmd:
+                app_cmd.append("--torch-operators")
+
 
         ld_preload = [args.rocprofiler_sdk_tool_path]
         if native_tool_path:
