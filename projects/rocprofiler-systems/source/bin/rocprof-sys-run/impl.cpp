@@ -486,7 +486,12 @@ INSTRUMENTATION WORKFLOW:
                              0);
                 tim::set_env("ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
                              0);
-                tim::set_env("ROCPROFSYS_SAMPLING_GPUS", "$env:HIP_VISIBLE_DEVICES", 0);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    tim::set_env("ROCPROFSYS_SAMPLING_GPUS",
+                                 std::string(hip_visible_devices).c_str(), 0);
+                }
                 tim::set_env("ROCPROFSYS_USE_ROCTRACER", "ON", 0);
                 tim::set_env("ROCPROFSYS_TRACE_HIP_API", "ON", 0);
                 tim::set_env("ROCPROFSYS_TRACE_HIP_ACTIVITY", "ON", 0);

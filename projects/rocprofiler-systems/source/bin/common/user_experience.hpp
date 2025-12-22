@@ -75,11 +75,17 @@ print_pre_execution_info(const std::string& tool_name,
 
     if(!preset_mode.empty())
     {
+        constexpr size_t  box_width       = 60;
+        constexpr size_t  box_inner_width = box_width - 2;
+        const std::string box_line =
+            "════════════════════════════════════════════════════════════";
+        const std::string prefix  = "ROCm Systems Profiler - ";
+        const size_t      padding = box_inner_width - prefix.size() - tool_name.size();
+
         std::cout << "\n"
-                  << "╔════════════════════════════════════════════════════════════╗\n"
-                  << "║ ROCm Systems Profiler - " << tool_name
-                  << std::string(28 - tool_name.size(), ' ') << "║\n"
-                  << "╚════════════════════════════════════════════════════════════╝\n"
+                  << "╔" << box_line << "╗\n"
+                  << "║ " << prefix << tool_name << std::string(padding, ' ') << " ║\n"
+                  << "╚" << box_line << "╝\n"
                   << "\n";
 
         std::cout << "Preset:        " << preset_mode << "\n";

@@ -37,6 +37,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -428,9 +429,14 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
-                rocprofsys::common::update_env(
-                    _env, "ROCPROFSYS_SAMPLING_GPUS", "$env:HIP_VISIBLE_DEVICES",
-                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
             }
         });
     parser
@@ -526,9 +532,14 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(
                     _env, "ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
                     update_mode::REPLACE, ":", updated_envs, original_envs);
-                rocprofsys::common::update_env(
-                    _env, "ROCPROFSYS_SAMPLING_GPUS", "$env:HIP_VISIBLE_DEVICES",
-                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCTRACER", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
