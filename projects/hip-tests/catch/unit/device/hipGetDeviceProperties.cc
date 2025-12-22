@@ -339,7 +339,6 @@ TEST_CASE("Print_Out_Properties") {
             << properties.cooperativeMultiDeviceUnmatchedBlockDim << "\n";
   std::cout << std::setw(w) << "cooperativeMultiDeviceUnmatchedSharedMem: "
             << properties.cooperativeMultiDeviceUnmatchedSharedMem << "\n";
-  std::cout << std::setw(w) << "hasExpertSchedMode: " << properties.hasExpertSchedMode << "\n";
 #endif
   std::flush(std::cout);
 }
@@ -421,32 +420,6 @@ TEST_CASE("Print_Out_Properties_6.0") {
 
   std::flush(std::cout);
 }
-
-#if HT_AMD
-/**
- * Test Description
- * ------------------------
- *  - Verify hasExpertSchedMode property is valid (0 or 1).
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceProperties.cc
- * Test requirements
- * ------------------------
- *  - Platform specific (AMD)
- *  - HIP_VERSION >= 6.4
- */
-TEST_CASE("Unit_hipGetDeviceProperties_hasExpertSchedMode") {
-  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-
-  hipDeviceProp_t properties;
-  HIP_CHECK(hipGetDeviceProperties(&properties, device));
-
-  // hasExpertSchedMode should be either 0 or 1
-  REQUIRE((properties.hasExpertSchedMode == 0 || properties.hasExpertSchedMode == 1));
-
-  INFO("Device " << device << " hasExpertSchedMode: " << properties.hasExpertSchedMode);
-}
-#endif
 
 /**
  * End doxygen group DeviceTest.

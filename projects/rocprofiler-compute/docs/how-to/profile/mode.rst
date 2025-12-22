@@ -668,9 +668,17 @@ Iteration Multiplexing
 To reduce profiling overhead when collecting a large number of performance counters,
 ROCm Compute Profiler supports iteration multiplexing. This technique divides the
 total set of requested performance counters into smaller subsets that can be collected
-over multiple iterations of the kernel execution. Each iteration collects a different
-subset of counters, and the results are later combined to provide a comprehensive view
-of the performance metrics.
+over multiple iterations of the kernel execution, thereby preventing the need for
+application replay. Each iteration collects a different subset of counters, and the
+results are later combined to provide a comprehensive view of the performance metrics.
+
+.. note::
+
+   Iteration multiplexing is most beneficial for large workloads that take a long time to run,
+   as it helps reduce profiling overhead by eliminating the need for application replay while
+   spreading counter collection across iterations. For small workloads with few kernel dispatches,
+   iteration multiplexing may result in incomplete metric calculations due to insufficient kernel
+   dispatch counts to cover all counter subsets.
 
 Usage
 -----
@@ -691,21 +699,22 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
 
 .. note::
 
-  * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
-   Iteration multiplexing is only supported when using ROCm Compute Profiler with
-   the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
+   * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
+     Iteration multiplexing is only supported when using ROCm Compute Profiler with
+     the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
 
-  * Ensure that your workload runs for enough iterations to cover all counter subsets. 
-   When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
-   or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
-   specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
-   is too low, some counters may not be collected.
+   * Ensure that your workload runs for enough iterations to cover all counter subsets. 
+     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
+     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
+     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
+     is too low, some counters may not be collected.
 
-  * Launch paramaters for ``kernel_launch_params`` policy.
-   Launch parameters refer to the following paramaters.
-      - Grid size
-      - Workgroup size
-      - LDS size
+   * Launch paramaters for ``kernel_launch_params`` policy.
+     Launch parameters refer to the following paramaters:
+
+     - Grid size
+     - Workgroup size
+     - LDS size
 
 The following example demonstrates how to use iteration multiplexing with the
 ``vcopy`` workload:
@@ -759,3 +768,25 @@ The following example demonstrates how to use iteration multiplexing with the
    [INFO]   |-> [rocprofiler-sdk] vcopy testing on GCD 0
    [INFO]   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
    ...
+
+
+Caveats
+------
+
+Iteration multiplexing feature comes with some caveats to be considered when profiling any workload:
+
+* **Accuracy vs speed trade-off**
+
+  Iteration multiplexing provides a trade-off with decreased profiling time by eliminating application replay while sacrificing accuracy since only a handful of counters can be collected per kernel dispatch; while we test for closeness in metric values with and without iteration multiplexing in our automatic test suite, more accurate results can be obtained by not using iteration multiplexing.
+
+* **Minimum number of kernel dispatches required**
+
+  When using iteration multiplexing it is recommended to filter by kernel(s) of interest and make sure these kernels are dispatched enough times (50 recommended) to cover all counter subsets (currently around 15); a warning is thrown for kernels with insufficient dispatch counts to warn the user about missing counter data for those kernels, and it is not possible to calculate some metrics for these kernels.
+
+* **Non-deterministic workloads**
+
+  Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
+
+* **Cannot use with dispatch filtering**
+
+  It is not possible to use dispatch filtering mentioned in :ref:`Filtering <filtering>` with iteration multiplexing, because iteration multiplexing merges counters across dispatches, making it impossible to isolate specific dispatches for profiling and analysis, so attempting to combine them will result in an error.

@@ -2621,7 +2621,7 @@ def test_iteration_multiplexing_kernel_launch_params(
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
 ):
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
     )
@@ -2630,7 +2630,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     )["pmc_perf.csv"]
 
     options = ["--iteration-multiplexing", "kernel"]
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -2644,7 +2644,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     )["pmc_perf.csv"]
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -2668,7 +2668,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
 ):
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="no_mplx")
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
     )
@@ -2677,7 +2677,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )["pmc_perf.csv"]
 
     options = ["--iteration-multiplexing", "kernel"]
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -2691,7 +2691,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )["pmc_perf.csv"]
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
-    workload_dir = test_utils.get_output_dir()
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,

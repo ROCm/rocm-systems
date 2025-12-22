@@ -1300,12 +1300,6 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 	if (!props->NumXcc)
 		props->NumXcc = 1;
 
-	/* Set HasExpertSchedMode based on KFD version and gfx major version >= 12 */
-	props->HasExpertSchedMode =
-		((hsakmt_kfd_version_info.KernelInterfaceMajorVersion >= 1 &&
-		  hsakmt_kfd_version_info.KernelInterfaceMinorVersion > 19) &&
-		 props->EngineId.ui32.Major >= 12) ? 1 : 0;
-
 out:
 	free(read_buf);
 	fclose(fd);

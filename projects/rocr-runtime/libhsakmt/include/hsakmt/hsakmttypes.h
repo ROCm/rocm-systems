@@ -354,8 +354,6 @@ typedef struct _HsaNodeProperties
 
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
-
-    HSAuint8        HasExpertSchedMode;// 1 if KFD supports expert scheduling mode
 } HsaNodeProperties;
 
 
@@ -558,24 +556,24 @@ typedef struct _HsaMemFlags
                                           // when setting this entry to 1. Scratch allocation may fail due to limited
                                           // resources. Application code is required to work without any allocation.
                                           // Allocation fails on any node without GPU function.
-            unsigned int AtomicAccessFull: 1; // default = 0: If set, the memory will be allocated and mapped to allow
-                                              // atomic ops processing. On AMD APU, this will use the ATC path on system
-                                              // memory, irrespective of the NonPaged flag setting (= if NonPaged is set,
-                                              // the memory is pagelocked but mapped through IOMMUv2 instead of GPUVM).
+            unsigned int AtomicAccessFull: 1; // default = 0: If set, the memory will be allocated and mapped to allow 
+                                              // atomic ops processing. On AMD APU, this will use the ATC path on system 
+                                              // memory, irrespective of the NonPaged flag setting (= if NonPaged is set, 
+                                              // the memory is pagelocked but mapped through IOMMUv2 instead of GPUVM). 
                                               // All atomic ops must be supported on this memory.
-            unsigned int AtomicAccessPartial: 1; // default = 0: See above for AtomicAccessFull description, however
-                                                 // focused on AMD discrete GPU that support PCIe atomics; the memory
-                                                 // allocation is mapped to allow for PCIe atomics to operate on system
-                                                 // memory, irrespective of NonPaged set or the presence of an ATC path
-                                                 // in the system. The atomic operations supported are limited to SWAP,
-                                                 // CompareAndSwap (CAS) and FetchAdd (this PCIe op allows both atomic
-                                                 // increment and decrement via 2-complement arithmetic), which are the
+            unsigned int AtomicAccessPartial: 1; // default = 0: See above for AtomicAccessFull description, however 
+                                                 // focused on AMD discrete GPU that support PCIe atomics; the memory 
+                                                 // allocation is mapped to allow for PCIe atomics to operate on system 
+                                                 // memory, irrespective of NonPaged set or the presence of an ATC path 
+                                                 // in the system. The atomic operations supported are limited to SWAP, 
+                                                 // CompareAndSwap (CAS) and FetchAdd (this PCIe op allows both atomic 
+                                                 // increment and decrement via 2-complement arithmetic), which are the 
                                                  // only atomic ops directly supported in PCI Express.
-                                                 // On AMD APU, setting this flag will allocate the same type of memory
-                                                 // as AtomicAccessFull, but it will be considered compatible with
+                                                 // On AMD APU, setting this flag will allocate the same type of memory 
+                                                 // as AtomicAccessFull, but it will be considered compatible with 
                                                  // discrete GPU atomic operations access.
-            unsigned int ExecuteAccess: 1; // default = 0: Identifies if memory is primarily used for data or accessed
-                                           // for executable code (e.g. queue memory) by the host CPU or the device.
+            unsigned int ExecuteAccess: 1; // default = 0: Identifies if memory is primarily used for data or accessed 
+                                           // for executable code (e.g. queue memory) by the host CPU or the device. 
                                            // Influences the page attribute setting within the allocation
             unsigned int CoarseGrain : 1;  // default = 0: The memory can be accessed assuming cache
                                            // coherency maintained by link infrastructure and HSA agents.
@@ -1054,7 +1052,7 @@ typedef enum _HSA_EVENTID_MEMORYFLAGS
 
 typedef struct _HsaAccessAttributeFailure
 {
-    unsigned int NotPresent  : 1;  // Page not present or supervisor privilege
+    unsigned int NotPresent  : 1;  // Page not present or supervisor privilege 
     unsigned int ReadOnly    : 1;  // Write access to a read-only page
     unsigned int NoExecute   : 1;  // Execute access to a page marked NX
     unsigned int GpuAccess   : 1;  // Host access only
