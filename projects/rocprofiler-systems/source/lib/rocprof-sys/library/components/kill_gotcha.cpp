@@ -43,6 +43,13 @@ int
 kill_gotcha::operator()(const gotcha_data& _data, kill_func_t _func, pid_t _pid,
                         int _sig) const
 {
+    // When profiling multi-process applications where a parent process sends SIGKILL to
+    // child processes, the termination can occur before the profiler has a chance to
+    // flush collected data. This introduces a configurable delay before SIGKILL
+    // signals are forwarded, allowing profiling data to be captured before process
+    // termination.
+    // NOTE: This is a workaround.
+
     auto kill_delay = get_kill_delay();
     if(kill_delay > 0)
     {
