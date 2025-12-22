@@ -1345,7 +1345,6 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         how="inner",
         suffixes=("_function", "_kernel"),
     )
-    # merged_results = merged_results[['Function', 'Start_Timestamp_function', 'End_Timestamp_function', 'Kernel_Name', 'Counter_Name', 'Counter_Value', 'Start_Timestamp_kernel', 'End_Timestamp_kernel']]
     # Save merged results
     merged_results.to_csv(
         f"{workload_dir}/out/pmc_1/results_{fbase}_torch_trace.csv",
