@@ -299,20 +299,32 @@ configure_settings(bool _init)
         get_env<size_t>("ROCPROFSYS_NUM_THREADS", 1), "threading", "performance",
         "sampling", "parallelism", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE", "Enable perfetto backend",
-                              _default_perfetto_v, "backend", "perfetto");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
+                              "Enable perfetto backend with deferred trace generation "
+                              "for minimal runtime overhead",
+                              _default_perfetto_v, "backend", "perfetto_caching");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
+                              "Enable perfetto backend (legacy, direct mode)", false,
+                              "backend", "perfetto");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE_LEGACY", false,
+                              "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_PERFETTO",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE",
-                              _default_perfetto_v, "backend", "perfetto", "deprecated");
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE_LEGACY", false,
+                              "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE", "Enable timemory backend",
-                              !_config->get<bool>("ROCPROFSYS_TRACE"), "backend",
-                              "timemory");
+                              !(_config->get<bool>("ROCPROFSYS_TRACE_LEGACY") ||
+                                _config->get<bool>("ROCPROFSYS_TRACE_CACHED")),
+                              "backend", "timemory");
 
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_USE_TIMEMORY", "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-        !_config->get<bool>("ROCPROFSYS_TRACE"), "backend", "timemory", "deprecated");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_TIMEMORY",
+                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
+                              !_config->get<bool>("ROCPROFSYS_TRACE_LEGACY"), "backend",
+                              "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_CAUSAL",
                               "Enable causal profiling analysis", false, "backend",
@@ -320,10 +332,6 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
-                              "Enable perfetto with trace cache", false, "backend",
-                              "perfetto_caching");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
@@ -1060,7 +1068,8 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
-    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
+    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE_LEGACY");
+    handle_deprecated_setting("ROCPROFSYS_TRACE", "ROCPROFSYS_TRACE_LEGACY");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
@@ -1127,7 +1136,8 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     if(get_mode() == Mode::Coverage)
     {
         set_default_setting_value("ROCPROFSYS_USE_CODE_COVERAGE", true);
-        _set("ROCPROFSYS_TRACE", false);
+        _set("ROCPROFSYS_TRACE_LEGACY", false);
+        _set("ROCPROFSYS_TRACE_CACHED", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1140,7 +1150,8 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     else if(get_mode() == Mode::Causal)
     {
         _set("ROCPROFSYS_USE_CAUSAL", true);
-        _set("ROCPROFSYS_TRACE", false);
+        _set("ROCPROFSYS_TRACE_LEGACY", false);
+        _set("ROCPROFSYS_TRACE_CACHED", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_SAMPLING", false);
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
@@ -1836,7 +1847,7 @@ get_verbose()
 bool&
 get_use_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
@@ -2144,11 +2155,12 @@ get_perfetto_backend()
 std::string
 get_perfetto_output_filename()
 {
-    static auto _v       = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
-    auto        _val     = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        _pos_dir = _val.find_last_of('/');
-    auto        _dir     = std::string{};
-    auto        _ext     = std::string{ "proto" };
+    static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
+    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+
+    auto _pos_dir = _val.find_last_of('/');
+    auto _dir     = std::string{};
+    auto _ext     = std::string{ "proto" };
     if(_pos_dir != std::string::npos)
     {
         _dir = _val.substr(0, _pos_dir + 1);
@@ -2161,12 +2173,38 @@ get_perfetto_output_filename()
         _val = _val.substr(0, _pos_ext);
     }
 
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename] Parsed: dir='%s', basename='%s', ext='%s'\n",
+        _dir.c_str(), _val.c_str(), _ext.c_str());
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename] settings::output_path()='%s'\n",
+        settings::output_path().c_str());
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename] settings::output_prefix()='%s'\n",
+        settings::output_prefix().c_str());
+
     auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
                                                    settings::default_process_suffix(),
                                                    false, _dir };
     _val      = settings::compose_output_filename(_val, _ext, _cfg);
+
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename] After compose_output_filename: '%s'\n",
+        _val.c_str());
+
     if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+    {
+        auto _result =
+            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        ROCPROFSYS_BASIC_VERBOSE_F(
+            2, "[get_perfetto_output_filename] Path is relative, prepending PWD: '%s'\n",
+            _result.c_str());
+        return _result;
+    }
+
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename] Path is absolute, returning: '%s'\n",
+        _val.c_str());
     return _val;
 }
 
@@ -2426,8 +2464,20 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     static auto _v   = get_config()->find("ROCPROFSYS_PERFETTO_FILE");
     auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 
+    ROCPROFSYS_BASIC_VERBOSE_F(2,
+                               "[get_perfetto_output_filename_with_suffix] Initial "
+                               "ROCPROFSYS_PERFETTO_FILE='%s', suffix='%s'\n",
+                               _val.c_str(), std::string{ suffix }.c_str());
+
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/') return _val;
+    if(!_val.empty() && _val.at(0) == '/')
+    {
+        ROCPROFSYS_BASIC_VERBOSE_F(
+            2,
+            "[get_perfetto_output_filename_with_suffix] Absolute path, returning: '%s'\n",
+            _val.c_str());
+        return _val;
+    }
 
     auto _pos_dir = _val.find_last_of('/');
     auto _dir     = std::string{};
@@ -2451,6 +2501,15 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     bool _explicitly_set =
         (_v->second->get_environ_updated() || _v->second->get_config_updated());
 
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2,
+        "[get_perfetto_output_filename_with_suffix] Parsed: dir='%s', basename='%s', "
+        "ext='%s', explicitly_set=%s\n",
+        _dir.c_str(), _val.c_str(), _ext.c_str(), _explicitly_set ? "true" : "false");
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2, "[get_perfetto_output_filename_with_suffix] settings::output_path()='%s'\n",
+        settings::output_path().c_str());
+
     auto _cfg = settings::compose_filename_config{
         !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
         suffix,                               // suffix value
@@ -2459,9 +2518,27 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     };
 
     _val = settings::compose_output_filename(_val, _ext, _cfg);
-    if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
 
+    ROCPROFSYS_BASIC_VERBOSE_F(2,
+                               "[get_perfetto_output_filename_with_suffix] After "
+                               "compose_output_filename: '%s'\n",
+                               _val.c_str());
+
+    if(!_val.empty() && _val.at(0) != '/')
+    {
+        auto _result =
+            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        ROCPROFSYS_BASIC_VERBOSE_F(2,
+                                   "[get_perfetto_output_filename_with_suffix] Path is "
+                                   "relative, prepending PWD: '%s'\n",
+                                   _result.c_str());
+        return _result;
+    }
+
+    ROCPROFSYS_BASIC_VERBOSE_F(
+        2,
+        "[get_perfetto_output_filename_with_suffix] Path is absolute, returning: '%s'\n",
+        _val.c_str());
     return _val;
 }
 
