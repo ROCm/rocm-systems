@@ -44,7 +44,7 @@ agent_manager::agent_manager(std::vector<std::shared_ptr<agent>> agents)
 void
 agent_manager::insert_agent(agent& _agent)
 {
-    LOG_DEBUG("Inserting agent with device handle: {}, and agent id: {}, device type: {}",
+    LOG_TRACE("Inserting agent with device handle: {}, and agent id: {}, device type: {}",
               _agent.device_id,
               (_agent.type == agent_type::GPU ? _gpu_agents_cnt : _cpu_agents_cnt),
               (_agent.type == agent_type::GPU ? "GPU" : "CPU"));
@@ -57,7 +57,7 @@ agent_manager::insert_agent(agent& _agent)
 const agent&
 agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 {
-    LOG_DEBUG("Getting agent for type: {}, with type index: {}",
+    LOG_TRACE("Getting agent for type: {}, with type index: {}",
               (type == agent_type::GPU ? "GPU" : "CPU"), type_index);
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
@@ -75,7 +75,7 @@ agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
 const agent&
 agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 {
-    LOG_DEBUG("Getting agent for device id: {}, type {}", device_id,
+    LOG_TRACE("Getting agent for device id: {}, type {}", device_id,
               (type == agent_type::GPU ? "GPU" : "CPU"));
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
@@ -93,7 +93,7 @@ agent_manager::get_agent_by_id(size_t device_id, agent_type type) const
 const agent&
 agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) const
 {
-    LOG_DEBUG("Getting agent for device handle: {}, type {}", device_handle,
+    LOG_TRACE("Getting agent for device handle: {}, type {}", device_handle,
               (type == agent_type::GPU ? "GPU" : "CPU"));
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
@@ -111,7 +111,7 @@ agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) cons
 const agent&
 agent_manager::get_agent_by_handle(size_t device_handle) const
 {
-    LOG_DEBUG("Getting agent for device handle: {}", device_handle);
+    LOG_TRACE("Getting agent for device handle: {}", device_handle);
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
             return agent_ptr->handle == device_handle;
@@ -127,7 +127,7 @@ agent_manager::get_agent_by_handle(size_t device_handle) const
 std::vector<std::shared_ptr<agent>>
 agent_manager::get_agents_by_type(agent_type type) const
 {
-    LOG_DEBUG("Getting agent for device type: {}",
+    LOG_TRACE("Getting agent for device type: {}",
               (type == agent_type::GPU ? "GPU" : "CPU"));
 
     std::vector<std::shared_ptr<agent>> agents;

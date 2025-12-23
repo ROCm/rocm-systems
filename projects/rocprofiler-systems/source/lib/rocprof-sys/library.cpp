@@ -984,7 +984,7 @@ rocprofsys_finalize_hidden(void)
         std::string _msg = JOIN("", *get_main_bundle());
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-        LOG_DEBUG("{}", _msg);
+        LOG_INFO("{}", _msg);
         LOG_DEBUG("Resetting main bundle...");
         get_main_bundle()->reset();
     }
@@ -1004,9 +1004,9 @@ rocprofsys_finalize_hidden(void)
                 std::string _msg = JOIN("", *itr);
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                if(_thr_verbose > 0)
+                if(_thr_verbose >= 0)
                 {
-                    LOG_DEBUG("{}", _msg);
+                    LOG_INFO("{}", _msg);
                 }
             }
         }
