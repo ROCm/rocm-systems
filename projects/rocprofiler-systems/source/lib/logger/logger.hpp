@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <sys/cdefs.h>
 #include <vector>
 
 namespace rocprofsys
@@ -37,7 +38,7 @@ namespace rocprofsys
 namespace
 {
 
-auto
+inline __attribute__((always_inline)) auto
 to_lower(std::string_view s)
 {
     std::string result;

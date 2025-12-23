@@ -1501,13 +1501,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
-            LOG_WARNING("#{}#\n", _v.data());
+            LOG_WARNING("#{}#", _v.data());
         };
         _separator();
-        LOG_WARNING("#\n");
-        LOG_WARNING("# DEPRECATION NOTICE:\n");
-        LOG_WARNING("#   {} is deprecated!\n", _old);
-        LOG_WARNING("#   Use {} instead!\n", _new);
+        LOG_WARNING("#");
+        LOG_WARNING("# DEPRECATION NOTICE:");
+        LOG_WARNING("#   {} is deprecated!", _old);
+        LOG_WARNING("#   Use {} instead!", _new);
 
         if(!_new_setting->second->get_environ_updated() &&
            !_new_setting->second->get_config_updated())
@@ -1520,13 +1520,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             {
                 std::string _cause =
                     (_old_setting->second->get_environ_updated()) ? "environ" : "config";
-                LOG_WARNING("#\n");
-                LOG_WARNING("# {} :: '{}' -> '{}'\n", _new, _before, _after);
+                LOG_WARNING("#");
+                LOG_WARNING("# {} :: '{}' -> '{}'", _new, _before, _after);
                 LOG_WARNING("#   via {} ({})", _old, _cause);
             }
         }
 
-        LOG_WARNING("#\n");
+        LOG_WARNING("#");
         _separator();
     }
 }

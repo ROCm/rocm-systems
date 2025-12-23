@@ -37,7 +37,7 @@ address_range::address_range(uintptr_t _low, uintptr_t _high)
 : low{ _low }
 , high{ _high }
 {
-    if(high >= low)
+    if(high < low)
     {
         auto message = fmt::format(
             "Error! address_range high must be >= low. low={:X}, high={:X}", low, high);

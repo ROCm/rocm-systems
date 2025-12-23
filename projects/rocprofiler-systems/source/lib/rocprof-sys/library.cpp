@@ -221,7 +221,6 @@ ensure_finalization(bool _static_init = false)
 
     if(_static_init)
     {
-        LOG_DEBUG("\n");
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
         auto _search_paths = JOIN(':', tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
@@ -230,10 +229,6 @@ ensure_finalization(bool _static_init = false)
                                   tim::get_env<std::string>("LIBRARY_PATH", ""),
                                   tim::get_env<std::string>("PATH", ""));
         common::setup_environ(_verbose, _search_paths);
-    }
-    else
-    {
-        LOG_DEBUG("\n");
     }
 
     if(_timemory_manager) _timemory_manager->set_write_metadata(-1);
@@ -445,7 +440,7 @@ rocprofsys_init_library_hidden()
 
     if(_selinux_mode == 1)
     {
-        LOG_DEBUG("/sys/fs/selinux/enforce has a value of {}. \n", _selinux_mode);
+        LOG_DEBUG("/sys/fs/selinux/enforce has a value of {}.", _selinux_mode);
         LOG_CRITICAL("SELinux enforcing mode detected. Consider disabling SELinux "
                      "or configure permissive mode with 'sudo setenforce 0'. Aborting.");
         std::exit(EXIT_FAILURE);
