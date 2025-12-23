@@ -111,6 +111,7 @@ enum vhsakmt_ccmd_query_type {
   VHSAKMT_CCMD_QUERY_GET_RUNTIME_CAPS,
   VHSAKMT_CCMD_QUERY_AMDGPU_DEVICE_HANDLE,
   VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ,
+  VHSAKMT_CCMD_QUERY_SET_XNACK_MODE,
 };
 
 #define QUERY_PTR_INFO_MAX_MAPPED_NODES 3
@@ -194,6 +195,7 @@ struct vhsakmt_ccmd_query_info_req {
     query_tile_config tile_config_args;
     query_open_kfd_args open_kfd_args;
     query_drm_cmd_write_read_args drm_cmd_write_read_args;
+    HSAint32 xnack_mode;
   };
 
   uint8_t payload[];

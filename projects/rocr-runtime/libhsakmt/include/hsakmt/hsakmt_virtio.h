@@ -136,6 +136,9 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtUnmapGraphicHandle(HSAuint32 NodeId, HSAuint64 Fl
 HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
                                                   int* DMABufFd, HSAuint64* Offset);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtModelEnabled(bool* enable);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenSMI(HSAuint32 NodeId, int* fd);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetXNACKMode(HSAint32 enable);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
