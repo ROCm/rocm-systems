@@ -40,7 +40,6 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#define NOMINMAX
 #include "image_manager_kv.h"
 
 #include <assert.h>
@@ -100,8 +99,8 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   assert(status == HSA_STATUS_SUCCESS);
 
   HsaGpuTileConfig tileConfig = {0};
-  unsigned int tc[40];
-  unsigned int mtc[40];
+  unsigned int tc[40] = {0};
+  unsigned int mtc[40] = {0};
   tileConfig.TileConfig = &tc[0];
   tileConfig.NumTileConfigs = 40;
   tileConfig.MacroTileConfig = &mtc[0];

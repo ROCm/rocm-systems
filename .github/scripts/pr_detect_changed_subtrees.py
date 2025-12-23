@@ -51,26 +51,20 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
     parser.add_argument("--require-auto-pull", action="store_true", help="Only include entries with auto_subtree_pull=true")
     parser.add_argument("--require-auto-push", action="store_true", help="Only include entries with auto_subtree_push=true")
+    parser.add_argument("--require-monorepo-source", action="store_true", help="Only include entries with monorepo_source_of_truth=true")
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args(argv)
 
-def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
-    """Extract valid subtree prefixes from the configuration."""
-    valid_prefixes = {
-        f"{entry.category}/{entry.name}"
-        for entry in config
-    }
-    logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
-    return valid_prefixes
-
-def get_valid_prefixes(config: List[RepoEntry], require_auto_pull: bool = False, require_auto_push: bool = False) -> Set[str]:
+def get_valid_prefixes(config: List[RepoEntry], require_auto_pull: bool = False, require_auto_push: bool = False, require_monorepo_source: bool = False) -> Set[str]:
     """Extract valid subtree prefixes from the configuration based on filters."""
     valid_prefixes = set()
     for entry in config:
         if require_auto_pull and not getattr(entry, "auto_subtree_pull", False):
             continue
         if require_auto_push and not getattr(entry, "auto_subtree_push", False):
+            continue
+        if require_monorepo_source and not getattr(entry, "monorepo_source_of_truth", False):
             continue
         valid_prefixes.add(f"{entry.category}/{entry.name}")
     logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
@@ -131,7 +125,7 @@ def main(argv=None) -> None:
             logger.error(f"SHA-based Git CLI fallback failed: {e}")
             sys.exit(1)
 
-    valid_prefixes = get_valid_prefixes(config, args.require_auto_pull, args.require_auto_push)
+    valid_prefixes = get_valid_prefixes(config, args.require_auto_pull, args.require_auto_push, args.require_monorepo_source)
     matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
 

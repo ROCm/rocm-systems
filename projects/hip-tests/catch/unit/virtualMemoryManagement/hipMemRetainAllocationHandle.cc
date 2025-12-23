@@ -65,12 +65,12 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap((void*)ptrA, size_mem, 0, handle, 0));
   // Test hipMemRetainAllocationHandle
   hipMemGenericAllocationHandle_t gethandle;
   // Check beginning of VMM ptr
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
   REQUIRE(granularity > 0);
   size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
   hipMemGenericAllocationHandle_t handle;
-  hipDeviceptr_t ptrA;
+  void* ptrA;
   // Allocate physical memory
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
   // Allocate virtual address range
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
     REQUIRE(hipMemRetainAllocationHandle(&gethandle, nullptr) == hipErrorInvalidValue);
   }
   SECTION("not mapped address") {
-    hipDeviceptr_t ptrB;
+    void* ptrB;
     HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0));
     REQUIRE(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrB)) ==
             hipErrorInvalidValue);
@@ -138,6 +138,47 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
             hipErrorInvalidValue);
   }
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+}
+
+TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
+  CTX_CREATE();
+  size_t granularity = 0;
+  size_t buffer_size = DATA_SIZE * sizeof(int);
+  int device_id = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, device_id));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp allocation_prop{};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  size_t allocation_size = ((granularity + buffer_size - 1) / granularity) * granularity;
+  hipMemGenericAllocationHandle_t allocation_handle;
+  void* device_ptr = nullptr;
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_size, &allocation_prop, 0));
+  HIP_CHECK(hipMemAddressReserve(&device_ptr, allocation_size, 0, 0, 0));
+  HIP_CHECK(hipMemMap(device_ptr, allocation_size, 0, allocation_handle, 0));
+
+  hipMemGenericAllocationHandle_t retained_handle;
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemRetainAllocationHandle(&retained_handle, reinterpret_cast<void*>(device_ptr)));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipMemUnmap(device_ptr, allocation_size));
+  HIP_CHECK(hipMemAddressFree(device_ptr, allocation_size));
+  CTX_DESTROY();
 }
 
 /**

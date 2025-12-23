@@ -25,13 +25,30 @@
 
 import argparse
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
+from utils.utils import METRIC_ID_RE
 
-def print_avail_arch(avail_arch: list[str]) -> str:
-    ret_str = "List all available metrics for analysis on specified arch:"
+
+def validate_block(value: str) -> str:
+    if METRIC_ID_RE.match(value):
+        return value
+    raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+
+
+def block_token_or_alias(s: str) -> str:
+    try:
+        return validate_block(s)
+    except argparse.ArgumentTypeError:
+        s = (s or "").strip()
+        if not s:
+            raise argparse.ArgumentTypeError("empty token for --block")
+        return s
+
+
+def print_avail_arch(avail_arch: list[str], args: str) -> str:
+    ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += f"\n   {arch}"
     return ret_str
@@ -66,7 +83,14 @@ def add_general_group(
         dest="list_metrics",
         metavar="",
         choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
-        help=print_avail_arch(list(supported_archs.keys())),
+        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+    )
+    general_group.add_argument(
+        "--list-blocks",
+        dest="list_blocks",
+        metavar="",
+        choices=supported_archs.keys(),  # ["gfx908", "gfx90a"],
+        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
     )
     general_group.add_argument(
         "--config-dir",
@@ -76,7 +100,7 @@ def add_general_group(
         default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
     # Nowhere to load specs from in db mode
-    if parser.usage and "database" not in parser.usage:
+    if parser.usage:
         general_group.add_argument(
             "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
@@ -154,7 +178,10 @@ Examples:
         metavar="",
         default=None,
         required=False,
-        help="\t\t\tProcess id to be attached for profiling.",
+        help=(
+            "\t\t\tProcess id to be attached for profiling.\n"
+            "\t\t\tImplies --no-native-tool"
+        ),
     )
     profile_group.add_argument(
         "--attach-duration-msec",
@@ -164,9 +191,9 @@ Examples:
         default=None,
         required=False,
         help=(
-            "\t\t\tWhen --attach-pid is used, it specifies the attach duration "
-            "in milliseconds. If not set, detachment occurs when "
-            '"Enter" key is pressed.'
+            "\t\t\tWhen --attach-pid is used, it specifies the attach duration\n"
+            "\t\t\tin milliseconds. If not set, detachment occurs when\n"
+            '\t\t\t"Enter" key is pressed.'
         ),
     )
     profile_group.add_argument(
@@ -231,14 +258,34 @@ Examples:
         nargs="+",
         dest="dispatch",
         required=False,
-        help="\t\t\tDispatch ID filtering.",
+        help=(
+            "\t\t\tWhich dispatch iterations of the kernel to filter \n"
+            "\t\t\t(e.g. 1 3:5 captures 1st, 3rd, 4th and 5th iterations)."
+        ),
     )
-
-    def validate_block(value: str) -> str:
-        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        if re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$").match(value):
-            return value
-        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+    profile_group.add_argument(
+        "--iteration-multiplexing",
+        type=str,
+        dest="iteration_multiplexing",
+        metavar="",
+        required=False,
+        nargs="?",
+        choices=[
+            # "simple",
+            "kernel",
+            "kernel_launch_params",
+        ],
+        const="kernel_launch_params",
+        help=(
+            "\t\t\tChoose the iteration multiplexing policy: "
+            "(DEFAULT: kernel_launch_params).\n"
+            # "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
+            "\t\t\t   kernel (i.e. Round robin counters over kernel calls with "
+            "unique kernel names.)\n"
+            "\t\t\t   kernel_launch_params (i.e. Round robin counters over "
+            "kernel calls with unique kernel and launch parameters)"
+        ),
+    )
 
     profile_group.add_argument(
         "--list-available-metrics",
@@ -249,15 +296,19 @@ Examples:
     profile_group.add_argument(
         "-b",
         "--block",
-        type=validate_block,
         dest="filter_blocks",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         required=False,
         default=[],
         help=(
             "\t\t\tSpecify metric id(s) from --list-metrics for filtering "
             "(e.g. 12, 12.1, 12.1.1).\n"
+            "\t\t\tAlternatively, specify block id(s) for filtering "
+            "(e.g. 12, 13, 14).\n"
+            "\t\t\tAlternatively, specify block alias(es) for filtering "
+            "(e.g. lds, l1i, sl1d).\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set or --roof-only"
         ),
@@ -319,9 +370,9 @@ Examples:
         required=False,
         metavar="",
         dest="format_rocprof_output",
-        choices=["json", "csv", "rocpd"],
-        default="csv",
-        help="\t\t\tSet the format of output file of rocprof.",
+        choices=["csv", "rocpd"],
+        default="rocpd",
+        help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
         "--pc-sampling-method",
@@ -348,14 +399,28 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--rocprofiler-sdk-library-path",
+        "--rocprofiler-sdk-tool-path",
         type=str,
-        dest="rocprofiler_sdk_library_path",
+        dest="rocprofiler_sdk_tool_path",
         required=False,
         default=str(
-            Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "lib/librocprofiler-sdk.so"
+            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+            / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
         ),
-        help="\t\t\tSet the path to rocprofiler SDK library.",
+        help="\t\t\tSet the path to rocprofiler-sdk tool.",
+    )
+    profile_group.add_argument(
+        "--no-native-tool",
+        required=False,
+        default=False,
+        action="store_true",
+        help=(
+            "\t\t\tDo not use the native counter collection tool.\n"
+            "\t\t\tNative tool is not used if ROCPROF env. var. is set "
+            "and not equal to rocprofiler-sdk.\n"
+            "\t\t\tNative tool is not used for ROCm version < 7.x.x.\n"
+            "\t\t\tNative tool is not used attach/detach scenario"
+        ),
     )
     profile_group.add_argument(
         "--retain-rocpd-output",
@@ -413,16 +478,9 @@ Examples:
         "--device",
         metavar="",
         required=False,
-        default=-1,
+        default=0,
         type=int,
-        help="\t\t\tTarget GPU device ID. (DEFAULT: ALL)",
-    )
-    roofline_group.add_argument(
-        "--kernel-names",
-        required=False,
-        default=False,
-        action="store_true",
-        help="\t\t\tInclude kernel names in roofline plot.",
+        help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
     roofline_group.add_argument(
         "-R",
@@ -480,106 +538,6 @@ Examples:
     #     '--iter', required=False, default=-1, type=int,
     #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
     # )
-
-    ## Database Command Line Options
-    ## ----------------------------
-    db_parser = subparsers.add_parser(
-        "database",
-        help="Interact with rocprofiler-compute database",
-        usage="""
-            \nrocprof-compute database <interaction type> [connection options]
-
-            \n\n-------------------------------------------------------------------------------
-            \nExamples:
-            \n\trocprof-compute database --import -H pavii1 -u temp -t asw -w "workloads/vcopy/mi200/"
-            \n\trocprof-compute database --remove -H pavii1 -u temp -w "rocprofiler-compute_asw_sample_mi200"
-            \n-------------------------------------------------------------------------------\n
-        """,  # noqa: E501
-        prog="tool",
-        allow_abbrev=False,
-        formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-            prog, max_help_position=40
-        ),
-    )
-    db_parser._optionals.title = "Help"
-
-    add_general_group(
-        db_parser, rocprof_compute_home, supported_archs, rocprof_compute_version
-    )
-    interaction_group = db_parser.add_argument_group("Interaction Type")
-    connection_group = db_parser.add_argument_group("Connection Options")
-
-    interaction_group.add_argument(
-        "-i",
-        "--import",
-        required=False,
-        dest="upload",
-        action="store_true",
-        help="\t\tImport workload to rocprofiler-compute DB",
-    )
-    interaction_group.add_argument(
-        "-r",
-        "--remove",
-        required=False,
-        dest="remove",
-        action="store_true",
-        help="\t\tRemove a workload from rocprofiler-compute DB",
-    )
-
-    connection_group.add_argument(
-        "-H",
-        "--host",
-        required=True,
-        metavar="",
-        help="\t\tName or IP address of the server host.",
-    )
-    connection_group.add_argument(
-        "-P",
-        "--port",
-        required=False,
-        metavar="",
-        help="\t\tTCP/IP Port. (DEFAULT: 27018)",
-        default=27018,
-    )
-    connection_group.add_argument(
-        "-u",
-        "--username",
-        required=True,
-        metavar="",
-        help="\t\tUsername for authentication.",
-    )
-    connection_group.add_argument(
-        "-p",
-        "--password",
-        metavar="",
-        help="\t\tThe user's password. (will be requested later if it's not set)",
-        default="",
-    )
-    connection_group.add_argument(
-        "-t", "--team", required=False, metavar="", help="\t\tSpecify Team prefix."
-    )
-    connection_group.add_argument(
-        "-w",
-        "--workload",
-        required=True,
-        metavar="",
-        dest="workload",
-        help=(
-            "\t\tSpecify name of workload (to remove) or path to workload (to import)"
-        ),
-    )
-    connection_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help=(
-            "\t\tSpecify Kernel Name verbose level 1-5. "
-            "Lower the level, shorter the kernel name. "
-            "(DEFAULT: 5) (DISABLE: 5)"
-        ),
-        default=5,
-        type=int,
-    )
 
     ## Analyze Command Line Options
     ## ----------------------------
@@ -656,6 +614,7 @@ Examples:
         dest="filter_metrics",
         metavar="",
         nargs="+",
+        type=block_token_or_alias,
         help="\t\tSpecify metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(

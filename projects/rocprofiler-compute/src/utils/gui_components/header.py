@@ -304,7 +304,7 @@ def get_header(
                                         children=[
                                             # Report bug button
                                             html.A(
-                                                href="https://github.com/ROCm/rocprofiler-compute/issues",
+                                                href="https://github.com/ROCm/rocm-systems/issues",
                                                 children=[
                                                     html.Button(
                                                         className="report",

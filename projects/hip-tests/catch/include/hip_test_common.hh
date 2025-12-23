@@ -24,7 +24,7 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wsign-compare"
 #include "hip_test_context.hh"
 
-#include <catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -44,9 +44,13 @@ THE SOFTWARE.
 #define __HIP_ATOMIC_BACKWARD_COMPAT 1
 #endif
 
+#if HT_AMD
 #if defined(__has_extension) && __has_extension(clang_atomic_attributes) && __HIP_ATOMIC_BACKWARD_COMPAT
 #define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY [[clang::atomic(fine_grained_memory, remote_memory)]]
 #else
+#define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
+#endif
+#elif HT_NVIDIA
 #define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
 #endif
 

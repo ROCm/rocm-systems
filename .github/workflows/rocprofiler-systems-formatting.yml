@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: [3.8]
+        python-version: ['3.10']
 
     steps:
     - uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install gersemi
+        python3 -m pip install gersemi==0.23.1
     - name: gersemi
       working-directory: projects/rocprofiler-systems/
       run: |

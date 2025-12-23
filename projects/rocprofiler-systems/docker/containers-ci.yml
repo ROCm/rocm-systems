@@ -19,13 +19,7 @@ matrix:
     version: "8.10"
   # RHEL9
   - distro: "rhel"
-    version: "9.3"
-  - distro: "rhel"
-    version: "9.4"
-  - distro: "rhel"
-    version: "9.5"
-  - distro: "rhel"
-    version: "9.6"
+    version: "9"
   # RHEL10
   - distro: "rhel"
-    version: "10.0"
+    version: "10"

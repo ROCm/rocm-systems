@@ -612,7 +612,9 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
 
 template <size_t TableIdx, size_t... OpIdx>
 void
-update_table(context_array_t ctxs, hsa_amd_tool_table_t* _orig, std::index_sequence<OpIdx...>)
+update_table(const context_array_t& ctxs,
+             hsa_amd_tool_table_t*  _orig,
+             std::index_sequence<OpIdx...>)
 {
     static_assert(
         std::is_same<hsa_amd_tool_table_t, typename hsa_table_lookup<TableIdx>::type>::value,

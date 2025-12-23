@@ -40,8 +40,6 @@ extern "C" __device__ int printf(const char* fmt, ...);
 template <typename... All> static inline __device__ void printf(const char* format, All... all) {}
 #endif
 
-extern "C" __device__ unsigned long long __ockl_steadyctr_u64();
-
 /*
 Integer Intrinsics
 */
@@ -628,7 +626,7 @@ __device__ inline __attribute((always_inline)) long long int __clock() { return 
 // Clock function to return wall clock count at a constant frequency that can be queried
 // through hipDeviceAttributeWallClockRate attribute.
 __device__ inline __attribute__((always_inline)) long long int wall_clock64() {
-  return (long long int)__ockl_steadyctr_u64();
+  return (long long int)__builtin_readsteadycounter();
 }
 
 __device__ inline __attribute__((always_inline)) long long int clock64() { return __clock64(); }
@@ -642,7 +640,7 @@ __device__ inline void __named_sync() { __builtin_amdgcn_s_barrier(); }
 
 // hip.amdgcn.bc - lanemask
 __device__ inline __hip_uint64_t __lanemask_gt() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   if (lane == 63) return 0;
   __hip_uint64_t ballot = __ballot64(1);
   __hip_uint64_t mask = (~((__hip_uint64_t)0)) << (lane + 1);
@@ -650,14 +648,14 @@ __device__ inline __hip_uint64_t __lanemask_gt() {
 }
 
 __device__ inline __hip_uint64_t __lanemask_lt() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   __hip_int64_t ballot = __ballot64(1);
   __hip_uint64_t mask = ((__hip_uint64_t)1 << lane) - (__hip_uint64_t)1;
   return mask & ballot;
 }
 
 __device__ inline __hip_uint64_t __lanemask_eq() {
-  __hip_uint32_t lane = __ockl_lane_u32();
+  __hip_uint32_t lane = __lane_id();
   __hip_int64_t mask = ((__hip_uint64_t)1 << lane);
   return mask;
 }

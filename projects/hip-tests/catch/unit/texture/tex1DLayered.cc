@@ -72,16 +72,16 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeElementType", "", char, u
     for (auto i = 0u; i < params.NumItersX(); ++i) {
       float x = GetCoordinate(i, params.NumItersX(), params.Width(), params.num_subdivisions,
                               params.tex_desc.normalizedCoords);
-
-      INFO("Layer: " << layer);
-      INFO("i: " << i);
-      INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-      INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-      INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
-      INFO("x: " << std::fixed << std::setprecision(16) << x);
-
       const auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
-      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
+      if (!fixture.Verify(fixture.out_alloc_h[i], ref_val)) {
+        INFO("Layer: " << layer);
+        INFO("i: " << i);
+        INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+        INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+        INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
+        INFO("x: " << std::fixed << std::setprecision(16) << x);
+        REQUIRE(false);
+      }
     }
   }
 }
@@ -127,16 +127,16 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeNormalizedFloat", "", cha
     for (auto i = 0u; i < params.NumItersX(); ++i) {
       float x = GetCoordinate(i, params.NumItersX(), params.Width(), params.num_subdivisions,
                               params.tex_desc.normalizedCoords);
-
-      INFO("Layer: " << layer);
-      INFO("Index: " << i);
-      INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
-      INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
-      INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
-      INFO("x: " << std::fixed << std::setprecision(16) << x);
-
       auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
-      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
+      if (!fixture.Verify(fixture.out_alloc_h[i], ref_val)) {
+        INFO("Layer: " << layer);
+        INFO("Index: " << i);
+        INFO("Filtering mode: " << FilteringModeToString(params.tex_desc.filterMode));
+        INFO("Normalized coordinates: " << std::boolalpha << params.tex_desc.normalizedCoords);
+        INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
+        INFO("x: " << std::fixed << std::setprecision(16) << x);
+        REQUIRE(false);
+      }
     }
   }
 }

@@ -73,7 +73,8 @@ struct counter_event
     {}
 
     void operator()(const client_data* tool_data, counter_track_type*,
-                    timing_interval _timing, scope::config _scope) const;
+                    const std::string& track_name, timing_interval _timing,
+                    scope::config _scope) const;
 
     counter_dispatch_record record = {};
 };
@@ -108,8 +109,8 @@ struct counter_storage
     void operator()(const counter_event& _event, timing_interval _timing,
                     scope::config _scope = scope::get_default()) const;
 
-    static void write(counter_storage_type* storage, std::string metric_name,
-                      std::string metric_description);
+    static void write(counter_storage_type* storage, const std::string& metric_name,
+                      const std::string& metric_description);
 };
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

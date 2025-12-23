@@ -30,6 +30,8 @@
 #include "statistics.hpp"
 #include "timestamps.hpp"
 
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -600,7 +602,11 @@ generate_csv(const output_config&                    cfg,
 
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
+    {
+        // Counter records now contain agent-encoded IDs (reconstructed in tool.cpp),
+        // so we use the full agent-encoded ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
+    }
 
     for(auto ditr : data)
     {

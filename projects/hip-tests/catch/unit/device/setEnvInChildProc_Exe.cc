@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip/hip_runtime.h>
-#include <cstring>
+#include <string>
 #ifdef _WIN64
 #define setenv(x, y, z) _putenv_s(x, y)
 #define unsetenv(x) _putenv(x)

@@ -31,7 +31,7 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 }
 
 // The following section tests working of hipMallocManaged with flag parameters
-TEST_CASE("Unit_hipMallocManaged_FlgParam") {
+TEST_CASE("Unit_hipMallocManaged_FlgParam", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -119,7 +119,7 @@ TEST_CASE("Unit_hipMallocManaged_FlgParam") {
 
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
-TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
+TEST_CASE("Unit_hipMallocManaged_AccessMultiStream", "[multigpu]") {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

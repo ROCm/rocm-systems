@@ -30,11 +30,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <optional>
+#include <vector>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
+#include <initializer_list>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdint.h>
@@ -54,6 +58,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    uint32_t    start;
+    uint32_t    end;
 };
 
 template <typename Category>
@@ -166,23 +172,28 @@ struct kernel_symbol_less
         const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t& rhs)
         const
     {
-        return lhs.kernel_object < rhs.kernel_object;
+        return lhs.kernel_id < rhs.kernel_id;
     }
 };
 #endif
 
 }  // namespace info
 
-class cache_manager;
 struct metadata_registry
 {
+    metadata_registry();
+    metadata_registry(const metadata_registry&)            = delete;
+    metadata_registry& operator=(const metadata_registry&) = delete;
+    metadata_registry(metadata_registry&&)                 = delete;
+    metadata_registry& operator=(metadata_registry&&)      = delete;
+
     void set_process(const info::process& process);
     void add_pmc_info(const info::pmc& pmc_info);
     void add_thread_info(const info::thread& thread_info);
     void add_track(const info::track& track_info);
     void add_queue(const uint64_t& queue_handle);
     void add_stream(const uint64_t& stream_handle);
-    void add_string(const std::string_view& string_value);
+    void add_string(const std::string_view string_value);
 
     info::process               get_process_info() const;
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
@@ -194,6 +205,11 @@ struct metadata_registry
     std::vector<uint64_t>       get_queue_list() const;
     std::vector<uint64_t>       get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
+
+    bool save_to_file(const std::string&                         filepath,
+                      const std::vector<std::shared_ptr<agent>>& _agents) const;
+    bool load_from_file(const std::string&                   filepath,
+                        std::vector<std::shared_ptr<agent>>& _agents);
 
 #if ROCPROFSYS_USE_ROCM > 0
     void add_code_object(
@@ -214,32 +230,38 @@ struct metadata_registry
 #endif
 
 private:
-    friend class cache_manager;
-    metadata_registry() = default;
-    common::synchronized<info::process> m_process;
+    common::synchronized<info::process> m_process{};
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
-                                                 m_pmc_infos;
-    common::synchronized<std::set<info::thread>> m_threads;
-    common::synchronized<std::set<info::track>>  m_tracks;
+                                                 m_pmc_infos{};
+    common::synchronized<std::set<info::thread>> m_threads{};
+    common::synchronized<std::set<info::track>>  m_tracks{};
 
-    common::synchronized<std::set<uint64_t>>                   m_streams;
-    common::synchronized<std::set<uint64_t>>                   m_queues;
-    common::synchronized<std::unordered_set<std::string_view>> m_strings;
+    common::synchronized<std::set<uint64_t>>              m_streams{};
+    common::synchronized<std::set<uint64_t>>              m_queues{};
+    common::synchronized<std::unordered_set<std::string>> m_strings{};
 #if ROCPROFSYS_USE_ROCM > 0
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>
-        m_code_objects;
+        m_code_objects{};
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>>
-                                                      m_kernel_symbols;
+                                                      m_kernel_symbols{};
     rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
         rocprofiler::sdk::get_buffer_tracing_names<const char*>()
     };
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
 #endif
 };
 

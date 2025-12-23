@@ -207,7 +207,6 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
 }
 
 // ================================================================================================
-
 stream_per_thread::stream_per_thread() {
   m_streams.resize(g_devices.size());
   for (auto& stream : m_streams) {
@@ -215,15 +214,21 @@ stream_per_thread::stream_per_thread() {
   }
 }
 
+// ================================================================================================
 stream_per_thread::~stream_per_thread() {
   for (auto& stream : m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
-      hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
+      // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
+      if (IS_LINUX || (GPU_ENABLE_PAL != 0)) {
+        hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      }
       stream = nullptr;
     }
   }
 }
 
+// ================================================================================================
 hipStream_t stream_per_thread::get() {
   hip::Device* device = hip::getCurrentDevice();
   int currDev = device->deviceId();
@@ -240,18 +245,18 @@ hipStream_t stream_per_thread::get() {
     hipError_t status =
         ihipStreamCreate(&m_streams[currDev], hipStreamDefault, hip::Stream::Priority::Normal);
     if (status != hipSuccess) {
-      DevLogError("Stream creation failed");
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Stream creation failed");
     }
   }
   return m_streams[currDev];
 }
 
+// ================================================================================================
 void stream_per_thread::clear_spt() {
   if (!m_streams.empty()) {
     m_streams[getCurrentDevice()->deviceId()] = nullptr;
   }
 }
-
 
 // ================================================================================================
 void getStreamPerThread(hipStream_t& stream) {
@@ -547,7 +552,7 @@ hipError_t hipStreamQuery_common(hipStream_t stream) {
   if (stream != nullptr) {
     // If still capturing return error
     if (hip::Stream::StreamCaptureOngoing(stream) == true) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
   bool wait = (stream == nullptr) ? true : false;
@@ -878,7 +883,8 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -912,7 +918,8 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   getStreamPerThread(stream);
 
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  constexpr bool wait = false;
+  hip::Stream* s = hip::getStream(stream, wait);
 
   switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
@@ -928,6 +935,24 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
     }
   }
 
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  HIP_INIT_API(hipStreamCopyAttributes, dst, src);
+
+  if (!hip::isValid(src) || !hip::isValid(dst)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  getStreamPerThread(src);
+  getStreamPerThread(dst);
+
+  constexpr bool wait = false;
+  hip::Stream* src_stream = hip::getStream(src, wait);
+  hip::Stream* dst_stream = hip::getStream(dst, wait);
+  // Currently, SyncPolicy is the only stream attribute we can set during runtime
+  dst_stream->SetSyncPolicy(src_stream->GetSyncPolicy());
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

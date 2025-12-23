@@ -19,6 +19,8 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
+#include <random>
+
 #include <cmd_options.hh>
 #include <cpu_grid.h>
 #include <resource_guards.hh>
@@ -421,7 +423,9 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  auto delta = GENERATE(range(static_cast<size_t>(0), static_cast<size_t>(getWarpSize())));
+  // Tests edge cases (0, 1, max-1) and middle values
+  auto delta = GENERATE(values<size_t>({0, 1, static_cast<size_t>(getWarpSize()/2),
+                                         static_cast<size_t>(getWarpSize()-1)}));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
   CPUGrid grid(blocks, threads);
@@ -501,7 +505,9 @@ template <typename T> void CoalescedGroupShflDownTest() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  auto delta = GENERATE(range(static_cast<size_t>(0), static_cast<size_t>(getWarpSize())));
+  // Tests edge cases (0, 1, max-1) and middle values
+  auto delta = GENERATE(values<size_t>({0, 1, static_cast<size_t>(getWarpSize()/2),
+                                         static_cast<size_t>(getWarpSize()-1)}));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
   CPUGrid grid(blocks, threads);

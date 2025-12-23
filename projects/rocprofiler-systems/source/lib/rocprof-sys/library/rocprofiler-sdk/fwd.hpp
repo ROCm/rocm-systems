@@ -101,16 +101,6 @@ struct timing_interval
     rocprofiler_timestamp_t end   = 0;
 };
 
-struct argument_info
-{
-    uint32_t    arg_number = 0;
-    std::string arg_type   = {};
-    std::string arg_name   = {};
-    std::string arg_value  = {};
-};
-
-using function_args_t = std::vector<argument_info>;
-
 using agent_counter_info_map_t =
     std::unordered_map<rocprofiler_agent_id_t,
                        std::vector<rocprofiler_tool_counter_info_t>>;
@@ -198,7 +188,7 @@ client_data::get_buffers() const
 inline const rocprofsys_agent_t*
 client_data::get_agent(rocprofiler_agent_id_t _id) const
 {
-    const auto& agent = agent_manager::get_instance().get_agent_by_handle(_id.handle);
+    const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
 
     return &agent;
 }

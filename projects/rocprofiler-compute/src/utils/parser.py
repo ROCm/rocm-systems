@@ -27,7 +27,6 @@ import argparse
 import ast
 import json
 import re
-import sys
 import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -119,7 +118,7 @@ PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_R
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args: Any) -> Union[float, None]:
+def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -128,7 +127,7 @@ def to_min(*args: Any) -> Union[float, None]:
         return min(args)
 
 
-def to_max(*args: Any) -> Union[float, np.ndarray, None]:
+def to_max(*args: Any) -> Union[float, np.ndarray]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -143,8 +142,10 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating, None]:
+) -> Union[float, np.floating]:
     if a is None:
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
         if a.empty:
@@ -167,16 +168,16 @@ def to_avg(
         else:
             return float(a)
     elif isinstance(a, str):
-        if not a:
+        if not a or a == "N/A":
             return np.nan
         return float(a)
     else:
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_median(a: Union[pd.Series, None]) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -187,6 +188,9 @@ def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
 
 def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
+        # Define std as 0.0 if there is only one element
+        if len(a) <= 1:
+            return 0.0
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
@@ -194,20 +198,23 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, pd.Series, None]:
+) -> Union[int, float, pd.Series]:
     if a is None:
-        return None
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
+        return np.nan
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype(int)
+        # "Int64" handles null values
+        return a.astype("Int64")
     elif isinstance(a, str):
         return int(a)
     else:
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_sum(a: Union[pd.Series, None]) -> float:
     if a is None:
         return np.nan
     elif np.isnan(a).all():
@@ -227,9 +234,9 @@ def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
         return round(a, b)
 
 
-def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
@@ -316,33 +323,13 @@ class MetricEvaluator:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
-        self._prepare_df_cache()
-
-    def _prepare_df_cache(self) -> None:
-        """Prepare cached dataframe access for performance."""
-        if isinstance(self.raw_pmc_df, dict):
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key]
-                for key in self.raw_pmc_df.keys()
-            }
-        elif isinstance(self.raw_pmc_df, pd.DataFrame):
-            raw_pmc_df_keys = set(self.raw_pmc_df.columns.get_level_values(0))
-            self.df_cache = {
-                f"raw_pmc_df_{key}": self.raw_pmc_df[key] for key in raw_pmc_df_keys
-            }
-        else:
-            raise ValueError(f'Unknown `raw_pmc_df` type: "{type(self.raw_pmc_df)}".')
 
     def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
-            # Optimize dataframe access by replacing dict notation with dir_path
-            # variable access
-            opt_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", expr)
-
             # Create comprehensive local context
             local_expr_context = {}
-            local_expr_context.update(self.df_cache)
+            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
 
@@ -362,31 +349,56 @@ class MetricEvaluator:
             })
 
             eval_result = eval(
-                compile(opt_expr, "<string>", "eval"),
+                compile(expr, "<string>", "eval"),
                 {},
                 local_expr_context,
             )
 
-            if np.isnan(eval_result):
-                return ""
+            # Only return "N/A" for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for
+            # downstream operations
+            # Note: None and pd.NA are not detected as scalar by np.isscalar()
+            if (
+                eval_result is None
+                or eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            ):
+                # Do not give warning if None is explicitly specified in expression
+                if "None" not in expr:
+                    console_warning(
+                        f"Could not evaluate expression '{expr}' - likely "
+                        "due to missing counter data."
+                    )
+                else:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - likely "
+                        "explicitly specified."
+                    )
+                return "N/A"
             else:
                 return eval_result
 
         except (TypeError, NameError, KeyError) as exception:
             if "empirical_peak" in str(exception):
-                console_warning(
-                    f"Missing empirical peak data: {exception}. Using empty value."
-                )
-                return ""
+                console_warning(f"Missing empirical peak data: {exception}.")
+                return "N/A"
             else:
-                return ""
+                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+                return "N/A"
 
         except AttributeError as attribute_error:
-            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                return ""
-            else:
-                console_error("analysis", str(attribute_error))
-                return ""
+            console_warning(
+                f"Failed to evaluate expression '{expr}': {attribute_error}."
+            )
+            return "N/A"
+
+        except pd.errors.IntCastingNaNError as exception:
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
+
+        except ValueError as value_error:
+            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -478,8 +490,17 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
             equation_string,
         )
     else:
+        # Use pmc_perf.csv for all counters
         equation_string = re.sub(
-            r"raw_pmc_df", f"raw_pmc_df['{coll_level}']", equation_string
+            r"raw_pmc_df",
+            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+            equation_string,
+        )
+        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
+        equation_string = re.sub(
+            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
+            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
+            equation_string,
         )
     return equation_string
 
@@ -912,7 +933,9 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
 
 
 def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict], config: dict
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    config: dict,
+    sys_vars: dict[str, Union[int, float]],
 ) -> dict[str, Optional[Union[str, float, int]]]:
     """Calculate built-in variables"""
     # TODO: fix all $normUnit in Unit column or title
@@ -930,11 +953,15 @@ def calc_builtin_vars(
         )
         try:
             # Create temporary evaluator for this calculation
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+            # Pass sys_vars so that $num_xcd and other system variables are available
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
@@ -945,13 +972,16 @@ def calc_builtin_vars(
             variable_value, schema.PMC_PERF_FILE_PREFIX, config
         )
         try:
-            temporary_evaluator = MetricEvaluator(
-                raw_pmc_df, builtin_vars_collection, {}
-            )
+            # Merge sys_vars with builtin_vars_collection for second pass
+            combined_vars = {**sys_vars, **builtin_vars_collection}
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
 
@@ -982,7 +1012,7 @@ def eval_metric(
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config)
+    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
     # Create metric evaluator
@@ -1016,6 +1046,93 @@ def eval_metric(
     for df_id, row_id, col, expr in exprs_to_eval:
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
+    # Check for metrics exceeding theoretical peak due to dual-issue
+    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def validate_dual_issue_metrics(
+    dfs: dict,
+    dfs_type: dict,
+    sys_info: pd.Series,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+) -> None:
+    """
+    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
+    Warns about dual-issue behavior.
+    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
+    """
+    gpu_arch = sys_info.get("gpu_arch", "")
+
+    # Metrics to check for dual-issue warnings
+    valu_utilization_metrics = ["VALU Utilization"]
+    valu_flops_metrics = ["VALU FLOPs (F64)"]
+
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+        if "Metric" not in df.columns or "Value" not in df.columns:
+            continue
+
+        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
+        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
+
+        if not has_peak_column:
+            continue
+
+        for _, row in df.iterrows():
+            metric_name = row.get("Metric", "")
+
+            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
+                continue
+
+            try:
+                value = float(row.get("Value", 0))
+                peak = float(row.get(peak_col, 0))
+
+                if peak > 0 and value > peak:
+                    (value / peak) * 100
+                    dual_issue_confirmed = False
+                    if gpu_arch == "gfx950":
+                        if isinstance(raw_pmc_df, dict) and "pmc_perf" in raw_pmc_df:
+                            pmc_df = raw_pmc_df["pmc_perf"]
+                            if "SQ_ACTIVE_INST_VALU2" in pmc_df.columns:
+                                valu2_sum = pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
+                                if valu2_sum > 0:
+                                    dual_issue_confirmed = True
+
+                    # Determine warning message based on metric type
+                    faq_url = (
+                        "https://rocm.docs.amd.com/projects/"
+                        "rocprofiler-compute/en/latest/reference/"
+                        "faq.html#why-does-valu-utilization-exceed-"
+                        "the-theoretical-peak"
+                    )
+
+                    if metric_name in valu_utilization_metrics:
+                        warning_msg = (
+                            "VALU Utilization can go up to 200% "
+                            "because CU can dual-issue instructions. "
+                            f"See {faq_url} for more information."
+                        )
+                    else:  # VALU FLOPs metrics
+                        warning_msg = (
+                            "VALU FLOPs can exceed the peak value "
+                            "because these instructions can be "
+                            "dual-issued in specific circumstances. "
+                            f"See {faq_url} for more information."
+                        )
+
+                    if gpu_arch == "gfx950" and dual_issue_confirmed:
+                        warning_msg += (
+                            " (Dual-issue activity detected "
+                            "via SQ_ACTIVE_INST_VALU2 counter)"
+                        )
+
+                    console_warning(warning_msg)
+
+            except (ValueError, TypeError):
+                # Skip if the value or peak cannot be converted to a float
+                continue
 
 
 def debug_evaluate_metrics(
@@ -1233,20 +1350,35 @@ def search_pc_sampling_record(
     records: Union[list[dict], dict],
 ) -> Optional[list[tuple]]:
     """
-    Search PC sampling records, and group and sort them
-    """
+    Search PC sampling records.
 
-    # NB:
-    #  The field stall_reason is vailid only for HW stochastic pc sampling.
-    # TODO: might save wavefront count for HW stochastic pc sampling?
+    Group by (code_object_id, code_object_offset, inst_index), and aggregate
+    counts, stall reasons, and dispatch IDs.
+
+    Returns:
+        A sorted list of tuples:
+        (
+            code_object_id,
+            code_object_offset,
+            inst_index,
+            total_count,
+            count_issued,
+            count_stalled,
+            sorted_stall_reasons,
+            sorted_dispatch_ids,
+        )
+    """
 
     if not records:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
+    # records should always be a list of dict
+    if isinstance(records, dict):
+        records = [records]
+
     rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
 
-    grouped_data = {}
     stall_reason_keys = {
         "NONE": 0,
         # No instruction available in the instruction cache.
@@ -1265,82 +1397,74 @@ def search_pc_sampling_record(
         "LAST": 0,
     }
 
-    # Populate grouped_data
+    grouped_data: dict[tuple, list] = {}
+
     for item in records:
-        record = item["record"]
+        record = item.get("record", {})
         pc_info = record.get("pc", {})
 
         code_object_id = pc_info.get("code_object_id")
         code_object_offset = pc_info.get("code_object_offset")
         inst_index = item.get("inst_index")
+        dispatch_id = record.get("dispatch_id")
 
         if None in (code_object_id, code_object_offset, inst_index):
             continue
 
-        # Create composite key
-        key = (code_object_id, code_object_offset)
+        key = (code_object_id, code_object_offset, inst_index)
 
         snapshot = record.get("snapshot", {})
-        issued = record.get("wave_issued")
+        issued = record.get("wave_issued", False)
 
         if key not in grouped_data:
-            grouped_data[key] = [0, 0, 0, inst_index, {}]
+            grouped_data[key] = [0, 0, 0, {}, set()]
+
+        entry = grouped_data[key]
 
         # Update counts
-        entry = grouped_data[key]
-        entry[0] += 1  # count
-        entry[3] = inst_index  # inst_index
+        entry[0] += 1  # total_count
+        if issued:
+            entry[1] += 1  # count_issued
+        else:
+            entry[2] += 1  # count_stalled
+            stall_reason = snapshot.get("stall_reason")
+            if stall_reason and len(stall_reason) > rocp_inst_not_issued_prefix_len:
+                reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
+                if reason_key in stall_reason_keys:
+                    entry[3][reason_key] = entry[3].get(reason_key, 0) + 1
 
-        # Process snapshot data
-        if snapshot:
-            if issued:
-                entry[1] += 1  # count_issued
-            else:
-                entry[2] += 1  # count_stalled
-
-                # Process stall reason only when stalled
-                stall_reason = snapshot.get("stall_reason")
-                if stall_reason:
-                    # Extract reason key with bounds checking
-                    if len(stall_reason) > rocp_inst_not_issued_prefix_len:
-                        reason_key = stall_reason[rocp_inst_not_issued_prefix_len:]
-                        # Only track known stall reasons
-                        if reason_key in stall_reason_keys:
-                            stall_reasons = entry[4]
-                            stall_reasons[reason_key] = (
-                                stall_reasons.get(reason_key, 0) + 1
-                            )
+        # Add dispatch_id if valid
+        if dispatch_id is not None:
+            entry[4].add(dispatch_id)
 
     if not grouped_data:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
     # Convert to sorted list of tuples:
-    # (code_object_id, inst_index, code_object_offset, count)
     sorted_counts = sorted(
         [
             (
                 code_object_id,
-                info["inst_index"],
-                offset,
-                info["count"],
-                info["count_issued"],
-                info["count_stalled"],
-                # For info["stall_reason"], remove the zero entries,
-                # sorting the remaining items by their values in descending order
+                code_object_offset,
+                inst_index,
+                info[0],  # total_count
+                info[1],  # count_issued
+                info[2],  # count_stalled
                 sorted(
-                    ((k, v) for k, v in info["stall_reason"].items() if v > 0),
+                    ((k, v) for k, v in info[3].items() if v > 0),
                     key=lambda item: item[1],
                     reverse=True,
-                ),
+                ),  # sorted stall reasons
+                sorted(info[4]),  # sorted dispatch_ids list
             )
-            for code_object_id, offsets in grouped_data.items()
-            for offset, info in offsets.items()
+            for (
+                code_object_id,
+                code_object_offset,
+                inst_index,
+            ), info in grouped_data.items()
         ],
-        key=lambda x: (
-            x[0],
-            x[2],
-        ),  # Sort by code_object_id, then by code_object_offset
+        key=lambda x: (x[0], x[1], x[2]),
     )
 
     return sorted_counts
@@ -1348,7 +1472,11 @@ def search_pc_sampling_record(
 
 @demarcate
 def load_pc_sampling_data_per_kernel(
-    method: str, file_name: Path, kernel_name: str, sorting_type: str
+    method: str,
+    file_name: Path,
+    csv_file_name: Path,
+    kernel_name: str,
+    sorting_type: str,
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data from json file with given method and kernel name,
@@ -1367,48 +1495,21 @@ def load_pc_sampling_data_per_kernel(
     :return: The counted and reordering pc sampling info.
     :rtype: pd.DataFrame:
     """
-    kernel_info_list = search_key_in_json(file_name, "kernel_symbols")
-
-    kernel_info = {}
-    if kernel_info_list:
-        for item in kernel_info_list:
-            if (
-                item["formatted_kernel_name"] == kernel_name
-                or item["demangled_kernel_name"] == kernel_name
-                or item["truncated_kernel_name"] == kernel_name
-            ):
-                # kernel_info["kernel_id"] = item["kernel_id"]
-                kernel_info["code_object_id"] = item["code_object_id"]
-                kernel_info["entry_byte_offset"] = item["kernel_code_entry_byte_offset"]
-                break
-
-    if not kernel_info:
-        console_warning(f"PC sampling: can not find the kernel {kernel_name}")
-        return pd.DataFrame()
-    else:
-        console_debug(f"PC sampling: kernel {kernel_info}")
-
-    filtered_sorted_list = sorted(
-        [
-            item
-            for item in kernel_info_list
-            if item["code_object_id"] == kernel_info["code_object_id"]
-        ],
-        key=lambda x: x["kernel_code_entry_byte_offset"],
+    # Load kernel trace CSV with kernel info
+    kernel_trace_df = pd.read_csv(
+        csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"]
+    )
+    console_debug(
+        f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries"
     )
 
-    for i, item in enumerate(filtered_sorted_list):
-        if item["kernel_code_entry_byte_offset"] == kernel_info["entry_byte_offset"]:
-            next_index = i + 1
-            if next_index < len(filtered_sorted_list):  # Ensure the next item exists
-                next_item = filtered_sorted_list[next_index]
-                kernel_info["potential_end_offset"] = next_item[
-                    "kernel_code_entry_byte_offset"
-                ]
-            else:
-                kernel_info["potential_end_offset"] = sys.maxsize
-            break
+    # Filter kernels matching requested kernel_name
+    matching_kernels = kernel_trace_df[kernel_trace_df["Kernel_Name"] == kernel_name]
+    if matching_kernels.empty:
+        console_warning(f"PC sampling: cannot find kernel '{kernel_name}' in CSV")
+        return pd.DataFrame()
 
+    # Extract raw PC sampling records from JSON
     pc_sample_key_loc = (
         search_key_in_json(file_name, "pc_sample_host_trap")
         if method == "host_trap"
@@ -1419,90 +1520,145 @@ def load_pc_sampling_data_per_kernel(
         console_warning("PC sampling: can not find pc sample.")
         return pd.DataFrame()
 
-    df = pd.DataFrame(
-        search_pc_sampling_record(pc_sample_key_loc),
-        columns=[
-            "code_object_id",
-            "inst_index",
-            "offset",
-            "count",
-            "count_issued",
-            "count_stalled",
-            "stall_reason",
-        ],
+    # Get processed sampling data grouped by (code_object_id, offset, inst_index)
+    records = search_pc_sampling_record(pc_sample_key_loc)
+    if not records:
+        console_warning("PC sampling: no records found in PC sampling data.")
+        return pd.DataFrame()
+
+    # Flatten records by dispatch_id to create one row per dispatch ID
+    rows = []
+    for (
+        code_object_id,
+        offset,
+        inst_index,
+        count,
+        count_issued,
+        count_stalled,
+        stall_reasons,
+        dispatch_ids,
+    ) in records:
+        for dispatch_id in dispatch_ids:
+            rows.append({
+                "dispatch_id": dispatch_id,
+                "code_object_id": code_object_id,
+                "offset": offset,
+                "inst_index": inst_index,
+                "count": count,
+                "count_issued": count_issued,
+                "count_stalled": count_stalled,
+                "stall_reason": stall_reasons,
+            })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        console_warning("PC sampling: no records found after flattening dispatch IDs.")
+        return df
+
+    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
+    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
+        ["Kernel_Id", "Kernel_Name"]
+    ]
+
+    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
+    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
+    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
+
+    # Drop dispatch_id
+    df.drop(columns=["dispatch_id"], inplace=True)
+
+    def merge_stall_reasons(
+        stall_reason_series: list[Optional[list[tuple[str, int]]]],
+    ) -> list[tuple[str, int]]:
+        """
+        Function to merge stall_reason lists (list of dicts -> merged & sorted dict)
+        """
+        merged_counts = {}
+
+        for entry in stall_reason_series:
+            if not entry:
+                continue
+            # Each entry is a list of (key, count) tuples
+            for k, v in entry:
+                if v > 0:
+                    merged_counts[k] = merged_counts.get(k, 0) + v
+
+        # Return sorted list of tuples by descending count
+        return sorted(merged_counts.items(), key=lambda item: item[1], reverse=True)
+
+    # Group and aggregate
+    df = df.groupby(["code_object_id", "offset", "kernel_id"], as_index=False).agg({
+        "inst_index": "first",
+        "count": "sum",
+        "count_issued": "sum",
+        "count_stalled": "sum",
+        "stall_reason": merge_stall_reasons,
+        "kernel_name": "first",
+    })
+
+    # Filter DataFrame to only include rows matching the requested kernel_name
+    df = df[df["kernel_name"] == kernel_name]
+
+    # Convert offset column to hex string for display, keep original numeric for sorting
+    df["offset"] = df["offset"].apply(lambda x: hex(x))
+
+    # Load PC sampling instructions from JSON (if available)
+    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
+    df["instruction"] = (
+        df["inst_index"].apply(
+            lambda x: pc_sample_instructions[x]
+            if x < len(pc_sample_instructions)
+            else None
+        )
+        if pc_sample_instructions
+        else None
     )
 
-    df = df[
-        (df["code_object_id"] == kernel_info["code_object_id"])
-        & (df["offset"] > kernel_info["entry_byte_offset"])
-        & (df["offset"] < kernel_info["potential_end_offset"])
-    ][
+    # Load source code comments (if available)
+    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
+    df["source_line"] = (
+        df["inst_index"].apply(
+            lambda x: f".../{Path(pc_sample_comments[x]).name}"
+            if x < len(pc_sample_comments)
+            else None
+        )
+        if pc_sample_comments
+        else None
+    )
+
+    # Sorting and returning relevant columns depending on method and sorting_type
+    if sorting_type == "offset":
+        df_sorted = df.sort_values(by=["code_object_id", "offset"])
+    elif sorting_type == "count":
+        df_sorted = df.sort_values(by=["count"], ascending=False)
+    else:
+        console_error(
+            'Error: pc sampling sorting_type must be either "offset" or "count".'
+        )
+        return pd.DataFrame()
+
+    columns_to_return = (
         [
-            "inst_index",
+            "source_line",
+            "instruction",
+            "code_object_id",
+            "offset",
+            "count",
+        ]
+        if method == "host_trap"
+        else [
+            "source_line",
+            "instruction",
+            "code_object_id",
             "offset",
             "count",
             "count_issued",
             "count_stalled",
             "stall_reason",
         ]
-    ]
+    )
 
-    df["offset"] = df["offset"].apply(lambda x: hex(x))
-
-    # Add instruction and source line information
-    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
-    if pc_sample_instructions:
-        df["instruction"] = df["inst_index"].apply(
-            lambda x: (
-                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
-            )
-        )
-
-    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
-    if pc_sample_comments:
-        df["source_line"] = df["inst_index"].apply(
-            lambda x: (
-                f".../{Path(pc_sample_comments[x]).name}"
-                if x < len(pc_sample_comments)
-                else None
-            )
-        )
-
-    # Return sorted data based on sorting type
-    if sorting_type == "offset":
-        return (
-            df[["source_line", "instruction", "offset", "count"]]
-            if method == "host_trap"
-            else df[
-                [
-                    "source_line",
-                    "instruction",
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                ]
-            ]
-        )
-    else:  # sort by "count"
-        return (
-            df[["source_line", "instruction", "offset", "count"]].sort_values(
-                by="count", ascending=False
-            )
-            if method == "host_trap"
-            else df[
-                [
-                    "source_line",
-                    "instruction",
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                ]
-            ].sort_values(by="count", ascending=False)
-        )
+    return df_sorted[columns_to_return]
     # might support sort by stall reason in the future
 
 
@@ -1526,6 +1682,12 @@ def load_pc_sampling_data(
     #  - Alternatively, we could check pc_sampling_method in json
     stochastic_path = Path(dir_path) / f"{file_prefix}_pc_sampling_stochastic.csv"
     host_trap_path = Path(dir_path) / f"{file_prefix}_pc_sampling_host_trap.csv"
+    json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
+    csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
+
+    if not csv_kernel_trace_file_path.exists():
+        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
+        return pd.DataFrame()
 
     if stochastic_path.exists():
         pc_sampling_method = "stochastic"
@@ -1541,24 +1703,44 @@ def load_pc_sampling_data(
 
     # No kernel filter, return grouped and sorted csv dir_pathectly
     if not workload.filter_kernel_ids:
+        # Load instruction CSV
         df = pd.read_csv(csv_file_path)
-        # Group by 'Instruction_Comment' and count occurrences
+
+        # Load kernel trace CSV
+        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
+
+        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
+        merged_df = df.merge(
+            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
+            how="left",
+            left_on="Correlation_Id",
+            right_on="Dispatch_Id",
+        )
+
+        # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            df.groupby("Instruction_Comment")
+            merged_df.groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
+                Kernel_Id=("Kernel_Id", "first"),
+                Kernel_Name=("Kernel_Name", "first"),
             )
             .reset_index()
             .rename(columns={"Instruction_Comment": "source_line"})
         )
-
-        grouped_counts = grouped_counts[["source_line", "instruction", "count"]]
+        grouped_counts = grouped_counts[
+            [
+                "source_line",
+                "Kernel_Name",
+                "instruction",
+                "count",
+            ]
+        ]
         grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}"
+            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
         )
 
-        # Sort by the count of occurrences
         return grouped_counts.sort_values(by="count", ascending=False)
 
     elif len(workload.filter_kernel_ids) > 1:
@@ -1570,21 +1752,33 @@ def load_pc_sampling_data(
         return pd.DataFrame()
 
     elif len(workload.filter_kernel_ids) == 1:
-        # NB: the default file name is subject to changes from rocprofv3/rocprofiler_sdk
-        json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
         if not json_file_path.exists():
-            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
+            console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
             # NB:
             #   We should find better way to remove the dependency on kernel_top_table
             kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
             file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
-            kernel_name = pd.read_csv(file).loc[
-                workload.filter_kernel_ids[0], "Kernel_Name"
-            ]
+            kernel_index = workload.filter_kernel_ids[0]
+
+            kernel_df = pd.read_csv(file)
+
+            if kernel_index >= len(kernel_df):
+                console_warning(
+                    f"Kernel index {kernel_index} is out of bounds. "
+                    f"kernel_top CSV has only {len(kernel_df)} rows."
+                )
+                return pd.DataFrame()
+
+            kernel_name = kernel_df.iloc[kernel_index]["Kernel_Name"]
+
             return load_pc_sampling_data_per_kernel(
-                pc_sampling_method, json_file_path, kernel_name, sorting_type
+                pc_sampling_method,
+                json_file_path,
+                csv_kernel_trace_file_path,
+                kernel_name,
+                sorting_type,
             )
     else:
         console_warning("PC sampling: No data")

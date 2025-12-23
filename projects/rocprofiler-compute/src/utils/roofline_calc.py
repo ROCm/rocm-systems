@@ -26,12 +26,12 @@
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import pandas as pd
 
 from utils import schema
-from utils.logger import console_debug, console_warning
+from utils.logger import console_debug, console_error, console_warning
 from utils.parser import apply_filters, eval_metric
 from utils.specs import MachineSpecs
 
@@ -101,7 +101,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported:
 }
 
-PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
+PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
 MFMA_DATATYPES = ["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8"]
 CACHE_HIERARCHY = ["HBM", "L2", "L1", "LDS"]
 
@@ -201,9 +201,22 @@ def calc_ceilings(
     roofline_parameters: dict[str, Any],
     dtype: str,
     benchmark_data: dict[str, list[str]],
+    ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
+
+    if ai_data:
+        max_ai = 0
+        for cache_level in ["ai_l1", "ai_l2", "ai_hbm"]:
+            if cache_level in ai_data and ai_data[cache_level][0]:
+                cache_max = max(ai_data[cache_level][0])
+                max_ai = max(max_ai, cache_max)
+
+        dynamic_xmax = max_ai * 1.2 if max_ai > 0 else 1000
+    else:
+        dynamic_xmax = 1000
+
     # TODO: This is where filtering by memory level will need to occur for standalone
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
@@ -227,15 +240,30 @@ def calc_ceilings(
 
     peak_ops = 0.0
     if dtype in PEAK_OPS_DATATYPES:
-        peak_ops = float(
-            benchmark_data[f"{dtype}{ops_flops}"][roofline_parameters["device_id"]]
-        )
+        try:
+            peak_ops = float(
+                benchmark_data[f"{dtype}{ops_flops}"][roofline_parameters["device_id"]]
+            )
+        except KeyError:
+            console_warning(
+                f"Missing benchmark data for {dtype}{ops_flops} in benchmark_results. "
+                "Skipping peak operations calculation. This may indicate incomplete or "
+                "corrupted benchmark data."
+            )
+            return GraphPoints.empty().__dict__
 
     for cache_level in cache_hierarchy:
         # Plot BW line
-        console_debug("roofline", f"Current cache level is {cache_level}")
         curr_bw = f"{cache_level}Bw"
-        peak_bw = float(benchmark_data[curr_bw][roofline_parameters["device_id"]])
+        try:
+            peak_bw = float(benchmark_data[curr_bw][roofline_parameters["device_id"]])
+        except KeyError:
+            console_warning(
+                f"Missing benchmark data for {curr_bw} in benchmark_results. "
+                f"Skipping {cache_level} cache level. This may indicate incomplete or "
+                "corrupted benchmark data."
+            )
+            continue
 
         x1 = float(XMIN)
         y1 = float(XMIN) * peak_bw
@@ -252,13 +280,21 @@ def calc_ceilings(
         if dtype in MFMA_DATATYPES:
             target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
 
-            peak_mfma = float(
-                benchmark_data[f"MFMA{target_precision}{ops_flops}"][
-                    roofline_parameters["device_id"]
-                ]
-            )
-            x2_mfma = peak_mfma / peak_bw
-            y2_mfma = peak_mfma
+            try:
+                peak_mfma = float(
+                    benchmark_data[f"MFMA{target_precision}{ops_flops}"][
+                        roofline_parameters["device_id"]
+                    ]
+                )
+                x2_mfma = peak_mfma / peak_bw
+                y2_mfma = peak_mfma
+            except KeyError:
+                console_warning(
+                    f"Missing benchmark data for "
+                    f"MFMA{target_precision}{ops_flops} in benchmark_results. "
+                    f"Skipping MFMA calculations for {cache_level} cache level. "
+                    "This may indicate incomplete or corrupted benchmark data."
+                )
 
         # Check which peak is higher for formatting bandwidth lines
         if y2_mfma > y1_mfma:  # peak_mfma
@@ -268,11 +304,6 @@ def calc_ceilings(
             peak_x = x1_mfma
             peak_y = y1_mfma
 
-        # These are the points to use:
-        console_debug("roofline", "coordinate points:")
-        console_debug(f"x = [{x1}, {peak_x}]")
-        console_debug(f"y = [{y1}, {peak_y}]")
-
         cache_key = cache_level.lower()
         graph_points[cache_key].extend([[x1, peak_x], [y1, peak_y], peak_bw])
 
@@ -281,18 +312,20 @@ def calc_ceilings(
     # ----------------------------------------------------------------------------------
     if dtype in PEAK_OPS_DATATYPES:
         # Plot FMA roof
-        x0 = min(x2, XMAX) if x2 < XMAX else XMAX
+        x0 = min(x2, dynamic_xmax) if x2 < dynamic_xmax else dynamic_xmax
 
-        console_debug(f"FMA ROOF [{x0}, {XMAX}], [{peak_ops},{peak_ops}]")
-        graph_points["valu"].extend([[x0, XMAX], [peak_ops, peak_ops], peak_ops])
+        graph_points["valu"].extend([
+            [x0, dynamic_xmax],
+            [peak_ops, peak_ops],
+            peak_ops,
+        ])
 
     # Plot MFMA roof
     if dtype in MFMA_DATATYPES:  # assert that mfma has been assigned
-        x0_mfma = min(x2_mfma, XMAX) if x2_mfma < XMAX else XMAX
+        x0_mfma = min(x2_mfma, dynamic_xmax) if x2_mfma < dynamic_xmax else dynamic_xmax
 
-        console_debug(f"MFMA ROOF [{x0_mfma}, {XMAX}], [{peak_mfma},{peak_mfma}]")
         graph_points["mfma"].extend([
-            [x0_mfma, XMAX],
+            [x0_mfma, dynamic_xmax],
             [peak_mfma, peak_mfma],
             peak_mfma,
         ])
@@ -378,14 +411,6 @@ def calc_ai_analyze(
             config=config,
         )
 
-        # DEBUG
-        if 402 in kernel_dfs:
-            console_debug("roofline", f"Table 402 for kernel {kernel_id}:")
-            for idx, row in kernel_dfs[402].iterrows():
-                console_debug(
-                    "roofline", f"  {row.get('Metric', '')}: {row.get('Value', '')}"
-                )
-
         ai_hbm = ai_l2 = ai_l1 = performance = 0
 
         if 402 in kernel_dfs:
@@ -393,13 +418,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = value if value and value != "" else 0
+                    ai_hbm = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L2":
-                    ai_l2 = value if value and value != "" else 0
+                    ai_l2 = value if value and value not in ("", "N/A") else 0
                 elif metric == "AI L1":
-                    ai_l1 = value if value and value != "" else 0
+                    ai_l1 = value if value and value not in ("", "N/A") else 0
                 elif metric == "Performance (GFLOPs)":
-                    performance = value if value and value != "" else 0
+                    performance = value if value and value not in ("", "N/A") else 0
 
         console_debug(
             "roofline",
@@ -437,7 +462,6 @@ def calc_ai_analyze(
         }
 
     console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
-    console_debug("roofline", f"Plot points: {plot_points}")
     return plot_points.__dict__
 
 
@@ -773,10 +797,15 @@ def calc_ai_profile(
     return intensity_points
 
 
-def construct_roof(
-    roofline_parameters: dict[str, Any], dtype: str
-) -> dict[str, list[Union[list[float], float, None]]]:
-    workload_dir = roofline_parameters.get("workload_dir")
+def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
+    """
+    Validate roofline.csv exists and has consistent structure.
+
+    Returns:
+        tuple: (is_valid, error_message)
+               is_valid=True if CSV is valid, False otherwise
+               error_message contains description if invalid
+    """
     if isinstance(workload_dir, list):
         base_dir = (
             workload_dir[0][0]
@@ -788,10 +817,68 @@ def construct_roof(
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 
-    # -----------------------------------------------------
-    # Initialize roofline data dictionary from roofline.csv
-    # -----------------------------------------------------
-    # TODO: consider changing this to an ordered dict for consistency over py versions
+    # Check if file exists
+    if not benchmark_results.exists():
+        return False, f"Benchmark results file not found: {benchmark_results}"
+
+    # Validate CSV structure
+    try:
+        with open(benchmark_results) as csvfile:
+            csv_reader = csv.reader(csvfile, delimiter=",")
+            row_count = 0
+            num_headers = 0
+
+            for row in csv_reader:
+                if row_count == 0:
+                    num_headers = len(row) - 1
+                    if num_headers <= 0:
+                        return (
+                            False,
+                            "Empty or invalid header row in benchmark_results",
+                        )
+                else:
+                    if len(row) - 1 != num_headers:
+                        return (
+                            False,
+                            f"Inconsistent row length in benchmark_results at "
+                            f"row {row_count + 1}. "
+                            f"Expected {num_headers + 1} columns, "
+                            f"found {len(row)}. "
+                            "Roofline data appears corrupted or incomplete.",
+                        )
+                row_count += 1
+
+            if row_count < 2:
+                return (
+                    False,
+                    f"Insufficient data in benchmark_results. "
+                    f"Found {row_count} rows (need at least 2)."
+                    f" Roofline data appears corrupted or incomplete.",
+                )
+    except Exception as e:
+        return False, f"Failed to read benchmark_results: {e}"
+
+    return True, ""
+
+
+def construct_roof(
+    roofline_parameters: dict[str, Any], dtype: str, ai_data: Optional[dict] = None
+) -> dict[str, list[Union[list[float], float, None]]]:
+    workload_dir = roofline_parameters.get("workload_dir")
+
+    # Normalize workload_dir to extract base directory
+    if isinstance(workload_dir, list):
+        base_dir = (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    else:
+        base_dir = workload_dir
+
+    benchmark_results = Path(base_dir) / "roofline.csv"
+
+    # Initialize benchmark data dictionary from roofline.csv
     benchmark_data: dict[str, list[str]] = {}
     headers: list[str] = []
 
@@ -801,7 +888,7 @@ def construct_roof(
             row_count = 0
 
             for row in csv_reader:
-                row.pop(0)  # remove devID
+                row.pop(0)  # Remove first column (Device ID)
                 if row_count == 0:
                     headers = row
                     for header in headers:
@@ -811,10 +898,45 @@ def construct_roof(
                         benchmark_data[key].append(row[i])
                 row_count += 1
     except Exception as e:
-        console_debug("roofline", f"Failed to read benchmark results: {e}")
+        console_error(
+            "roofline",
+            f"Failed to read benchmark results from {base_dir}: {e}",
+            exit=False,
+        )
         return GraphPoints.empty().__dict__
+
+    # ------------------
+    #  Validate benchmark data completeness
+    # ------------------
+    ops_flops = "Ops" if dtype.startswith("I") else "Flops"
+    expected_columns = []
+
+    if dtype in PEAK_OPS_DATATYPES:
+        expected_columns.append(f"{dtype}{ops_flops}")
+
+    cache_hierarchy = (
+        CACHE_HIERARCHY
+        if roofline_parameters["mem_level"] == "ALL"
+        else roofline_parameters["mem_level"]
+    )
+    for cache_level in cache_hierarchy:
+        expected_columns.append(f"{cache_level}Bw")
+
+    if dtype in MFMA_DATATYPES:
+        target_precision = dtype if dtype.startswith("I") else f"F{dtype[2:]}"
+        expected_columns.append(f"MFMA{target_precision}{ops_flops}")
+
+    # Check for missing expected columns
+    missing_columns = [col for col in expected_columns if col not in benchmark_data]
+    if missing_columns:
+        console_warning(
+            f"Missing expected columns in roofline.csv for datatype {dtype}: "
+            f"{', '.join(missing_columns)}. "
+            "The roofline plot may be incomplete. Consider regenerating "
+            "benchmark data or cleaning the directory and re-running the analysis."
+        )
 
     # ------------------
     #  Generate Roofline
     # ------------------
-    return calc_ceilings(roofline_parameters, dtype, benchmark_data)
+    return calc_ceilings(roofline_parameters, dtype, benchmark_data, ai_data)

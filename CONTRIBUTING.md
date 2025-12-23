@@ -51,6 +51,12 @@ Further changes to the structure may be made to improve development efficiency a
 
 ---
 
+## Ignored commits for git blame
+
+There were two major styling change commits, which impacted almost every C++ file in the repository. If you want to avoid seeing those changes in `git blame` output, you can run `git config blame.ignoreRevsFile .git-blame-ignore-revs`. This will exclude style changes from git blame.
+
+---
+
 ## Making Changes
 
 ### From a Developer's Perspective

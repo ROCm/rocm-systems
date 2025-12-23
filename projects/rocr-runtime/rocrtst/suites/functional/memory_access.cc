@@ -150,12 +150,7 @@ static void PrintMemorySubtestHeader(const char *header) {
   std::cout << "  *** Memory Subtest: " << header << " ***" << std::endl;
 }
 
-#if ROCRTST_EMULATOR_BUILD
-static const int kMemoryAllocSize = 8;
-#else
-static const int kMemoryAllocSize = 1024;
-#endif
-
+static const int kMemoryAllocSize = rocrtst::isEmuModeEnabled() ? 8 : 1024;
 
 // Test to check GPU can read & write to system memory
 void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,

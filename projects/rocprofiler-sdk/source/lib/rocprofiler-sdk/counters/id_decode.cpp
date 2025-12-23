@@ -89,5 +89,51 @@ aqlprofile_id_to_rocprof_instance()
     return *aql_to_rocprof_dims;
 }
 
+// Counter ID encoding/decoding implementations
+void
+set_agent_in_counter_id(rocprofiler_counter_id_t& id, uint8_t agent_logical_node_id)
+{
+    // Check that logical_node_id + offset fits in 6 bits
+    // With AGENT_ENCODING_OFFSET=1, this allows logical_node_id 0-62 (63 agents)
+    CHECK(agent_logical_node_id < ((1 << AGENT_BIT_LENGTH) - AGENT_ENCODING_OFFSET))
+        << "Agent logical_node_id " << static_cast<int>(agent_logical_node_id)
+        << " exceeds limit (max " << ((1 << AGENT_BIT_LENGTH) - AGENT_ENCODING_OFFSET - 1)
+        << " to allow for encoding offset)";
+
+    // Add encoding offset to ensure agent 0 is detectable (non-zero)
+    uint8_t agent_encoded = agent_logical_node_id + AGENT_ENCODING_OFFSET;
+
+    // Clear agent bits and set new value
+    id.handle = (id.handle & ~(AGENT_MASK << AGENT_BIT_OFFSET)) |
+                (static_cast<uint64_t>(agent_encoded) << AGENT_BIT_OFFSET);
+}
+
+uint8_t
+get_agent_from_counter_id(rocprofiler_counter_id_t id)
+{
+    return static_cast<uint8_t>((id.handle >> AGENT_BIT_OFFSET) & AGENT_MASK);
+}
+
+void
+set_base_metric_in_counter_id(rocprofiler_counter_id_t& id, uint16_t metric_id)
+{
+    CHECK(metric_id <= BASE_METRIC_MASK) << "Base metric ID exceeds 16-bit limit";
+    // Clear base metric bits and set new value
+    id.handle = (id.handle & ~BASE_METRIC_MASK) | metric_id;
+}
+
+uint16_t
+get_base_metric_from_counter_id(rocprofiler_counter_id_t id)
+{
+    return static_cast<uint16_t>(id.handle & BASE_METRIC_MASK);
+}
+
+bool
+is_agent_encoded_counter_id(rocprofiler_counter_id_t id)
+{
+    // Check if agent bits are non-zero
+    return ((id.handle >> AGENT_BIT_OFFSET) & AGENT_MASK) != 0;
+}
+
 }  // namespace counters
 }  // namespace rocprofiler

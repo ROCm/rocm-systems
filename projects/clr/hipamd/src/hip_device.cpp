@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_deprecated.h>
+#include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
@@ -199,8 +200,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
           ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
           // and it's not the current stream
           (active_stream != blocking_stream)) {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p",
-                active_stream);
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         // Get the last valid command
         waitForStream(active_stream);
       }
@@ -265,9 +265,9 @@ void Device::destroyAllStreams() {
 void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
   std::vector<hip::Stream*> streams;
-  streams.reserve(streamSet.size());
   {
     std::shared_lock lock(streamSetLock);
+    streams.reserve(streamSet.size());
     if (wait_blocking_streams_only) {
       auto null_stream = GetNullStream();
       for (auto it : streamSet) {
@@ -481,7 +481,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_ * info.numRTCUs_;
+  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;
@@ -766,42 +766,83 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
-  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-
+  if (symbol == nullptr || std::string_view{symbol}.empty() || pfn == nullptr) {
+    return hipErrorInvalidValue;
+  }
   std::string symbolString = symbol;
-  if (symbol == nullptr || symbolString == "" || pfn == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
+      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+    return hipErrorInvalidValue;
   }
 
+  bool checkSpt = (flags == HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM);
   if (symbolString == "hipGetDeviceProperties") {
     if (hipVersion >= 600) {
       symbolString = "hipGetDevicePropertiesR0600";
     }
+    checkSpt = false;
   } else if (symbolString == "hipChooseDevice") {
     if (hipVersion >= 600) {
       symbolString = "hipChooseDeviceR0600";
     }
+    checkSpt = false;
+  } else if (symbolString == "hipAmdFileRead") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileRead);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    return hipSuccess;
+  } else if (symbolString == "hipAmdFileWrite") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileWrite);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    return hipSuccess;
   }
 
   void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
   if (handle == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
+  }
+
+  if (checkSpt) {
+      symbolString += "_spt";
   }
 
   *pfn = amd::Os::getSymbol(handle, symbolString.c_str());
-  if (!(*pfn)) {
-    if (symbolStatus != nullptr) {
-      *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+  if (*pfn == nullptr) {
+    if (checkSpt) {
+      *pfn = amd::Os::getSymbol(handle, symbol);
     }
-    HIP_RETURN(hipErrorInvalidValue);
+    if (*pfn == nullptr) {
+      if (symbolStatus != nullptr) {
+        *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+      }
+      return hipErrorInvalidValue;
+    }
   }
 
   if (symbolStatus != nullptr) {
     *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
   }
-  HIP_RETURN(hipSuccess);
+
+  return hipSuccess;
+}
+
+hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
+}
+
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
 }  // namespace hip

@@ -44,7 +44,7 @@ ENV RDC_LIB_DIR=/opt/rocm/lib/rdc
 ENV CMAKE_ROOT=/usr/bin/cmake
 
 # Install gRPC
-RUN git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules && \
+RUN git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules && \
     cd grpc && \
     cmake -B build \
         -DgRPC_INSTALL=ON \
@@ -58,8 +58,8 @@ RUN git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submod
     echo "$GRPC_ROOT" | tee /etc/ld.so.conf.d/grpc.conf
 
 # Build and install RDC
-RUN git clone https://github.com/ROCm/rdc && \
-    cd rdc && \
+RUN git clone https://github.com/ROCm/rocm-systems --recursive && \
+    cd rocm-systems/projects/rdc && \
     cmake -B build -DGRPC_ROOT="$GRPC_ROOT" \
         -DSMIDIR="$SMI_DIR" \
         -DBUILD_TESTS=OFF \

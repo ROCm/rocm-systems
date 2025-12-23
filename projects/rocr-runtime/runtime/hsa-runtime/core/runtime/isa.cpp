@@ -288,7 +288,7 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   if (supported_isas->size() > 0) {
     return *supported_isas;
   }
-  
+
   auto parse_out_minor_ver = [&](const std::string& generic_name) -> int32_t {
       size_t dot_pos = generic_name.find('.');
       int32_t min;

@@ -96,7 +96,6 @@ if(NOT WIN32)
 endif()
 
 target_sources(amdhip64 PRIVATE
-  fixme.cpp
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
@@ -118,6 +117,7 @@ target_sources(amdhip64 PRIVATE
   hip_peer.cpp
   hip_platform.cpp
   hip_profile.cpp
+  hip_storage.cpp
   hip_stream_ops.cpp
   hip_stream.cpp
   hip_surface.cpp
@@ -218,7 +218,6 @@ if(USE_PROF_API)
   set(PROF_API_GEN "${CMAKE_CURRENT_SOURCE_DIR}/hip_prof_gen.py")
   set(PROF_API_LOG "${PROJECT_BINARY_DIR}/hip_prof_gen.log.txt")
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
   execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
                   RESULT_VARIABLE CPP_HEADER_PARSER

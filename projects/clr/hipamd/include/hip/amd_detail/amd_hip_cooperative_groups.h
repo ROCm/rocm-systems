@@ -921,6 +921,15 @@ template <unsigned int tileSize, class ParentCGTy> class thread_block_tile_type
     coalesced_info.tiled_info.is_tiled = true;
   }
 
+  __CG_QUALIFIER__ thread_block_tile_type(unsigned int meta_group_rank,
+                                          unsigned int meta_group_size)
+      : tiled_group(numThreads) {
+    coalesced_info.tiled_info.num_threads = numThreads;
+    coalesced_info.tiled_info.is_tiled = true;
+    coalesced_info.tiled_info.meta_group_rank = meta_group_rank;
+    coalesced_info.tiled_info.meta_group_size = meta_group_size;
+  }
+
  public:
   using tbtBase::num_threads;
   using tbtBase::size;
@@ -1187,6 +1196,16 @@ template <unsigned int size> struct tiled_partition_internal<size, thread_block>
     : public thread_block_tile<size, thread_block> {
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block& g)
       : thread_block_tile<size, thread_block>(g) {}
+};
+
+// ParentCGTy = thread_block_tile<ParentSize, GrandParentCGTy> specialization
+template <unsigned int size, unsigned int ParentSize, class GrandParentCGTy>
+struct tiled_partition_internal<size, thread_block_tile<ParentSize, GrandParentCGTy> >
+    : public thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> > {
+  static_assert(size <= ParentSize, "Sub tile size must be <= parent tile size in tiled_partition");
+
+  __CG_QUALIFIER__ tiled_partition_internal(const thread_block_tile<ParentSize, GrandParentCGTy>& g)
+      : thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> >(g) {}
 };
 
 }  // namespace impl

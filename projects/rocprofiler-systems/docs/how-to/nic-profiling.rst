@@ -6,7 +6,7 @@
 Network performance profiling
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ supports network profiling.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network profiling.
 
 All network events that can be traced on the system can be listed by running the command:
 
@@ -75,7 +75,7 @@ The configuration parameter settings can be saved in a configuration file. Here 
   ROCPROFSYS_SAMPLING_DELAY=0.05
   ROCPROFSYS_SAMPLING_CPUS=0-9
   ROCPROFSYS_SAMPLING_GPUS=$env:HIP_VISIBLE_DEVICES
-  ROCPROFSYS_TRACE=ON
+  ROCPROFSYS_TRACE_CACHED=ON
   ROCPROFSYS_PROFILE=ON
   ROCPROFSYS_USE_SAMPLING=ON
   ROCPROFSYS_USE_PROCESS_SAMPLING=OFF

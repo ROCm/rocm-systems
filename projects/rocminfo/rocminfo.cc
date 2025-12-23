@@ -1321,6 +1321,11 @@ int main() {
     return 1;
   }
   err = hsa_init();
+  if (wsl_env && (err != HSA_STATUS_SUCCESS)) {
+    printf("%shsa_init Failed, possibly no supported GPU devices%s\n",
+                                                            COL_RED, COL_RESET);
+    return 1;
+  }
   RET_IF_HSA_ERR(err)
 
   // Acquire and display system information

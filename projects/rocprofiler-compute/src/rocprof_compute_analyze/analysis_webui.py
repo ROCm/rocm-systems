@@ -220,7 +220,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "device_id": 0,
                             "sort_type": "kernels",
                             "mem_level": "ALL",
-                            "include_kernel_names": False,
+                            "include_kernel_names": True,
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
                             "kernel_filter": False,
@@ -286,21 +286,21 @@ class webui_analysis(OmniAnalyze_Base):
                             )
                         )
 
-                    # Append the new section with all of it's contents
-                    div_children.append(
-                        html.Section(
-                            id=section_title,
-                            children=[
-                                html.H3(
-                                    children=title,
-                                    style={"color": "white"},
-                                ),
-                                html.Div(
-                                    className="float-container", children=html_section
-                                ),
-                            ],
-                        )
+                # Append the new section with all of it's contents
+                div_children.append(
+                    html.Section(
+                        id=section_title,
+                        children=[
+                            html.H3(
+                                children=title,
+                                style={"color": "white"},
+                            ),
+                            html.Div(
+                                className="float-container", children=html_section
+                            ),
+                        ],
                     )
+                )
 
             # Display pop-up message if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
@@ -352,6 +352,12 @@ class webui_analysis(OmniAnalyze_Base):
         if args.spatial_multiplexing:
             self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
                 self._runs[self.dest_dir].raw_pmc
+            )
+
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            self._runs[self.dest_dir].raw_pmc = self.iteration_multiplex_merge_counters(
+                self._runs[self.dest_dir].raw_pmc,
+                policy=self._profiling_config["iteration_multiplexing"],
             )
 
         file_io.create_df_kernel_top_stats(

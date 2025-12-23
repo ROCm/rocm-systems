@@ -7,7 +7,7 @@ Configuring runtime options
 ****************************************************
 
 The ``rocprof-sys.cfg`` file maintains a list of the
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ runtime
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ runtime
 options. To create this configuration
 file and view the current runtime options, use the ``rocprof-sys-avail`` executable.
 
@@ -34,7 +34,8 @@ and tweak the default sampling values.
 .. code-block:: shell
 
    # ...
-   ROCPROFSYS_TRACE                = true
+   ROCPROFSYS_TRACE_CACHED         = true   # Recommended: deferred trace generation for minimal overhead
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Alternative: direct mode with higher overhead
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -81,12 +82,7 @@ data and resources. By default, with ``ROCPROFSYS_PROFILE=ON``, ROCm Systems Pro
 timing values. However, by modifying the ``ROCPROFSYS_TIMEMORY_COMPONENTS`` setting,
 ROCm Systems Profiler can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context switches, page faults, network statistics,
-and much more. ROCm Systems Profiler can even be used as a dynamic instrumentation vehicle
-for other third-party profiling
-APIs such as `Caliper <https://github.com/LLNL/Caliper>`_ and `LIKWID <https://github.com/RRZE-HPC/likwid>`_.
-To leverage this capability, build ROCm Systems Profiler from source with the CMake
-options ``TIMEMORY_USE_CALIPER=ON`` or ``TIMEMORY_USE_LIKWID=ON`` and then add
-``caliper_marker``, ``likwid_marker``, or both to ``ROCPROFSYS_TIMEMORY_COMPONENTS``.
+and much more.
 
 To view all possible components and their descriptions:
 
@@ -186,6 +182,51 @@ PAPI components from different namespaces:
    installed with the prefix ``rocprof-sys-`` with
    underscores replaced with hyphens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
+There are two distinct approaches for collecting PAPI-based hardware counters, each with different characteristics and use cases:
+
+1. **Instrumentation-based collection:** Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
+
+**Example 1: Using ``papi_array`` for a fixed list of events**
+
+.. code-block:: shell
+
+   # Enable profiling mode (required)
+   export ROCPROFSYS_PROFILE=ON
+
+   # Specify papi_array in the timemory component list
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_array"
+
+   # Specify which PAPI events to collect
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+
+**Example 2: Using ``papi_vector`` for dynamically allocated array of events**
+
+.. code-block:: shell
+
+   # Include papi_vector for dynamic event lists
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_vector"
+
+   # Alternative: Use perf event names
+   export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
+
+
+2. **Sampling-based collection:** Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
+
+.. code-block:: shell
+
+   # Enable sampling mode (required)
+   export ROCPROFSYS_USE_SAMPLING=ON
+
+   # Specify PAPI events for sampling
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_SAMPLING_OVERFLOW_EVENT="perf::PERF_COUNT_HW_CACHE_REFERENCES"
+
 ROCPROFSYS_ROCM_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -257,7 +298,7 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
@@ -269,9 +310,11 @@ Use the following command to view the available domains:
 
 .. note::
 
-Some  settings can enable tracing for multiple domains, such as ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
-And ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, ``hsa_finalize_ext_api``.
-The setting ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   Some settings can enable tracing for multiple domains, such as:
+
+   * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
+   * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
+   * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
 
 For example, the following is a valid configuration:
 
@@ -297,7 +340,8 @@ Generating a default configuration file
 
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
-   ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_TRACE_CACHED                             = true
+   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
@@ -455,7 +499,9 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_TRACE_CACHED                  | Enable perfetto backend with deferred...|
+   | ROCPROFSYS_TRACE_LEGACY                  | Enable perfetto backend (legacy, dir... |
+   | ROCPROFSYS_TRACE                         | [DEPRECATED] Renamed to ROCPROFSYS_T... |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
@@ -1303,7 +1349,8 @@ but do not override an existing value for the environment variable.
    $SAMPLE                         = OFF
 
    # use fields
-   ROCPROFSYS_TRACE                 = $ENABLE
+   ROCPROFSYS_TRACE_CACHED          = $ENABLE  # Recommended: deferred trace generation
+   ROCPROFSYS_TRACE_LEGACY          = OFF      # Legacy direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

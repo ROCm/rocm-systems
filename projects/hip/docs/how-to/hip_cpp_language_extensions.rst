@@ -103,66 +103,10 @@ The kernel arguments are listed after the configuration parameters.
 
 .. code-block:: cpp
 
-  #include <hip/hip_runtime.h>
-  #include <iostream>
-
-  #define HIP_CHECK(expression)                                \
-  {                                                            \
-      const hipError_t err = expression;                       \
-      if(err != hipSuccess){                                   \
-          std::cerr << "HIP error: " << hipGetErrorString(err) \
-              << " at " << __LINE__ << "\n";                   \
-      }                                                        \
-  }
-
-  // Performs a simple initialization of an array with the thread's index variables.
-  // This function is only available in device code.
-  __device__ void init_array(float * const a, const unsigned int arraySize){
-    // globalIdx uniquely identifies a thread in a 1D launch configuration.
-    const int globalIdx = threadIdx.x + blockIdx.x * blockDim.x;
-    // Each thread initializes a single element of the array.
-    if(globalIdx < arraySize){
-      a[globalIdx] = globalIdx;
-    }
-  }
-
-  // Rounds a value up to the next multiple.
-  // This function is available in host and device code.
-  __host__ __device__ constexpr int round_up_to_nearest_multiple(int number, int multiple){
-    return (number + multiple - 1)/multiple;
-  }
-
-  __global__ void example_kernel(float * const a, const unsigned int N)
-  {
-    // Initialize array.
-    init_array(a, N);
-    // Perform additional work:
-    // - work with the array
-    // - use the array in a different kernel
-    // - ...
-  }
-
-  int main()
-  {
-    constexpr int N = 100000000; // problem size
-    constexpr int blockSize = 256; //configurable block size
-
-    //needed number of blocks for the given problem size
-    constexpr int gridSize = round_up_to_nearest_multiple(N, blockSize);
-
-    float *a;
-    // allocate memory on the GPU
-    HIP_CHECK(hipMalloc(&a, sizeof(*a) * N));
-
-    std::cout << "Launching kernel." << std::endl;
-    example_kernel<<<dim3(gridSize), dim3(blockSize), 0/*example doesn't use shared memory*/, 0/*default stream*/>>>(a, N);
-    // make sure kernel execution is finished by synchronizing. The CPU can also
-    // execute other instructions during that time
-    HIP_CHECK(hipDeviceSynchronize());
-    std::cout << "Kernel execution finished." << std::endl;
-
-    HIP_CHECK(hipFree(a));
-  }
+  .. literalinclude:: ../tools/example_codes/calling_global_functions.hip
+      :start-after: // [sphinx-start]
+      :end-before: // [sphinx-end]
+      :language: cpp
 
 Inline qualifiers
 --------------------------------------------------------------------------------
@@ -321,28 +265,10 @@ launch has to specify the needed amount of ``extern`` shared memory in the launc
 configuration. The statically allocated shared memory is allocated without this
 parameter.
 
-.. code-block:: cpp
-
-  #include <hip/hip_runtime.h>
-
-  extern __shared__ int shared_array[];
-
-  __global__ void kernel(){
-    // initialize shared memory
-    shared_array[threadIdx.x] = threadIdx.x;
-    // use shared memory - synchronize to make sure, that all threads of the
-    // block see all changes to shared memory
-    __syncthreads();
-  }
-
-  int main(){
-    //shared memory in this case depends on the configurable block size
-    constexpr int blockSize = 256;
-    constexpr int sharedMemSize = blockSize * sizeof(int);
-    constexpr int gridSize = 2;
-
-    kernel<<<dim3(gridSize), dim3(blockSize), sharedMemSize, 0>>>();
-  }
+.. literalinclude:: ../tools/example_codes/extern_shared_memory.hip
+    :start-after: // [sphinx-start]
+    :end-before: // [sphinx-end]
+    :language: cpp
 
 __managed__
 --------------------------------------------------------------------------------
@@ -735,22 +661,18 @@ with the actual frequency.
 
 The difference between the returned values represents the cycles used.
 
-.. code-block:: cpp
-
-  __global void kernel(){
-    long long int start = clock64();
-    // kernel code
-    long long int stop = clock64();
-    long long int cycles = stop - start;
-  }
+.. literalinclude:: ../tools/example_codes/timer.hip
+    :start-after: // [sphinx-kernel-start]
+    :end-before: // [sphinx-kernel-end]
+    :language: cpp
 
 ``long long int wall_clock64()`` returns the wall clock time on the device, with a constant, fixed frequency.
 The frequency is device dependent and can be queried using:
 
-.. code-block:: cpp
-
-  int wallClkRate = 0; //in kilohertz
-  hipDeviceGetAttribute(&wallClkRate, hipDeviceAttributeWallClockRate, deviceId);
+.. literalinclude:: ../tools/example_codes/timer.hip
+    :start-after: // [sphinx-query-start]
+    :end-before: // [sphinx-query-end]
+    :language: cpp
 
 .. _atomic functions:
 
@@ -998,8 +920,10 @@ Arithmetic reduces:
   T __reduce_max_sync (unsigned long long mask, T var);
 
 ``T`` can be:
-- On Nvidia platform: ``int`` or ``unsigned int``
-- On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating
+
+* On Nvidia platform: ``int`` or ``unsigned int``
+
+* On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating
 point types are also be supported.
 
 Returns the aggregated result of the arithmetic operation, where each of the participating threads
@@ -1017,8 +941,10 @@ Logical reduces:
   T __reduce_xor_sync (unsigned long long mask, T var);
 
 ``T`` can be:
-- On Nvidia platform: ``unsigned int``
-- On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also supported
+
+* On Nvidia platform: ``unsigned int``
+
+* On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also supported
 
 Returns the result of the aggregated logical AND/OR/XOR operation where each of the participating threads
 (i.e. the ones mentioned on the mask) contribute ``var``.
@@ -1032,7 +958,7 @@ Informational note: On the AMD platform, **masks that start from lane zero and h
 exhibit better performance** than masks with "holes" (example of mask with no holes: 0xFF and with holes: 0xFB;
 the reduction with 0xFF is faster).
 
-These functiones do not provide a memory barrier on any platform.
+These functions do not provide a memory barrier on any platform.
 
 Warp matrix functions
 --------------------------------------------------------------------------------

@@ -24,9 +24,6 @@ ROCm Systems Profiler API, such as ``rocprofsys_user_push_region`` and
    is disabled at start up, which means ``rocprofsys_user_stop_trace()`` is not
    required at the beginning of ``main``. This behavior
    can be manually controlled by using the ``ROCPROFSYS_INIT_ENABLED`` environment variable.
-   User-defined regions are always
-   recorded, regardless of whether ``rocprofsys_user_start_*`` or
-   ``rocprofsys_user_stop_*`` has been called.
 
 .. code-block:: shell
 
@@ -195,7 +192,7 @@ First, instrument and run the program.
    ROCPROFSYS: LD_PRELOAD=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
    ROCPROFSYS: OMP_TOOL_LIBRARIES=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
    ROCPROFSYS: ROCPROFSYS_PROFILE=true
-   ROCPROFSYS: ROCPROFSYS_TRACE=true
+   ROCPROFSYS: ROCPROFSYS_TRACE_CACHED=true
    ROCPROFSYS: ROCPROFSYS_VERBOSE=0
    [rocprof-sys][dl][1827155] rocprofsys_main
    [rocprof-sys][1827155][rocprofsys_init_tooling] Instrumentation mode: Trace

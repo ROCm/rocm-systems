@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
 #include <cstring>
+#include <string>
 int main(int argc, char** argv) {
   if (argc < 0) {
     return -1;

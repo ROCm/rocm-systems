@@ -172,7 +172,30 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_MaskedDevices") {
 /* Compare {pciDomainID, pciBusID, pciDeviceID} values
  * hipDeviceGetPCIBusId vs lspci
  */
+
 TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
+  auto are_devices_hidden = []() -> bool {
+#if HT_AMD
+    auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+    if (env_res == nullptr) {
+      env_res = std::getenv("ROCR_VISIBLE_DEVICES");
+      if (env_res == nullptr) {
+        return false;
+      }
+    }
+    return true;
+#else
+    auto env_res = std::getenv("HIP_VISIBLE_DEVICES");
+    return env_res != nullptr;
+#endif
+  }();
+
+  if (are_devices_hidden) {
+    HipTest::HIP_SKIP_TEST(
+        "There are hidden devices, which means lscpi might report something different than what we "
+        "have here");
+  }
+
   FILE* fpipe;
   {
     // Check if lspci is installed, if not, don't proceed

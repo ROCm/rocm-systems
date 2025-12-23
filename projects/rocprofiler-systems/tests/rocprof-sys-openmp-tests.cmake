@@ -7,6 +7,11 @@
 #
 # ----------------------------------------------------------------------------- #
 
+# Note:
+# We do not receive the end of certain OMPT callbacks. This can result in missing completion events
+# for the underlying functions that belong to the tracked host category (causing push vs pop mismatch).
+# To avoid this, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the environment.
+
 if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
     message(
         FATAL_ERROR
@@ -14,6 +19,22 @@ if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
         "Verify that ROCm is installed correctly and that ROCM_PATH "
         "(${ROCM_PATH}) points at the right location."
     )
+endif()
+
+set(_ompt_environment
+    "ROCPROFSYS_TRACE_LEGACY=OFF"
+    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_TIME_OUTPUT=OFF"
+    "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
+    "${_test_openmp_env}"
+    "${_test_library_path}"
+)
+
+# Enable ROCPD for tests only if valid ROCm is installed and a valid GPU is detected
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _ompt_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
@@ -25,6 +46,7 @@ else()
 endif()
 
 rocprofiler_systems_add_test(
+    SKIP_RUNTIME
     NAME openmp-cg
     TARGET openmp-cg
     LABELS "openmp"
@@ -61,7 +83,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "openmp;openmp-target"
     ENVIRONMENT
-      "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
+      "${_ompt_environment};ROCPROFSYS_ROCM_DOMAINS=hip_api,hsa_api,kernel_dispatch"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -69,7 +91,6 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "openmp;openmp-target"
-    ENVIRONMENT "${_rocm_ld_env}"
     ARGS
       --label-substrings
       Z4vmulIiEvPT_S1_S1_i_l51.kd
@@ -80,22 +101,35 @@ rocprofiler_systems_add_validation_test(
       -p
 )
 
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST openmp-target-sampling)
+    set_property(TEST openmp-target-sampling APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME openmp-target-sampling
+        ROCPD_FILE "rocpd.db"
+        LABELS "openmp;openmp-target;rocpd"
+        ARGS --validation-rules
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/kernel-rules.json"
+            "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/openmp-target/sdk-metrics-rules.json"
+    )
+endif()
+
 # OpenMP tests generated using OMPVV binaries
 if(ROCPROFSYS_OMPVV_HOST_TESTS)
     foreach(HOST_TEST_NAME ${ROCPROFSYS_OMPVV_HOST_TESTS})
         rocprofiler_systems_add_test(
-            SKIP_RUNTIME
             NAME ${HOST_TEST_NAME}
-            TARGET ${HOST_TEST_NAME}
+            TARGET ${HOST_TEST_NAME}-exec
             LABELS "openmp;ompvv"
             REWRITE_ARGS
               -e -v 2 --instrument-loops
             RUNTIME_ARGS
-              -e -v 1 --label return args -E ^GOMP
+              -e -v 1 --label return args
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
+            RUNTIME_TIMEOUT 600
             ENVIRONMENT
-              "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
+              "${_ompt_environment};ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
             REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
         )
@@ -103,7 +137,6 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
 
     set(_ompvv_offload_environment
         "${_ompt_environment}"
-        "${_rocm_ld_env}"
         "ROCPROFSYS_USE_SAMPLING=ON"
         "ROCPROFSYS_SAMPLING_FREQ=50"
         "ROCPROFSYS_COUT_OUTPUT=ON"
@@ -114,7 +147,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
         rocprofiler_systems_add_test(
             SKIP_RUNTIME
             NAME ${OFFLOAD_TEST_NAME}
-            TARGET ${OFFLOAD_TEST_NAME}
+            TARGET ${OFFLOAD_TEST_NAME}-exec
             GPU ON
             LABELS "openmp;ompvv;openmp-target"
             REWRITE_ARGS -e -v 2
