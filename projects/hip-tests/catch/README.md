@@ -4,11 +4,13 @@ Collection of HIP runtime tests.
 
 ## How to build
 
+`hip-tests` now rely on `amdclang` to build, which is shipped with ROCm installation.
+
 ### Linux
 
 - `cd hip-tests`
 - `mkdir build && cd build`
-- `cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_PREFIX_PATH=<HIP-Install-Path>`
+- `cmake ../catch -DHIP_PLATFORM=amd -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_C_COMPILER=amdclang -DCMAKE_HIP_COMPILER=amdclang++ -DCMAKE_PREFIX_PATH=<HIP-Install-Path>`
 - `make -j32 build_tests`
 - `make test`
 
