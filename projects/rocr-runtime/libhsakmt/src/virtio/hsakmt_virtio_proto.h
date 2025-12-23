@@ -482,7 +482,14 @@ VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_memory_rsp)
 enum vhsakmt_ccmd_queue_type {
   VHSAKMT_CCMD_QUEUE_CREATE,
   VHSAKMT_CCMD_QUEUE_DESTROY,
+  VHSAKMT_CCMD_QUEUE_UPDATE,
+  VHSAKMT_CCMD_QUEUE_GET_INFO,
+  VHSAKMT_CCMD_QUEUE_SET_CU_MASK,
+  VHSAKMT_CCMD_QUEUE_ALLOC_GWS,
 };
+
+#define VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE 128
+#define VHSAKMT_CCMD_QUEUE_MAX_GWS_SIZE 128
 
 typedef struct _vHsaQueueResource {
   HsaQueueResource r;
@@ -512,11 +519,24 @@ typedef struct _queue_req_create {
 } queue_req_create;
 VHSAKMT_STATIC_ASSERT_SIZE(_queue_req_create)
 
+typedef struct _queue_req_update {
+  HSA_QUEUEID QueueId;
+  uint32_t QueuePercentage;
+  uint32_t pad;
+  HSA_QUEUE_PRIORITY Priority;
+  uint64_t QueueAddress;
+  uint64_t QueueSizeInBytes;
+} queue_req_update;
+VHSAKMT_STATIC_ASSERT_SIZE(_queue_req_update)
+
 struct vhsakmt_ccmd_queue_req {
   struct vhsakmt_ccmd_req hdr;
   union {
     HSA_QUEUEID QueueId;
     queue_req_create create_queue_args;
+    queue_req_update update_queue_args;
+    uint32_t CUMaskCount;
+    uint32_t nGWS;
   };
   uint64_t blob_id;          /* For queue create, queue resource */
   uint64_t rw_ptr_blob_id;   /* For queue create, r/w ptr memory mapping */
@@ -534,6 +554,8 @@ struct vhsakmt_ccmd_queue_rsp {
   struct vhsakmt_ccmd_rsp hdr;
   int32_t ret;
   vHsaQueueResource vqueue_res;
+  uint32_t pad;
+  HsaQueueInfo queue_info;
   uint8_t payload[];
 };
 VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_queue_rsp)

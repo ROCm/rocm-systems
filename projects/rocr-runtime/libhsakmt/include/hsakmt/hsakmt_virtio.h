@@ -112,6 +112,14 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type
                                            void* QueueAddress, HSAuint64 QueueSizeInBytes,
                                            HsaEvent* Event, HsaQueueResource* QueueResource);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtDestroyQueue(HSA_QUEUEID QueueId);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtUpdateQueue(HSA_QUEUEID QueueId, HSAuint32 QueuePercentage,
+                                           HSA_QUEUE_PRIORITY Priority, void* QueueAddress,
+                                           HSAuint64 QueueSize, HsaEvent* Event);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtGetQueueInfo(HSA_QUEUEID QueueId, HsaQueueInfo* QueueInfo);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUMaskCount,
+                                              HSAuint32* QueueCUMask);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
+                                             HSAuint32* firstGWS);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterGraphicsHandleToNodesExt(
     HSAuint64 GraphicsResourceHandle, HsaGraphicsResourceInfo* GraphicsResourceInfo,
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray, HSA_REGISTER_MEM_FLAGS RegisterFlags);
