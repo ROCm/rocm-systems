@@ -533,12 +533,22 @@ void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
              const rocprofiler_timestamp_t end_timestamp, const std::string& call_stack,
-             const std::string& args_str, const std::string& category)
+             const std::string& args_str, const std::string& category,
+             std::string_view name = {})
 
 {
-    auto callback_tracing_info =
-        trace_cache::get_metadata_registry().get_callback_tracing_info();
-    auto _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    // Use provided name if available, otherwise fall back to API operation name
+    std::string _name;
+    if(name.empty())
+    {
+        auto callback_tracing_info =
+            trace_cache::get_metadata_registry().get_callback_tracing_info();
+        _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    }
+    else
+    {
+        _name = std::string{ name };
+    }
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
         record->thread_id, _name.c_str(), record->correlation_id.internal,
@@ -814,7 +824,7 @@ tool_tracing_callback_stop(
         cache_add_thread_info(record.thread_id);
         std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
-                     trait::name<CategoryT>::value);
+                     trait::name<CategoryT>::value, _name);
     }
 }
 

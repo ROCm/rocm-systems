@@ -91,11 +91,13 @@ __global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ i
 
   __syncthreads();
 
-  if (mask & (1ul << __ockl_lane_u32())) op(&result[numWarp], input[idx]);
+  uint lane = __lane_id();
+
+  if (mask & (1ul << lane)) op(&result[numWarp], input[idx]);
 
   __syncthreads();
 
-  if (__ockl_lane_u32() == 0) output[idx / warpSize] = result[numWarp];
+  if (lane == 0) output[idx / warpSize] = result[numWarp];
 }
 
 template <class T, template <typename> class Op>
@@ -104,7 +106,7 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   T result;
 
-  if (mask & (1ul << __ockl_lane_u32())) {
+  if (mask & (1ul << __lane_id())) {
     if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
       result = __reduce_add_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
