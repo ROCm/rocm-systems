@@ -355,22 +355,23 @@ static bool UncompressAndPopulateCodeObject(
 
       std::string item_bundle_id(item_name_size, 0);
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item, &item_name_size, item_bundle_id.data());
+              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
         break;
       }
 
       size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item, &item_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
       }
+      LogPrintfInfo("Uncompressed size of co: %s  %zu", item_bundle_id.c_str(), item_size);
 
       if (item_size > 0) {
         char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item, &item_size, item_data);
+        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get data");
           break;
