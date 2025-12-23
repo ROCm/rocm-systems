@@ -66,7 +66,7 @@ jobs:
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
           rm ./TheRock/patches/amd-mainline/rocm-systems/0002-Revert-hsakmt-bump-vgpr-count-for-gfx1151-1807.patch
 
 
