@@ -31,7 +31,7 @@
 CPerfCounter::CPerfCounter() : _clocks(0), _start(0) {
 #ifdef _WIN32
 
-  QueryPerformanceFrequency((LARGE_INTEGER *)&_freq);
+  QueryPerformanceFrequency((LARGE_INTEGER*)&_freq);
 
 #endif
 
@@ -51,7 +51,7 @@ void CPerfCounter::Start(void) {
     MessageBox(NULL, "Bad Perf Counter Start", "Error", MB_OK);
     exit(0);
   }
-  QueryPerformanceCounter((LARGE_INTEGER *)&_start);
+  QueryPerformanceCounter((LARGE_INTEGER*)&_start);
 
 #endif
 #ifdef __linux__
@@ -73,7 +73,7 @@ void CPerfCounter::Stop(void) {
     exit(0);
   }
 
-  QueryPerformanceCounter((LARGE_INTEGER *)&n);
+  QueryPerformanceCounter((LARGE_INTEGER*)&n);
 
 #endif
 #ifdef __linux__

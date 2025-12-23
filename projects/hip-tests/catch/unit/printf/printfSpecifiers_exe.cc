@@ -55,7 +55,7 @@ __global__ void test_kernel() {
   printf("%A\n", -123.456);
   printf("%c\n", 'x');
   printf("%s\n", N);
-  printf("%p\n", (void *)N);
+  printf("%p\n", (void*)N);
 #if HT_AMD
   printf("%.*f %*.*s %p\n", 8, 3.14159, 8, 5, s, (void*)0xf01dab1eca55e77e);
 #else

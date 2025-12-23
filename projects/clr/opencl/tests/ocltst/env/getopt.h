@@ -20,7 +20,7 @@
 
 #pragma once
 
-extern char *optarg;
+extern char* optarg;
 extern int optind;
 
-extern "C" int getopt(int argc, char *const argv[], const char *optstring);
+extern "C" int getopt(int argc, char* const argv[], const char* optstring);

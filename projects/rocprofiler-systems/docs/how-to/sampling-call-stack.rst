@@ -6,7 +6,7 @@
 Sampling the call stack
 ****************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ can use call-stack sampling
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can use call-stack sampling
 on a binary instrumented with either the ``rocprof-sys`` executable
 or the ``rocprof-sys-sample`` executable.
 For example, all of the following commands are effectively equivalent:
@@ -284,7 +284,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       LD_PRELOAD=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so.1.7.1
       ROCPROFSYS_CPU_FREQ_ENABLED=false
       ROCPROFSYS_PROFILE=true
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_AMD_SMI=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_SAMPLING=true
@@ -307,7 +307,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_KOKKOSP=true
       ROCPROFSYS_USE_MPIP=true
       ROCPROFSYS_USE_OMPT=true
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=true
       ROCPROFSYS_USE_AMD_SMI=true
@@ -337,7 +337,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
       ROCPROFSYS_USE_KOKKOSP=false
       ROCPROFSYS_USE_MPIP=false
       ROCPROFSYS_USE_OMPT=false
-      ROCPROFSYS_TRACE=true
+      ROCPROFSYS_TRACE_CACHED=true
       ROCPROFSYS_USE_PROCESS_SAMPLING=true
       ROCPROFSYS_USE_RCCLP=false
       ROCPROFSYS_USE_AMD_SMI=false
@@ -362,7 +362,7 @@ Here is the full output from the previous
    ROCPROFSYS_OUTPUT_PATH=rocprof-sys-output
    ROCPROFSYS_OUTPUT_PREFIX=%tag%
    ROCPROFSYS_PROFILE=true
-   ROCPROFSYS_TRACE=true
+   ROCPROFSYS_TRACE_CACHED=true
    ROCPROFSYS_TRACE_THREAD_LOCKS=false
    ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false
    ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false
@@ -410,4 +410,3 @@ Here is the full output from the previous
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalized: 0.054582 sec wall_clock,    0.000 MB peak_rss,   -1.798 MB page_rss, 0.040000 sec cpu_clock,   73.3 % cpu_util
    [989.312]       perfetto.cc:60128 Tracing session 1 ended, total sessions:0
-

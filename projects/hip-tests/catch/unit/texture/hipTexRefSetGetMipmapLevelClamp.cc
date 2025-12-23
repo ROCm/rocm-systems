@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <float.h>
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 // Test for hipTexRefSetMipmapLevelClamp and hipTexRefGetMipmapLevelClamp, including error handling
 TEST_CASE("Unit_texRefSetGetMipmapLevelClamp") {
@@ -55,3 +56,4 @@ TEST_CASE("Unit_texRefSetGetMipmapLevelClamp") {
     REQUIRE(err == hipErrorInvalidValue);
   }
 }
+#endif

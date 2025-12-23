@@ -22,11 +22,11 @@
 
 #pragma once
 
+#include "core/rocpd/data_storage/database.hpp"
 #include <cstdint>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <optional>
-#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -39,7 +39,7 @@ struct data_processor
     using insert_event_stmt =
         std::function<void(const char*, size_t, size_t, size_t, size_t, const char*,
                            const char*, const char*)>;
-    using insert_pmc_event_stms =
+    using insert_pmc_event_stmt =
         std::function<void(const char*, size_t, size_t, double, const char*)>;
     using insert_sample_stmt =
         std::function<void(const char*, size_t, uint64_t, size_t, const char*)>;
@@ -102,7 +102,13 @@ private:
     };
 
 public:
-    static data_processor& get_instance();
+    explicit data_processor(std::shared_ptr<data_storage::database> database);
+
+    data_processor()                                  = delete;
+    data_processor(const data_processor&)             = delete;
+    data_processor& operator=(const data_processor&)  = delete;
+    data_processor(const data_processor&&)            = delete;
+    data_processor& operator=(const data_processor&&) = delete;
 
     size_t insert_string(const char* str);
 
@@ -124,9 +130,10 @@ public:
     void insert_track(const char* track_name, size_t node_id, size_t process_id,
                       std::optional<size_t> thread_id, const char* extdata = "{}");
 
-    size_t insert_event(size_t category_id, size_t stack_id, size_t parent_stack_id,
-                        size_t correlation_id, const char* call_stack = "{}",
-                        const char* line_info = "{}", const char* extdata = "{}");
+    size_t insert_event(size_t string_primary_key, size_t stack_id,
+                        size_t parent_stack_id, size_t correlation_id,
+                        const char* call_stack = "{}", const char* line_info = "{}",
+                        const char* extdata = "{}");
 
     void insert_pmc_event(size_t event_id, size_t agent_id, const char* pmc_descriptor,
                           double value, const char* extdata = "{}");
@@ -142,8 +149,6 @@ public:
 
     void insert_sample(const char* track, uint64_t timestamp, size_t event_id,
                        const char* extdata = "{}");
-
-    void insert_category(size_t category_id, const char* name);
 
     void insert_region(size_t node_id, size_t process_id, size_t thread_id,
                        uint64_t start, uint64_t end, size_t name_id, size_t event_id,
@@ -199,13 +204,11 @@ public:
                              size_t stream_id, size_t event_id,
                              const char* extdata = "{}");
 
+    size_t map_thread_id_to_primary_key(size_t thread_id);
+
     void flush();
 
 private:
-    data_processor();
-    data_processor(data_processor&)                  = delete;
-    data_processor& operator=(const data_processor&) = delete;
-
     void initialize_pmc_event_stmt();
     void initialize_event_stmt();
     void initialize_sample_stmt();
@@ -219,20 +222,15 @@ private:
     void initialize_memory_alloc_stmt();
 
 private:
+    std::shared_ptr<data_storage::database>         _database;
     std::unordered_map<std::string, track_name_map> _tracks;
     std::unordered_map<pmc_identifier, size_t, pmc_identifier_hash, pmc_identifier_equal>
                                             _pmc_descriptor_map;
     std::unordered_map<size_t, size_t>      _thread_id_map;
-    std::unordered_map<size_t, size_t>      _category_map;
     std::unordered_map<std::string, size_t> _string_map;
 
-    std::set<uint64_t> _code_object_ids;
-    std::set<uint64_t> _kernel_sym_ids;
-    std::set<uint64_t> _stream_ids;
-    std::set<uint64_t> _queue_ids;
-
     insert_event_stmt                 _insert_event_statement;
-    insert_pmc_event_stms             _insert_pmc_event_statement;
+    insert_pmc_event_stmt             _insert_pmc_event_statement;
     insert_sample_stmt                _insert_sample_statement;
     insert_region_stmt                _insert_region_statement;
     insert_kernel_dispatch_stmt       _insert_kernel_dispatch_statement;
@@ -244,8 +242,6 @@ private:
     insert_memory_alloc_no_agent_stmt _insert_memory_alloc_no_agent_statement;
 
     std::string _upid{};
-
-    std::mutex _data_mutex;
 };
 
 }  // namespace rocpd

@@ -212,10 +212,17 @@ template <typename F> auto GetOccupancyMaxPotentialBlockSize(F kernel) {
 inline size_t GetMaxAllowedDeviceMemoryUsage() {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  return props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);
+  return props.totalGlobalMem > cmd_options.max_memory
+      ? cmd_options.max_memory
+      : props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);
 }
 
-inline uint64_t GetTestIterationCount() { return cmd_options.accuracy_iterations; }
+inline double GetTestReductionFactor() { return cmd_options.reduction_factor * 0.01; }
+
+inline uint64_t GetTestIterationCount() {
+  return static_cast<uint64_t>(
+      std::ceil(cmd_options.accuracy_iterations * GetTestReductionFactor()));
+}
 
 template <typename T, typename... Ts> using kernel_sig = void (*)(T*, const size_t, Ts*...);
 
@@ -253,4 +260,72 @@ template <int error_num> void NegativeTestRTCWrapper(const char* program_source)
   HIPRTC_CHECK(hiprtcDestroyProgram(&program));
   HIPRTC_CHECK_ERROR(result, HIPRTC_ERROR_COMPILATION);
   REQUIRE(error_count == expected_error_count);
+}
+
+inline void SinglePrecisionReducedRun(std::function<void(size_t)> run,
+                                      const LinearAllocGuard<float>& values, const float a,
+                                      const float b, const double reduction_factor,
+                                      const size_t max_batch_size) {
+  bool test_positive = true;
+  float positive_start = 0.0f;
+  float positive_end = 0.0f;
+  bool test_negative = true;
+  float negative_start = 0.0f;
+  float negative_end = 0.0f;
+  if (a < 0 && b <= 0) {
+    test_positive = false;
+    negative_start = -b;
+    negative_end = -a;
+  }
+  if (a < 0 && b > 0) {
+    positive_start = 0.0f;
+    positive_end = b;
+    negative_start = 0.0f;
+    negative_end = -a;
+  }
+  if (a >= 0 && b > 0) {
+    positive_start = a;
+    positive_end = b;
+    test_negative = false;
+  }
+
+  const auto inv_reduction_factor = 1 / reduction_factor;
+  size_t inserted = 0u;
+
+  constexpr int radix = std::numeric_limits<float>::radix;
+
+  float increment = std::numeric_limits<float>::min() * std::numeric_limits<float>::epsilon();
+  float limit = std::numeric_limits<float>::min() * radix;
+
+  const auto iterate = [&](float start, float end, int positive) {
+    for (float v = start; v < end; limit *= radix, increment *= radix) {
+      const auto start_v = v;
+      double count = 0ul;
+      while (v < limit && v < end) {
+        values.ptr()[inserted++] = (v * positive);
+        count += inv_reduction_factor;
+        v = start_v + increment * static_cast<uint64_t>(std::floor(count));
+        if (inserted < max_batch_size) continue;
+
+        run(inserted);
+        inserted = 0u;
+      }
+    }
+
+    if (inserted > 0u) {
+      run(inserted);
+      inserted = 0u;
+    }
+  };
+
+  if (test_positive) {
+    iterate(positive_start, positive_end, 1);
+  }
+
+  increment = std::numeric_limits<float>::min() * std::numeric_limits<float>::epsilon();
+  limit = std::numeric_limits<float>::min() * radix;
+
+  if (test_negative) {
+    iterate(negative_start, negative_end, -1);
+  }
 }

@@ -30,20 +30,18 @@
 #include <time.h>
 #include <unistd.h>
 #endif  // !_WIN32
-
-#if defined(ATI_ARCH_X86)
-#include <xmmintrin.h>  // for _mm_pause
-#endif                  // ATI_ARCH_X86
+#include <cmath>
+#include <simde/x86/sse2.h>
 
 namespace amd {
 
 // ================================================================================================
 bool Os::isValidFileDesc(const amd::Os::FileDesc& desc) {
-  #if IS_WINDOWS
-    return desc != nullptr;
-  #else
-    return desc > 0;
-  #endif
+#if IS_WINDOWS
+  return desc != nullptr;
+#else
+  return desc > 0;
+#endif
   return false;
 }
 
@@ -120,13 +118,7 @@ size_t Os::pageSize_ = 0;
 
 int Os::processorCount_ = 0;
 
-void Os::spinPause() {
-#if defined(ATI_ARCH_X86)
-  _mm_pause();
-#elif defined(ATI_ARCH_ARM)
-  __asm__ __volatile__("yield");
-#endif
-}
+void Os::spinPause() { simde_mm_pause(); }
 
 void Os::sleep(long n) {
 // FIXME_lmoriche: Should be nano-seconds not seconds.
@@ -175,12 +167,6 @@ bool Os::skipIDIV(address& pc) {
     return true;
   }
   return false;
-}
-
-void Os::setThreadAffinity(const void* handle, unsigned int cpu) {
-  ThreadAffinityMask mask;
-  mask.set(cpu);
-  setThreadAffinity(handle, mask);
 }
 
 }  // namespace amd

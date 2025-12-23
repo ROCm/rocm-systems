@@ -26,6 +26,7 @@
 #endif
 
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -78,15 +79,6 @@ namespace Results
 {
 using pcinfo_t = rocprofiler_thread_trace_decoder_pc_t;
 
-struct address_sort_t
-{
-    bool operator()(const pcinfo_t& a, const pcinfo_t& b) const
-    {
-        if(a.marker_id == b.marker_id) return a.addr < b.addr;
-        return a.marker_id < b.marker_id;
-    }
-};
-
 struct Latency
 {
     uint64_t latency{0};
@@ -94,7 +86,7 @@ struct Latency
 };
 
 // Maps address to latency
-using LatencyTable = std::map<rocprofiler_thread_trace_decoder_pc_t, Latency, address_sort_t>;
+using LatencyTable = std::map<rocprofiler_thread_trace_decoder_pc_t, Latency>;
 // Used to disassemble instructions at (id, vaddr) pair
 using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
@@ -135,7 +127,7 @@ gen_output_stream()
     {
         auto& addr    = sorted.at(i).first;
         auto& latency = sorted.at(i).second;
-        auto  inst    = table->get(addr.marker_id, addr.addr);
+        auto  inst    = table->get(addr.code_object_id, addr.address);
 
         auto   comment = inst->comment;
         size_t pos     = comment.rfind('/');
@@ -165,31 +157,34 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t* /* user_data */,
                               void* /* userdata */)
 {
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
-
-    CHECK_NOTNULL(Results::table);
-    auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-
-    if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
     {
+        CHECK_NOTNULL(Results::table);
+        auto* data =
+            static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+
+        if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+        {
+            Results::table->addDecoder(
+                data->uri, data->code_object_id, data->load_delta, data->load_size);
+            return;
+        }
+
+        auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
+        CHECK_NOTNULL(memorybase);
+
+        DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
+                                                                   data->code_object_id,
+                                                                   data->load_delta,
+                                                                   data->load_size,
+                                                                   memorybase,
+                                                                   data->memory_size));
+
         Results::table->addDecoder(
-            data->uri, data->code_object_id, data->load_delta, data->load_size);
-        return;
+            memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
     }
-
-    auto* memorybase = reinterpret_cast<const void*>(data->memory_base);
-    CHECK_NOTNULL(memorybase);
-
-    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(decoder,
-                                                               data->code_object_id,
-                                                               data->load_delta,
-                                                               data->load_size,
-                                                               memorybase,
-                                                               data->memory_size));
-
-    Results::table->addDecoder(
-        memorybase, data->memory_size, data->code_object_id, data->load_delta, data->load_size);
 }
 
 void
@@ -265,9 +260,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, TARGET_CU});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, BUFFER_SIZE});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, SHADER_MASK});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {TARGET_CU}});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}});
+        parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {SHADER_MASK}});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,
@@ -309,6 +305,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
     // This is set by ctests: TODO: move to client.cpp
     // If nullptr, searches rocprofiler-sdk install location
     const char* lib_path = std::getenv("ROCPROFILER_TRACE_DECODER_LIB_PATH");
+    if(lib_path == nullptr) lib_path = "/opt/rocm/lib";
 
     DECODER_CALL(rocprofiler_thread_trace_decoder_create(&Decoder::decoder, lib_path));
 

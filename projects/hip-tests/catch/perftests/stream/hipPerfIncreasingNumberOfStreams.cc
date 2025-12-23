@@ -23,9 +23,7 @@
 
 using namespace std;
 
-__global__
-static void _noop_kernel() {
-}
+__global__ static void _noop_kernel() {}
 
 
 TEST_CASE("Perf_KernelLaunchLatency_IncreasingNumberOfStreams") {
@@ -67,12 +65,11 @@ TEST_CASE("Perf_KernelLaunchLatency_IncreasingNumberOfStreams") {
   for (auto& numHipStreams : streamsNumber) {
     vector<hipStream_t> streams(numHipStreams);
 
-    if(isBlocking) {
+    if (isBlocking) {
       for (int i = 0; i < numHipStreams; ++i) {
         HIP_CHECK(hipStreamCreate(&streams[i]));
       }
-    }
-    else {
+    } else {
       for (int i = 0; i < numHipStreams; ++i) {
         HIP_CHECK(hipStreamCreateWithFlags(&streams[i], hipStreamNonBlocking));
       }

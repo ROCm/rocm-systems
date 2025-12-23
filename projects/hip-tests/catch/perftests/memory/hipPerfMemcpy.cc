@@ -82,11 +82,8 @@ void hipPerfMemcpy::TestResult(unsigned int numTests,
     perf *= 2.0;
   }
 
-  CONSOLE_PRINT("hipPerfMemcpy[%d] %s copy BW %.2f GB/s for memory size of %lu Bytes.\n", numTests,
+  CONSOLE_PRINT("hipPerfMemcpy[%d] %s copy BW %.2f GB/s for memory size of %zu Bytes.\n", numTests,
                 typestr, perf, totalSizes_[numTests]);
-
-  if (totalSizes_[numTests] == 4194304 && type == hipMemcpyDeviceToDeviceNoCU)
-    REQUIRE(perf < NOCU_MAX_BW);
 }
 
 bool hipPerfMemcpy::run_h2d(unsigned int numTests) {

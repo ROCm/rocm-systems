@@ -1,0 +1,97 @@
+{
+    "required_tables": [
+        {
+            "name": "top_kernels",
+            "required_columns": [
+                "name",
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check for null function names",
+                    "error_message": "Found API calls with null function names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM top_kernels WHERE name IS NULL"
+                },
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that we have some kernel calls",
+                    "error_message": "No kernel calls found in summary",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM top_kernels"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 'hipKernelLaunch' kernel captured",
+                    "error_message": "'hipKernelLaunch' not found in top_kernels",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM top_kernels WHERE name LIKE 'hipKernelLaunch%'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have predefined number of kernel calls",
+                    "error_message": "No kernel calls found in summary",
+                    "expected_result": 2,
+                    "query": "SELECT total_calls FROM top_kernels WHERE name LIKE 'hipKernelLaunch%'"
+                }
+            ]
+        },
+        {
+            "min_rows": 2,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check for null function names",
+                    "error_message": "Found kernels with null function names",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels WHERE name IS NULL"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have kernel entries",
+                    "error_message": "No kernel entries found",
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(*) as count FROM kernels"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check for kernels with no active time",
+                    "error_message": "Kernels with no active execution times found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels WHERE (end - start) = 0"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have number of kernel entries as expected number of calls",
+                    "error_message": "Mismatch in expected numbers of kernels entries",
+                    "expected_result": 2,
+                    "query": "SELECT COUNT(*) as count FROM kernels WHERE name LIKE 'hipKernelLaunch%'"
+                }
+            ]
+        },
+        {
+            "min_rows": 2,
+            "name": "threads",
+            "required_columns": [
+                "tid",
+                "start",
+                "end",
+                "name"
+            ]
+        }
+    ]
+}

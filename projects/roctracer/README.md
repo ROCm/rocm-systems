@@ -61,11 +61,11 @@ To use the rocTX API you need the API header and to link your application with `
     `rocTracer` library public API header.
 
   - `roctx.h`
-  
+
     `rocTX` library public API header.
 
 - `src`
-  
+
   Library sources.
 
   - `core`
@@ -138,20 +138,20 @@ To use the rocTX API you need the API header and to link your application with `
 - Clone development branch of `roctracer`:
 
   ```sh
-  git clone -b amd-master https://github.com/ROCm-Developer-Tools/roctracer
+  git clone -b develop https://github.com/ROCm/rocm-systems.git
   ```
 
 - To build `roctracer` library:
 
    ```sh
-   cd <your path>/roctracer
+   cd <your path>/rocm-systems/projects/roctracer
    ./build.sh
    ```
 
 - To build and run test:
 
   ```sh
-  cd <your path>/roctracer/build
+  cd <your path>/rocm-systems/projects/roctracer/build
   make mytest
   run.sh
   ```

@@ -31,8 +31,7 @@ THE SOFTWARE.
  * Contains performance tests for kernel launch overhead benchmarking.
  */
 
-template <KernelType kernel_type, bool timer_type>
-class ExtLaunchKernelBenchmark
+template <KernelType kernel_type, bool timer_type> class ExtLaunchKernelBenchmark
     : public KernelLaunchBenchmark<ExtLaunchKernelBenchmark<kernel_type, timer_type>, timer_type> {
  public:
   constexpr void LaunchKernel() {

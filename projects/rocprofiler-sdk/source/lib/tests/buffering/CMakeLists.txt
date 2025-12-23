@@ -7,21 +7,17 @@ include(GoogleTest)
 
 set(buffering_sources buffering-serial.cpp buffering-parallel.cpp buffering-save-load.cpp)
 
-add_executable(buffering-test)
-target_sources(buffering-test PRIVATE ${buffering_sources})
+add_executable(buffering-tests)
+target_sources(buffering-tests PRIVATE ${buffering_sources})
 target_link_libraries(
-    buffering-test
+    buffering-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
             GTest::gtest_main)
 
-gtest_add_tests(
-    TARGET buffering-test
+rocprofiler_add_unit_test(
+    TARGET buffering-tests
     SOURCES ${buffering_sources}
-    TEST_LIST buffering-tests_TESTS
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-set_tests_properties(
-    ${buffering-tests_TESTS}
-    PROPERTIES TIMEOUT 360 LABELS "unittests" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    )

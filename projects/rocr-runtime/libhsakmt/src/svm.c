@@ -37,7 +37,8 @@
 /* Helper functions for calling KFD SVM ioctl */
 
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
+hsaKmtSVMSetAttrCtx(HsaKFDContext *ctx,
+		 void *start_addr, HSAuint64 size, unsigned int nattr,
 		 HSA_SVM_ATTRIBUTE *attrs)
 {
 	struct kfd_ioctl_svm_args *args;
@@ -94,7 +95,7 @@ hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 	}
 
 	/* Driver does one copy_from_user, with extra attrs size */
-	r = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
+	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
 	if (r) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
 		return HSAKMT_STATUS_ERROR;
@@ -104,7 +105,8 @@ hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 }
 
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
+hsaKmtSVMGetAttrCtx(HsaKFDContext *ctx,
+		 void *start_addr, HSAuint64 size, unsigned int nattr,
 		 HSA_SVM_ATTRIBUTE *attrs)
 {
 	struct kfd_ioctl_svm_args *args;
@@ -150,7 +152,7 @@ hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 	}
 
 	/* Driver does one copy_from_user, with extra attrs size */
-	r = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
+	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
 	if (r) {
 		pr_debug("op get range attrs failed %s\n", strerror(errno));
 		return HSAKMT_STATUS_ERROR;
@@ -187,7 +189,7 @@ hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 }
 
 static HSAKMT_STATUS
-hsaKmtSetGetXNACKMode(HSAint32 * enable)
+hsaKmtSetGetXNACKModeCtx(HsaKFDContext *ctx, HSAint32 * enable)
 {
 	struct kfd_ioctl_set_xnack_mode_args args;
 
@@ -196,7 +198,7 @@ hsaKmtSetGetXNACKMode(HSAint32 * enable)
 
 	args.xnack_enabled = *enable;
 
-	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SET_XNACK_MODE, &args)) {
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SET_XNACK_MODE, &args)) {
 		if (errno == EPERM) {
 			pr_debug("set mode not supported %s\n",
 				 strerror(errno));
@@ -211,6 +213,40 @@ hsaKmtSetGetXNACKMode(HSAint32 * enable)
 	*enable = args.xnack_enabled;
 
 	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtSetXNACKModeCtx(HsaKFDContext *ctx, HSAint32 enable)
+{
+	return hsaKmtSetGetXNACKModeCtx(ctx, &enable);
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetXNACKModeCtx(HsaKFDContext *ctx, HSAint32 * enable)
+{
+	*enable = -1;
+	return hsaKmtSetGetXNACKModeCtx(ctx, enable);
+}
+
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
+		 HSA_SVM_ATTRIBUTE *attrs)
+{
+	return hsaKmtSVMSetAttrCtx(&hsakmt_primary_kfd_ctx, start_addr, size, nattr, attrs);
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
+		 HSA_SVM_ATTRIBUTE *attrs)
+{
+	return hsaKmtSVMGetAttrCtx(&hsakmt_primary_kfd_ctx, start_addr, size, nattr, attrs);
+}
+
+static HSAKMT_STATUS
+hsaKmtSetGetXNACKMode(HSAint32 * enable)
+{
+	return hsaKmtSetGetXNACKModeCtx(&hsakmt_primary_kfd_ctx, enable);
 }
 
 HSAKMT_STATUS HSAKMTAPI

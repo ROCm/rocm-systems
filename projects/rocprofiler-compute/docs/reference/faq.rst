@@ -9,18 +9,6 @@ FAQ
 
 Frequently asked questions and troubleshooting tips.
 
-How do I export profiling data I have already generated using ROCm Compute Profiler?
-====================================================================================
-
-To interact with the Grafana GUI, you must sync data with the MongoDB
-backend. You can do this using :ref:`database <modes-database>` mode.
-
-Pass in the directory of your desired workload as follows.
-
-.. code-block:: shell
-
-    $ rocprof-compute database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name>
-
 python ast error: 'Constant' object has no attribute 'kind'
 ===========================================================
 
@@ -44,6 +32,18 @@ locale settings.
 
    $ export LC_ALL=C.UTF-8
    $ export LANG=C.UTF-8
+
+Why does VALU utilization exceed the theoretical peak?
+======================================================
+
+In specific circumstances, the GPU can co-issue two VALU instructions in the same clock cycle. This may result in an observed VALU Utilization and FP64 VALU FLOP values above the theoretical peak. This is expected hardware behavior and not a measurement error.
+
+This dual-issue capability can be further investigated via:
+
+* **ROCm Compute Viewer**: The Instructions view shows when two instructions are issued to the VALU in the same cycle.
+* **On MI350 and newer platforms**: Starting in ROCm 7.2.0, the ``Dual-issue VALU Utilization`` metric shows the % of time when VALU is executing dual-issued instructions.
+
+When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays a warning message indicating this behavior.
 
 How can I SSH tunnel in MobaXterm?
 ==================================

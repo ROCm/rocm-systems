@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -191,7 +191,7 @@ rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF
 )
 rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
-                               "Enable rpath to linked libraries" ON
+                               "Enable rpath to linked libraries" OFF
 )
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
@@ -214,18 +214,34 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from submodule"
                                OFF
 )
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_BOOST "Build boost from submodule"
+                               OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TBB "Build tbb from submodule"
+                               OFF
+)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
                                "Build libunwind from submodule" ON
+)
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_NLOHMANN_JSON
+                               "Build nlohmann/json from submodule" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
-rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
-                               "Enable building sqlite3 library internally" OFF
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
+                               "Enable building sqlite3 library internally" ON
 )
-rocprofiler_systems_add_option(ROCPROFSYS_ENABLE_BENCHMARK
-                               "Enable performance benchmarking capabilities for the project" OFF
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
+                               "Enable building googletest library internally" ON
 )
 
 if(ROCPROFSYS_USE_PAPI)
@@ -334,10 +350,6 @@ if(ROCPROFSYS_BUILD_TESTING OR "$ENV{ROCPROFSYS_CI}" MATCHES "[1-9]+|ON|on|y|yes
     include(CTest)
 endif()
 
-if(ROCPROFSYS_ENABLE_BENCHMARK)
-    add_compile_definitions(-DROCPROFSYS_USE_BENCHMARK=1)
-endif()
-
 # ------------------------------------------------------------------------------#
 #
 # library and executables
@@ -392,8 +404,8 @@ endif()
 # ------------------------------------------------------------------------------#
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/LICENSE
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    ${PROJECT_SOURCE_DIR}/LICENSE.md
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     COPYONLY
 )
 
@@ -437,7 +449,8 @@ install(
 )
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
+    FILES
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}
     COMPONENT setup
 )

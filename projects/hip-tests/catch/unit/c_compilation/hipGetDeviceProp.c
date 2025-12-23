@@ -21,7 +21,6 @@
 #include <stdio.h>
 
 int hipGetDeviceProp() {
-
   hipDeviceProp_t prop;
   hipError_t err = hipGetDeviceProperties(&prop, 0);
 

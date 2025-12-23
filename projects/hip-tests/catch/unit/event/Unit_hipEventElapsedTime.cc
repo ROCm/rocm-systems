@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipEventElapsedTime_DisableTiming") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices") {
+TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices", "[multigpu]") {
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount > 1) {
@@ -130,7 +130,7 @@ TEST_CASE("Unit_hipEventElapsedTime_DifferentDevices") {
 
     float tElapsed = 1.0f;
     // start on device 0 but stop on device 1
-    HIP_ASSERT(hipEventElapsedTime(&tElapsed,start,stop) == hipErrorInvalidHandle);
+    HIP_ASSERT(hipEventElapsedTime(&tElapsed, start, stop) == hipErrorInvalidHandle);
 
     HIP_CHECK(hipEventDestroy(start));
     HIP_CHECK(hipEventDestroy(stop));
@@ -176,7 +176,7 @@ TEST_CASE("Unit_hipEventElapsedTime_NotReady_Negative") {
   HIP_CHECK(hipEventDestroy(start));
   HIP_CHECK(hipEventDestroy(stop));
 }
-#endif // HT_AMD
+#endif  // HT_AMD
 
 /**
  * Test Description
@@ -236,6 +236,6 @@ TEST_CASE("Unit_hipEventElapsedTime_Verify_Capture") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

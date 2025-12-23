@@ -195,3 +195,27 @@ TEST_CASE("Unit_hipMemsetD32_KernelBuffer") {
 
   REQUIRE(result == true);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemsetD32 while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemsetD32.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipMemsetD32_Capture") {
+  const size_t N = 128;
+  void* dst = nullptr;
+  HIP_CHECK(hipMalloc(&dst, N * sizeof(uint32_t)));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemsetD32(dst, 0xAB, N), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}

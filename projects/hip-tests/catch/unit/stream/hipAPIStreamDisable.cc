@@ -54,14 +54,12 @@ TEST_CASE("Unit_hipStreamCreate_MultistreamBasicFunctionalities") {
 
   for (int i = 0; i < NUM_STREAMS; i++) {
     HIP_CHECK(hipStreamCreate(&streams[i]));
-    HIP_CHECK(hipMalloc(&data[i],
-            (hipAPIStreamDisableTest::NN)*sizeof(float)));
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipAPIStreamDisableTest::kernel),
-                       dim3(1), dim3(1), 0, streams[i], data[i], xd,
-                       hipAPIStreamDisableTest::NN);
+    HIP_CHECK(hipMalloc(&data[i], (hipAPIStreamDisableTest::NN) * sizeof(float)));
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipAPIStreamDisableTest::kernel), dim3(1), dim3(1), 0,
+                       streams[i], data[i], xd, hipAPIStreamDisableTest::NN);
     HIP_CHECK(hipGetLastError());
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipAPIStreamDisableTest::nKernel),
-                       dim3(1), dim3(1), 0, 0, yd);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipAPIStreamDisableTest::nKernel), dim3(1), dim3(1), 0, 0,
+                       yd);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamDestroy(streams[i]));
   }

@@ -57,24 +57,20 @@ TEST_CASE("Unit_hipDeviceComputeCapability_Negative") {
 
     // Scenario1
     SECTION("major is nullptr") {
-      REQUIRE_FALSE(hipDeviceComputeCapability(nullptr, &minor, device)
-                          == hipSuccess);
+      REQUIRE_FALSE(hipDeviceComputeCapability(nullptr, &minor, device) == hipSuccess);
     }
 
     // Scenario2
     SECTION("minor is nullptr") {
-      REQUIRE_FALSE(hipDeviceComputeCapability(&major, nullptr, device)
-                          == hipSuccess);
+      REQUIRE_FALSE(hipDeviceComputeCapability(&major, nullptr, device) == hipSuccess);
     }
     // Scenario3
     SECTION("device is -1") {
-      REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, -1)
-                          == hipSuccess);
+      REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, -1) == hipSuccess);
     }
     // Scenario4
     SECTION("device is out of bounds") {
-      REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, numDevices)
-                          == hipSuccess);
+      REQUIRE_FALSE(hipDeviceComputeCapability(&major, &minor, numDevices) == hipSuccess);
     }
   } else {
     WARN("Test skipped as no gpu devices available");
@@ -106,6 +102,6 @@ TEST_CASE("Unit_hipDeviceComputeCapability_ValidateVersion") {
 }
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */
