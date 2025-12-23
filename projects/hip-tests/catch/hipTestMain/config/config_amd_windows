@@ -748,6 +748,8 @@
         "Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice",
         "Unit_hipExtModuleLaunchKernel_Positive_Parameters",
         "Unit_hip_linker_spirv_input",
+        "Unit_hipMultiThreadStreams1_AsyncAsync",
+        "Unit_hipMultiThreadStreams1_AsyncSame",
         "========mlsejenkins_Window_Failures_on_gfx1201===========================================",
         "Unit_hipMemPoolSetAttribute_EventDependencies",
         "Unit_hipStreamSynchronize_NullStreamSynchronization",

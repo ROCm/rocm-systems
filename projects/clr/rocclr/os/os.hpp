@@ -299,6 +299,9 @@ namespace numa {
 
 static constexpr uint32_t kBitsPerUInt64 = 8 * sizeof(uint64_t);
 
+//! Get the NUMA node ID of the current thread
+uint32_t getCurrentNumaNode();
+
 /*! \brief Manage Numa policy.
  *
  *  \note Works in Linux only, dummy in Windows.

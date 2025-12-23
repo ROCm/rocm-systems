@@ -22,6 +22,7 @@
 
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "core/agent_manager.hpp"
+#include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -94,7 +95,9 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
     const auto* _kern_sym_data =
         tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
 
-    auto _bundle = counter_bundle_t{ tim::demangle(_kern_sym_data->kernel_name), _scope };
+    auto _bundle =
+        counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),
+                          _scope };
 
     _bundle.push(_dispatch_info.queue_id.handle)
         .start()
