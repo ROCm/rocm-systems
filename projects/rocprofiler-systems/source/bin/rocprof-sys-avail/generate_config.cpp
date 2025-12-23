@@ -339,7 +339,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 if(_lomni && !_romni) return true;
                 if(_romni && !_lomni) return false;
                 for(const auto* itr :
-                    { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE_CACHED",
+                    { "ROCPROFSYS_CONFIG", "ROCPROFSYS_MODE", "ROCPROFSYS_TRACE",
                       "ROCPROFSYS_TRACE_LEGACY", "ROCPROFSYS_PROFILE",
                       "ROCPROFSYS_USE_SAMPLING", "ROCPROFSYS_USE_PROCESS_SAMPLING",
                       "ROCPROFSYS_USE_ROCM", "ROCPROFSYS_USE_AMD_SMI",

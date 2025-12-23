@@ -192,7 +192,7 @@ First, instrument and run the program.
    ROCPROFSYS: LD_PRELOAD=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
    ROCPROFSYS: OMP_TOOL_LIBRARIES=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
    ROCPROFSYS: ROCPROFSYS_PROFILE=true
-   ROCPROFSYS: ROCPROFSYS_TRACE_CACHED=true
+   ROCPROFSYS: ROCPROFSYS_TRACE=true
    ROCPROFSYS: ROCPROFSYS_VERBOSE=0
    [rocprof-sys][dl][1827155] rocprofsys_main
    [rocprof-sys][1827155][rocprofsys_init_tooling] Instrumentation mode: Trace

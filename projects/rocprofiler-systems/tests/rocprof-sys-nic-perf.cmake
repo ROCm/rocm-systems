@@ -28,7 +28,6 @@ message(STATUS "The list of all PAPI network events is ${_event_list}")
 # Use legacy trace mode for network stats - cached mode doesn't support real-time counter tracking
 set(_nic_perf_environment
     "${_base_environment}"
-    "ROCPROFSYS_TRACE_CACHED=OFF"
     "ROCPROFSYS_TRACE_LEGACY=ON"
     "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/nic-performance"
     "ROCPROFSYS_USE_PID=OFF"
