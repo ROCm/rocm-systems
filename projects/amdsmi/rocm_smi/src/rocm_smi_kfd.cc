@@ -201,11 +201,17 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
     return ENOENT;
   }
   // Remove any *trailing* empty (whitespace) lines
-  while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+  while (!retVec->empty() && retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
   }
 
   fs.close();
+
+  // Return error if vector became empty after removing whitespace-only lines
+  if (retVec->empty()) {
+    return ENOENT;
+  }
+
   return 0;
 }
 
