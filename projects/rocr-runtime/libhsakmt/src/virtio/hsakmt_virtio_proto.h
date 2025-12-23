@@ -112,6 +112,9 @@ enum vhsakmt_ccmd_query_type {
   VHSAKMT_CCMD_QUERY_AMDGPU_DEVICE_HANDLE,
   VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ,
   VHSAKMT_CCMD_QUERY_SET_XNACK_MODE,
+  VHSAKMT_CCMD_QUERY_SPM_ACQUIRE,
+  VHSAKMT_CCMD_QUERY_SPM_RELEASE,
+  VHSAKMT_CCMD_QUERY_SPM_SET_DST_BUFFER,
 };
 
 #define QUERY_PTR_INFO_MAX_MAPPED_NODES 3
@@ -156,6 +159,15 @@ typedef struct _query_open_kfd_args {
 } query_open_kfd_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_query_open_kfd_args)
 
+typedef struct _query_spm_set_dst_buffer_args {
+  uint32_t PreferredNode;
+  uint32_t SizeInBytes;
+  uint32_t timeout;
+  uint32_t res_id;
+  uint64_t DestMemoryAddress;
+} query_spm_set_dst_buffer_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_spm_set_dst_buffer_args)
+
 typedef struct _query_open_kfd_rsp {
   uint64_t vm_start;
   uint64_t vm_size;
@@ -180,6 +192,14 @@ typedef struct _query_device_handle_rsp {
 } query_device_handle_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_query_device_handle_rsp)
 
+typedef struct _query_spm_set_dst_buffer_rsp {
+  uint32_t SizeCopied;
+  uint32_t timeout;
+  uint8_t IsTileDataLoss;
+  uint8_t pad[7];
+} query_spm_set_dst_buffer_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_spm_set_dst_buffer_rsp)
+
 struct vhsakmt_ccmd_query_info_req {
   struct vhsakmt_ccmd_req hdr;
   struct drm_amdgpu_info info;
@@ -195,6 +215,7 @@ struct vhsakmt_ccmd_query_info_req {
     query_tile_config tile_config_args;
     query_open_kfd_args open_kfd_args;
     query_drm_cmd_write_read_args drm_cmd_write_read_args;
+    query_spm_set_dst_buffer_args spm_set_dst_buffer_args;
     HSAint32 xnack_mode;
   };
 
@@ -223,6 +244,7 @@ struct vhsakmt_ccmd_query_info_rsp {
     int32_t xnack_mode;
     HsaClockCounters clock_counters;
     query_device_handle_rsp device_handle_rsp;
+    query_spm_set_dst_buffer_rsp spm_set_dst_buffer_rsp;
     uint32_t caps;
     uint64_t pad[9];
   };
