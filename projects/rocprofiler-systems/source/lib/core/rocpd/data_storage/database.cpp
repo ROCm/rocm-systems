@@ -146,7 +146,9 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
             schema_content = rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
             break;
-        default: LOG_WARNING("Unknown schema kind: {}", schema_kind); return "";
+        default:
+            LOG_WARNING("Unknown schema kind: {}", static_cast<int>(schema_kind));
+            return "";
     }
 
     return process_schema_template(schema_content, upid);
