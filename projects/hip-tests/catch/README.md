@@ -180,7 +180,7 @@ The process must be a standalone exe inside the same folder as other tests.
 
 ## Building a single test
 
-The  test suite has moved to Catch2v3 (v3.8.1) to be exact. Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
+The  test suite has moved to Catch2v3 (v3.8.1 to be exact). Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
 Starting with, it is no longer a single header, it is now a library, which needs to be linked to the test exe.
 
 If you are on your personal machine, I highly recommend you to install Catch2v3 (v3.8.1) locally on your system. This helps skip the download/build part in hip-tests and results in faster builds overall.
@@ -205,12 +205,24 @@ export ROCM_SYSTEMS_DIR=<path_to_rocm_systems>
 amdclang++                                                                           \
   -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/external/picojson                    \
   -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
+  --offload-arch=native                                                              \
+  -L /usr/local/lib -lCatch2 -lCatch2Main                                            \
+  -x hip <path_to_test>
+```
+The command above builds hip without the `main` from hip-tests, if the purpose is just to run the test with as simple commands as possible, go with this.
+
+If you want to use `main` provided by hip-tests, use the following command:
+
+```bash
+amdclang++                                                                           \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/external/picojson                    \
+  -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
   -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/main.cc              \
   -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/hip_test_context.cc  \
-  -x hip <path_to_test>                                                              \
   -L /usr/local/lib                                                                  \
   --offload-arch=native                                                              \
-  -lCatch2
+  -lCatch2                                                                           \
+  -x hip <path_to_test>
 ```
 
 ### Steps to use FetchContent to get Catch2
@@ -220,6 +232,7 @@ Build Catch2 with hip-tests
 ```bash
 export HIP_PATH=<path_where_hip_is_installed>
 cd rocm-systems
+export ROCM_SYSTEMS_DIR=$PWD
 mkdir tests
 cd tests
 cmake ../projects/hip-tests/catch -DHIP_PLATFORM=amd -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HIP_PATH
@@ -230,7 +243,6 @@ export DEPS_PATH=$PWD/_deps
 We now use the Catch2 we just build to link to the tests
 
 ```bash
-export ROCM_SYSTEMS_DIR=<path_to_rocm_systems>
 amdclang++                                                                           \
   -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/external/picojson                    \
   -I $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/include                              \
@@ -238,10 +250,10 @@ amdclang++                                                                      
   -I $DEPS_PATH/catch2-build/generated-includes                                      \
   -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/main.cc              \
   -x hip $ROCM_SYSTEMS_DIR/projects/hip-tests/catch/hipTestMain/hip_test_context.cc  \
-  -x hip <path_to_test>                                                              \
   --offload-arch=native                                                              \
   -L $DEPS_PATH/catch2-build/src                                                     \
-  -lCatch2
+  -lCatch2                                                                           \
+  -x hip <path_to_test>
 ```
 
 You might need to set `LD_LIBRARY_PATH` to be Catch2 location.
