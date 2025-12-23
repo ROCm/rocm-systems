@@ -131,6 +131,7 @@ get_operations_impl(rocprofiler_callback_tracing_kind_t kindv,
     if(!_val)
     {
         LOG_CRITICAL("no setting {}", optname);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 
@@ -175,6 +176,7 @@ get_operations_impl(rocprofiler_buffer_tracing_kind_t kindv,
     if(!_val)
     {
         LOG_CRITICAL("no setting {}", optname);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 
@@ -612,6 +614,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
     {
         LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
                      static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 
@@ -631,6 +634,7 @@ get_operations(rocprofiler_buffer_tracing_kind_t kindv)
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 
@@ -650,6 +654,7 @@ get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv)
     {
         LOG_CRITICAL("callback_operation_operation_names does not have value for {}",
                      static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 
@@ -669,6 +674,7 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
     {
         LOG_CRITICAL("buffered_operation_option_names does not have value for {}",
                      static_cast<int>(kindv));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::abort();
     }
 

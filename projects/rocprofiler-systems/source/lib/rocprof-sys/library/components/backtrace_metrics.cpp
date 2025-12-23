@@ -195,7 +195,7 @@ apply_for_all_thread_names(int64_t _tid, std::function<void(const std::string&)>
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(_desc.empty())
+            if(get_is_continuous_integration() && _desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -404,7 +404,7 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(_desc.empty())
+            if(get_is_continuous_integration() && _desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -421,7 +421,7 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
-    if(!_thread_info)
+    if(get_is_continuous_integration() && !_thread_info)
     {
         throw std::runtime_error(
             fmt::format("Error! missing thread info for tid={}", _tid));

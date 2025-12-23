@@ -414,6 +414,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         .max_count(1)
         .action([&](parser_t& p) {
             update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug");
         });
     parser.add_argument({ "-v", "--verbose" }, "Verbose output")
         .count(1)
@@ -421,6 +422,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             auto _v = p.get<int>("verbose");
             verbose = _v;
             update_env(_env, "ROCPROFSYS_VERBOSE", _v);
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", "trace");
         });
 
     std::string _config_file      = {};

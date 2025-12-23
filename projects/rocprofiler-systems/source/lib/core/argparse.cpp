@@ -268,7 +268,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v       = p.get<int>("verbose");
                 _data.verbose = _v;
-                // update_env(_data, "ROCPROFSYS_VERBOSE", _v);
+                update_env(_data, "ROCPROFSYS_VERBOSE", _v);
                 update_env(_data, "ROCPROFSYS_LOG_LEVEL", "trace");
             });
 

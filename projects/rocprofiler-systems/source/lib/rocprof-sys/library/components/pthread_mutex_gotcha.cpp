@@ -85,7 +85,7 @@ pthread_mutex_gotcha::get_hashes()
                 LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value",
                              i);
                 ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                std::exit(1);
+                std::abort();
             }
         }
         return _init;

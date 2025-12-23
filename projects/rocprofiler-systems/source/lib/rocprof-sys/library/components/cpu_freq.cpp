@@ -154,7 +154,8 @@ cpu_freq::configure()
     {
         LOG_CRITICAL("[cpu_freq::config] CPU frequencies are disabled :: unable to open "
                      "/proc/cpuinfo");
-        std::exit(EXIT_FAILURE);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::abort();
     }
 
     get_enabled_cpus() = _enabled_freqs;
