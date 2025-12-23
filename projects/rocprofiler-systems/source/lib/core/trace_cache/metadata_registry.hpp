@@ -32,6 +32,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <vector>
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -192,7 +193,7 @@ struct metadata_registry
     void add_track(const info::track& track_info);
     void add_queue(const uint64_t& queue_handle);
     void add_stream(const uint64_t& stream_handle);
-    void add_string(const std::string_view& string_value);
+    void add_string(const std::string_view string_value);
 
     info::process               get_process_info() const;
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
@@ -236,9 +237,9 @@ private:
     common::synchronized<std::set<info::thread>> m_threads{};
     common::synchronized<std::set<info::track>>  m_tracks{};
 
-    common::synchronized<std::set<uint64_t>>                   m_streams{};
-    common::synchronized<std::set<uint64_t>>                   m_queues{};
-    common::synchronized<std::unordered_set<std::string_view>> m_strings{};
+    common::synchronized<std::set<uint64_t>>              m_streams{};
+    common::synchronized<std::set<uint64_t>>              m_queues{};
+    common::synchronized<std::unordered_set<std::string>> m_strings{};
 #if ROCPROFSYS_USE_ROCM > 0
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>

@@ -386,7 +386,7 @@ bool goamdsmi_gpu_init()
         if((num_gpu_devices_inAllSocket)) gpu_init_success = true;
     }
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s, InitAMDSMIGPUInit:%d, GpuSocketCount:%d, GpuCount:%d\n", gpu_init_success?"Success":"Failed", gpu_init_success?1:0, num_gpuSockets, num_gpu_devices_inAllSocket);}
-	
+
     return gpu_init_success;
 }
 
@@ -407,7 +407,7 @@ char* goamdsmi_gpu_dev_name_get(uint32_t dv_ind)
 	uint32_t len = 256;
     char* dev_name = (char*)malloc(sizeof(char)*len);dev_name[0] = '\0';
     strcpy(dev_name, GOAMDSMI_STRING_NA);
-	
+
     return dev_name;
 }
 

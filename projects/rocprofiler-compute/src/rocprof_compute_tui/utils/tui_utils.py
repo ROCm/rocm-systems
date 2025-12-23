@@ -22,8 +22,10 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 import argparse
 import logging
+import threading
 from collections.abc import Hashable
 from datetime import datetime
 from enum import Enum
@@ -74,15 +76,39 @@ class Logger:
         }
         self.logger.log(level_map[log_level], message)
 
-        if update_ui and self.output_area and hasattr(self.output_area, "text"):
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted_msg = f"[{timestamp}] [{log_level}] {message}"
-            self.output_area.text = (
-                f"{self.output_area.text}\n{formatted_msg}"
-                if self.output_area.text
-                else formatted_msg
-            )
+        if (
+            not update_ui
+            or not self.output_area
+            or not hasattr(self.output_area, "text")
+        ):
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{timestamp}] [{log_level}] {message}"
+        app = getattr(self.output_area, "app", None)
+
+        if app is None or not hasattr(app, "_thread_id"):
+            # app not ready yet — update immediately (safe during compose)
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
+            return
+
+        # Detect if we are on UI thread
+        in_ui_thread = threading.get_ident() == app._thread_id
+
+        def _apply() -> None:
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
             self.output_area.cursor_location = (999999, 0)
+
+        if in_ui_thread:
+            _apply()
+        else:
+            app.call_from_thread(_apply)
 
     def info(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "INFO", update_ui)
