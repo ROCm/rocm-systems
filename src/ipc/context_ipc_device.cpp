@@ -209,7 +209,7 @@ __device__ void IPCContext::putmem_signal(void *dest, const void *source, size_t
                                           uint64_t *sig_addr, uint64_t signal, int sig_op,
                                           int pe) {
   putmem(dest, source, nelems, pe);
-  fence();
+  fence(pe);
 
   switch (sig_op) {
   case ROCSHMEM_SIGNAL_SET:
@@ -228,7 +228,8 @@ __device__ void IPCContext::putmem_signal_wg(void *dest, const void *source, siz
                                              uint64_t *sig_addr, uint64_t signal, int sig_op,
                                              int pe) {
   putmem_wg(dest, source, nelems, pe);
-  fence();
+  if (is_thread_zero_in_block())
+      fence(pe);
 
   if (is_thread_zero_in_block()) {
     switch (sig_op) {
@@ -249,7 +250,8 @@ __device__ void IPCContext::putmem_signal_wave(void *dest, const void *source, s
                                                uint64_t *sig_addr, uint64_t signal, int sig_op,
                                                int pe) {
   putmem_wave(dest, source, nelems, pe);
-  fence();
+  if (is_thread_zero_in_wave())
+    fence(pe);
 
   if (is_thread_zero_in_wave()) {
     switch (sig_op) {
