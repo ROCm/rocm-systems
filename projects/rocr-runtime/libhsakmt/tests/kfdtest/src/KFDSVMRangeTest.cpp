@@ -1541,7 +1541,7 @@ queue_fail:
  *
  */
 
-inline bool IsRunningInContainer () {
+inline bool IsRunningInContainer() {
     bool inCon = false;
     struct stat buffer;
     std::vector<std::string> filenames = {
