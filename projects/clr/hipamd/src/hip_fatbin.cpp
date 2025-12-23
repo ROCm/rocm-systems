@@ -466,6 +466,31 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
+  // SPIRV Cache.
+  // Basically we do not want to maintain copies compiled spirv code objects
+  // This structure acts as a look up of already compiled spirv code objects.
+  // Input: name of device, spirv code object ptr
+  struct SpirvCacheKey {
+    std::string isa_;
+    const void* code_obj_;
+    bool operator==(const SpirvCacheKey& other) const {
+      return isa_ == other.isa_ && code_obj_ == other.code_obj_;
+    }
+  };
+  // Output: device code object, its size.
+  struct SpirvCacheValue {
+    const void* spirv_co_;
+    size_t size_;
+  };
+  // Its hash
+  struct SpirvCacheKeyHash {
+    std::size_t operator()(const SpirvCacheKey& in) const {
+      return std::hash<std::string>()(in.isa_) ^
+             std::hash<uintptr_t>()(reinterpret_cast<uintptr_t>(in.code_obj_));
+    }
+  };
+  std::unordered_map<SpirvCacheKey, SpirvCacheValue, SpirvCacheKeyHash> spirv_cache;
+
   LogPrintfInfo("Forcing SPIRV: %s", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
   hipError_t hip_status = hipErrorInvalidImage;
   do {
@@ -498,6 +523,26 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         std::string target_id = device->devices()[0]->isa().targetId();
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
 
+        // Handle both SPIRV isa name
+        auto spirv_isa_handle = code_obj_map.find(spirv_isa_name);
+        if (spirv_isa_handle == code_obj_map.end()) {
+          spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
+        }
+
+        auto cache_key = SpirvCacheKey{isa, spirv_isa_handle->second.first};
+        if (auto cache_val = spirv_cache.find(cache_key); cache_val != spirv_cache.end()) {
+          // Cache hit
+          LogPrintfInfo("SPIRV Cache hit, isa: %s input spirv co: %p output co: %p size: %zu",
+                        cache_val->first.isa_.c_str(), cache_val->first.code_obj_,
+                        cache_val->second.spirv_co_, cache_val->second.size_);
+          hip_status =
+              AddDevProgram(device, cache_val->second.spirv_co_, cache_val->second.size_, 0);
+          if (hip_status != hipSuccess) {
+            break;
+          }
+          continue;
+        }
+
         comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
         comgr_helper::ComgrDataSetUniqueHandle reloc_data;
         comgr_helper::ComgrDataUniqueHandle spirv_data;
@@ -514,11 +559,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           break;
         }
 
-        // Handle both SPIRV isa name
-        auto spirv_isa_handle = code_obj_map.find(spirv_isa_name);
-        if (spirv_isa_handle == code_obj_map.end()) {
-          spirv_isa_handle = code_obj_map.find(spirv_isa_name_empty);
-        }
         if (auto comgr_status =
                 amd::Comgr::set_data(spirv_data.get(), spirv_isa_handle->second.second /* size */,
                                      reinterpret_cast<const char*>(spirv_isa_handle->second.first)
@@ -622,6 +662,13 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           LogError("Failed to get exe data");
           break;
         }
+        auto cache_val = SpirvCacheValue{co, co_size};
+
+        // Add it to cache to not make duplicate copies
+        LogPrintfInfo(
+            "Inserting into SPIRV cache: isa: %s input spirv co: %p output co: %p size: %zu",
+            cache_key.isa_.c_str(), cache_key.code_obj_, cache_val.spirv_co_, cache_val.size_);
+        spirv_cache.emplace(std::move(std::make_pair(std::move(cache_key), std::move(cache_val))));
 
         hip_status = AddDevProgram(device, co, co_size, 0);
         if (hip_status != hipSuccess) {
