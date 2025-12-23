@@ -21,15 +21,12 @@
 # THE SOFTWARE.
 
 """
-Tests for ROCTX marker API integration with rocprofiler-systems.
-
+Tests for the ROCTX marker API integration with rocprofiler-systems.
 Equivalent to rocprof-sys-roctx-tests.cmake
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
 import sys
 from pathlib import Path
 
@@ -42,9 +39,7 @@ from rocprofsys import (
     BaselineRunner,
     SamplingRunner,
     BinaryRewriteRunner,
-    RuntimeInstrumentRunner,
     SysRunRunner,
-    validate_perfetto_trace,
     validate_rocpd_database,
 )
 
@@ -66,9 +61,11 @@ def roctx_env(base_env: dict[str, str]) -> dict[str, str]:
 # Test Class: rocTX Tests
 # ============================================================================
 
+
 @pytest.mark.gpu
 class TestRoctx:
     """Tests for rocTX marker API."""
+
     @pytest.fixture
     def roctx_rules(self, validation_rules_dir: Path) -> list[Path]:
         """Get validation rules for rocTX tests."""
@@ -86,6 +83,7 @@ class TestRoctx:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         roctx_env: dict[str, str],
+        collect_result,
     ):
         try:
             runner = BaselineRunner(
@@ -99,7 +97,9 @@ class TestRoctx:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"rocTX baseline failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"rocTX baseline failed: {result.test_output}")
 
     def test_sampling(
         self,
@@ -109,6 +109,7 @@ class TestRoctx:
         roctx_rules: list[Path],
         use_rocpd: bool,
         subtests,
+        collect_result,
     ):
         env = roctx_env.copy()
         if use_rocpd:
@@ -121,35 +122,38 @@ class TestRoctx:
                 env=env,
                 timeout=120,
             )
-
         except FileNotFoundError:
             pytest.skip("roctx target not built")
+
         result = runner.run()
-        assert result.success, f"rocTX sampling failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"rocTX sampling failed: {result.test_output}")
 
         # ROCpd validation
         with subtests.test("ROCpd validation"):
             if not use_rocpd:
                 pytest.skip("ROCpd is not enabled")
             rocpd_file = result.rocpd_file
-            assert rocpd_file is not None, "ROCpd database not created"
-
+            if rocpd_file is None:
+                pytest.fail(f"ROCpd database not created")
             existing_rules = [r for r in roctx_rules if r.exists()]
             if not existing_rules:
                 pytest.skip("No validation rules found")
-
             validation = validate_rocpd_database(
                 rocpd_file,
                 rocprof_config.rocprofsys_tests_dir,
                 rules_files=existing_rules,
             )
-            assert validation.is_valid, f"ROCpd validation failed: {validation.message}"
+            if not validation.is_valid:
+                pytest.fail(f"ROCpd validation failed: {validation.message}")
 
     def test_binary_rewrite(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         roctx_env: dict[str, str],
+        collect_result,
     ):
         try:
             runner = BinaryRewriteRunner(
@@ -163,14 +167,17 @@ class TestRoctx:
         except FileNotFoundError:
             pytest.skip("roctx target not built")
 
-        rewrite_result = runner.rewrite()
-        assert rewrite_result.success, f"Rewrite failed: {rewrite_result.test_output}"
+        result = runner.run()
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"rocTX binary rewrite test failed: {result.test_output}")
 
     def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         roctx_env: dict[str, str],
+        collect_result,
     ):
         try:
             runner = SysRunRunner(
@@ -178,9 +185,12 @@ class TestRoctx:
                 target="roctx",
                 output_dir=test_output_dir,
                 env=roctx_env,
+                timeout=120,
             )
         except FileNotFoundError:
             pytest.skip("roctx target not built")
 
         result = runner.run()
-        assert result.success, f"rocTX sys run failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"rocTX sys run failed: {result.test_output}")

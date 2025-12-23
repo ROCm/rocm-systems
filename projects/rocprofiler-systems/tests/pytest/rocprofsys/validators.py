@@ -38,12 +38,12 @@ This ensures consistency between pytest and CMake/CTest validation.
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
 
 @dataclass
 class ValidationResult:
@@ -63,6 +63,7 @@ class ValidationResult:
     stdout: str = ""
     stderr: str = ""
 
+
 def validate_file_exists(path: Path, description: str = "File") -> ValidationResult:
     """Validate that a file exists and is non-empty.
 
@@ -75,21 +76,12 @@ def validate_file_exists(path: Path, description: str = "File") -> ValidationRes
     """
 
     if not path.exists():
-        return ValidationResult(
-            False,
-            f"{description} not found: {path}"
-        )
+        return ValidationResult(False, f"{description} not found: {path}")
 
     if path.stat().st_size == 0:
-        return ValidationResult(
-            False,
-            f"{description} exists: {path}"
-        )
+        return ValidationResult(False, f"{description} exists: {path}")
 
-    return ValidationResult(
-        True,
-        f"{description} exists: {path}"
-    )
+    return ValidationResult(True, f"{description} exists: {path}")
 
 
 def _run_validation_script(
@@ -112,9 +104,7 @@ def _run_validation_script(
     script_path = tests_dir / script_name
 
     if not script_path.exists():
-        return ValidationResult(
-            False, f"Validation script not found: {script_path}"
-        )
+        return ValidationResult(False, f"Validation script not found: {script_path}")
 
     cmd = [sys.executable, str(script_path)] + args
 
@@ -129,7 +119,11 @@ def _run_validation_script(
         if result.returncode == 0:
             message = result.stdout.strip()
         else:
-            message = result.stderr.strip() or result.stdout.strip() or f"Exit code: {result.returncode}"
+            message = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"Exit code: {result.returncode}"
+            )
 
         return ValidationResult(
             is_valid=(result.returncode == 0),
@@ -139,9 +133,7 @@ def _run_validation_script(
         )
 
     except subprocess.TimeoutExpired:
-        return ValidationResult(
-            False, f"Validation timed out after {timeout}s"
-        )
+        return ValidationResult(False, f"Validation timed out after {timeout}s")
     except Exception as e:
         return ValidationResult(False, f"Validation error: {e}")
 

@@ -41,22 +41,6 @@ import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
 
-# Global registry for test results (cleared after each test)
-_test_results: list["TestResult"] = []
-
-
-def _register_result(result: "TestResult") -> None:
-    """Register a test result for potential output display."""
-    _test_results.append(result)
-
-
-def _get_and_clear_results() -> list["TestResult"]:
-    """Get all registered results and clear the registry."""
-    global _test_results
-    results = _test_results.copy()
-    _test_results = []
-    return results
-
 ROCPROFSYS_ABORT_FAIL_REGEX = [
     r"### ERROR ###",
     r"unknown-hash=",
@@ -67,6 +51,7 @@ ROCPROFSYS_ABORT_FAIL_REGEX = [
     r"Exit code: [1-9]",
 ]
 
+
 def _safe_remove_file(filepath: Path) -> None:
     """Safely remove a file, ignoring errors."""
     try:
@@ -75,6 +60,7 @@ def _safe_remove_file(filepath: Path) -> None:
     except OSError:
         pass
 
+
 def _safe_remove_directory(dirpath: Path) -> None:
     """Safely remove a directory recursively, ignoring errors."""
     try:
@@ -82,6 +68,7 @@ def _safe_remove_directory(dirpath: Path) -> None:
             shutil.rmtree(dirpath)
     except OSError:
         pass
+
 
 @dataclass
 class TestResult:
@@ -108,7 +95,9 @@ class TestResult:
     extra_output: Optional[str] = None
     duration: Optional[float] = None
     pass_regex: Optional[list[str]] = None
-    fail_regex: list[str] = field(default_factory=lambda: ROCPROFSYS_ABORT_FAIL_REGEX.copy())
+    fail_regex: list[str] = field(
+        default_factory=lambda: ROCPROFSYS_ABORT_FAIL_REGEX.copy()
+    )
     _instrumented_files: list[Path] = field(default_factory=list)
 
     def _check_patterns(self) -> tuple[bool, Optional[str]]:
@@ -206,9 +195,7 @@ class TestResult:
     @property
     def timemory_files(self) -> list[Path]:
         """List of timemory output files."""
-        return list(self.output_dir.glob("*.json")) + list(
-            self.output_dir.glob("*.txt")
-        )
+        return list(self.output_dir.glob("*.json")) + list(self.output_dir.glob("*.txt"))
 
     def get_output_file(self, pattern: str) -> Optional[Path]:
         """Get an output file matching the given pattern.
@@ -221,22 +208,6 @@ class TestResult:
         """
         matches = list(self.output_dir.glob(pattern))
         return matches[0] if matches else None
-
-    def assert_file_exists(self, filename: str) -> Path:
-        """Assert that an output file exists and return its path.
-
-        Args:
-            filename: Name of the file to check
-
-        Returns:
-            Path to the file
-
-        Raises:
-            AssertionError: If file doesn't exist
-        """
-        path = self.output_dir / filename
-        assert path.exists(), f"Expected output file not found: {path}"
-        return path
 
     def cleanup(self, keep_on_failure: bool = True) -> None:
         """Clean up test output files.
@@ -271,6 +242,7 @@ class TestResult:
             for inst_file in self.output_dir.glob("*.inst"):
                 _safe_remove_file(inst_file)
 
+
 class BaseRunner(ABC):
     """Abstract base class for test runners."""
 
@@ -295,7 +267,9 @@ class BaseRunner(ABC):
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
         self.pass_regex = pass_regex
-        self.fail_regex = fail_regex if fail_regex is not None else ROCPROFSYS_ABORT_FAIL_REGEX.copy()
+        self.fail_regex = (
+            fail_regex if fail_regex is not None else ROCPROFSYS_ABORT_FAIL_REGEX.copy()
+        )
 
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
@@ -398,15 +372,15 @@ class BaseRunner(ABC):
                 fail_regex=self.fail_regex,
             )
 
-        # Register result for pytest output hooks
-        _register_result(test_result)
         return test_result
+
 
 class BaselineRunner(BaseRunner):
     """Run target without any instrumentation."""
 
     def build_command(self) -> list[str]:
         return [str(self.target_exe)] + self.run_args
+
 
 class SamplingRunner(BaseRunner):
     """Run target with sampling instrumentation."""
@@ -438,6 +412,7 @@ class SamplingRunner(BaseRunner):
             + ["--", str(self.target_exe)]
             + self.run_args
         )
+
 
 class BinaryRewriteRunner(BaseRunner):
     """Run binary rewrite instrumentation (two-phase: rewrite then run)."""
@@ -513,10 +488,11 @@ class BinaryRewriteRunner(BaseRunner):
 
     def build_command(self) -> list[str]:
         """Build command to run the instrumented binary."""
-        return (
-            [str(self.config.rocprofsys_run), "--", str(self.instrumented_exe)]
-            + self.run_args
-        )
+        return [
+            str(self.config.rocprofsys_run),
+            "--",
+            str(self.instrumented_exe),
+        ] + self.run_args
 
     def run(self) -> TestResult:
         """Execute full rewrite + run sequence.
@@ -532,7 +508,6 @@ class BinaryRewriteRunner(BaseRunner):
         """
         # First, perform rewrite
         rewrite_result = self.rewrite()
-        _register_result(rewrite_result)
         if not rewrite_result.success:
             return rewrite_result
 
@@ -549,6 +524,19 @@ class BinaryRewriteRunner(BaseRunner):
             if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") != "1":
                 run_result.cleanup_instrumented_binaries()
 
+        # Combine rewrite and run output
+        run_result.test_output = (
+            f"=== REWRITE PHASE ===\n{rewrite_result.test_output}\n"
+            f"=== RUN PHASE ===\n{run_result.test_output}"
+        )
+        extra_parts = []
+        if rewrite_result.extra_output:
+            extra_parts.append(f"=== REWRITE PHASE ===\n{rewrite_result.extra_output}")
+        if run_result.extra_output:
+            extra_parts.append(f"=== RUN PHASE ===\n{run_result.extra_output}")
+        if extra_parts:
+            run_result.extra_output = "\n".join(extra_parts)
+
         return run_result
 
     def cleanup(self) -> None:
@@ -563,6 +551,7 @@ class BinaryRewriteRunner(BaseRunner):
         if self.output_dir.exists():
             for inst_file in self.output_dir.glob("*.inst"):
                 _safe_remove_file(inst_file)
+
 
 class RuntimeInstrumentRunner(BaseRunner):
     """Run target with runtime instrumentation."""
@@ -596,14 +585,17 @@ class RuntimeInstrumentRunner(BaseRunner):
             + self.run_args
         )
 
+
 class SysRunRunner(BaseRunner):
     """Run target with rocprof-sys-run wrapper."""
 
     def build_command(self) -> list[str]:
-        return (
-            [str(self.config.rocprofsys_run), "--", str(self.target_exe)]
-            + self.run_args
-        )
+        return [
+            str(self.config.rocprofsys_run),
+            "--",
+            str(self.target_exe),
+        ] + self.run_args
+
 
 class SysBinaryRunner(BaseRunner):
     """Run a rocprof-sys binary
@@ -627,6 +619,7 @@ class SysBinaryRunner(BaseRunner):
         command: Optional full command to run instead of target
         **kwargs: Additional arguments passed to BaseRunner
     """
+
     # Marker for abort fail regex replacement
     ABORT_FAIL_REGEX_MARKER = "|ROCPROFSYS_ABORT_FAIL_REGEX"
 
@@ -645,7 +638,9 @@ class SysBinaryRunner(BaseRunner):
     ):
         # Regex validation
         if pass_regex and fail_regex:
-            fail_regex_str = "|".join(fail_regex) if isinstance(fail_regex, list) else str(fail_regex)
+            fail_regex_str = (
+                "|".join(fail_regex) if isinstance(fail_regex, list) else str(fail_regex)
+            )
             if self.ABORT_FAIL_REGEX_MARKER not in fail_regex_str:
                 raise ValueError(
                     f"Test has set pass and fail regexes but fail regex does not include "
@@ -758,5 +753,4 @@ class SysBinaryRunner(BaseRunner):
                 fail_regex=self.fail_regex,
             )
 
-        _register_result(test_result)
         return test_result

@@ -32,12 +32,13 @@ import os
 import sys
 import shutil
 from pathlib import Path
-from typing import Generator, Any
+from typing import Generator, Callable
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
+from pytest import StashKey
 
 from rocprofsys import (
     RocprofsysConfig,
@@ -46,9 +47,11 @@ from rocprofsys import (
     detect_gpu,
     lookup_gpu_category,
     _get_rocm_version,
-    _check_rocm_version,
+    _check_rocm_version_geq,
 )
-from rocprofsys.runners import _get_and_clear_results
+
+# Key for storing test results on pytest items
+_results_key: StashKey[list] = StashKey()
 
 
 # ============================================================================
@@ -63,54 +66,55 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Shows both stdout and stderr from runner commands even when tests pass (default: False)",
+        help="Show runner output on test pass",
     )
     group.addoption(
         "--no-output",
         action="store_true",
         default=False,
-        help="Suppress all output including failure details - show only pass/fail (default: False)",
+        help="Suppress all output including failure details",
     )
+    group.addoption(
+        "--show-output-on-subtest-fail",
+        action="store_true",
+        default=False,
+        help="Show runner output only when subtests fail",
+    )
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
+    config.addinivalue_line("markers", "gpu: mark test as requiring a GPU")
     config.addinivalue_line(
-        "markers", "gpu: mark test as requiring a GPU"
+        "markers",
+        "gpu_category_exclude(categories): exclude tests that require a specific GPU category (instinct, radeon, apu)",
     )
-    config.addinivalue_line(
-        "markers", "gpu_category_exclude(categories): exclude tests that require a specific GPU category (instinct, radeon, apu)"
-    )
-    config.addinivalue_line(
-        "markers", "mpi: mark test as requiring MPI"
-    )
-    config.addinivalue_line(
-        "markers", "rocm: mark test as requiring ROCm"
-    )
+    config.addinivalue_line("markers", "mpi: mark test as requiring MPI")
+    config.addinivalue_line("markers", "rocm: mark test as requiring ROCm")
     config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
     )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
     config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
+        "markers",
+        "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')",
     )
-    config.addinivalue_line(
-        "markers", "loops: mark test as testing loop instrumentation"
-    )
-    config.addinivalue_line(
-        "markers", "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')"
-    )
-    # Store --no-output flag for use in pytest_runtest_logreport
-    global _no_output_enabled
-    _no_output_enabled = config.getoption("--no-output", default=False)
+    # Register plugin to handle --no-output flag
+    config.pluginmanager.register(NoOutputPlugin(config), "no_output_plugin")
 
 
-_no_output_enabled = False
+class NoOutputPlugin:
+    """Plugin to suppress failure details when --no-output is specified."""
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    """Suppress failure details when --no-output is specified."""
-    if _no_output_enabled and report.failed:
-        # Use empty string instead of None to remain compatible with junitxml plugin
-        report.longrepr = ""
+    def __init__(self, config: pytest.Config):
+        self.no_output = config.getoption("--no-output", default=False)
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        if self.no_output and report.failed:
+            # Use empty string instead of None to remain compatible with junitxml plugin
+            report.longrepr = ""
 
 
 def pytest_collection_modifyitems(
@@ -118,12 +122,13 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
-    rocm_version = _get_rocm_version()
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
 
-    mpi_available = shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
+    mpi_available = (
+        shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
+    )
 
     for item in items:
         if "gpu" in item.keywords and not gpu_info.available:
@@ -136,14 +141,13 @@ def pytest_collection_modifyitems(
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
         if rocm_min_marker:
             min_version = rocm_min_marker.args[0] if rocm_min_marker.args else None
-            if min_version:
+            if min_version and not _check_rocm_version_geq(min_version):
+                rocm_version = _get_rocm_version()
                 if rocm_version is None:
-                    item.add_marker(pytest.mark.skip(reason="ROCm not found"))
-                elif not _check_rocm_version(min_version):
-                    current_str = f"{rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]}"
-                    item.add_marker(pytest.mark.skip(
-                        reason=f"ROCm {current_str} < required {min_version}"
-                    ))
+                    reason = "ROCm not found"
+                else:
+                    reason = f"ROCm {rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]} < required {min_version}"
+                item.add_marker(pytest.mark.skip(reason=reason))
 
         # Check gpu_category_exclude marker
         gpu_category_marker = item.get_closest_marker("gpu_category_exclude")
@@ -159,15 +163,18 @@ def pytest_collection_modifyitems(
             # Skip if any system GPU category is in the excluded list
             matching_categories = system_categories & excluded_categories
             if matching_categories:
-                item.add_marker(pytest.mark.skip(
-                    reason=f"Test does not support GPU categories {excluded_categories}, "
-                           f"system has {system_categories}"
-                ))
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"Test does not support GPU categories {excluded_categories}, "
+                        f"system has {system_categories}"
+                    )
+                )
 
 
 # ============================================================================
 # Session-scoped Fixtures
 # ============================================================================
+
 
 @pytest.fixture(scope="session")
 def use_rocpd(gpu_info: GPUInfo) -> bool:
@@ -183,10 +190,8 @@ def use_rocpd(gpu_info: GPUInfo) -> bool:
         return False
     if not gpu_info.available:
         return False
-    rocm_version = _get_rocm_version()
-    if rocm_version is None:
-        return False
-    return rocm_version >= (7, 0, 0)
+    return _check_rocm_version_geq("7.0")
+
 
 @pytest.fixture(scope="session")
 def use_perfetto() -> bool:
@@ -200,9 +205,11 @@ def use_perfetto() -> bool:
         return False
     try:
         import perfetto  # noqa
+
         return True
     except ImportError:
         return False
+
 
 @pytest.fixture(scope="session")
 def rocprof_config() -> RocprofsysConfig:
@@ -222,10 +229,12 @@ def gpu_info() -> GPUInfo:
     """
     return detect_gpu()
 
+
 @pytest.fixture(scope="session")
 def root_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to the rocprofiler-systems root directory (or install directory)."""
     return rocprof_config.rocprofsys_root_dir
+
 
 @pytest.fixture(scope="session")
 def build_dir(rocprof_config: RocprofsysConfig) -> Path:
@@ -238,111 +247,12 @@ def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to tests directory."""
     return rocprof_config.rocprofsys_tests_dir
 
+
 @pytest.fixture(scope="session")
 def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to validation rules directory."""
     return rocprof_config.rocpd_validation_rules
 
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
-    """Hook to display runner output after each test.
-
-    Output is displayed:
-    - On test failure: Always prints both stdout and stderr
-    - With --show-output: Shows both stdout and stderr
-    - With --no-output: Do not show any output from runner commands
-
-    This hook automatically captures output from all BaseRunner.run() calls.
-    """
-    outcome = yield
-
-    # Get results registered during this test
-    results = _get_and_clear_results()
-    if not results:
-        return
-
-    no_output = item.config.getoption("--no-output", default=False)
-    if no_output:
-        return
-
-    test_failed = outcome.excinfo is not None
-    show_output = item.config.getoption("--show-output", default=False)
-
-    # Always show output on failure, otherwise respect flags
-    if not test_failed and not show_output:
-        return
-
-    for result in results:
-        cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
-
-        if cmd_str is not None and cmd_str != "":
-            print(f"\n{'='*70}")
-            print(f"Command: {cmd_str}")
-            print(f"{'='*70}")
-
-        test_output = getattr(result, "test_output", "")
-        extra_output = getattr(result, "extra_output", "")
-
-        if test_output is not None and test_output != "":
-            print(f"--- TEST OUTPUT ---\n{test_output}")
-        if extra_output is not None and extra_output != "":
-            print(f"--- EXTRA OUTPUT ---\n{extra_output}")
-
-
-# Debug helper
-def pytest_report_header(config: pytest.Config) -> list[str]:
-    """Add test configuration to pytest header output."""
-    try:
-        rocprof_config = discover_build_config()
-    except Exception as e:
-        return [f"rocprofiler-systems: Configuration error - {e}"]
-
-    try:
-        gpuInfo = detect_gpu()
-    except Exception as e:
-        return [f"rocprofiler-systems: GPU detection error - {e}"]
-
-    rocm_ver = _get_rocm_version()
-    rocm_ver_str = f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
-
-    lines = [
-        "",
-        "=" * 70,
-        "Test Configuration:",
-        "=" * 70,
-        f"  ROCm version:   {rocm_ver_str}",
-        f"  ROCm path:      {rocprof_config.rocm_path}",
-        f"  Is installed:   {rocprof_config.is_installed}",
-        "-" * 70,
-        "GPU Information:",
-        f"  Available:      {gpuInfo.available}",
-        f"  Architectures:  {gpuInfo.architectures}",
-        f"  Device count:   {gpuInfo.device_count}",
-        f"  Is Navi:        {gpuInfo.is_navi}",
-        f"  Is Mi300:       {gpuInfo.is_mi300}",
-        "-" * 70,
-        "Directories:",
-        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
-        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
-        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
-        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
-        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
-        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
-        f"  Output dir:     {rocprof_config.test_output_dir}",
-        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
-        "-" * 70,
-        "Executables:",
-        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
-        f"  Run:            {rocprof_config.rocprofsys_run}",
-        f"  Sample:         {rocprof_config.rocprofsys_sample}",
-        f"  Avail:          {rocprof_config.rocprofsys_avail}",
-        f"  Causal:         {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:       {rocprof_config.mpiexec}",
-        "=" * 70,
-        "",
-    ]
-    return lines
 
 # ============================================================================
 # Module-scoped Fixtures
@@ -363,6 +273,92 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 # ============================================================================
 # Function-scoped Fixtures
 # ============================================================================
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _result_output(request):
+    """Auto-use fixture to handle result collection and --show-output display.
+
+    Output display logic:
+    - Default (no flags): Test fails → pytest shows test_output. No extra printing.
+    - --show-output-on-subtest-fail: Print test_output only when subtests fail
+    - --show-output: Implies --show-output-on-subtest-fail, plus prints on test pass
+    - --no-output: Suppresses all output
+
+    Main test body failures are always handled by pytest's captured output.
+    """
+    results = []
+    request.node.stash[_results_key] = results
+    yield
+    if not results:
+        return
+
+    show_output = request.config.getoption("--show-output", default=False)
+    show_on_subtest_fail = request.config.getoption(
+        "--show-output-on-subtest-fail", default=False
+    )
+    if show_output:
+        show_on_subtest_fail = True
+    if not show_output and not show_on_subtest_fail:
+        return
+
+    # Check test status
+    test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
+
+    # Check if the test even uses subtests fixture
+    # If subtests fixture is not used, there can be no subtest failures
+    uses_subtests = False
+    if hasattr(request, "fixturenames"):
+        uses_subtests = "subtests" in request.fixturenames
+
+    # Detect probable subtest failures (heuristic: test uses subtests, runners passed, but test failed)
+    has_subtest_failures = False
+    if uses_subtests and test_failed:
+        all_results_succeeded = all(getattr(r, "success", True) for r in results)
+        if all_results_succeeded:
+            has_subtest_failures = True
+
+    should_show = False
+    if has_subtest_failures and show_on_subtest_fail:
+        # Actual subtest failed - show output
+        should_show = True
+    elif not test_failed and show_output:
+        # Test passed and --show-output is set - show output
+        should_show = True
+    # Main test body failure (no subtests): pytest handles it via captured output, don't duplicate
+    if not should_show:
+        return
+
+    for result in results:
+        cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
+        if cmd_str:
+            print(f"\n{'='*70}")
+            print(f"Command: {cmd_str}")
+            print(f"{'='*70}")
+
+        test_output = getattr(result, "test_output", "")
+        extra_output = getattr(result, "extra_output", "")
+
+        if test_output:
+            print(f"--- TEST OUTPUT ---\n{test_output}")
+        if extra_output:
+            print(f"--- EXTRA OUTPUT ---\n{extra_output}")
+
+
+@pytest.fixture
+def collect_result(request) -> Callable:
+    """Fixture to collect test results for --show-output display.
+
+    Usage in tests:
+        result = runner.run()
+        collect_result(result)
+        assert result.success, f"Failed: {result.failure_reason}"
+    """
+
+    def _collect(result):
+        request.node.stash[_results_key].append(result)
+
+    return _collect
 
 
 @pytest.fixture
@@ -407,6 +403,7 @@ def test_output_dir(
 def base_env(rocprof_config: RocprofsysConfig) -> dict[str, str]:
     """Base environment variables for test execution."""
     return rocprof_config.get_base_environment()
+
 
 @pytest.fixture
 def flat_env(base_env: dict[str, str]) -> dict[str, str]:
@@ -575,7 +572,9 @@ def cleanup_temp_files(rocprof_config: RocprofsysConfig):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_module_temp_files(rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest):
+def cleanup_module_temp_files(
+    rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest
+):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
     Execution Order:
@@ -593,9 +592,6 @@ def cleanup_module_temp_files(rocprof_config: RocprofsysConfig, request: pytest.
         return
 
     import glob
-
-    # Get module name for targeted cleanup
-    module_name = request.module.__name__ if hasattr(request, "module") else ""
 
     # Clean up instrumented binaries in build directory
     for pattern in ["*.inst", "*.inst.orig"]:
@@ -623,7 +619,9 @@ def cleanup_instrumented_binary(
     they are cleaned up after the test completes.
     """
     # Track files before test
-    pre_existing = set(test_output_dir.glob("*.inst")) if test_output_dir.exists() else set()
+    pre_existing = (
+        set(test_output_dir.glob("*.inst")) if test_output_dir.exists() else set()
+    )
 
     yield
 
@@ -652,3 +650,60 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+
+
+# Debug helper
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Add test configuration to pytest header output."""
+    try:
+        rocprof_config = discover_build_config()
+    except Exception as e:
+        return [f"rocprofiler-systems: Configuration error - {e}"]
+
+    try:
+        gpuInfo = detect_gpu()
+    except Exception as e:
+        return [f"rocprofiler-systems: GPU detection error - {e}"]
+
+    rocm_ver = _get_rocm_version()
+    rocm_ver_str = (
+        f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
+    )
+
+    lines = [
+        "",
+        "=" * 70,
+        "Test Configuration:",
+        "=" * 70,
+        f"  ROCm version:   {rocm_ver_str}",
+        f"  ROCm path:      {rocprof_config.rocm_path}",
+        f"  Is installed:   {rocprof_config.is_installed}",
+        "-" * 70,
+        "GPU Information:",
+        f"  Available:      {gpuInfo.available}",
+        f"  Architectures:  {gpuInfo.architectures}",
+        f"  Device count:   {gpuInfo.device_count}",
+        f"  Is Navi:        {gpuInfo.is_navi}",
+        f"  Is Mi300:       {gpuInfo.is_mi300}",
+        "-" * 70,
+        "Directories:",
+        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
+        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
+        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
+        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
+        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
+        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
+        f"  Output dir:     {rocprof_config.test_output_dir}",
+        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
+        "-" * 70,
+        "Executables:",
+        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
+        f"  Run:            {rocprof_config.rocprofsys_run}",
+        f"  Sample:         {rocprof_config.rocprofsys_sample}",
+        f"  Avail:          {rocprof_config.rocprofsys_avail}",
+        f"  Causal:         {rocprof_config.rocprofsys_causal}",
+        f"  MPI exec:       {rocprof_config.mpiexec}",
+        "=" * 70,
+        "",
+    ]
+    return lines

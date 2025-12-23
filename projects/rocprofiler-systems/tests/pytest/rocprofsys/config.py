@@ -28,6 +28,7 @@ import tempfile
 from typing import Optional
 import re
 
+
 @dataclass
 class RocprofsysConfig:
     """Configuration for rocprofiler-systems test execution
@@ -45,9 +46,12 @@ class RocprofsysConfig:
         - rocm_path: Path to ROCm installation directory
         - rocprofsys_lib_dir: Path to rocprofsys library directory
         - rocprofsys_bin_dir: Path to rocprofsys binary directory
-        - rocprofsys_examples_bin_dir: Path to rocprofsys examples binary directory
-        - rocprofsys_tests_bin_dir: Path to rocprofsys tests binary directory
+        - rocprofsys_examples_dir:
+            In build mode, this is the root of the build directory.
+            In install mode, this is the examples/ directory.
+        - rocprofsys_tests_dir: Path to rocprofsys tests directory
         - rocpd_validation_rules: Path to rocprofiler-systems rocpd validation rules directory
+        - mpiexec: Path to MPI launcher executable
         - is_installed: Whether this is an installed configuration
     """
 
@@ -90,8 +94,6 @@ class RocprofsysConfig:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries."""
         paths = [str(self.rocprofsys_lib_dir)]
 
-        # Add existing LD_LIBRARY_PATH first (before system ROCm paths)
-        # This ensures user-specified paths (e.g., TheRock builds) take precedence
         existing = os.environ.get("LD_LIBRARY_PATH", "")
         if existing:
             paths.append(existing)
@@ -108,12 +110,12 @@ class RocprofsysConfig:
         When is_installed is True, searches in the following order:
         1. rocprofsys_root_dir/name (build directory layout)
         2. rocprofsys_examples_dir/name/name (build directory layout)
-        3. PATH lookup via shutil.which
+        3. PATH lookup
 
         When is_installed is False, searches in the following order:
         1. rocprofsys_examples_dir/name
         2. rocprofsys_bin_dir/name
-        3. PATH lookup via shutil.which
+        3. PATH lookup
 
         Args:
             name: Name of the target executable
@@ -210,6 +212,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_CONFIG_FILE": "",
         }
 
+
 def _find_rocm_path() -> Optional[Path]:
     """Find ROCm installation path."""
     for candidate in [
@@ -232,7 +235,7 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     if not rocm_path:
         return None
 
-    # Check .info/version file (standard location)
+    # Check .info/version file
     version_file = rocm_path / ".info" / "version"
     if not version_file.exists():
         # Try alternative location
@@ -241,7 +244,6 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     if version_file.exists():
         try:
             version_str = version_file.read_text().strip()
-            # Parse version like "6.2.0" or "6.2.0-12345"
             match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
             if match:
                 return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
@@ -251,7 +253,7 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     return None
 
 
-def _check_rocm_version(min_version: str) -> bool:
+def _check_rocm_version_geq(min_version: str) -> bool:
     """Check if installed ROCm version meets minimum requirement.
 
     Args:
@@ -273,6 +275,7 @@ def _check_rocm_version(min_version: str) -> bool:
 
     return current >= min_tuple
 
+
 def _find_mpiexec() -> Optional[Path]:
     """Find MPI laucnher executable."""
     for candidate in ["mpiexec", "mpirun"]:
@@ -280,6 +283,7 @@ def _find_mpiexec() -> Optional[Path]:
         if path:
             return Path(path)
     return None
+
 
 def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
     """Find an executable in search paths or via PATH."""
@@ -322,11 +326,17 @@ def discover_install_config(
                 _find_rocm_path(),
                 Path("/usr/local"),
                 Path("/usr"),
-                Path("/opt/rocprofiler-systems"), # Standard install location from README.md
+                Path(
+                    "/opt/rocprofiler-systems"
+                ),  # Standard install location from README.md
             ]:
-                if (candidate
+                if (
+                    candidate
                     and (candidate / "share" / "rocprofiler-systems" / "tests").is_dir()
-                    and (candidate / "share" / "rocprofiler-systems" / "examples").is_dir()):
+                    and (
+                        candidate / "share" / "rocprofiler-systems" / "examples"
+                    ).is_dir()
+                ):
                     install_dir = candidate
                     break
 
@@ -358,8 +368,8 @@ def discover_install_config(
 
     rocm_path = _find_rocm_path()
     mpiexec = _find_mpiexec()
-    search_paths = [bin_dir]
 
+    search_paths = [bin_dir]
     rocprof_instrument = _find_executable("rocprof-sys-instrument", search_paths)
     rocprof_sample = _find_executable("rocprof-sys-sample", search_paths)
     rocprof_run = _find_executable("rocprof-sys-run", search_paths)
@@ -400,6 +410,7 @@ def discover_install_config(
         mpiexec=mpiexec,
         is_installed=True,
     )
+
 
 def discover_build_config(
     build_dir: Optional[Path] = None,
@@ -463,9 +474,7 @@ def discover_build_config(
             cmake_cache = build_dir / "CMakeCache.txt"
             if cmake_cache.exists():
                 content = cmake_cache.read_text()
-                match = re.search(
-                    r"CMAKE_HOME_DIRECTORY:INTERNAL=(.+)", content
-                )
+                match = re.search(r"CMAKE_HOME_DIRECTORY:INTERNAL=(.+)", content)
                 if match:
                     source_dir = Path(match.group(1))
 
@@ -477,7 +486,12 @@ def discover_build_config(
                     parent = source_dir.parent
                     if parent == source_dir:
                         break
-                    if source_dir.name in ("build", "debug", "release", "rocprof-sys-build"):
+                    if source_dir.name in (
+                        "build",
+                        "debug",
+                        "release",
+                        "rocprof-sys-build",
+                    ):
                         source_dir = parent
                     else:
                         break
@@ -498,7 +512,6 @@ def discover_build_config(
     lib_dir = build_dir / "lib"
 
     search_paths = [bin_dir]
-
     rocprof_instrument = _find_executable("rocprof-sys-instrument", search_paths)
     rocprof_sample = _find_executable("rocprof-sys-sample", search_paths)
     rocprof_run = _find_executable("rocprof-sys-run", search_paths)
@@ -532,7 +545,7 @@ def discover_build_config(
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
-        rocprofsys_examples_dir=build_dir, # Example binaries are in root of build directory
+        rocprofsys_examples_dir=build_dir,  # Example binaries are in root of build directory
         rocprofsys_tests_dir=source_dir / "tests",
         rocpd_validation_rules=source_dir / "tests" / "rocpd-validation-rules",
         test_output_dir=build_dir / "rocprof-sys-pytest-output",

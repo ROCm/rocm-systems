@@ -7,7 +7,7 @@
 pytest>=7.4.0
 pytest-subtests>=0.10.0,<0.14.0
 pytest-timeout>=2.0.0
-pytest-xdist>=3.0.0  # For parallel test execution
+# pytest-xdist>=3.0.0  # Currently disabled
 
 # Optional: Coverage reporting
 pytest-cov>=4.0.0

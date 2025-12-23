@@ -65,6 +65,7 @@ class GPUInfo:
         """Get expected counter output files based on architecture."""
         return [f"rocprof-device-0-{name}.txt" for name in self.counter_names]
 
+
 @lru_cache(maxsize=1)
 def detect_gpu() -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
@@ -84,34 +85,37 @@ def detect_gpu() -> GPUInfo:
                 timeout=30,
             )
             if result.returncode == 0:
-                all_entries = result.stdout.strip().split('\n')
+                all_entries = result.stdout.strip().split("\n")
                 # gfx000 is the cpu, remove it
-                device_count = sum(1 for entry in all_entries if entry and entry != "gfx000")
-                architectures = list(set(entry for entry in all_entries if entry and entry != "gfx000"))
+                device_count = sum(
+                    1 for entry in all_entries if entry and entry != "gfx000"
+                )
+                architectures = list(
+                    set(entry for entry in all_entries if entry and entry != "gfx000")
+                )
         except (subprocess.TimeoutExpired, OSError):
             pass
 
     navi = any(is_navi_architecture(arch) for arch in architectures)
-    if (not navi):
+    if not navi:
         mi300 = any(is_mi300_architecture(arch) for arch in architectures)
     else:
         mi300 = False
 
     return GPUInfo(
-        available = device_count > 0,
-        architectures = sorted(architectures),
-        device_count = device_count,
-        is_navi = navi,
-        is_mi300 = mi300,
+        available=device_count > 0,
+        architectures=sorted(architectures),
+        device_count=device_count,
+        is_navi=navi,
+        is_mi300=mi300,
     )
+
 
 def lookup_gpu_category(arch: str) -> list[str]:
     """Lookup the GPU category for an architecture.
 
-    Note: Some architectures (e.g., gfx906) span multiple categories.
-
     Args:
-        arch: Architecture string (e.g., 'gfx940', 'gfx94a')
+        arch: Architecture string (e.g., 'gfx940')
 
     Returns:
         List of GPU categories the architecture belongs to (instinct, radeon, apu)
@@ -126,8 +130,8 @@ def lookup_gpu_category(arch: str) -> list[str]:
     ]
 
     # Also includes PRO GPUs
+    # We ignore Radeon VII (gfx906)
     radeon_list = [
-        "gfx906",  # Radeon VII
         "gfx1010",
         "gfx1011",
         "gfx1012",
@@ -166,6 +170,7 @@ def lookup_gpu_category(arch: str) -> list[str]:
 
     return categories
 
+
 def get_target_gpu_arch(target_path: Path) -> list[str]:
     """Uses llvm-objdump --offloading to get the GPU architectures the binary was compiled for.
 
@@ -186,8 +191,8 @@ def get_target_gpu_arch(target_path: Path) -> list[str]:
                 timeout=30,
             )
             if result.returncode == 0:
-                for line in result.stdout.strip().split('\n'):
-                    match = re.search(r'processor:\s*(gfx[0-9a-fA-F]+)', line)
+                for line in result.stdout.strip().split("\n"):
+                    match = re.search(r"processor:\s*(gfx[0-9a-fA-F]+)", line)
                     if match:
                         target_archs.append(match.group(1))
         except (subprocess.TimeoutExpired, OSError):
@@ -195,13 +200,14 @@ def get_target_gpu_arch(target_path: Path) -> list[str]:
 
     return target_archs
 
+
 def is_navi_architecture(arch: str) -> bool:
     """Check if an architecture string represents NAVI GPU.
 
     NAVI includes gfx10xx, gfx11xx, and gfx12xx architectures.
 
     Args:
-        arch: Architecture string (e.g., 'gfx940', 'gfx94a')
+        arch: Architecture string (e.g., 'gfx940')
 
     Returns:
         True if NAVI architecture
@@ -209,11 +215,12 @@ def is_navi_architecture(arch: str) -> bool:
     navi_matches = re.match(r"gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]", arch)
     return navi_matches is not None
 
+
 def is_mi300_architecture(arch: str) -> bool:
     """Detect if the GPU architecture is MI300 series.
 
     Args:
-        arch: Architecture string (e.g., 'gfx940', 'gfx94a')
+        arch: Architecture string (e.g., 'gfx940')
 
     Returns:
         True if MI300 architecture

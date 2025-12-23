@@ -37,6 +37,7 @@ from rocprofsys import (
 # HIP stream tests
 # =============================================================================
 
+
 @pytest.mark.gpu
 @pytest.mark.rocm_min_version("7.0")
 class TestTransposeGroupByQueue:
@@ -47,8 +48,8 @@ class TestTransposeGroupByQueue:
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         base_env: dict[str, str],
+        collect_result,
     ):
-        """Test transpose with group by queue"""
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "YES"
         try:
@@ -60,17 +61,20 @@ class TestTransposeGroupByQueue:
                 timeout=120,
             )
         except FileNotFoundError:
-            pytest.skip("transpose not built")
+            pytest.skip("transpose binary not found")
+
         result = runner.run()
-        assert result.success, f"Sampling failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"Sampling failed: {result.test_output}")
 
     def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         base_env: dict[str, str],
+        collect_result,
     ):
-        """Test transpose with group by queue"""
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "YES"
         try:
@@ -82,22 +86,24 @@ class TestTransposeGroupByQueue:
                 timeout=120,
             )
         except FileNotFoundError:
-            pytest.skip("transpose not built")
+            pytest.skip("transpose binary not found")
+
         result = runner.run()
-        assert result.success, f"Sys run failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"Sys run failed: {result.test_output}")
+
 
 @pytest.mark.gpu
 @pytest.mark.rocm_min_version("7.0")
 class TestTransposeGroupByStream:
-    """Tests for transpose with group by stream"""
-
     def test_sampling(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         base_env: dict[str, str],
+        collect_result,
     ):
-        """Test transpose with group by stream"""
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "NO"
         try:
@@ -109,17 +115,20 @@ class TestTransposeGroupByStream:
                 timeout=120,
             )
         except FileNotFoundError:
-            pytest.skip("transpose not built")
+            pytest.skip("transpose binary not found")
+
         result = runner.run()
-        assert result.success, f"Sampling failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"Sampling failed: {result.test_output}")
 
     def test_sys_run(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
         base_env: dict[str, str],
+        collect_result,
     ):
-        """Test transpose with group by stream"""
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "NO"
         try:
@@ -131,6 +140,9 @@ class TestTransposeGroupByStream:
                 timeout=120,
             )
         except FileNotFoundError:
-            pytest.skip("transpose not built")
+            pytest.skip("transpose binary not found")
+
         result = runner.run()
-        assert result.success, f"Sys run failed: {result.test_output}"
+        collect_result(result)
+        if not result.success:
+            pytest.fail(f"Sys run failed: {result.test_output}")
