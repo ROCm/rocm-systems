@@ -344,7 +344,11 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_AMDGPU_EXPORT,
   VHSAKMT_CCMD_MEMORY_AMDGPU_VA_OP,
   VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
+  VHSAKMT_CCMD_MEMORY_SHARE_MEMORY,
+  VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
 };
+
+#define VHSAKMT_MEMORY_MAX_NODES 32
 
 typedef struct _memory_req_alloc_args {
   uint32_t PreferredNode;
@@ -419,6 +423,18 @@ typedef struct _memory_export_dmabuf_args {
 } memory_export_dmabuf_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_export_dmabuf_args)
 
+typedef struct _memory_share_memory_args {
+  uint64_t MemoryAddress;
+  uint64_t MemorySizeInBytes;
+} memory_share_memory_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_share_memory_args)
+
+typedef struct _memory_register_shared_handle_args {
+  HsaSharedMemoryHandle SharedMemoryHandle;
+  uint64_t NumberOfNodes;
+} memory_register_shared_handle_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_register_shared_handle_args)
+
 struct vhsakmt_ccmd_memory_req {
   struct vhsakmt_ccmd_req hdr;
   union {
@@ -434,6 +450,8 @@ struct vhsakmt_ccmd_memory_req {
     memory_amdgpu_import_args amdgpu_import_args;
     memory_amdgpu_export_args amdgpu_export_args;
     memory_amdgpu_va_op_args amdgpu_va_op_args;
+    memory_share_memory_args share_memory_args;
+    memory_register_shared_handle_args register_shared_handle_args;
   };
   uint64_t blob_id;
   uint32_t type;
@@ -462,6 +480,17 @@ typedef struct _vhsakmt_ccmd_memory_amdgpu_import_rsp
 }vhsakmt_ccmd_memory_amdgpu_import_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_amdgpu_import_rsp)
 
+typedef struct _vhsakmt_ccmd_memory_share_memory_rsp {
+  HsaSharedMemoryHandle SharedMemoryHandle;
+} vhsakmt_ccmd_memory_share_memory_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_share_memory_rsp)
+
+typedef struct _vhsakmt_ccmd_memory_register_shared_handle_rsp {
+  uint64_t memory_handle;
+  uint64_t size;
+} vhsakmt_ccmd_memory_register_shared_handle_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_register_shared_handle_rsp)
+
 struct vhsakmt_ccmd_memory_rsp {
   struct vhsakmt_ccmd_rsp hdr;
   int32_t ret;
@@ -473,6 +502,8 @@ struct vhsakmt_ccmd_memory_rsp {
     uint64_t available_bytes;
     vhsakmt_ccmd_memory_amdgpu_import_rsp amdgpu_import_rsp;
     uint32_t shared_handle;
+    vhsakmt_ccmd_memory_share_memory_rsp share_memory_rsp;
+    vhsakmt_ccmd_memory_register_shared_handle_rsp register_shared_handle_rsp;
   };
   uint8_t payload[];
 };

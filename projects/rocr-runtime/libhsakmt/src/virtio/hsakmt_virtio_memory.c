@@ -1139,3 +1139,93 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtExportDMABufHandle(void* MemoryAddress, HSAuint64
 
   return r;
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtShareMemory(void* MemoryAddress, HSAuint64 SizeInBytes,
+                                           HsaSharedMemoryHandle* SharedMemoryHandle) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_SHARE_MEMORY,
+      .share_memory_args =
+          {
+              .MemoryAddress = (uint64_t)MemoryAddress,
+              .MemorySizeInBytes = SizeInBytes,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, MemoryAddress);
+  if (!bo) return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  req.res_id = bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(SharedMemoryHandle, &rsp->share_memory_rsp.SharedMemoryHandle,
+         sizeof(HsaSharedMemoryHandle));
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
+    const HsaSharedMemoryHandle* SharedMemoryHandle, void** MemoryAddress, HSAuint64* SizeInBytes,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (NumberOfNodes > VHSAKMT_MEMORY_MAX_NODES) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(
+          MEMORY, sizeof(struct vhsakmt_ccmd_memory_req) + NumberOfNodes * sizeof(NodeArray)),
+      .type = VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
+      .blob_id = vhsakmt_atomic_inc_return(&dev->next_blob_id),
+      .register_shared_handle_args = {
+          .NumberOfNodes = NumberOfNodes,
+      }};
+  int r;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  memcpy(req.payload, NodeArray, NumberOfNodes * sizeof(NodeArray));
+  memcpy(&req.register_shared_handle_args.SharedMemoryHandle, SharedMemoryHandle,
+         sizeof(HsaSharedMemoryHandle));
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  if (!rsp->register_shared_handle_rsp.memory_handle || !rsp->register_shared_handle_rsp.size)
+    return -ENOMEM;
+
+  // treat as VHSA_BO_KFD_MEM for shared handle memory
+  r = vhsakmt_init_host_blob(dev, rsp->register_shared_handle_rsp.size, VIRTGPU_BLOB_MEM_HOST3D,
+                             VIRTGPU_BLOB_FLAG_USE_MAPPABLE, req.blob_id, VHSA_BO_KFD_MEM,
+                             (void*)rsp->register_shared_handle_rsp.memory_handle, &bo);
+  if (r) return r;
+
+  r = vhsakmt_bo_cpu_map(bo, &bo->cpu_addr, bo->host_addr);
+  if (r) {
+    free(bo);
+    return -ENOMEM;
+  }
+
+  *MemoryAddress = bo->cpu_addr;
+  *SizeInBytes = rsp->register_shared_handle_rsp.size;
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle* SharedMemoryHandle,
+                                                    void** MemoryAddress, HSAuint64* SizeInBytes) {
+  return vhsaKmtRegisterSharedHandleToNodes(SharedMemoryHandle, MemoryAddress, SizeInBytes, 0,
+                                            NULL);
+}

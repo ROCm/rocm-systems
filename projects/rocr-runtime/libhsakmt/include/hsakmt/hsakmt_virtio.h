@@ -139,6 +139,13 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetRuntimeCapabilities(HSAuint32* caps_mask);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtModelEnabled(bool* enable);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtOpenSMI(HSAuint32 NodeId, int* fd);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtSetXNACKMode(HSAint32 enable);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtShareMemory(void* MemoryAddress, HSAuint64 SizeInBytes,
+                                           HsaSharedMemoryHandle* SharedMemoryHandle);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
+    const HsaSharedMemoryHandle* SharedMemoryHandle, void** MemoryAddress, HSAuint64* SizeInBytes,
+    HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle* SharedMemoryHandle,
+                                                    void** MemoryAddress, HSAuint64* SizeInBytes);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
