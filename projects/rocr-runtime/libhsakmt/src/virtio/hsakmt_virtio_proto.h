@@ -346,9 +346,13 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
   VHSAKMT_CCMD_MEMORY_SHARE_MEMORY,
   VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
+  VHSAKMT_CCMD_MEMORY_SET_MEM_POLICY,
+  VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
+  VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
 };
 
 #define VHSAKMT_MEMORY_MAX_NODES 32
+#define VHSAKMT_MEMORY_MAX_NATTR 32
 
 typedef struct _memory_req_alloc_args {
   uint32_t PreferredNode;
@@ -435,6 +439,24 @@ typedef struct _memory_register_shared_handle_args {
 } memory_register_shared_handle_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_register_shared_handle_args)
 
+typedef struct _memory_set_mem_policy_args {
+  uint32_t Node;
+  uint32_t DefaultPolicy;
+  uint32_t AlternatePolicy;
+  uint32_t pad;
+  uint64_t MemoryAddressAlternate;
+  uint64_t MemorySizeInBytes;
+} memory_set_mem_policy_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_set_mem_policy_args)
+
+typedef struct _memory_svm_attr_args {
+  uint64_t start_addr;
+  uint64_t size;
+  uint32_t nattr;
+  uint32_t pad;
+} memory_svm_attr_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_svm_attr_args)
+
 struct vhsakmt_ccmd_memory_req {
   struct vhsakmt_ccmd_req hdr;
   union {
@@ -452,6 +474,8 @@ struct vhsakmt_ccmd_memory_req {
     memory_amdgpu_va_op_args amdgpu_va_op_args;
     memory_share_memory_args share_memory_args;
     memory_register_shared_handle_args register_shared_handle_args;
+    memory_set_mem_policy_args set_mem_policy_args;
+    memory_svm_attr_args svm_attr_args;
   };
   uint64_t blob_id;
   uint32_t type;

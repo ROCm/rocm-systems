@@ -146,6 +146,17 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandleToNodes(
     HSAuint64 NumberOfNodes, HSAuint32* NodeArray);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle* SharedMemoryHandle,
                                                     void** MemoryAddress, HSAuint64* SizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryUserData(const void* Pointer, void* UserData);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryPolicy(HSAuint32 Node, HSAuint32 DefaultPolicy,
+                                               HSAuint32 AlternatePolicy,
+                                               void* MemoryAddressAlternate,
+                                               HSAuint64 MemorySizeInBytes);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMSetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReplaceAsanHeaderPage(void* addr);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReturnAsanHeaderPage(void* addr);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,

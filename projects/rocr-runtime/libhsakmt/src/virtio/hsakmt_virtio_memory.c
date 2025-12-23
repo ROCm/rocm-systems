@@ -1229,3 +1229,124 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle*
   return vhsaKmtRegisterSharedHandleToNodes(SharedMemoryHandle, MemoryAddress, SizeInBytes, 0,
                                             NULL);
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryPolicy(HSAuint32 Node, HSAuint32 DefaultPolicy,
+                                               HSAuint32 AlternatePolicy,
+                                               void* MemoryAddressAlternate,
+                                               HSAuint64 MemorySizeInBytes) {
+  CHECK_VIRTIO_KFD_OPEN();
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_SET_MEM_POLICY,
+      .set_mem_policy_args = {
+          .Node = Node,
+          .DefaultPolicy = DefaultPolicy,
+          .AlternatePolicy = AlternatePolicy,
+          .MemoryAddressAlternate = (uint64_t)MemoryAddressAlternate,
+          .MemorySizeInBytes = MemorySizeInBytes,
+      }};
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSetMemoryUserData(const void* Pointer, void* UserData) {
+  CHECK_VIRTIO_KFD_OPEN();
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo = vhsakmt_find_bo_by_addr(dev, VHSA_UINT64_TO_VPTR(Pointer));
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+
+  pthread_mutex_lock(&dev->bo_handles_mutex);
+  bo->user_data = UserData;
+  pthread_mutex_unlock(&dev->bo_handles_mutex);
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (nattr > VHSAKMT_MEMORY_MAX_NATTR) return -EINVAL;
+
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  vhsakmt_bo_handle bo;
+  size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  size_t rsp_len = sizeof(struct vhsakmt_ccmd_memory_rsp) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
+      .type = VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
+      .svm_attr_args =
+          {
+              .start_addr = (uint64_t)start_addr,
+              .size = size,
+              .nattr = nattr,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, start_addr);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  req.res_id = bo->real.res_id;
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, rsp_len);
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMSetAttr(void* start_addr, HSAuint64 size, unsigned int nattr,
+                                          HSA_SVM_ATTRIBUTE* attrs) {
+  CHECK_VIRTIO_KFD_OPEN();
+  if (nattr > VHSAKMT_MEMORY_MAX_NATTR) return -EINVAL;
+  vhsakmt_device_handle dev = vhsakmt_dev();
+  vhsakmt_bo_handle bo;
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
+      .type = VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
+      .svm_attr_args =
+          {
+              .start_addr = (uint64_t)start_addr,
+              .size = size,
+              .nattr = nattr,
+          },
+  };
+
+  bo = vhsakmt_find_bo_by_addr(dev, start_addr);
+  if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
+  req.res_id = bo->real.res_id;
+
+  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
+  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  return rsp->ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReplaceAsanHeaderPage(void* addr) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtReturnAsanHeaderPage(void* addr) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}

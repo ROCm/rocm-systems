@@ -155,6 +155,8 @@ struct vhsakmt_bo {
     int refcount;
     pthread_mutex_t lock;  /* protects imported, import_size and refcount operations */
   } amdgpu_bo;
+
+  void* user_data;
 };
 
 /*hsakmt_virtio_memory.c*/
