@@ -1537,6 +1537,29 @@ queue_fail:
 }
 
 /*
+ * Check if Test is being ran inside of a container.
+ *
+ */
+
+inline bool IsRunningInContainer () {
+    bool inCon = false;
+    struct stat buffer;
+    std::vector<std::string> filenames = {
+	    "/.dockerenv",  // docker
+	    "/run/.containerenv", // podman, and some docker
+	    "/run/systemd/container" // lxc, and some docker
+    };
+
+    for (const std::string& filename : filenames) {
+	    if (stat(filename.c_str(), &buffer) == 0) {
+		    inCon = true;
+		    break;
+	    }
+    }
+    return inCon;
+}
+
+/*
  * Test SMI HMM SVM profiling event
  * Use separate thread to read event the same way as ROCr and ROCProfiler
  */
@@ -1582,20 +1605,23 @@ unsigned int ReadSMIEventThread(void* p) {
                      &addr, &size, &unused, &unused, &unused, &unused, &trigger), 9, pArgs->nodeid);
         EXPECT_EQ_GPU((HSAuint64 *)(addr << PAGE_SHIFT), pArgs->pBuf, pArgs->nodeid);
         EXPECT_EQ_GPU(size << PAGE_SHIFT, pArgs->BufSize, pArgs->nodeid);
-        EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
+        if (!IsRunningInContainer())
+		EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
         EXPECT_EQ_GPU(trigger, HSA_MIGRATE_TRIGGER_PREFETCH, pArgs->nodeid);
 
      }else if (event_id == HSA_SMI_EVENT_QUEUE_EVICTION) {
         /* the message is HSA_SMI_EVENT_QUEUE_EVICTION */
         EXPECT_EQ_GPU(sscanf(msg + sizeof(event_id), "%ld -%d %x %d\n",  &timestamp, &pid, &id, &trigger),
                       4, pArgs->nodeid);
-        EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
+        if (!IsRunningInContainer())
+		EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
         EXPECT_EQ_GPU(trigger, HSA_QUEUE_EVICTION_TRIGGER_SVM, pArgs->nodeid);
 
     } else if (event_id == HSA_SMI_EVENT_QUEUE_RESTORE) {
       /* the message is HSA_SMI_EVENT_QUEUE_RESTORE */
         EXPECT_EQ_GPU(sscanf(msg + sizeof(event_id), "%ld -%d %x\n", &timestamp, &pid, &id), 3, pArgs->nodeid);
-        EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
+        if (!IsRunningInContainer())
+		EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
 
     } else if (event_id == HSA_SMI_EVENT_UNMAP_FROM_GPU) {
         /* the message is HSA_SMI_EVENT_UNMAP_FROM_GPU */
@@ -1603,7 +1629,8 @@ unsigned int ReadSMIEventThread(void* p) {
                       &addr, &size, &id, &trigger), 6, pArgs->nodeid);
         /* unmap address can be from different gpus */
         EXPECT_EQ_GPU(size << PAGE_SHIFT, pArgs->BufSize, pArgs->nodeid);
-        EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
+        if (!IsRunningInContainer())
+		EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
         EXPECT_EQ_GPU(trigger, HSA_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU, pArgs->nodeid);
     } else {
         WARN() << "HMMProfilingEvent failed on gpuNode: " <<  pArgs->nodeid << std::endl;
