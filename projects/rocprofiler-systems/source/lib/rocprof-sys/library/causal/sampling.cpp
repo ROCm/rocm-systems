@@ -308,7 +308,12 @@ configure(bool _setup, int64_t _tid)
             return true;
         };
 
-        TIMEMORY_REQUIRE(_causal) << "nullptr to causal profiling instance";
+        if(!_causal)
+        {
+            LOG_CRITICAL("nullptr to causal profiling instance");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            std::abort();
+        }
 
         _causal->set_flags(SA_RESTART);
         _causal->set_verbose(_verbose);

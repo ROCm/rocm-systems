@@ -383,7 +383,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             }
             else
             {
-                LOG_WARNING("{}() returned {} :: unexpected function wrapper\n",
+                LOG_WARNING("{}() returned {} :: unexpected function wrapper",
                             _data.tool_id, (int) _retval);
             }
 

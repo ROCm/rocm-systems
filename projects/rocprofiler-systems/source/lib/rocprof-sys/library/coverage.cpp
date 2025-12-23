@@ -335,7 +335,7 @@ rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t a
     else if(rocprofsys::get_state() >= rocprofsys::State::Finalized)
         return;
 
-    LOG_TRACE("[0x{:X}] {:20s} :: {:20s}", (unsigned int) address, func, file);
+    // LOG_TRACE("[0x{:X}] {:20s} :: {:20s}", (unsigned int) address, func, file);
     (*coverage::get_coverage_count())[file][func][address] += 1;
 }
 
