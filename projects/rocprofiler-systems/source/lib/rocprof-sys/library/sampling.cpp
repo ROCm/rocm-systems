@@ -306,7 +306,7 @@ cache_sampling_data(int64_t _tid, const std::vector<timer_sampling_data>& _timer
 {
     if(get_debug_sampling())
     {
-        LOG_TRACE("[{}] Storing sampling data to trace cache...", _tid);
+        LOG_DEBUG("[{}] Storing sampling data to trace cache...", _tid);
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
@@ -656,6 +656,8 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("Error! sampling allocator tried to offload buffer of samples for "
                      "thread {} but the offload file does not exist",
                      _seq);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::exit(-1);
     }
 
     LOG_DEBUG("Offloading {} samples for thread {} to {}", _buf.count(), _seq,
@@ -667,6 +669,8 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
         LOG_CRITICAL("Error! temporary file for offloading buffer is in an invalid state "
                      "during offload for thread {}",
                      _seq);
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::exit(-1);
     }
 
     offload_seq_data[_seq].emplace(_fs.tellg());
@@ -769,7 +773,7 @@ configure(bool _setup, int64_t _tid)
         {
             if(_tids.count(_tid) == 0)
             {
-                LOG_TRACE("Disabling SIG{} from thread {}", _signum, _tid);
+                LOG_DEBUG("Disabling SIG{} from thread {}", _signum, _tid);
                 _signal_types->erase(_signum);
             }
         }
@@ -928,7 +932,7 @@ configure(bool _setup, int64_t _tid)
                 auto _overflow_event =
                     get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
                         .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
-                LOG_TRACE("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
+                LOG_DEBUG("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
                           "{} events...",
                           itr, _tid, _freq, _overflow_event);
             }
@@ -940,7 +944,7 @@ configure(bool _setup, int64_t _tid)
                     dynamic_cast<const timer*>(_sampler->get_trigger(itr));
                 if(_timer)
                 {
-                    LOG_TRACE(
+                    LOG_DEBUG(
                         "[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                         "second of {}-time (every {:.3e} milliseconds)...",
                         itr, _tid, _timer->get_frequency(units::sec), _type,
