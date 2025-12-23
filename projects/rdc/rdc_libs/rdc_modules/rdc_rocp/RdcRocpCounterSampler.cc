@@ -34,6 +34,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -86,14 +87,14 @@ CounterSampler::~CounterSampler() { ctx_ = {}; }
 
 const std::string& CounterSampler::decode_record_name(
     const rocprofiler_record_counter_t& rec) const {
-  static auto roc_counters = [this]() {
+
+  std::call_once(roc_counters_init_flag, [this](){
     auto name_to_id = CounterSampler::get_supported_counters(agent_);
-    std::map<uint64_t, std::string> id_to_name;
     for (const auto& [name, id] : name_to_id) {
-      id_to_name.emplace(id.handle, name);
+      roc_counters.emplace(id.handle, name);
     }
-    return id_to_name;
-  }();
+  });
+
   rocprofiler_counter_id_t counter_id = {.handle = 0};
   rocprofiler_query_record_counter_id(rec.id, &counter_id);
 
