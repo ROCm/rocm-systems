@@ -54,6 +54,8 @@ jobs:
           if [ ${{ matrix.os-release }} == "8.10" ]; then
             yum -y install python39
             yum -y install python39-devel
+            alternatives --set python3 /usr/bin/python3.9
+            rm /usr/bin/python3.11
           else
             yum -y install python3-devel
           fi
@@ -81,8 +83,9 @@ jobs:
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute
         run: |
-          python3.9 -m pip install -r requirements.txt
-          python3.9 -m pip install -r requirements-test.txt
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements-test.txt
+          python3 -m pip install cmake
       - name: Configure and install
         working-directory: projects/rocprofiler-compute
         run: |

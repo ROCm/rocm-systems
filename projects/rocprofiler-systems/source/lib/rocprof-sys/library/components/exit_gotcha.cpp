@@ -25,7 +25,6 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/state.hpp"
-#include "core/timemory.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -33,7 +32,9 @@
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
+#include <unistd.h>
 
 namespace rocprofsys
 {
@@ -105,6 +106,39 @@ void
 exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) const
 {
     _exit_info = { true, _data.tool_id.find("quick") != std::string::npos, _ec };
+
+    if(config::get_use_amd_smi())
+    {
+        threading::clear_callbacks();
+
+        if(get_state() < ::rocprofsys::State::Finalized && !is_child_process())
+        {
+            if(config::settings_are_configured())
+            {
+                ROCPROFSYS_VERBOSE(0, "finalizing %s before calling %s(%i)...\n",
+                                   get_exe_name().c_str(), _data.tool_id.c_str(), _ec);
+            }
+            else
+            {
+                ROCPROFSYS_BASIC_VERBOSE(0, "finalizing %s before calling %s(%i)...\n",
+                                         get_exe_name().c_str(), _data.tool_id.c_str(),
+                                         _ec);
+            }
+
+            rocprofsys_finalize();
+        }
+
+        if(config::settings_are_configured())
+        {
+            ROCPROFSYS_VERBOSE(
+                0, "calling _exit(%i) in %s to avoid AMD SMI cleanup issues...\n", _ec,
+                get_exe_name().c_str());
+        }
+
+        std::fflush(nullptr);
+        _exit(_ec);
+    }
+
     invoke_exit_gotcha(_data, _func, _ec);
 }
 

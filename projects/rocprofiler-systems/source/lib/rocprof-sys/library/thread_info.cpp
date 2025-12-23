@@ -30,6 +30,7 @@
 #include "library/causal/delay.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
+#include "library/thread_data_growth.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -111,6 +112,13 @@ init_index_data(int64_t _tid, bool _offset = false)
 thread_local int64_t offset_causal_count = 0;
 const auto           unknown_thread      = std::optional<thread_info>{};
 int64_t              peak_num_threads    = max_supported_threads;
+
+// Register callback to allow thread_data containers to query peak_num_threads
+// when they are instantiated, ensuring late-instantiated containers are properly sized.
+const auto peak_num_threads_callback_registered = []() {
+    set_peak_num_threads_callback([]() -> int64_t { return peak_num_threads; });
+    return true;
+}();
 }  // namespace
 
 std::string
