@@ -118,7 +118,7 @@ PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_R
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args: Any) -> Union[float, None]:
+def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -127,7 +127,7 @@ def to_min(*args: Any) -> Union[float, None]:
         return min(args)
 
 
-def to_max(*args: Any) -> Union[float, np.ndarray, None]:
+def to_max(*args: Any) -> Union[float, np.ndarray]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -142,8 +142,10 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating, None]:
+) -> Union[float, np.floating]:
     if a is None:
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
         if a.empty:
@@ -173,9 +175,9 @@ def to_avg(
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_median(a: Union[pd.Series, None]) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -186,6 +188,9 @@ def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
 
 def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
+        # Define std as 0.0 if there is only one element
+        if len(a) <= 1:
+            return 0.0
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
@@ -193,20 +198,23 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, pd.Series, None]:
+) -> Union[int, float, pd.Series]:
     if a is None:
-        return None
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
+        return np.nan
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype(int)
+        # "Int64" handles null values
+        return a.astype("Int64")
     elif isinstance(a, str):
         return int(a)
     else:
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_sum(a: Union[pd.Series, None]) -> float:
     if a is None:
         return np.nan
     elif np.isnan(a).all():
@@ -226,9 +234,9 @@ def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
         return round(a, b)
 
 
-def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
@@ -346,7 +354,26 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if eval_result is None or np.isnan(eval_result).any():
+            # Only return "N/A" for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for
+            # downstream operations
+            # Note: None and pd.NA are not detected as scalar by np.isscalar()
+            if (
+                eval_result is None
+                or eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            ):
+                # Do not give warning if None is explicitly specified in expression
+                if "None" not in expr:
+                    console_warning(
+                        f"Could not evaluate expression '{expr}' - likely "
+                        "due to missing counter data."
+                    )
+                else:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - likely "
+                        "explicitly specified."
+                    )
                 return "N/A"
             else:
                 return eval_result
@@ -360,18 +387,18 @@ class MetricEvaluator:
                 return "N/A"
 
         except AttributeError as attribute_error:
-            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(
-                    f"Failed to evaluate expression '{expr}': {attribute_error}."
-                )
-                return "N/A"
-            else:
-                console_error("analysis", str(attribute_error))
-                return "N/A"
+            console_warning(
+                f"Failed to evaluate expression '{expr}': {attribute_error}."
+            )
+            return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Missing data: {exception}. Using empty value.")
-            return ""
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
+
+        except ValueError as value_error:
+            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -929,9 +956,12 @@ def calc_builtin_vars(
             # Pass sys_vars so that $num_xcd and other system variables are available
             temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
@@ -946,9 +976,12 @@ def calc_builtin_vars(
             combined_vars = {**sys_vars, **builtin_vars_collection}
             temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
 
@@ -1653,9 +1686,7 @@ def load_pc_sampling_data(
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
     if not csv_kernel_trace_file_path.exists():
-        console_error(
-            f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False
-        )
+        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
         return pd.DataFrame()
 
     if stochastic_path.exists():
@@ -1722,7 +1753,7 @@ def load_pc_sampling_data(
 
     elif len(workload.filter_kernel_ids) == 1:
         if not json_file_path.exists():
-            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
+            console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
             # NB:

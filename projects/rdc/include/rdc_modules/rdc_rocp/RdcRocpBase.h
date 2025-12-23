@@ -58,6 +58,22 @@ class RdcRocpBase {
    */
   rdc_status_t rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* value,
                            rdc_field_type_t* type);
+
+  /**
+   * @brief Bulk lookup of multiple ROCProfiler counters for a single GPU
+   *
+   * @param[in] fields Vector of fields to lookup (all for the same GPU)
+   * @param[out] values Vector to be populated with returned values
+   * @param[out] types Vector to be populated with returned types
+   * @param[out] statuses Vector to be populated with status for each field
+   *
+   * @retval ::RDC_ST_OK The function has been executed successfully.
+   */
+  rdc_status_t rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
+                                std::vector<rdc_field_value_data>& values,
+                                std::vector<rdc_field_type_t>& types,
+                                std::vector<rdc_status_t>& statuses);
+
   const char* get_field_id_from_name(rdc_field_t);
   const std::vector<rdc_field_t> get_field_ids();
 
@@ -97,6 +113,25 @@ class RdcRocpBase {
       RDC_FI_PROF_EVAL_FLOPS_64,         RDC_FI_PROF_EVAL_FLOPS_16_PERCENT,
       RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, RDC_FI_PROF_EVAL_FLOPS_64_PERCENT,
   };
+
+  /**
+   * @brief Apply field-specific transformations to raw profiler values
+   *
+   * @param[in] field Field ID to transform
+   * @param[in] agent_index Index of the agent/GPU
+   * @param[in] raw_value Raw value from profiler
+   * @param[in] elapsed_time_ms Elapsed time in milliseconds (for eval fields)
+   * @param[in] sampled_values Map of all sampled values (for fields needing multiple metrics)
+   * @param[out] output Transformed output value
+   * @param[out] type Output type
+   *
+   * @retval ::RDC_ST_OK Transformation successful
+   */
+  rdc_status_t apply_field_transformation(rdc_field_t field, uint32_t agent_index,
+                                          double raw_value, double elapsed_time_ms,
+                                          const std::map<std::string, double>& sampled_values,
+                                          rdc_field_value_data* output,
+                                          rdc_field_type_t* type);
 
   /**
    * @brief Convert from profiler status into RDC status
