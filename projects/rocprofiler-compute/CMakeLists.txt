@@ -700,8 +700,7 @@ add_custom_target(
         --include-data-files=src/lib/helper.hpp=lib/helper.hpp --include-package=dash_svg
         --include-package-data=dash_svg --include-package=dash_bootstrap_components
         --include-package-data=dash_bootstrap_components --include-package=plotly
-        --include-package-data=plotly --include-package=kaleido
-        --include-package-data=kaleido --include-package=rocprof_compute_analyze
+        --include-package-data=plotly --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
         --include-package=rocprof_compute_profile
         --include-package-data=rocprof_compute_profile
