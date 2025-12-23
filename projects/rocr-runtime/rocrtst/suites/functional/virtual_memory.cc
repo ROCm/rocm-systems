@@ -93,6 +93,37 @@ static void PrintMemorySubtestHeader(const char* header) {
   std::cout << "  *** Virtual Memory Functional Subtest: " << header << " ***" << std::endl;
 }
 
+static void PrintAgentNameAndType(hsa_agent_t agent) {
+  hsa_status_t err;
+
+  char ag_name[64];
+  hsa_device_type_t ag_type;
+
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, ag_name);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  std::cout << "  Agent: " << ag_name << " (";
+  switch (ag_type) {
+    case HSA_DEVICE_TYPE_CPU:
+      std::cout << "CPU)";
+      break;
+    case HSA_DEVICE_TYPE_GPU:
+      std::cout << "GPU)";
+      break;
+    case HSA_DEVICE_TYPE_DSP:
+      std::cout << "DSP)";
+      break;
+    case HSA_DEVICE_TYPE_AIE:
+      std::cout << "AIE)";
+      break;
+    }
+  std::cout << std::endl;
+  return;
+}
+
 VirtMemoryTestBasic::VirtMemoryTestBasic(void) : TestBase() {
   set_title("ROCr Virtual Memory Basic Tests");
   set_description(" Tests virtual memory API functions");
@@ -1096,6 +1127,92 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(void) {
     }
     GPUAccessToGPUMemoryTest(cpus[0], gpus[i], gpu_pool);
   }
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
+void VirtMemoryTestBasic::MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
+  if (verbosity() > 0) {
+    PrintAgentNameAndType(agent);
+  }
+
+  hsa_status_t err;
+  hsa_amd_memory_pool_access_t access;
+  ASSERT_SUCCESS(hsa_amd_agent_memory_pool_get_info(agent, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access));
+  if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) return;
+
+  rocrtst::pool_info_t pool_info;
+  err = rocrtst::AcquirePoolInfo(pool, &pool_info);
+  if (err != HSA_STATUS_SUCCESS || !pool_info.alloc_allowed) return;
+
+  if (pool_info.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  hsa_device_type_t device_type;
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+  if (err != HSA_STATUS_SUCCESS || device_type != HSA_DEVICE_TYPE_GPU) return;
+
+  bool vmem_supported = false;
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported);
+  if (err != HSA_STATUS_SUCCESS || !vmem_supported) return;
+
+  rocrtst::pool_info_t pool_i;
+
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+
+  size_t granule_size = pool_i.alloc_rec_granule;
+  size_t allocation_size = 10 * granule_size;
+
+  size_t amount_begin = 0, amount_current = 0;
+  void* reserved_addr = nullptr;
+  hsa_amd_vmem_alloc_handle_t mem_handle;
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_begin));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&reserved_addr, allocation_size, 0, 0));
+
+  hsa_amd_pointer_info_t ptr_info = {};
+  ptr_info.size = sizeof(ptr_info);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(reserved_addr, &ptr_info, nullptr, nullptr, nullptr));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, allocation_size, MEMORY_TYPE_NONE, 0, &mem_handle));
+ 
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_current));
+  ASSERT_NEAR(amount_begin - amount_current, allocation_size, 4096);
+  
+  ASSERT_SUCCESS(hsa_amd_vmem_map(reserved_addr, allocation_size, 0, mem_handle, 0));
+
+  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, agent};
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(reserved_addr, allocation_size, &access_desc, 1));
+
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(reserved_addr, allocation_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(reserved_addr, allocation_size));
+
+  ASSERT_SUCCESS(hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL, &amount_current));
+  ASSERT_EQ(amount_begin, amount_current);
+}
+
+void VirtMemoryTestBasic::MemoryAccountingTest(void) {
+  hsa_status_t err;
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Memory Accounting Test");
+  }
+
+  err = rocrtst::GetAgentPools(&agent_pools);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  auto pool_idx = 0;
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      if (verbosity() > 0) {
+        std::cout << "  Pool " << pool_idx++ << ":" << std::endl;
+      }
+      MemoryAccountingTest(a->agent, p);
+    }
+  }
+
   if (verbosity() > 0) {
     std::cout << "    Subtest finished" << std::endl;
     std::cout << kSubTestSeparator << std::endl;

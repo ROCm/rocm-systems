@@ -71,6 +71,10 @@ class BlitSdmaBase : public core::Blit {
                                              const hsa_dim3_t* src_offset, const hsa_dim3_t* range,
                                              std::vector<core::Signal*>& dep_signals,
                                              core::Signal& out_signal) = 0;
+
+  virtual hsa_status_t SubmitCommand(const void* cmds, size_t cmd_size, uint64_t size,
+                                     const std::vector<core::Signal*>& dep_signals,
+                                     core::Signal& out_signal, std::vector<core::Signal*>& gang_signals) = 0;
 };
 
 template <bool useGCR> class BlitSdma : public BlitSdmaBase {
@@ -94,10 +98,8 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   ///
   /// @note: The call will block until all packets have executed.
   ///
-  /// @param agent Agent passed to Initialize.
-  ///
   /// @return hsa_status_t
-  virtual hsa_status_t Destroy(const core::Agent& agent) override;
+  virtual hsa_status_t Destroy() override;
 
   /// @brief Submit a linear copy command to the queue buffer.
   ///

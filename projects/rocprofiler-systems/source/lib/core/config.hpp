@@ -252,6 +252,9 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
+uint32_t
+get_perfetto_flush_period();
+
 bool
 get_perfetto_combined_traces();
 
@@ -355,14 +358,26 @@ get_trace_thread_join();
 bool
 get_use_tmp_files();
 
+int
+get_kill_delay();
+
 std::string
 get_tmpdir();
 
 std::string
-get_database_absolute_path(std::string_view database_name);
+get_database_absolute_path(std::string_view database_name, std::string_view tag);
+
+std::string
+get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_caching_perfetto() ROCPROFSYS_HOT;
+
+bool
+get_merge_perfetto_files();
 
 struct tmp_file
 {

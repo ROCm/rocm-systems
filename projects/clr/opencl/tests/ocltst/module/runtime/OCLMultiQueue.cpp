@@ -53,13 +53,8 @@ std::stringstream lerror;
 
 class MemTransfer {
  public:
-  MemTransfer(OCLWrapper* wrapper, cl_context context, cl_command_queue queue,
-              cl_uint numElements)
-      : wrapper_(wrapper),
-        context_(context),
-        queue_(queue),
-        numElements_(numElements),
-        count_(0) {}
+  MemTransfer(OCLWrapper* wrapper, cl_context context, cl_command_queue queue, cl_uint numElements)
+      : wrapper_(wrapper), context_(context), queue_(queue), numElements_(numElements), count_(0) {}
 
   ~MemTransfer() {
     wrapper_->clReleaseMemObject(dst_);
@@ -72,8 +67,7 @@ class MemTransfer {
     cl_uint* data = new cl_uint[numElements_];
     memset(data, 0, size);
 
-    src_ = wrapper_->clCreateBuffer(context_, CL_MEM_COPY_HOST_PTR, size, data,
-                                    &err);
+    src_ = wrapper_->clCreateBuffer(context_, CL_MEM_COPY_HOST_PTR, size, data, &err);
     if (src_ == NULL) {
       lerror << "clReleaseContext failed";
       delete[] data;
@@ -98,27 +92,23 @@ class MemTransfer {
     global_work_size[0] = (numElements_ + 63) / 64 * 64;
     local_work_size[0] = 64;
 
-    if (CL_SUCCESS !=
-        wrapper_->clSetKernelArg(kernel, 0, sizeof(cl_mem), (void*)&dst_)) {
+    if (CL_SUCCESS != wrapper_->clSetKernelArg(kernel, 0, sizeof(cl_mem), (void*)&dst_)) {
+      return false;
+    }
+
+    if (CL_SUCCESS != wrapper_->clSetKernelArg(kernel, 1, sizeof(cl_mem), (void*)&src_)) {
       return false;
     }
 
     if (CL_SUCCESS !=
-        wrapper_->clSetKernelArg(kernel, 1, sizeof(cl_mem), (void*)&src_)) {
-      return false;
-    }
-
-    if (CL_SUCCESS != wrapper_->clEnqueueNDRangeKernel(
-                          queue_, kernel, 1, NULL,
-                          (const size_t*)global_work_size,
-                          (const size_t*)local_work_size, 0, NULL, NULL)) {
+        wrapper_->clEnqueueNDRangeKernel(queue_, kernel, 1, NULL, (const size_t*)global_work_size,
+                                         (const size_t*)local_work_size, 0, NULL, NULL)) {
       lerror << "clEnqueueNDRangeKernel() failed";
       return false;
     }
 
     // Copy dst into src
-    if (CL_SUCCESS != wrapper_->clEnqueueCopyBuffer(queue_, dst_, src_, 0, 0,
-                                                    size, 0, 0, NULL)) {
+    if (CL_SUCCESS != wrapper_->clEnqueueCopyBuffer(queue_, dst_, src_, 0, 0, size, 0, 0, NULL)) {
       lerror << "clEnqueueCopyBuffer() failed";
       return false;
     }
@@ -129,8 +119,8 @@ class MemTransfer {
   bool check() {
     size_t size = numElements_ * sizeof(cl_uint);
     cl_event event;
-    void* ptr = wrapper_->clEnqueueMapBuffer(queue_, src_, CL_TRUE, CL_MAP_READ,
-                                             0, size, 0, NULL, NULL, NULL);
+    void* ptr = wrapper_->clEnqueueMapBuffer(queue_, src_, CL_TRUE, CL_MAP_READ, 0, size, 0, NULL,
+                                             NULL, NULL);
     cl_uint* data = reinterpret_cast<cl_uint*>(ptr);
 
     for (cl_uint i = 0; i < numElements_; ++i) {
@@ -162,8 +152,7 @@ bool test(cl_kernel, cl_uint, cl_uint);
 
 OCLMultiQueue::OCLMultiQueue() {
   _numSubTests = 0;
-  for (cl_uint i = 1; i <= NumQueues; i <<= 1, _numSubTests++)
-    ;
+  for (cl_uint i = 1; i <= NumQueues; i <<= 1, _numSubTests++);
   failed_ = false;
 }
 
@@ -175,8 +164,8 @@ void OCLMultiQueue::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
   test_ = test;
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -186,27 +175,23 @@ void OCLMultiQueue::open(unsigned int test, char* units, double& conversion,
   }
   size_t maxWorkGroupSize = 1;
   cl_uint computePower = 1;
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[deviceId], CL_DEVICE_MAX_WORK_GROUP_SIZE,
-      sizeof(maxWorkGroupSize), &maxWorkGroupSize, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MAX_WORK_GROUP_SIZE,
+                                     sizeof(maxWorkGroupSize), &maxWorkGroupSize, NULL);
   computePower *= static_cast<cl_uint>(maxWorkGroupSize);
   cl_uint maxComputeUnits = 1;
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[deviceId], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(maxComputeUnits),
-      &maxComputeUnits, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_MAX_COMPUTE_UNITS,
+                                     sizeof(maxComputeUnits), &maxComputeUnits, NULL);
   computePower *= 32 * maxComputeUnits;
   NumElements = (NumElements < static_cast<size_t>(computePower))
                     ? static_cast<size_t>(computePower)
                     : NumElements;
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -235,8 +220,7 @@ bool OCLMultiQueue::test(cl_kernel kernel, cl_uint numRuns, cl_uint numQueues) {
   CPerfCounter timer;
 
   for (cl_uint i = 0; i < numQueues; ++i) {
-    cmd_queue[i] = _wrapper->clCreateCommandQueue(context_, devices_[_deviceId],
-                                                  0, &error_);
+    cmd_queue[i] = _wrapper->clCreateCommandQueue(context_, devices_[_deviceId], 0, &error_);
     if (cmd_queue[i] == (cl_command_queue)0) {
       _wrapper->clReleaseContext(context_);
       testDescString = "clCreateCommandQueue() failed";
@@ -262,8 +246,7 @@ bool OCLMultiQueue::test(cl_kernel kernel, cl_uint numRuns, cl_uint numQueues) {
       // Every queue should have a dispatch after 256 executions,
       // but the time for dispatch on each queue
       // will be shifted on dispatchCount
-      if (((i % dispatchCount) == 0) &&
-          (((i / dispatchCount) % numQueues) == j)) {
+      if (((i % dispatchCount) == 0) && (((i / dispatchCount) % numQueues) == j)) {
         work[j]->flush();
       }
     }

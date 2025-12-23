@@ -21,7 +21,7 @@ find_package(PkgConfig)
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 if (NOT DEFINED CPACK_RESOURCE_FILE_LICENSE)
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 endif()
 
 set(ROCM_SMI "rocm_smi")
@@ -38,6 +38,18 @@ set(SHARE_INSTALL_PREFIX
 
 # provide git to utilities
 find_program (GIT NAMES git)
+
+# Set Lintian Support Flags
+set(BUILD_ENABLE_LINTIAN_OVERRIDES
+    OFF
+    CACHE BOOL
+    "Enable/Disable Lintian Overrides"
+)
+set(BUILD_DEBIAN_PKGING_FLAG
+    OFF
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
 
 # sets DRM_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
@@ -188,10 +200,12 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 
 ## set components
 if(ENABLE_ASAN_PACKAGING)
-  # ASAN Package requires only asan component with libraries and license file
-  set(CPACK_COMPONENTS_ALL asan)
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
+    set(COMP_TYPE "asan")
 else()
-  set(CPACK_COMPONENTS_ALL dev tests)
+    set(CPACK_COMPONENTS_ALL dev tests)
+    set(COMP_TYPE "dev")
 endif()
 
 # Enable Component Mode & Install Settings
@@ -276,15 +290,15 @@ install(EXPORT rocm_smiTargets
     COMPONENT dev)
 
 #License file
-set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
-	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.md
         COMPONENT asan)
 endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
-	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.md
         COMPONENT dev)
 
 ###########################
@@ -299,7 +313,9 @@ else()
   set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
 endif()
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_CONTACT "RocmSMILib Support <rocm-smi.support@amd.com>")
+set(PKG_MAINTAINER_NM "RocmSMILib Support")
+set(PKG_MAINTAINER_EMAIL "rocm-smi.support@amd.com")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
 
 #Make proper version for appending
@@ -385,7 +401,35 @@ set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
-include (CPack)
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+
+# Custom installation for Debian Lintian File
+if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
+    set(OVERRIDE_FILE
+        "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+    )
+    set(OVERRIDE_TEMP_INSTALL_LOC
+        "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}"
+    )
+    if(BUILD_SHARED_LIBS)
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+        )
+    else()
+        set(OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev")
+        set(OVERRIDE_FILE_STATIC_DEST
+            "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}"
+        )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
+        )
+    endif()
+endif()
+
+include(CPack)
 
 cpack_add_component(
   dev

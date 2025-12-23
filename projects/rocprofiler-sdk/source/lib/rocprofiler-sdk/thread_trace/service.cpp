@@ -41,9 +41,13 @@ using parameter_pack = rocprofiler::thread_trace::thread_trace_parameter_pack;
 rocprofiler_status_t
 build_pack_from_array(parameter_pack&                             pack,
                       const rocprofiler_thread_trace_parameter_t* params,
-                      size_t                                      num_parameters)
+                      size_t                                      num_parameters,
+                      rocprofiler_agent_id_t                      agent_id)
 {
-    auto id_map = rocprofiler::counters::getPerfCountersIdMap();
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
+    if(agent == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto id_map = rocprofiler::counters::getPerfCountersIdMap(agent);
 
     for(size_t p = 0; p < num_parameters; p++)
     {
@@ -68,6 +72,8 @@ build_pack_from_array(parameter_pack&                             pack,
                 auto event_it = id_map.find(param.counter_id.handle);
                 if(event_it != id_map.end())
                     pack.perfcounters.push_back({event_it->second, param.simd_mask});
+                else
+                    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
             }
             break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL:
@@ -125,7 +131,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
     if(pack.dispatch_cb_fn == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     {
-        auto status = build_pack_from_array(pack, parameters, num_parameters);
+        auto status = build_pack_from_array(pack, parameters, num_parameters, agent_id);
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 
@@ -160,7 +166,7 @@ rocprofiler_configure_device_thread_trace_service(
     pack.callback_userdata = userdata;
 
     {
-        auto status = build_pack_from_array(pack, parameters, num_parameters);
+        auto status = build_pack_from_array(pack, parameters, num_parameters, agent_id);
         if(status != ROCPROFILER_STATUS_SUCCESS) return status;
     }
 

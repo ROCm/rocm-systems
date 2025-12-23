@@ -55,10 +55,9 @@ TEST_CASE("Unit_hipDeviceGetByPCIBusId_Functional") {
     int tempDeviceId = -1;
     int pciFunction = -1;
     HIP_CHECK(hipDeviceGetPCIBusId(&pciBusId[0], SIZE, i));
-    REQUIRE(sscanf(pciBusId, "%x:%x:%x.%x", &pciDomainID,
-           &pciBusID, &pciDeviceID, &pciFunction) == 4);
-    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId,
-           hipDeviceAttributePciBusId, i));
+    REQUIRE(sscanf(pciBusId, "%x:%x:%x.%x", &pciDomainID, &pciBusID, &pciDeviceID, &pciFunction) ==
+            4);
+    HIP_CHECK(hipDeviceGetAttribute(&tempPciBusId, hipDeviceAttributePciBusId, i));
 
     REQUIRE(pciBusID == tempPciBusId);
     HIP_CHECK(hipDeviceGetByPCIBusId(&tempDeviceId, pciBusId));
@@ -147,8 +146,8 @@ TEST_CASE("Unit_hipDeviceGetByPCIBusId_WrongBusID") {
     pciBusId.push_back(prop.pciBusID);
     pciDeviceID.push_back(prop.pciDeviceID);
     pciDomainID.push_back(prop.pciDomainID);
-    printf("device %d: pciDomainID=%x, pciBusID=%x, pciDeviceID=%x \n",
-           i, prop.pciDomainID, prop.pciBusID, prop.pciDomainID);
+    printf("device %d: pciDomainID=%x, pciBusID=%x, pciDeviceID=%x \n", i, prop.pciDomainID,
+           prop.pciBusID, prop.pciDomainID);
   }
   // get a non existing bus id
   int id = 0;
@@ -161,21 +160,19 @@ TEST_CASE("Unit_hipDeviceGetByPCIBusId_WrongBusID") {
         break;
       }
     }
-    if (!bFound)
-       break;
+    if (!bFound) break;
   }
   // now pass the non existing bus id as string
   char pciBusIdstr[MaxBusIdLen];
   int device = -1;
   hipError_t ret;
-  snprintf(pciBusIdstr, sizeof(pciBusIdstr), "%04x:%02x:%02x", pciDomainID[0],
-           id, pciDeviceID[0]);
+  snprintf(pciBusIdstr, sizeof(pciBusIdstr), "%04x:%02x:%02x", pciDomainID[0], id, pciDeviceID[0]);
   ret = hipDeviceGetByPCIBusId(&device, pciBusIdstr);
   REQUIRE(ret != hipSuccess);
 }
 
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

@@ -25,38 +25,38 @@
 
 #include <stdlib.h>
 
-char *khrIcd_getenv(const char *name) {
-    // No allocation of memory necessary for Linux.
-    return getenv(name);
+char* khrIcd_getenv(const char* name) {
+  // No allocation of memory necessary for Linux.
+  return getenv(name);
 }
 
-char *khrIcd_secure_getenv(const char *name) {
+char* khrIcd_secure_getenv(const char* name) {
 #if defined(__APPLE__)
-    // Apple does not appear to have a secure getenv implementation.
-    // The main difference between secure getenv and getenv is that secure getenv
-    // returns NULL if the process is being run with elevated privileges by a normal user.
-    // The idea is to prevent the reading of malicious environment variables by a process
-    // that can do damage.
-    // This algorithm is derived from glibc code that sets an internal
-    // variable (__libc_enable_secure) if the process is running under setuid or setgid.
-    return geteuid() != getuid() || getegid() != getgid() ? NULL : khrIcd_getenv(name);
+  // Apple does not appear to have a secure getenv implementation.
+  // The main difference between secure getenv and getenv is that secure getenv
+  // returns NULL if the process is being run with elevated privileges by a normal user.
+  // The idea is to prevent the reading of malicious environment variables by a process
+  // that can do damage.
+  // This algorithm is derived from glibc code that sets an internal
+  // variable (__libc_enable_secure) if the process is running under setuid or setgid.
+  return geteuid() != getuid() || getegid() != getgid() ? NULL : khrIcd_getenv(name);
 #else
 // Linux
 #ifdef HAVE_SECURE_GETENV
-    return secure_getenv(name);
+  return secure_getenv(name);
 #elif defined(HAVE___SECURE_GETENV)
-    return __secure_getenv(name);
+  return __secure_getenv(name);
 #else
-#pragma message(                                                                       \
-    "Warning:  Falling back to non-secure getenv for environmental lookups!  Consider" \
+#pragma message(                                                                                   \
+    "Warning:  Falling back to non-secure getenv for environmental lookups!  Consider"             \
     " updating to a different libc.")
-    return khrIcd_getenv(name);
+  return khrIcd_getenv(name);
 #endif
 #endif
 }
 
-void khrIcd_free_getenv(char *val) {
-    // No freeing of memory necessary for Linux, but we should at least touch
-    // val to get rid of compiler warnings.
-    (void)val;
+void khrIcd_free_getenv(char* val) {
+  // No freeing of memory necessary for Linux, but we should at least touch
+  // val to get rid of compiler warnings.
+  (void)val;
 }

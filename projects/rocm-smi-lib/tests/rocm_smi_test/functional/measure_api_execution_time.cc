@@ -93,7 +93,7 @@ void TestMeasureApiExecutionTime::Run(void) {
   constexpr float kFAN_SPEED_ELAPSED_MICROSEC_BASE = (1000);
   /**
    * gpu_metrics can only refresh every 1000 microseconds (1 millisecs) due to FW
-   * 
+   *
    * We have additional processing time (each read() -> fread()  ~ costs 900 microseconds).
    * We need to read 2x:
    * 1) reading metric's header to check support (~900 microseconds)
@@ -103,17 +103,17 @@ void TestMeasureApiExecutionTime::Run(void) {
    * 5) Pass to public structure (~100 microseconds)
    * ---------------------------
    * ~2100 worst case
-   * 
+   *
    * Note: performance of fread/mmap/read
    * https://github.com/nurettn/c-read-vs-mmap-vs-fread
-   * 
+   *
    * Possible improvments ideas:
    * a) Initize "N/A" / Max UINT only for non-backwards comptable public struct
    * or arrays
    * b) Directly put data into public structure - this skips other copy/fill
    * procedures
    * c) Expirement with other file reading options
-   **/ 
+   **/
   constexpr float kMETRICS_ELAPSED_MICROSEC_BASE = (2100);
   bool skip = false;
 

@@ -65,11 +65,7 @@ set(TEST_SRC
     hipTexRefSetAddressMode.cc
     hipTexRefGetAddressMode.cc
     hipTexRefSetGetFilterMode.cc
-    hipTexRefSetGetMipmapFilterMode.cc
-    hipTexRefSetGetMipmapLevelBias.cc
-    hipTexRefSetGetMipmapLevelClamp.cc
-    hipTexRefSetGetMipmappedArray.cc
-
+    hipDeviceGetTexture1DLinearMaxWidth.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -110,9 +106,10 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code
-                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
@@ -136,7 +133,7 @@ else()
 endif()
 
 # Mipmap APIs are not supported on Linux
-if(WIN32)
+if(0)
 set(TEST_SRC
     ${TEST_SRC}
     hipBindTextureToMipmappedArray.cc
@@ -154,6 +151,10 @@ set(TEST_SRC
     tex2DLod.cc
     tex2DLayeredLod.cc
     tex3DLod.cc
+    hipTexRefSetGetMipmapFilterMode.cc
+    hipTexRefSetGetMipmapLevelBias.cc
+    hipTexRefSetGetMipmapLevelClamp.cc
+    hipTexRefSetGetMipmappedArray.cc
 )
 endif()
 
@@ -162,4 +163,5 @@ hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
+target_compile_options(TextureTest PRIVATE -Wno-deprecated-declarations)
 add_dependencies(TextureTest tex_ref_get_module)

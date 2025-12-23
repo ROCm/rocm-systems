@@ -30,18 +30,14 @@ import json
 import locale
 import logging
 import os
-import tempfile
-import pathlib
 import re
 import shutil
-import subprocess
+import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
 import pytest
-import yaml
 
 import utils.utils as utils
 
@@ -84,36 +80,65 @@ def check_file_pattern(pattern, file_path):
     return len(re.findall(pattern, content)) != 0
 
 
-def get_output_dir(suffix="_output", clean_existing=True):
+def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     """
     Provides a unique output directory based on the name of the calling test function
-    with a suffix applied.
+    with a suffix applied. For parametrized tests, pass param_id to ensure unique
+    directory names and avoid NFS conflicts.
 
     Args:
         suffix (str, optional): suffix to append to output_dir.
             Defaults to "_output".
         clean_existing (bool, optional): Whether to remove existing directory if exists.
             Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    param_suffix = ""
+    if param_id:
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
 
 
-def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True):
-    """Provides a unique input workoad directory with contents of input_dir
-    based on the name of the calling test function.
+def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
+    """Provides a unique input workload directory with contents of input_dir
+    based on the name of the calling test function. For parametrized tests,
+    pass param_id to ensure unique directory names and avoid NFS conflicts.
 
     Setup is a NOOP when tests run serially.
+
+    Args:
+        input_dir (str): Source directory to copy from.
+        suffix (str, optional): suffix to append to output_dir.
+            Defaults to "_tmp".
+        clean_existing (bool, optional): Whether to remove existing directory if exists.
+            Defaults to True.
+        param_id (str, optional): Unique identifier for parametrized tests.
+            When provided, appended to the directory name to ensure uniqueness.
+            Defaults to None.
     """
 
     if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
         return input_dir
 
-    output_dir = inspect.stack()[1].function + suffix
+    func_name = inspect.stack()[1].function
+
+    # Include param_id in directory name if provided
+    param_suffix = ""
+    if param_id:
+        # Sanitize param_id: replace special chars that may not be valid in paths
+        param_suffix = "_" + re.sub(r"[^\w\-]", "_", str(param_id))
+
+    output_dir = func_name + param_suffix + suffix
     if clean_existing:
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
@@ -159,10 +184,12 @@ def check_csv_files(output_dir, num_devices, num_kernels):
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
             if "roofline" in file:
                 assert len(file_dict[file].index) >= num_devices
-            elif not "sysinfo" in file:
+            elif "sysinfo" not in file and "ps_file" not in file:
                 assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
+        elif file.endswith(".json"):
+            file_dict[file] = "json"
     return file_dict
 
 
@@ -173,7 +200,9 @@ def get_num_pmc_file(output_dir):
     """
 
     perfmon_path = Path(output_dir) / "perfmon"
-    return len([f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"])
+    return len([
+        f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
+    ])
 
 
 # =============================================================================
@@ -186,7 +215,7 @@ def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     given directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path provided by pytest for test isolation.
+        tmp_path (Path): Temporary path provided by pytest for test isolation.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture to modify or simulate behavior
             of modules/functions.
 
@@ -216,7 +245,7 @@ def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     in the given directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path provided by pytest for test isolation.
+        tmp_path (Path): Temporary path provided by pytest for test isolation.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture to modify or simulate behavior
             of modules/functions.
 
@@ -277,7 +306,7 @@ def test_get_version_git_success(tmp_path, monkeypatch):
     Test get_version returns correct version info when git command succeeds.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -306,7 +335,7 @@ def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
     Test get_version returns correct version info when git fails but VERSION.sha exists.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -340,7 +369,7 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
     Test get_version returns unknown sha and mode when both git and VERSION.sha fail.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -379,10 +408,10 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     # Set ROCPROF to 'rocprof'
-    monkeypatch.setenv("ROCPROF", "rocprof")
+    monkeypatch.setenv("ROCPROF", "rocprofv3")
     # shutil.which returns None for 'rocprof'
     monkeypatch.setattr("shutil.which", lambda cmd: None)
     # Track calls to console_warning and console_error
@@ -401,7 +430,6 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
 
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_mod.detect_rocprof(DummyArgs())
-    assert any("Unable to resolve path to rocprofv3 binary" in w for w in warnings)
     assert any(
         "Please verify installation or set ROCPROF environment variable" in e
         for e in errors
@@ -415,7 +443,7 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     monkeypatch.setenv("ROCPROF", "rocprof")
     # shutil.which returns a fake path for 'rocprof'
@@ -447,13 +475,10 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/fake/path"
+        rocprofiler_sdk_tool_path = "/fake/path"
 
     monkeypatch.delenv("ROCPROF", raising=False)
-    monkeypatch.setattr(
-        "shutil.which", lambda cmd: "/usr/bin/rocprofv3" if cmd == "rocprofv3" else None
-    )
-    monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
+    monkeypatch.setattr("pathlib.Path.exists", lambda _: True)
     logs = []
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
@@ -461,10 +486,10 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     import utils.utils as utils_mod
 
     result = utils_mod.detect_rocprof(DummyArgs())
-    assert result == "rocprofv3"
+    assert result == "rocprofiler-sdk"
     assert any(
-        "ROC Profiler: /usr/bin/rocprofv3" in log_entry
-        or "rocprof_cmd is rocprofv3" in log_entry
+        "rocprofiler_sdk_path is /fake/path" in log_entry
+        or "rocprof_cmd is rocprofiler-sdk" in log_entry
         for log_entry in logs
     )
 
@@ -477,7 +502,7 @@ def test_detect_rocprof_sdk(monkeypatch):
     """
 
     class DummyArgs:
-        rocprofiler_sdk_library_path = "/some/sdk/path"
+        rocprofiler_sdk_tool_path = "/some/sdk/path"
 
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
@@ -1307,7 +1332,7 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
     Test basic functionality of v3_json_to_csv with a minimal valid JSON input.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1422,7 +1447,7 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
     Should create an empty CSV with headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1477,7 +1502,7 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     Should rename them to SQ_ACCUM_PREV_HIRES.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1587,7 +1612,7 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
     Should sum the values.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1715,7 +1740,7 @@ def test_v3_json_to_csv_invalid_json(tmp_path):
     Should raise JSONDecodeError.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
     """
     json_path = tmp_path / "invalid.json"
     with open(json_path, "w") as f:
@@ -1733,7 +1758,7 @@ def test_v3_json_to_csv_missing_required_keys(tmp_path):
     Should raise KeyError.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
     """
 
     invalid_json = {
@@ -1761,7 +1786,7 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     multiple dispatches and 3D grid/workgroup sizes.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1770,8 +1795,18 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 1, "wave_front_size": 32},
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    },
+                    {
+                        "id": {"handle": 2},
+                        "type": 2,
+                        "node_id": 1,
+                        "wave_front_size": 32,
+                    },
                 ],
                 "counters": [
                     {
@@ -1924,11 +1959,13 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
 
 def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     """
-    Test v3_json_to_csv handles cases where different dispatches have different sets of counters.
-    This addresses the DataFrame creation issue where arrays have different lengths.
+    Test v3_json_to_csv handles cases where different
+    dispatches have different sets of counters.
+    This addresses the DataFrame creation issue
+    where arrays have different lengths.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files
+        tmp_path (Path): Temporary directory for test files
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
 
@@ -1937,7 +1974,12 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
                     {
@@ -2073,7 +2115,8 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     except ValueError as e:
         if "All arrays must be of the same length" in str(e):
             pytest.skip(
-                "v3_json_to_csv does not currently handle missing counters gracefully - arrays have different lengths"
+                "v3_json_to_csv does not currently "
+                "handle missing counters gracefully - arrays have different lengths"
             )
         else:
             raise
@@ -2207,7 +2250,7 @@ def test_parse_text_basic(tmp_path):
     """Test parse_text with a simple valid input file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that counters are correctly extracted from a simple file.
@@ -2223,7 +2266,7 @@ def test_parse_text_empty_file(tmp_path):
     """Test parse_text with an empty file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that an empty file returns an empty list.
@@ -2239,7 +2282,7 @@ def test_parse_text_no_pmc_entries(tmp_path):
     """Test parse_text with a file that doesn't contain any 'pmc:' entries.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that a file without 'pmc:' returns an empty list.
@@ -2255,7 +2298,7 @@ def test_parse_text_with_comments(tmp_path):
     """Test parse_text with lines that have comments after the counters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that comments are properly stripped from counter lines.
@@ -2271,7 +2314,7 @@ def test_parse_text_multiple_lines(tmp_path):
     """Test parse_text with multiple 'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts counters from multiple lines are correctly combined.
@@ -2287,7 +2330,7 @@ def test_parse_text_mixed_lines(tmp_path):
     """Test parse_text with a mix of 'pmc:' and non-'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that only counters from 'pmc:' lines are extracted.
@@ -2305,7 +2348,7 @@ def test_parse_text_whitespace_handling(tmp_path):
     """Test parse_text with various whitespace combinations.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that whitespace is properly handled in counter extraction.
@@ -2331,7 +2374,7 @@ def test_parse_text_edge_cases(tmp_path):
     """Test parse_text with edge cases like empty 'pmc:' lines.
 
     Args:
-        tmp_path (pathlib.Path): Temporary path fixture provided by pytest.
+        tmp_path (Path): Temporary path fixture provided by pytest.
 
     Returns:
         None: Asserts that edge cases are handled correctly.
@@ -2359,12 +2402,12 @@ def test_parse_text_file_not_found():
 # =============================================================================
 
 
-def test_run_prof_success_v2(tmp_path, monkeypatch):
+def test_run_prof_success_v3(tmp_path, monkeypatch):
     """
-    Test run_prof with rocprofv2 successful execution.
+    Test run_prof with rocprofv3 successful execution.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2375,25 +2418,29 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
-    csv_content = "Dispatch_ID,GPU_ID,Kernel_Name\n0,0,test_kernel"
+    csv_content = (
+        "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
+        "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
+        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
+        "End_Timestamp,Counter_Name,Counter_Value\n"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
+    )
     with open(workload_dir + "/out/pmc_1/results_0.csv", "w") as f:
         f.write(csv_content)
 
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi250x"
-            self._l2_banks = 32
+            self.l2_banks = 32
             self.gpu_arch = "gfx90a"
             self.compute_partition = "CPX"
 
     mspec = MockSpec()
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: False)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -2412,7 +2459,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     Test run_prof with rocprofv3 using CSV format.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2428,7 +2475,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2438,8 +2485,6 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -2460,7 +2505,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     Test run_prof with rocprofiler-sdk execution.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2475,13 +2520,14 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
     profiler_options = {
         "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": workload_dir,
+        "ROCPROF_COUNTER_COLLECTION": "1",
         "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
         "librocprofiler-sdk-tool.so",
     }
@@ -2490,7 +2536,6 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.parse_text", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
@@ -2509,7 +2554,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     Test run_prof with additional YAML configuration file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2526,7 +2571,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2534,8 +2579,6 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
@@ -2554,7 +2597,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     Test run_prof when subprocess execution fails.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2569,7 +2612,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2577,8 +2620,6 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (False, "error output")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
@@ -2601,7 +2642,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     Test run_prof sets proper environment variables for MI300 series GPUs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2616,7 +2657,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2631,8 +2672,6 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", mock_capture_subprocess_output
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
@@ -2651,7 +2690,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     Test run_prof handles timestamps.txt special case correctly.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2668,11 +2707,17 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
-    csv_content = "Dispatch_ID,Start_Timestamp,End_Timestamp\n0,100,200"
+    csv_content = (
+        "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
+        "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
+        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
+        "End_Timestamp,Counter_Name,Counter_Value\n"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
+    )
     with open(workload_dir + "/kernel_trace.csv", "w") as f:
         f.write(csv_content)
 
@@ -2682,8 +2727,6 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr(
         "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
     )
@@ -2709,7 +2752,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     Test run_prof when no results files are generated.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2724,7 +2767,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
@@ -2732,8 +2775,6 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: False)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
@@ -2748,7 +2789,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     Test run_prof properly standardizes CSV headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2765,51 +2806,36 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
     csv_content = (
-        "KernelName,Index,grd,gpu-id,BeginNs,EndNs\ntest_kernel,0,64,0,100,200"
+        "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
+        "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
+        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
+        "End_Timestamp,Counter_Name,Counter_Value\n"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
     )
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    old_headers_df = pd.DataFrame({
-        "KernelName": ["test_kernel"],
-        "Index": [0],
-        "grd": [64],
-        "gpu-id": [0],
-        "BeginNs": [100],
-        "EndNs": [200],
-    })
-
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: False)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr(
         "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_test.csv"]
     )
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
-    read_calls = []
-
-    def mock_read_csv(path, **kwargs):
-        read_calls.append(path)
-        return old_headers_df.copy()
-
     write_calls = []
 
     def mock_to_csv(self, path, **kwargs):
         write_calls.append((path, self.columns.tolist()))
 
-    monkeypatch.setattr("pandas.read_csv", mock_read_csv)
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
-    monkeypatch.setattr("pandas.concat", lambda dfs, **k: old_headers_df.copy())
 
     import utils.utils as utils_mod
 
@@ -2817,9 +2843,8 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     final_headers = write_calls[-1][1] if write_calls else []
     assert "Kernel_Name" in final_headers
-    assert "Dispatch_ID" in final_headers
+    assert "Dispatch_Id" in final_headers
     assert "Grid_Size" in final_headers
-    assert "GPU_ID" in final_headers
     assert "Start_Timestamp" in final_headers
     assert "End_Timestamp" in final_headers
 
@@ -2829,7 +2854,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     Test run_prof applies TCC flattening for MI300 series GPUs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -2844,32 +2869,16 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
             self.compute_partition = "SPX"
-            self._l2_banks = 32
+            self.l2_banks = 32
 
     mspec = MockSpec()
 
-    flatten_called = False
-
-    def mock_flatten_tcc_info_across_xcds(file, xcds, l2_banks):
-        nonlocal flatten_called
-        flatten_called = True
-        return pd.DataFrame({
-            "Dispatch_ID": [0],
-            "TCC_HIT[0]": [100],
-            "TCC_HIT[16]": [200],
-        })
-
     # Mock functions
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
         "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
     )
-    monkeypatch.setattr("utils.utils.using_v3", lambda: False)
-    monkeypatch.setattr("utils.utils.using_v1", lambda: False)
-    monkeypatch.setattr(
-        "utils.utils.flatten_tcc_info_across_xcds", mock_flatten_tcc_info_across_xcds
-    )
-    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 2)
+    monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
     monkeypatch.setattr(
         "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
     )
@@ -2887,8 +2896,6 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     # Execute function
     utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
-    assert flatten_called
-
 
 import utils.utils as utils_mod  # noqa
 
@@ -2900,7 +2907,7 @@ class MockMSpec:
         self.gpu_model = gpu_model
         self.gpu_arch = gpu_arch
         self.compute_partition = compute_partition
-        self._l2_banks = l2_banks
+        self.l2_banks = l2_banks
 
 
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
@@ -2910,11 +2917,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             by the mspec.gpu_model check.
     """
     fname_str = str(tmp_path / "counters.txt")
-    pathlib.Path(fname_str).touch()
+    Path(fname_str).touch()
     workload_dir_str = str(tmp_path)
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr("utils.utils.using_v3", lambda: False)
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
 
     capture_subprocess_called_with_env = None
@@ -2937,15 +2943,17 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         "utils.utils.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
     )
 
-    mock_fname_path_obj = mock.Mock(spec=pathlib.Path)
+    mock_fname_path_obj = mock.MagicMock(spec=Path)
     mock_fname_path_obj.stem = "counters"
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_out_path_obj = mock.Mock(spec=pathlib.Path)
+    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=Path)
+
+    mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
 
     def path_side_effect(p_arg, *args):
-        if isinstance(p_arg, pathlib.Path):
+        if isinstance(p_arg, Path):
             if p_arg.name == "counters.txt":
                 return mock_fname_path_obj
             return p_arg
@@ -2962,7 +2970,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
+    monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
     original_env_var = "original_value"
     monkeypatch.setenv("EXISTING_VAR", original_env_var)
@@ -2979,6 +2987,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
 
     utils_mod.run_prof(
         fname_str,
@@ -3010,8 +3019,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     Line 5 (CLI): elif "--hip-trace" in options:
         process_hip_trace_output(...)
     """
-    fname_str = str(tmp_path / "counters.txt")
-    pathlib.Path(fname_str).touch()
+    fname_str = str(tmp_path) + "/counters.txt"
+    Path(fname_str).touch()
     fbase_str = "counters"
     workload_dir_str = str(tmp_path)
     (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
@@ -3021,7 +3030,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "utils.utils.process_rocprofv3_output",
-        lambda *a, **k: [str(tmp_path / "results1.csv")],
+        lambda *a, **k: [str(tmp_path) + "/results1.csv"],
     )
 
     hip_trace_called_with = None
@@ -3044,17 +3053,17 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])
 
-    mock_fname_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_fname_path_obj = mock.MagicMock(spec=Path)
     mock_fname_path_obj.stem = fbase_str
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=pathlib.Path)
+    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=Path)
 
-    mock_out_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_out_path_obj = mock.MagicMock(spec=Path)
     mock_out_path_obj.exists.return_value = True
 
     def path_side_effect(p_arg, *args):
-        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt":
+        if isinstance(p_arg, Path) and p_arg.name == "counters.txt":
             return mock_fname_path_obj
         if isinstance(p_arg, str) and p_arg.endswith("/out"):
             return mock_out_path_obj
@@ -3068,7 +3077,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
+    monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
     dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
@@ -3076,19 +3085,18 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
     monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
-    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)
-    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)
+    monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 1)
 
     mspec = MockMSpec()
     loglevel = logging.INFO
-    format_rocprof_output = True
+    format_rocprof_output = "csv"
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
 
     profiler_options_sdk_hip = {
         "APP_CMD": "my_app",
         "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
+        "ROCPROF_COUNTER_COLLECTION": "1",
         "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
         "librocprofiler-sdk-tool.so",
     }
@@ -3144,50 +3152,12 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
 # =============================================================================
 
 
-def test_process_rocprofv3_output_json_format(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output with json format converts JSON files to CSV.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts CSV files are created from JSON files.
-    """
-    workload_dir = str(tmp_path)
-    output_dir = tmp_path / "out" / "pmc_1" / "subdir"
-    output_dir.mkdir(parents=True)
-
-    json_file1 = output_dir / "test1.json"
-    json_file2 = output_dir / "test2.json"
-    json_file1.write_text('{"test": "data1"}')
-    json_file2.write_text('{"test": "data2"}')
-
-    monkeypatch.setattr("glob.glob", lambda pattern: [str(json_file1), str(json_file2)])
-
-    def mock_v3_json_to_csv(json_path, csv_path):
-        Path(csv_path).write_text("csv,data\ntest,value")
-
-    monkeypatch.setattr("utils.utils.v3_json_to_csv", mock_v3_json_to_csv)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("json", workload_dir, False)
-
-    assert len(result) == 2
-    csv_file1 = output_dir / "test1.csv"
-    csv_file2 = output_dir / "test2.csv"
-    assert csv_file1.exists()
-    assert csv_file2.exists()
-
-
 def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output with csv format processes counter collection files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3222,7 +3192,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 1
     assert str(converted_file) in result
@@ -3233,7 +3203,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
     Test process_rocprofv3_output handles conversion errors gracefully.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3268,7 +3238,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
     assert len(warnings) == 1
@@ -3280,7 +3250,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
     Test process_rocprofv3_output raises error when agent info file is missing.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3302,43 +3272,8 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
 
     import utils.utils as utils_mod
 
-    with pytest.raises(ValueError, match='has no coresponding "agent info" file'):
-        utils_mod.process_rocprofv3_output("csv", workload_dir, False)
-
-
-def test_process_rocprofv3_output_csv_format_timestamps_fallback(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output falls back to kernel trace files for timestamps.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts kernel trace files are used when is_timestamps is True.
-    """
-    workload_dir = str(tmp_path)
-    output_dir = tmp_path / "out" / "pmc_1" / "subdir"
-    output_dir.mkdir(parents=True)
-
-    trace_file = output_dir / "test_kernel_trace.csv"
-    trace_file.write_text("kernel,trace\ntest,data")
-
-    def mock_glob(pattern):
-        if "_counter_collection.csv" in pattern:
-            return []
-        elif "_kernel_trace.csv" in pattern:
-            return [str(trace_file)]
-        return []
-
-    monkeypatch.setattr("glob.glob", mock_glob)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, True)
-
-    assert len(result) == 1
-    assert str(trace_file) in result
+    with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
+        utils_mod.process_rocprofv3_output(workload_dir, False)
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
@@ -3349,7 +3284,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
     no files found for non-timestamps.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3361,53 +3296,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
-
-    assert result == []
-
-
-def test_process_rocprofv3_output_invalid_format(monkeypatch):
-    """
-    Test process_rocprofv3_output raises error for invalid output format.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts console_error is called for invalid format.
-    """
-
-    def mock_console_error(msg):
-        raise RuntimeError(f"console_error: {msg}")
-
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(
-        RuntimeError, match="The output file of rocprofv3 can only support json or csv"
-    ):
-        utils_mod.process_rocprofv3_output("invalid", "/tmp", False)
-
-
-def test_process_rocprofv3_output_json_format_no_files(tmp_path, monkeypatch):
-    """
-    Test process_rocprofv3_output with json format when no JSON files exist.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts empty list returned when no JSON files found.
-    """
-    workload_dir = str(tmp_path)
-
-    monkeypatch.setattr("glob.glob", lambda pattern: [])
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output("json", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
 
@@ -3419,7 +3308,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     Test process_rocprofv3_output processes multiple counter collection files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3460,7 +3349,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
 
     import utils.utils as utils_mod
 
-    result = utils_mod.process_rocprofv3_output("csv", workload_dir, False)
+    result = utils_mod.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 2
     assert str(converted_file1) in result
@@ -3514,7 +3403,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with a single CSV file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3605,7 +3494,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     Should handle empty file list gracefully.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3654,7 +3543,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with a mix of valid, empty, and corrupted files.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3713,7 +3602,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
     Should not copy file to workload directory.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3742,7 +3631,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    original_path = utils.path
+    original_path = utils.Path
 
     def mock_path_exists(path_str):
         if path_str == workload_dir + "/out":
@@ -3752,7 +3641,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
         else:
             return original_path(path_str)
 
-    monkeypatch.setattr("utils.utils.path", mock_path_exists)
+    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
     import utils.utils as utils_mod
 
@@ -3776,7 +3665,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
     only headers but no data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3813,7 +3702,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with larger CSV files to ensure memory handling.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3864,7 +3753,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with CSV files containing unicode characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3905,7 +3794,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with CSV files having different column schemas.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -3961,7 +3850,7 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     errors during file operations.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
 
     Returns:
@@ -4298,7 +4187,7 @@ def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    original_path = utils.path
+    original_path = utils.Path
 
     def mock_path_exists(path_str):
         if path_str == workload_dir + "/out":
@@ -4308,7 +4197,7 @@ def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
         else:
             return original_path(path_str)
 
-    monkeypatch.setattr("utils.utils.path", mock_path_exists)
+    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
     import utils.utils as utils_mod
 
@@ -4567,1154 +4456,6 @@ def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch
         utils_mod.process_hip_trace_output(workload_dir, fbase)
 
 
-# ==============================================================================
-# ROOFLINE DETECTION TESTS
-# ==============================================================================
-
-
-def test_ubuntu_22_04_detection(monkeypatch):
-    """
-    Test Ubuntu 22.04 detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies Ubuntu 22.04
-        and returns the appropriate distro
-    """
-    mock_os_release = 'VERSION_ID="22.04"\nNAME="Ubuntu"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "22.04"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    # Create an object with attribute value = 1
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-def test_ubuntu_24_04_detection(monkeypatch):
-    """
-    Test Ubuntu 24.04 detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies Ubuntu 24.04
-        and returns the appropriate distro
-    """
-    mock_os_release = 'VERSION_ID="24.04"\nNAME="Ubuntu"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "24.04"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-def test_rhel_detection(monkeypatch):
-    """
-    Test RHEL distro detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies RHEL
-        and returns the appropriate distro
-    """
-    mock_os_release = 'PLATFORM_ID="platform:el9"\nNAME="Red Hat Enterprise Linux"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    def mock_search(pattern, text):
-        if "PLATFORM_ID" in pattern:
-            return "platform:el9"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="7.x.x"))
-
-    assert result["rocm_ver"] == 7
-
-
-def test_sles_15_6_detection(monkeypatch):
-    """
-    Test SLES 15.6 detection.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly identifies SLES 15.6
-        and returns the appropriate distro
-    """
-    mock_os_release = 'VERSION_ID="15.6"\nNAME="SLES"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "15.6"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-def test_sles_15_7_detection(monkeypatch):
-    """
-    Test SLES 15.7 detection (edge case with higher service pack).
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching
-
-    Returns:
-        Verifies that the function correctly handles newer SLES service packs
-    """
-    mock_os_release = 'VERSION_ID="15.7"\nNAME="SLES"'
-
-    def mock_path_read_text(self):
-        return mock_os_release
-
-    monkeypatch.setattr("os.environ", {"keys": lambda: []})
-
-    monkeypatch.setattr("pathlib.Path.read_text", mock_path_read_text)
-
-    def mock_search(pattern, text):
-        if "VERSION_ID" in pattern:
-            return "15.7"
-        return None
-
-    monkeypatch.setattr("utils.specs.search", mock_search)
-
-    import utils.utils as utils_mod
-
-    result = utils_mod.detect_roofline(SimpleNamespace(rocm_version="0.x.x"))
-
-    assert result["rocm_ver"] == 0
-
-
-# =============================================================================
-# TESTS FOR MIBENCH OUTPUT
-# =============================================================================
-
-
-def test_mibench_override_distro_success(tmp_path, monkeypatch):
-    """
-    Test mibench with override distro that successfully finds and executes binary.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that override path is used and subprocess is called correctly.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "custom_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    expected_args = [  # noqa
-        str(override_binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "0",
-    ]
-    assert subprocess_calls[0][1] is True
-
-
-def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
-    """
-    Test mibench with standard distro where first potential path exists.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that first path is used when it exists.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 1
-        quiet = True
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-ubuntu22_04"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "22.04", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-
-
-def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
-    """
-    Test mibench with standard distro where second potential path exists.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that second path is used when first doesn't exist.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 2
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    second_path = install_root / "bin"
-    second_path.mkdir(parents=True)
-    binary_path = second_path / "roofline-rhel8"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "platform:el8", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "2"]  # noqa
-
-
-def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
-    """
-    Test mibench when no binary paths exist, should call console_error.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that console_error is called when no binaries are found.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "15.6", "rocm_ver": "0.x.x"}
-
-    console_error_calls = []
-
-    def mock_console_error(category, msg):
-        console_error_calls.append((category, msg))
-        raise RuntimeError("console_error called")
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(RuntimeError, match="console_error called"):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(console_error_calls) == 1
-    assert console_error_calls[0][0] == "roofline"
-    assert "Unable to locate expected binary" in console_error_calls[0][1]
-
-
-def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
-    """
-    Test mibench quiet flag handling demonstrates the bug where += splits the string.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that the bug exists and characters are split.
-    """
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-ubuntu22_04"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "22.04", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    class MockArgsQuiet:
-        path = str(tmp_path)
-        device = 0
-        quiet = True
-
-    class MockMspecQuiet:
-        pass
-
-    utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
-
-    expected_base_args = [
-        str(binary_path),
-        "-o",
-        str(tmp_path) + "/roofline.csv",
-        "-d",
-        "0",
-    ]
-    expected_full_args = expected_base_args + ["-", "-", "q", "u", "i", "e", "t"]  # noqa
-
-    subprocess_calls.clear()
-
-    class MockArgsNotQuiet:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspecNotQuiet:
-        pass
-
-    utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
-
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "0"]  # noqa
-
-
-def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
-    """
-    Test mibench with SLES distro mapping.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that SLES distro is correctly mapped.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 3
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    first_path = rocprof_home / "utils" / "rooflines"
-    first_path.mkdir(parents=True)
-    binary_path = first_path / "roofline-sles15sp6"
-    binary_path.write_text("#!/bin/bash\necho 'roofline executed'")
-    binary_path.chmod(0o755)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "15.6", "rocm_ver": "0.x.x"}
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append((args, check))
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda *a, **k: True)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-
-
-def test_mibench_subprocess_run_failure(tmp_path, monkeypatch):
-    """
-    Test mibench when subprocess.run raises an exception.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that subprocess exceptions are properly propagated.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "failing_roofline"
-    override_binary_path.write_text("#!/bin/bash\nexit 1")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    def mock_subprocess_run(args, check=True):
-        raise subprocess.CalledProcessError(1, args)
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(subprocess.CalledProcessError):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-
-def test_mibench_device_string_conversion(tmp_path, monkeypatch):
-    """
-    Test mibench correctly converts device ID to string.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that device ID is converted to string in subprocess args.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 42
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "test_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'success'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    subprocess_calls = []
-
-    def mock_subprocess_run(args, check=True):
-        subprocess_calls.append(args)
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(subprocess_calls) == 1
-    device_arg_index = subprocess_calls[0].index("-d") + 1
-    assert subprocess_calls[0][device_arg_index] == "42"
-    assert isinstance(subprocess_calls[0][device_arg_index], str)
-
-
-def test_mibench_unknown_distro_mapping(tmp_path, monkeypatch):
-    """
-    Test mibench behavior with unknown distro (should cause KeyError).
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that KeyError is raised for unknown distro.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    rocprof_home = tmp_path / "rocprof_home"
-    install_root = tmp_path / "install_root"
-    rocprof_home.mkdir(parents=True)
-    install_root.mkdir(parents=True)
-
-    class MockConfig:
-        def __init__(self):
-            self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
-
-        class MockPath:
-            def __init__(self, home_path, install_path):
-                self._home_path = home_path
-                self._install_path = install_path
-                self.parent = self.MockParent(install_path)
-
-            def __str__(self):
-                return str(self._home_path)
-
-            def __truediv__(self, other):
-                return self._home_path / other
-
-            class MockParent:
-                def __init__(self, install_path):
-                    self.parent = install_path
-
-                def __truediv__(self, other):
-                    return self.parent / other
-
-    mock_config = MockConfig()
-
-    def mock_detect_roofline(mspec):
-        return {"distro": "unknown_distro", "rocm_ver": "0.x.x"}  # Not in distro_map
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("utils.utils.config", mock_config)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(KeyError):
-        utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-
-def test_mibench_console_log_called(tmp_path, monkeypatch):
-    """
-    Test mibench calls console_log with correct message.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that console_log is called with expected message.
-    """
-
-    class MockArgs:
-        path = str(tmp_path)
-        device = 0
-        quiet = False
-
-    class MockMspec:
-        pass
-
-    override_binary_path = tmp_path / "test_roofline"
-    override_binary_path.write_text("#!/bin/bash\necho 'success'")
-    override_binary_path.chmod(0o755)
-
-    def mock_detect_roofline(mspec):
-        return {
-            "distro": "override",
-            "path": str(override_binary_path),
-            "rocm_ver": "0.x.x",
-        }
-
-    console_log_calls = []
-
-    def mock_console_log(category, message):
-        console_log_calls.append((category, message))
-
-    def mock_subprocess_run(args, check=True):
-        pass
-
-    monkeypatch.setattr("utils.utils.detect_roofline", mock_detect_roofline)
-    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
-    monkeypatch.setattr("utils.utils.console_log", mock_console_log)
-
-    import utils.utils as utils_mod
-
-    utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
-
-    assert len(console_log_calls) == 1
-    assert console_log_calls[0][0] == "roofline"
-    assert console_log_calls[0][1] == "No roofline data found. Generating..."
-
-
-# =============================================================================
-# TESTS FOR flatten_tcc_info_across_xcds
-# =============================================================================
-"""
-Normal Functionality:
-
-Basic single XCD operation
-Multiple XCD channel renumbering
-Complex channel index patterns
-Multiple dispatch handling
-Edge Cases:
-
-Empty dataframes
-Zero XCDs
-Insufficient data
-Large channel numbers
-Column Handling:
-
-No TCC columns
-TCC-only columns
-Mixed TCC/non-TCC columns
-Irregular TCC naming patterns
-Error Conditions:
-
-File not found errors
-Invalid input validation
-Performance & Data Integrity:
-
-Large dataset handling
-Data preservation validation
-Regex pattern validation
-"""
-
-
-def test_flatten_tcc_info_across_xcds_zero_xcds(tmp_path):
-    """
-    Test edge case with zero XCDs.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts function handles zero XCDs edge case by raising ValueError.
-    """
-    columns = ["Kernel_Name", "TCC_HIT[0]"]
-    data = [["kernel1", 100]]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_zero_xcds.csv"
-    df.to_csv(csv_file, index=False)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(ValueError, match="range\\(\\) arg 3 must not be zero"):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=0, tcc_channel_per_xcd=4
-        )
-
-
-def test_flatten_tcc_info_across_xcds_insufficient_data(tmp_path):
-    """
-    Test when there's insufficient data for the specified XCDs.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts function raises ValueError when trying
-        to process insufficient data.
-    """
-    columns = ["Kernel_Name", "TCC_HIT[0]"]
-    data = [["kernel1", 100]]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_insufficient.csv"
-    df.to_csv(csv_file, index=False)
-
-    import utils.utils as utils_mod
-
-    with pytest.raises(ValueError, match="cannot set a row with mismatched columns"):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=3, tcc_channel_per_xcd=4
-        )
-
-
-def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
-    """
-    Test with irregular TCC column naming patterns.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts function handles various TCC column name
-        patterns but may fail with pandas Series ambiguity.
-    """
-    columns = [
-        "Kernel_Name",
-        "TCC_HIT_SPECIAL[0]",
-        "NOT_TCC_BUT_HAS_TCC",
-        "TCC_MISS[0]",
-    ]
-    data = [
-        ["kernel1", 100, 50, 10],
-        ["kernel1", 200, 60, 20],
-    ]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_irregular.csv"
-    df.to_csv(csv_file, index=False)
-
-    import utils.utils as utils_mod
-
-    try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=4
-        )
-
-        assert len(result) == 1
-        assert "TCC_HIT_SPECIAL[0]" in result.columns
-        assert "TCC_HIT_SPECIAL[4]" in result.columns
-        assert "TCC_MISS[0]" in result.columns
-        assert "TCC_MISS[4]" in result.columns
-        assert result.iloc[0]["NOT_TCC_BUT_HAS_TCC"] == 50
-
-    except ValueError as e:
-        if "The truth value of a Series is ambiguous" in str(e):
-            pytest.skip(
-                "Function has pandas Series ambiguity issue in boolean evaluation"
-            )
-        else:
-            raise
-
-
-def test_flatten_tcc_info_across_xcds_regex_pattern_validation(tmp_path):
-    """
-    Test that regex pattern correctly identifies channel indices.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts regex pattern works for various channel
-        index formats but may fail with pandas Series ambiguity.
-    """
-    columns = ["TCC_HIT[0]", "TCC_MISS[10]", "TCC_REQ[255]", "TCC_INVALID_NO_BRACKET"]
-    data = [
-        [100, 200, 300, 400],  # XCD 0
-        [500, 600, 700, 800],  # XCD 1
-    ]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_regex.csv"
-    df.to_csv(csv_file, index=False)
-
-    import utils.utils as utils_mod
-
-    try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=128
-        )
-
-        assert len(result) == 1
-        assert "TCC_HIT[0]" in result.columns
-        assert "TCC_HIT[128]" in result.columns  # 0 + 1*128
-        assert "TCC_MISS[10]" in result.columns
-        assert "TCC_MISS[138]" in result.columns  # 10 + 1*128
-        assert "TCC_REQ[255]" in result.columns
-        assert "TCC_REQ[383]" in result.columns  # 255 + 1*128
-
-        assert result.iloc[0]["TCC_INVALID_NO_BRACKET"] == 400
-
-    except ValueError as e:
-        if "The truth value of a Series is ambiguous" in str(e):
-            pytest.skip(
-                "Function has pandas Series ambiguity issue in boolean evaluation"
-            )
-        else:
-            raise
-
-
-def test_flatten_tcc_info_across_xcds_edge_case_validation(tmp_path):
-    """
-    Test edge cases and validation scenarios for
-    flatten_tcc_info_across_xcds.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts function behavior with various edge cases.
-    """
-    import utils.utils as utils_mod
-
-    columns = ["Kernel_Name", "TCC_HIT[0]"]
-    data = [["kernel1", 100]]
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_zero_xcds.csv"
-    df.to_csv(csv_file, index=False)
-
-    with pytest.raises(ValueError):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=0, tcc_channel_per_xcd=4
-        )
-
-    try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=-1, tcc_channel_per_xcd=4
-        )
-        assert len(result) == 0
-    except ValueError:
-        pass
-
-    with pytest.raises(FileNotFoundError):
-        utils_mod.flatten_tcc_info_across_xcds(
-            "nonexistent.csv", xcds=2, tcc_channel_per_xcd=4
-        )
-
-
-def test_flatten_tcc_info_across_xcds_pandas_filter_issue(tmp_path):
-    """
-    Test demonstrating the pandas filter regex issue that causes Series ambiguity error.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Documents the pandas boolean evaluation issue in the function.
-    """
-    columns = ["Kernel_Name", "TCC_HIT[0]", "SQ_WAVES"]
-    data = [
-        ["kernel1", 100, 50],
-        ["kernel1", 200, 60],
-    ]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_pandas_issue.csv"
-    df.to_csv(csv_file, index=False)
-
-    import utils.utils as utils_mod
-
-    try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=4
-        )
-
-        assert len(result) == 1
-        assert "Kernel_Name" in result.columns
-        assert "TCC_HIT[0]" in result.columns
-        assert "TCC_HIT[4]" in result.columns
-        assert "SQ_WAVES" in result.columns
-
-    except ValueError as e:
-        if "The truth value of a Series is ambiguous" in str(e):
-            pytest.skip(
-                "Known issue: pandas .filter() with regex causes "
-                "Series boolean ambiguity"
-            )
-        else:
-            raise
-
-
-def test_flatten_tcc_info_across_xcds_successful_cases_only(tmp_path):
-    """
-    Test only the cases that are expected to work successfully.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-
-    Returns:
-        None: Asserts successful operation for known working scenarios.
-    """
-    import utils.utils as utils_mod
-
-    columns = ["TCC_HIT[0]", "TCC_MISS[0]"]
-    data = [
-        [100, 10],  # XCD 0
-        [200, 20],  # XCD 1
-    ]
-
-    df = pd.DataFrame(data, columns=columns)
-    csv_file = tmp_path / "test_simple_success.csv"
-    df.to_csv(csv_file, index=False)
-
-    result = utils_mod.flatten_tcc_info_across_xcds(
-        str(csv_file), xcds=2, tcc_channel_per_xcd=4
-    )
-
-    assert len(result) == 1
-    assert "TCC_HIT[0]" in result.columns
-    assert "TCC_HIT[4]" in result.columns
-    assert "TCC_MISS[0]" in result.columns
-    assert "TCC_MISS[4]" in result.columns
-    assert result.iloc[0]["TCC_HIT[0]"] == 100
-    assert result.iloc[0]["TCC_HIT[4]"] == 200
-
-
-# =============================================================================
-# TESTS FOR flatten_tcc_info_across_xcds
-# =============================================================================
 """
 Normal Functionality:
 
@@ -5750,7 +4491,18 @@ Behavior validation
 """
 
 
-def test_get_submodules_basic_functionality():
+mock_package = mock.MagicMock()
+mock_package.__path__ = ["/fake/path"]
+mock_submodules = [
+    (None, "module_parse", False),
+    (None, "module_request", False),
+    (None, "module_error", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules)
+def test_get_submodules_basic_functionality(mock_walk, mock_import):
     """
     Test basic functionality with a real package that has submodules.
 
@@ -5760,18 +4512,7 @@ def test_get_submodules_basic_functionality():
 
     import utils.utils as utils_mod
 
-    mock_package = mock.MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_parse", False),
-        (None, "module_request", False),
-        (None, "module_error", False),
-    ]
-
-    with mock.patch("importlib.import_module", return_value=mock_package):
-        with mock.patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
+    result = utils_mod.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert len(result) == 3
@@ -5814,144 +4555,131 @@ def test_get_submodules_package_not_found():
         utils_mod.get_submodules("nonexistent_package_12345")
 
 
-def test_get_submodules_name_processing_single_underscore():
+mock_package_single = mock.MagicMock()
+mock_package_single.__path__ = ["/fake/path"]
+mock_submodules_single = [
+    (None, "module_parser", False),
+    (None, "module_request", False),
+    (None, "module_error", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_single)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_single)
+def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import):
     """
     Test name processing with single underscore pattern.
 
     Returns:
         None: Asserts correct name processing for submodules with single underscore.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_parser", False),
-        (None, "module_request", False),
-        (None, "module_error", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["parser", "request", "error"]
     assert result == expected
 
 
-def test_get_submodules_name_processing_multiple_underscores():
+mock_package_multiple = mock.MagicMock()
+mock_package_multiple.__path__ = ["/fake/path"]
+mock_submodules_multiple = [
+    (None, "module_some_complex_name", False),
+    (None, "module_another_test_case", False),
+    (None, "module_simple", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_multiple)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_multiple)
+def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_import):
     """
     Test name processing with multiple underscores in submodule names.
 
     Returns:
         None: Asserts correct name processing for complex underscore patterns.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_some_complex_name", False),
-        (None, "module_another_test_case", False),
-        (None, "module_simple", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["somecomplexname", "anothertestcase", "simple"]
     assert result == expected
 
 
-def test_get_submodules_base_module_filtered():
+mock_package_base = mock.MagicMock()
+mock_package_base.__path__ = ["/fake/path"]
+mock_submodules_base = [
+    (None, "module_base", False),
+    (None, "module_parser", False),
+    (None, "module_handler", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_base)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_base)
+def test_get_submodules_base_module_filtered(mock_walk, mock_import):
     """
     Test that 'base' submodule is properly filtered out.
 
     Returns:
         None: Asserts 'base' submodules are excluded from results.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_base", False),
-        (None, "module_parser", False),
-        (None, "module_handler", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["parser", "handler"]
     assert result == expected
     assert "base" not in result
 
 
-def test_get_submodules_no_underscore_in_name():
+mock_package_no_underscore = mock.MagicMock()
+mock_package_no_underscore.__path__ = ["/fake/path"]
+mock_submodules_no_underscore = [
+    (None, "simplemodule", False),
+    (None, "anothermodule", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_no_underscore)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_no_underscore)
+def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
     """
     Test behavior with submodule names that don't follow the expected pattern.
 
     Returns:
         None: Asserts function handles names without underscores by raising IndexError.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "simplemodule", False),
-        (None, "anothermodule", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            with pytest.raises(IndexError):
-                utils_mod.get_submodules("test_package")
+    with pytest.raises(IndexError):
+        utils_mod.get_submodules("test_package")
 
 
-def test_get_submodules_empty_name_parts():
+mock_package_empty_parts = mock.MagicMock()
+mock_package_empty_parts.__path__ = ["/fake/path"]
+mock_submodules_empty_parts = [
+    (None, "module_", False),  # ends with underscore
+    (None, "_module", False),  # starts with underscore - this will cause IndexError
+    (None, "module__double", False),  # double underscore
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_empty_parts)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_empty_parts)
+def test_get_submodules_empty_name_parts(mock_walk, mock_import):
     """
     Test behavior with empty name parts after splitting.
 
     Returns:
         None: Asserts function handles edge cases in name processing.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_", False),  # ends with underscore
-        (None, "_module", False),  # starts with underscore - this will cause IndexError
-        (None, "module__double", False),  # double underscore
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            try:
-                result = utils_mod.get_submodules("test_package")
-                expected = ["", "", "double"]  # noqa - Empty strings for edge cases
-                assert len(result) == 3
-            except IndexError:
-                pytest.skip("Function doesn't handle edge case module names gracefully")
+    try:
+        result = utils_mod.get_submodules("test_package")
+        expected = ["", "", "double"]  # noqa - Empty strings for edge cases
+        assert len(result) == 3
+    except IndexError:
+        pytest.skip("Function doesn't handle edge case module names gracefully")
 
 
 def test_get_submodules_package_without_path_attribute():
@@ -5973,85 +4701,77 @@ def test_get_submodules_package_without_path_attribute():
             utils_mod.get_submodules("test_package")
 
 
-def test_get_submodules_pkgutil_walk_packages_exception():
+mock_package_exception = mock.MagicMock()
+mock_package_exception.__path__ = ["/fake/path"]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_exception)
+@mock.patch("pkgutil.walk_packages", side_effect=ImportError("Mock error"))
+def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
     """
     Test behavior when pkgutil.walk_packages raises an exception.
 
     Returns:
         None: Asserts exceptions from pkgutil.walk_packages are properly handled.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", side_effect=ImportError("Mock error")):
-            with pytest.raises(ImportError):
-                utils_mod.get_submodules("test_package")
+    with pytest.raises(ImportError):
+        utils_mod.get_submodules("test_package")
 
 
-def test_get_submodules_mixed_module_types():
+mock_package_mixed = mock.MagicMock()
+mock_package_mixed.__path__ = ["/fake/path"]
+mock_submodules_mixed = [
+    (None, "module_base", False),  # Should be filtered out
+    (None, "module_parser", False),  # Normal case
+    (None, "module_test_case", False),  # Multiple underscores
+    (None, "module_simple", False),  # Simple case
+    (None, "module_another_base", False),  # Contains 'base' but not exactly 'base'
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_mixed)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_mixed)
+def test_get_submodules_mixed_module_types(mock_walk, mock_import):
     """
     Test with a mix of different module types and names.
 
     Returns:
         None: Asserts function correctly processes various submodule patterns.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_base", False),  # Should be filtered out
-        (None, "module_parser", False),  # Normal case
-        (None, "module_test_case", False),  # Multiple underscores
-        (None, "module_simple", False),  # Simple case
-        (None, "module_another_base", False),  # Contains 'base' but not exactly 'base'
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["parser", "testcase", "simple", "anotherbase"]
     assert result == expected
     assert "base" not in result
 
 
-def test_get_submodules_large_number_of_submodules():
+mock_package_large = mock.MagicMock()
+mock_package_large.__path__ = ["/fake/path"]
+mock_submodules_large = []
+expected_results_large = []
+for i in range(100):
+    module_name = f"module_test{i}"
+    mock_submodules_large.append((None, module_name, False))
+    expected_results_large.append(f"test{i}")
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_large)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_large)
+def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
     """
     Test performance and correctness with a large number of submodules.
 
     Returns:
         None: Asserts function handles large numbers of submodules correctly.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = []
-    expected_results = []
-
-    for i in range(100):
-        module_name = f"module_test{i}"
-        mock_submodules.append((None, module_name, False))
-        expected_results.append(f"test{i}")
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     assert len(result) == 100
-    assert result == expected_results
+    assert result == expected_results_large
 
 
 def test_get_submodules_string_input_validation():
@@ -6102,36 +4822,39 @@ def test_get_submodules_return_type_consistency():
             assert len(result) == 0
 
 
-def test_get_submodules_special_characters_in_names():
+mock_package_special = mock.MagicMock()
+mock_package_special.__path__ = ["/fake/path"]
+mock_submodules_special = [
+    (None, "module_test-case", False),
+    (None, "module_test.case", False),
+    (None, "module_test123", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_special)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_special)
+def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
     """
     Test handling of special characters in submodule names.
 
     Returns:
-        None: Asserts function processes special
-        characters in names correctly.
+        None: Asserts function processes special characters in names correctly.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_test-case", False),
-        (None, "module_test.case", False),
-        (None, "module_test123", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["test-case", "test.case", "test123"]
     assert result == expected
 
 
-def test_get_submodules_imports_isolation():
+mock_package_isolation = mock.MagicMock()
+mock_package_isolation.__path__ = ["/fake/path"]
+mock_submodules_isolation = [(None, "module_test", False)]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_isolation)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_isolation)
+def test_get_submodules_imports_isolation(mock_walk, mock_import):
     """
     Test that imports are properly isolated and don't affect global state.
 
@@ -6139,83 +4862,70 @@ def test_get_submodules_imports_isolation():
         None: Asserts function imports don't pollute global namespace.
     """
     import sys
-    from unittest.mock import MagicMock, patch
 
     import utils.utils as utils_mod
 
     original_importlib = sys.modules.get("importlib")
     original_pkgutil = sys.modules.get("pkgutil")
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-    mock_submodules = [(None, "module_test", False)]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
+    result = utils_mod.get_submodules("test_package")
 
     assert sys.modules.get("importlib") == original_importlib
     assert sys.modules.get("pkgutil") == original_pkgutil
-
     assert isinstance(result, list)
     assert result == ["test"]
 
 
-def test_get_submodules_unicode_names():
+mock_package_unicode = mock.MagicMock()
+mock_package_unicode.__path__ = ["/fake/path"]
+mock_submodules_unicode = [
+    (None, "module_tëst", False),
+    (None, "module_测试", False),
+    (None, "module_тест", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_unicode)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_unicode)
+def test_get_submodules_unicode_names(mock_walk, mock_import):
     """
     Test handling of Unicode characters in package and submodule names.
 
     Returns:
         None: Asserts function handles Unicode characters appropriately.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_tëst", False),
-        (None, "module_测试", False),
-        (None, "module_тест", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
-
+    result = utils_mod.get_submodules("test_package")
     expected = ["tëst", "测试", "тест"]
     assert result == expected
 
 
-def test_get_submodules_docstring_verification():
+mock_package_docstring = mock.MagicMock()
+mock_package_docstring.__path__ = ["/fake/path"]
+mock_submodules_docstring = [
+    (None, "module_submodule1", False),
+    (None, "module_submodule2", False),
+]
+
+
+@mock.patch("importlib.import_module", return_value=mock_package_docstring)
+@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_docstring)
+def test_get_submodules_docstring_verification(mock_walk, mock_import):
     """
     Test that function behavior matches its docstring description.
 
     Returns:
         None: Asserts function behavior aligns with documented purpose.
     """
-    from unittest.mock import MagicMock, patch
-
     import utils.utils as utils_mod
 
     assert utils_mod.get_submodules.__doc__ is not None
     assert (
         "List all submodules for a target package" in utils_mod.get_submodules.__doc__
-    )
+    )  # noqa
 
-    mock_package = MagicMock()
-    mock_package.__path__ = ["/fake/path"]
-
-    mock_submodules = [
-        (None, "module_submodule1", False),
-        (None, "module_submodule2", False),
-    ]
-
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
+    result = utils_mod.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert "submodule1" in result
@@ -6248,7 +4958,7 @@ Directory access issues
 String Formatting and Dependencies:
 
 Console error message formatting
-Path handling (string vs pathlib.Path)
+Path handling (string vs Path)
 Pandas dependency verification
 Return value consistency
 Special Scenarios:
@@ -6265,7 +4975,7 @@ def test_is_workload_empty_valid_data_file(tmp_path):
     Test is_workload_empty with a valid pmc_perf.csv file containing data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles valid data files without errors.
@@ -6300,7 +5010,7 @@ def test_is_workload_empty_file_with_nan_values(tmp_path):
     Test is_workload_empty with pmc_perf.csv containing NaN values.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects and reports empty cells after dropping NaN.
@@ -6329,9 +5039,10 @@ NaN,,,"""
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
-    assert "pmc_perf.csv" in error_args[0]
-    assert "Profiling data could be corrupt" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
+    assert "pmc_perf.csv" in error_args[1]
+    assert "Profiling data could be corrupt" in error_args[1]
 
 
 def test_is_workload_empty_completely_empty_csv(tmp_path):
@@ -6339,7 +5050,7 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
     Test is_workload_empty with completely empty pmc_perf.csv file.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects empty CSV file.
@@ -6371,7 +5082,7 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     Test is_workload_empty with CSV containing only headers.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects CSV with headers but no data.
@@ -6397,7 +5108,8 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
 
 
 def test_is_workload_empty_no_pmc_perf_file(tmp_path):
@@ -6405,7 +5117,7 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     Test is_workload_empty when pmc_perf.csv file doesn't exist.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function detects missing profiling data file.
@@ -6461,7 +5173,7 @@ def test_is_workload_empty_malformed_csv(tmp_path):
     Test is_workload_empty with malformed CSV that causes pandas read error.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles pandas CSV reading errors gracefully.
@@ -6497,7 +5209,7 @@ def test_is_workload_empty_mixed_valid_invalid_data(tmp_path):
     Test is_workload_empty with CSV containing mix of valid and invalid (NaN) data.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles mixed data correctly.
@@ -6533,7 +5245,7 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     Test is_workload_empty with large dataset that becomes empty after dropping NaNs.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function correctly processes large datasets.
@@ -6563,7 +5275,8 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
-    assert "profilingFound empty cells" in error_args[0]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
 
 
 def test_is_workload_empty_unicode_content(tmp_path):
@@ -6571,7 +5284,7 @@ def test_is_workload_empty_unicode_content(tmp_path):
     Test is_workload_empty with CSV containing Unicode characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles Unicode content correctly.
@@ -6606,7 +5319,7 @@ def test_is_workload_empty_special_path_characters(tmp_path):
     Test is_workload_empty with directory paths containing special characters.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles special characters in paths.
@@ -6639,7 +5352,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
     Test is_workload_empty when CSV file exists but cannot be read due to permissions.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function handles file permission errors.
@@ -6675,7 +5388,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
 
 def test_is_workload_empty_string_path_input():
     """
-    Test is_workload_empty with string path input vs pathlib.Path.
+    Test is_workload_empty with string path input vs Path.
 
     Returns:
         None: Asserts function handles different path input types.
@@ -6703,7 +5416,7 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     Test is_workload_empty string formatting in console_error messages.
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts console_error messages are properly formatted.
@@ -6729,9 +5442,10 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
     expected_path = str(workload_dir / "pmc_perf.csv")
-    assert expected_path in error_args[0]
-    assert "profilingFound empty cells" in error_args[0]
-    assert "Profiling data could be corrupt" in error_args[0]
+    assert expected_path in error_args[1]
+    assert "profiling" in error_args[0]
+    assert "Found empty cells" in error_args[1]
+    assert "Profiling data could be corrupt" in error_args[1]
 
 
 def test_is_workload_empty_function_return_value(tmp_path):
@@ -6739,7 +5453,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     Test that is_workload_empty function return behavior (implicitly returns None).
 
     Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
+        tmp_path (Path): Temporary directory for test files.
 
     Returns:
         None: Asserts function return value consistency.
@@ -6921,13 +5635,12 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
 
                 utils_mod.set_locale_encoding()
 
-                assert len(console_error_calls) == 2
+                assert len(console_error_calls) == 1
                 assert (
-                    "Failed to set locale to the current UTF-8-based locale."
+                    "Failed to set locale to the current UTF-8-based locale:"
                     in console_error_calls[0][0][0]
                 )
-                assert console_error_calls[0][1]["exit"] == False  # noqa
-                assert console_error_calls[1][0][0] == fallback_error
+                assert "Fallback locale failed" in console_error_calls[0][0][0]
 
 
 def test_set_locale_encoding_no_utf8_locale_available():
@@ -7181,8 +5894,8 @@ def test_set_locale_encoding_different_locale_error_types():
 
                     utils_mod.set_locale_encoding()
 
-                    assert len(console_error_calls) == 2
-                    assert console_error_calls[1][0][0] == fallback_error
+                    assert len(console_error_calls) == 1
+                    assert str(fallback_error) in console_error_calls[0][0][0]
 
 
 def test_set_locale_encoding_unusual_locale_names():
@@ -7479,7 +6192,7 @@ def test_set_locale_encoding_comprehensive_error_handling():
                 locale.Error("Fallback fail"),
             ],
             "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 2,
+            "expected_errors": 1,
         },
         {
             "name": "No UTF-8 locale available",
@@ -8502,190 +7215,23 @@ def test_add_counter_overwrite_existing():
     updated_properties = ["P_UPDATED", "P_NEW"]  # noqa
 
 
-# =================================================================================
-# Test extract counter info extra config input yaml
-# =================================================================================
-
-
-def test_extract_counter_info_returns_none_when_not_found():
-    """
-    Test that extract_counter_info_extra_config_input_yaml returns None
-    when the counter is not found or data structure is incomplete.
-    """
-    data_empty = {}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(data_empty, "ANY_COUNTER")
-        is None
-    )
-
-    data_no_counters_key = {"rocprofiler-sdk": {}}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_no_counters_key, "ANY_COUNTER"
-        )
-        is None
-    )
-
-    data_empty_counters_list = {"rocprofiler-sdk": {"counters": []}}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_empty_counters_list, "ANY_COUNTER"
-        )
-        is None
-    )
-
-    data_with_other_counters = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {"name": "EXISTING_COUNTER_1", "value": "val1"},
-                {"name": "EXISTING_COUNTER_2", "value": "val2"},
-            ]
-        }
-    }
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_other_counters, "NON_EXISTENT_COUNTER"
-        )
-        is None
-    )
-
-    data_with_malformed_counter = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {"value": "val1"},  # No 'name' key
-                {"name": "EXISTING_COUNTER_2", "value": "val2"},
-            ]
-        }
-    }
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_malformed_counter, "EXISTING_COUNTER_1"
-        )
-        is None
-    )
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_malformed_counter, "EXISTING_COUNTER_2"
-        )
-        is not None
-    )
-
-
-def test_extract_counter_info_returns_counter_when_found():
-    """
-    Test that extract_counter_info_extra_config_input_yaml returns the correct
-    counter dictionary when the counter is found.
-    """
-    counter1_details = {
-        "name": "MY_COUNTER_1",
-        "description": "Desc 1",
-        "expression": "expr1",
-    }
-    counter2_details = {
-        "name": "MY_COUNTER_2",
-        "description": "Desc 2",
-        "expression": "expr2",
-    }
-    data = {
-        "rocprofiler-sdk": {
-            "counters-schema-version": 1,
-            "counters": [
-                counter1_details,
-                counter2_details,
-            ],
-        }
-    }
-
-    extracted_counter1 = utils.extract_counter_info_extra_config_input_yaml(
-        data, "MY_COUNTER_1"
-    )
-    assert extracted_counter1 is not None
-    assert extracted_counter1 == counter1_details
-
-    extracted_counter2 = utils.extract_counter_info_extra_config_input_yaml(
-        data, "MY_COUNTER_2"
-    )
-    assert extracted_counter2 is not None
-    assert extracted_counter2 == counter2_details
-
-
-# =============================================================================
-# test using_v1 function
-# =============================================================================
-
-
-def test_using_v1_rocprof_set_and_ends_with_rocprof_returns_true():
-    """
-    Covers the case where "ROCPROF" is in os.environ and its value ends with "rocprof".
-    This makes the entire expression True, so the function returns True.
-    """
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "/opt/rocm/bin/rocprof", "OTHER_VAR": "value"}
-    ):
-        assert utils.using_v1() is True
-
-
-def test_using_v1_rocprof_set_but_not_ends_with_rocprof_returns_false():
-    """
-    Covers the case where "ROCPROF" is in os.environ, but its value does
-    NOT end with "rocprof".
-
-    The second part of the 'and' (os.environ["ROCPROF"].endswith("rocprof")) is False.
-    So the function returns False.
-    """
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "/opt/rocm/bin/rocprofv2", "OTHER_VAR": "value"}
-    ):
-        assert utils.using_v1() is False
-
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "some/path/to/rocprof_tool", "OTHER_VAR": "value"}
-    ):
-        assert utils.using_v1() is False
-
-
-def test_using_v1_rocprof_not_in_environ_returns_false():
-    """
-    Covers the case where "ROCPROF" is NOT in os.environ.
-    The first part of the 'and' ("ROCPROF" in os.environ.keys()) is False.
-    Due to short-circuiting, the second part is not evaluated.
-    So the function returns False.
-    """
-    current_env = os.environ.copy()
-    if "ROCPROF" in current_env:
-        del current_env["ROCPROF"]
-
-    with mock.patch.dict(os.environ, current_env, clear=True):
-        assert utils.using_v1() is False
-
-
-def test_using_v1_rocprof_is_empty_string_returns_false():
-    """
-    Covers the case where "ROCPROF" is in os.environ but is an empty string.
-    The second part (os.environ["ROCPROF"].endswith("rocprof")) will be False.
-    So the function returns False.
-    """
-    with mock.patch.dict(os.environ, {"ROCPROF": "", "OTHER_VAR": "value"}):
-        assert utils.using_v1() is False
-
-
 # =============================================================================
 # additional test detect_rocprof console error
 # =============================================================================
 class MockArgs:
-    def __init__(self, rocprofiler_sdk_library_path):
-        self.rocprofiler_sdk_library_path = rocprofiler_sdk_library_path
+    def __init__(self, rocprofiler_sdk_tool_path):
+        self.rocprofiler_sdk_tool_path = rocprofiler_sdk_tool_path
 
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
 @mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.path")
+@mock.patch("utils.utils.Path")
 def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_constructor, mock_console_error_func
 ):
     """
     Tests that detect_rocprof calls console_error when ROCPROF is 'rocprofiler-sdk'
-    and the rocprofiler_sdk_library_path does not exist.
+    and the rocprofiler_sdk_tool_path does not exist.
     Focuses on the console_error call.
     """
     mock_path_instance = mock.Mock()
@@ -8693,13 +7239,13 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_constructor.return_value = mock_path_instance
 
     fake_library_path = "/some/invalid/path/to/librocprofiler_sdk.so"
-    args = MockArgs(rocprofiler_sdk_library_path=fake_library_path)
+    args = MockArgs(rocprofiler_sdk_tool_path=fake_library_path)
 
     with mock.patch("utils.utils.console_debug") as mock_console_debug:  # noqa
         utils.detect_rocprof(args)
 
     expected_error_message = (
-        "Could not find rocprofiler-sdk library at " + fake_library_path
+        "Could not find rocprofiler-sdk tool at " + fake_library_path
     )
     mock_console_error_func.assert_called_once_with(expected_error_message)
 
@@ -8715,27 +7261,6 @@ class MockArgs:  # noqa
         if not isinstance(other, MockArgs):
             return NotImplemented
         return self.__dict__ == other.__dict__
-
-
-def test_store_app_cmd_sets_global_rocprof_args():
-    """
-    Tests that store_app_cmd correctly assigns the passed 'args'
-    object to the global 'rocprof_args'.
-    """
-    sample_args_object = MockArgs(
-        rocprofiler_sdk_library_path="/path/to/sdk",
-        input_file="input.txt",
-        some_other_option=True,
-    )
-
-    if hasattr(utils, "rocprof_args"):
-        utils.rocprof_args = None
-    else:
-        pass
-    utils.store_app_cmd(sample_args_object)
-    assert utils.rocprof_args is sample_args_object, (
-        "Global rocprof_args should be the same object as the passed args"
-    )
 
 
 # =============================================================================
@@ -8836,11 +7361,12 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
         pass
 
     mock_console_error.assert_called_once()
-    call_args = mock_console_error.call_args[0][0]
-    assert 'Parsing rocprofv3 csv output: Error of getting "Agent_Id"' in call_args
+    call_args = mock_console_error.call_args[0]
+    assert "v3_counter_csv_to_v2_csv" in call_args[0]
+    assert 'Error getting "Agent_Id"' in call_args[1]
     assert (
-        "AttributeError" in call_args
-        or "'NoneType' object has no attribute 'group'" in call_args
+        "AttributeError" in call_args[1]
+        or "'NoneType' object has no attribute 'group'" in call_args[1]
     )
 
 
@@ -8955,7 +7481,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
     """
-    Edge Case: rocprofiler_sdk_library_path is valid, but librocprofiler-sdk-tool.so
+    Edge Case: rocprofiler_sdk_tool_path is valid, but librocprofiler-sdk-tool.so
     is NOT found next to it (or in rocprofiler-sdk subdir).
     This test primarily checks if the paths are constructed. The actual check for
     file existence before `capture_subprocess_output` is not in the provided snippet,
@@ -8965,31 +7491,29 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         method = "host_trap"
         interval = 1000
         workload_dir = str(tmp_path)
-        appcmd = "my_app --arg"
+        options = {"APP_CMD": "my_app --arg"}
 
         sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path).touch()
+        rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path).touch()
 
         expected_tool_path = str(
             sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
         )
 
+        options["LD_PRELOAD"] = expected_tool_path
+
         mock_capture_subprocess.return_value = (True, "Success output")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         call_args = mock_capture_subprocess.call_args
         called_env = call_args.kwargs.get("new_env", {})
 
         assert "LD_PRELOAD" in called_env
-        ld_preload_paths = called_env["LD_PRELOAD"].split(":")
-        assert expected_tool_path in ld_preload_paths
-        assert rocprofiler_sdk_library_path in ld_preload_paths
+        assert called_env["LD_PRELOAD"] == expected_tool_path
 
         mock_console_error.assert_not_called()
 
@@ -9008,14 +7532,12 @@ def test_pc_sampling_prof_subprocess_fails(
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
-        appcmd = "another_app"
-        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so"
+        options = ["another_app"]
+        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
         mock_capture_subprocess.return_value = (False, "Error output from subprocess")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -9023,10 +7545,11 @@ def test_pc_sampling_prof_subprocess_fails(
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()
     with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
+        options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()
+        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path_sdk).touch()
 
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
@@ -9037,9 +7560,7 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -9060,14 +7581,12 @@ def test_pc_sampling_prof_empty_appcmd(
         method = "host_trap"
         interval = 100
         workload_dir = str(tmp_path)
-        appcmd = ""
-        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so"
+        options = ["--"]
+        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
@@ -9079,218 +7598,20 @@ def test_pc_sampling_prof_empty_appcmd(
     with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
         sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()
+        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
+        Path(rocprofiler_sdk_tool_path_sdk).touch()
         tool_dir = sdk_lib_dir / "rocprofiler-sdk"
         tool_dir.mkdir(parents=True, exist_ok=True)
         (tool_dir / "librocprofiler-sdk-tool.so").touch()
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
+        options = {"APP_CMD": ""}
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
         mock_console_error.assert_not_called()
-
-
-# =============================================================================
-# test replace_timestamps function
-# =============================================================================
-
-
-def create_dummy_csv(filepath, data_dict):
-    df = pd.DataFrame(data_dict)
-    df.to_csv(filepath, index=False)
-
-
-@mock.patch("utils.utils.console_warning")
-@mock.patch("utils.utils.path")
-def test_replace_timestamps_no_timestamps_csv_returns_early(
-    mock_path_util, mock_console_warning, tmp_path
-):
-    """
-    Edge Case: timestamps.csv does not exist in workload_dir.
-    The function should return early.
-    Covers: if not path(workload_dir, "timestamps.csv").is_file(): return
-    """
-    workload_dir = str(tmp_path)
-
-    mock_timestamps_path_obj = mock.Mock()
-    mock_timestamps_path_obj.is_file.return_value = False
-
-    mock_path_util.side_effect = lambda *args: (
-        mock_timestamps_path_obj if args[1] == "timestamps.csv" else mock.DEFAULT
-    )
-
-    utils.replace_timestamps(workload_dir)
-
-    mock_path_util.assert_any_call(workload_dir, "timestamps.csv")
-    mock_timestamps_path_obj.is_file.assert_called_once()
-    mock_console_warning.assert_not_called()
-
-
-@mock.patch("utils.utils.console_warning")
-@mock.patch("glob.glob")  # Mock glob.glob
-@mock.patch("utils.utils.path")
-def test_replace_timestamps_timestamps_csv_missing_columns_warns(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
-    """
-    Edge Case: timestamps.csv exists but is missing
-    'Start_Timestamp' or 'End_Timestamp'.
-    The function should call console_warning.
-    Covers: else: console_warning(...)
-    """
-    workload_dir = str(tmp_path)
-    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")
-
-    create_dummy_csv(timestamps_csv_path_str, {"Some_Other_Column": [123]})
-
-    mock_timestamps_path_obj = mock.Mock()
-    mock_timestamps_path_obj.is_file.return_value = True
-    mock_timestamps_path_obj.name = "timestamps.csv"
-
-    mock_path_util.side_effect = lambda *args, **kwargs: (
-        mock_timestamps_path_obj if args[-1] == "timestamps.csv" else mock.DEFAULT
-    )
-
-    utils.replace_timestamps(workload_dir)
-
-    mock_path_util.assert_any_call(workload_dir, "timestamps.csv")
-    mock_timestamps_path_obj.is_file.assert_called_once()
-    mock_console_warning.assert_called_once_with(
-        "Incomplete profiling data detected. Unable to update timestamps.\n"
-    )
-    mock_glob.assert_not_called()
-
-
-@mock.patch("utils.utils.console_warning")
-@mock.patch("glob.glob")
-@mock.patch("utils.utils.path")
-def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
-    """
-    Edge Case: timestamps.csv is valid. Other CSVs exist, including sysinfo.csv.
-    Only non-sysinfo.csv files should be updated.
-    Covers: for fname in glob.glob(...): if path(fname).name != "sysinfo.csv": ...
-    """
-    workload_dir = str(tmp_path)
-    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")
-    data_csv_path_str = os.path.join(workload_dir, "data.csv")
-    sysinfo_csv_path_str = os.path.join(workload_dir, "sysinfo.csv")
-
-    new_start_ts = [1000, 2000]
-    new_end_ts = [1500, 2500]
-    create_dummy_csv(
-        timestamps_csv_path_str,
-        {"Start_Timestamp": new_start_ts, "End_Timestamp": new_end_ts},
-    )
-
-    create_dummy_csv(
-        data_csv_path_str,
-        {"Kernel_Name": ["A", "B"], "Start_Timestamp": [1, 2], "End_Timestamp": [3, 4]},
-    )
-    create_dummy_csv(
-        sysinfo_csv_path_str,
-        {"Info": ["CPU", "MEM"], "Start_Timestamp": [5, 6], "End_Timestamp": [7, 8]},
-    )
-
-    def path_side_effect(*args, **kwargs):
-        p_obj = mock.Mock()
-        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])
-
-        if full_path == timestamps_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "timestamps.csv"
-        elif full_path == data_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "data.csv"
-        elif full_path == sysinfo_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "sysinfo.csv"
-        else:
-            p_obj.is_file.return_value = False
-            p_obj.name = os.path.basename(full_path)
-        return p_obj
-
-    mock_path_util.side_effect = path_side_effect
-
-    mock_glob.return_value = [
-        data_csv_path_str,
-        sysinfo_csv_path_str,
-        timestamps_csv_path_str,
-    ]
-
-    utils.replace_timestamps(workload_dir)
-
-    mock_console_warning.assert_not_called()
-
-    df_data_updated = pd.read_csv(data_csv_path_str)
-    pd.testing.assert_series_equal(
-        df_data_updated["Start_Timestamp"],
-        pd.Series(new_start_ts, name="Start_Timestamp"),
-    )
-    pd.testing.assert_series_equal(
-        df_data_updated["End_Timestamp"], pd.Series(new_end_ts, name="End_Timestamp")
-    )
-
-    df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
-    assert list(df_sysinfo_original["Start_Timestamp"]) == [5, 6]
-    assert list(df_sysinfo_original["End_Timestamp"]) == [7, 8]
-
-
-@mock.patch("utils.utils.console_warning")
-@mock.patch("glob.glob")
-@mock.patch("utils.utils.path")
-def test_replace_timestamps_no_other_csvs_to_update(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
-    """
-    Edge Case: timestamps.csv is valid, but no other *.csv files
-    (or only sysinfo.csv) exist.
-    The loop for updating files should not do anything or not run.
-    Covers: The for loop not iterating if glob returns empty or only sysinfo.
-    """
-    workload_dir = str(tmp_path)
-    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")
-    sysinfo_csv_path_str = os.path.join(workload_dir, "sysinfo.csv")
-
-    create_dummy_csv(
-        timestamps_csv_path_str, {"Start_Timestamp": [100], "End_Timestamp": [200]}
-    )
-    create_dummy_csv(
-        sysinfo_csv_path_str,
-        {"Info": ["CPU"], "Start_Timestamp": [5], "End_Timestamp": [7]},
-    )
-
-    def path_side_effect(*args, **kwargs):
-        p_obj = mock.Mock()
-        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])
-        if full_path == timestamps_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "timestamps.csv"
-        elif full_path == sysinfo_csv_path_str:
-            p_obj.is_file.return_value = True
-            p_obj.name = "sysinfo.csv"
-        else:
-            p_obj.is_file.return_value = False
-            p_obj.name = os.path.basename(full_path)
-        return p_obj
-
-    mock_path_util.side_effect = path_side_effect
-
-    mock_glob.return_value = [timestamps_csv_path_str, sysinfo_csv_path_str]
-
-    utils.replace_timestamps(workload_dir)
-
-    mock_console_warning.assert_not_called()
-    df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
-    assert list(df_sysinfo_original["Start_Timestamp"]) == [5]
-    assert list(df_sysinfo_original["End_Timestamp"]) == [7]
 
 
 def test_set_parser():
@@ -9300,3 +7621,374 @@ def test_set_parser():
 
     assert "compute_thruput_util" in result
     assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_below_lower_bound():
+    value = 0.0001
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_at_lower_bound():
+    value = 0.01
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_just_below_upper_bound():
+    value = 999999
+    result = utils.format_scientific_notation_if_needed(value, precision=6)
+    assert pytest.approx(float(result.strip()), rel=1e-6) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_zero():
+    value = 0
+    result = utils.format_scientific_notation_if_needed(value)
+    assert float(result.strip()) == value  # Exact match for zero
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_slightly_below_lower_bound():
+    value = 0.009
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_well_below_lower_bound():
+    value = 1e-5
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_scientific_notation_trigger_well_above_upper_bound():
+    value = 1e10
+    result = utils.format_scientific_notation_if_needed(value)
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+@pytest.mark.sci_notion
+def test_alignment_and_width():
+    value = 1e10
+    result = utils.format_scientific_notation_if_needed(
+        value,
+        align=">",
+        width_align=12,
+        precision=2,
+        fmt_type_align="f",
+        max_length=8,
+    )
+    assert pytest.approx(float(result.strip()), rel=1e-9) == value
+
+
+# =============================================================================
+# TESTS FOR MODELESS COMMAND LINE OPTIONS
+# =============================================================================
+
+
+@pytest.mark.list_metrics
+def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
+    return_code = binary_handler_analyze_rocprof_compute(["--list-metrics", "gfx90a"])
+    assert return_code == 0
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "6 -> Workgroup Manager (SPI)" in output
+    assert "5.2 -> Command processor packet processor (CPC)" in output
+
+
+# =============================================================================
+# TESTS FOR AMDSMI INTERFACE
+# =============================================================================
+
+
+def test_amdsmi_ctx():
+    from utils.amdsmi_interface import amdsmi_ctx, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("amdsmi.amdsmi_init") as amdsmi_init_mock:
+        with mock.patch("amdsmi.amdsmi_shut_down") as amdsmi_shutdown_mock:
+            with amdsmi_ctx():
+                amdsmi_init_mock.assert_called_once()
+            amdsmi_shutdown_mock.assert_called_once()
+
+
+def test_amdsmi_get_device_handles():
+    from utils.amdsmi_interface import get_device_handles, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("amdsmi.amdsmi_get_processor_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        handles = get_device_handles()
+        assert handles[0] == 12345
+        device_handles_mock.assert_called_once()
+
+    with mock.patch(
+        "amdsmi.amdsmi_get_processor_handles", side_effect=Exception("Mock exception")
+    ) as device_handles_mock:
+        handle = get_device_handles()
+        assert len(handle) == 0
+
+
+def test_amdsmi_get_mem_max_clock():
+    from utils.amdsmi_interface import get_mem_max_clock, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [0, 4567]
+        with mock.patch("amdsmi.amdsmi_get_clock_info") as mem_max_clock_mock:
+
+            def side_effect(handle, *args, **kwargs):
+                if handle == 0:
+                    raise Exception("Invalid handle: 0")
+                return {"max_clk": 100}
+
+            mem_max_clock_mock.side_effect = side_effect
+            clk = get_mem_max_clock()
+            assert mem_max_clock_mock.call_count == 2
+            assert clk == 100
+
+
+def test_amdsmi_get_gpu_model():
+    from utils.amdsmi_interface import get_gpu_model, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_board_info") as device_name_mock:
+            with mock.patch("amdsmi.amdsmi_get_gpu_asic_info") as asic_name_mock:
+                with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_name_mock:
+                    device_name_mock.return_value = {"product_name": "AMD MIXXX"}
+                    asic_name_mock.return_value = {"market_name": "MIXXX"}
+                    vbios_name_mock.return_value = {"name": "mixxx"}
+                    model = get_gpu_model()
+                    device_name_mock.assert_called_once()
+                    assert model == ("AMD MIXXX", "MIXXX", "mixxx")
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_board_info", side_effect=Exception("Mock exception")
+        ):
+            model = get_gpu_model()
+            assert model == ("N/A", "N/A", "N/A")
+
+
+def test_amdsmi_get_gpu_vbios_part_number():
+    from utils.amdsmi_interface import get_gpu_vbios_part_number, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch("amdsmi.amdsmi_get_gpu_vbios_info") as vbios_part_number_mock:
+            vbios_part_number_mock.return_value = {
+                "part_number": "12345-67890",
+            }
+            part_number = get_gpu_vbios_part_number()
+            vbios_part_number_mock.assert_called_once()
+            assert part_number == "12345-67890"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_vbios_info", side_effect=Exception("Mock exception")
+        ):
+            part_number = get_gpu_vbios_part_number()
+            assert part_number == "N/A"
+
+
+def test_amdsmi_get_gpu_compute_partition():
+    from utils.amdsmi_interface import get_gpu_compute_partition, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_compute_partition"
+        ) as compute_partition_mock:
+            compute_partition_mock.return_value = "Mock Partition"
+            partition = get_gpu_compute_partition()
+            compute_partition_mock.assert_called_once()
+            assert partition == "Mock Partition"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_compute_partition",
+            side_effect=Exception("Mock exception"),
+        ):
+            partition = get_gpu_compute_partition()
+            assert partition == "N/A"
+
+
+def test_amdsmi_get_gpu_memory_partition():
+    from utils.amdsmi_interface import get_gpu_memory_partition, import_amdsmi_module
+
+    _ = import_amdsmi_module()
+
+    with mock.patch("utils.amdsmi_interface.get_device_handles") as device_handles_mock:
+        device_handles_mock.return_value = [12345]
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_memory_partition"
+        ) as memory_partition_mock:
+            memory_partition_mock.return_value = "Mock Memory Partition"
+            partition = get_gpu_memory_partition()
+            memory_partition_mock.assert_called_once()
+            assert partition == "Mock Memory Partition"
+
+        with mock.patch(
+            "amdsmi.amdsmi_get_gpu_memory_partition",
+            side_effect=Exception("Mock exception"),
+        ):
+            partition = get_gpu_memory_partition()
+            assert partition == "N/A"
+
+
+# =============================================================================
+# TESTS FOR ITERATION MULTIPLEXING
+# =============================================================================
+
+
+def test_merge_counters_iteration_multiplex():
+    """Test merge_counters_iteration_multiplex with sample DataFrame."""
+    import pandas as pd
+
+    import utils.utils as utils_mod
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 512, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
+
+    # For "kernel_launch_params" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 2
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 32],
+        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3
+
+    # Test multi_kernel
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 512],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, 200, 300],
+        ("file1", "Counter2"): [400, 500, 600],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 2
+
+    # For "kernel_launch_params" policy
+    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3
+
+
+# =============================================================================
+# validate_roofline_csv TESTS
+# =============================================================================
+
+
+def test_validate_roofline_csv_valid():
+    """
+    Test validate_roofline_csv returns True for a valid roofline.csv file.
+    Creates a temporary directory with a properly formatted CSV.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n"
+            "0,1000.0,2000.0,3000.0,4000.0,5000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is True
+        assert error_msg == ""
+
+
+def test_validate_roofline_csv_invalid_inconsistent_columns():
+    """
+    Test validate_roofline_csv returns False for a CSV with inconsistent row lengths.
+    This simulates corrupted or incomplete benchmark data.
+    """
+    from utils.roofline_calc import validate_roofline_csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "roofline.csv"
+        csv_path.write_text(
+            "device,HBMBw,L2Bw,L1Bw,FP32Flops,FP64Flops\n0,1000.0,2000.0,3000.0\n"
+        )
+
+        is_valid, error_msg = validate_roofline_csv(tmpdir)
+
+        assert is_valid is False
+        assert "Inconsistent row length" in error_msg
+        assert "row 2" in error_msg

@@ -30,8 +30,7 @@ class OCLMemObjs : public OCLTestImp {
   virtual ~OCLMemObjs();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
   int test(void);

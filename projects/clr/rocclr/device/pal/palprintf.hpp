@@ -102,30 +102,30 @@ class PrintfDbg : public amd::HeapObject {
 
   //! Returns TRUE if a float value has to be printed
   bool checkFloat(const std::string& fmt  //!< Format string
-                  ) const;
+  ) const;
 
   //! Returns TRUE if a string value has to be printed
   bool checkString(const std::string& fmt  //!< Format string
-                   ) const;
+  ) const;
 
   //! Finds the specifier in the format string
   int checkVectorSpecifier(const std::string& fmt,  //!< Format string
                            size_t startPos,         //!< Start position for processing
                            size_t& curPos           //!< End position for processing
-                           ) const;
+  ) const;
 
   //! Outputs an argument
-  size_t outputArgument(const std::string& fmt,   //!< Format strint
-                        bool printFloat,          //!< Argument is a float value
-                        size_t size,              //!< Argument's size
-                        const void* argument      //!< Argument's location
-                        ) const;
+  size_t outputArgument(const std::string& fmt,  //!< Format strint
+                        bool printFloat,         //!< Argument is a float value
+                        size_t size,             //!< Argument's size
+                        const void* argument     //!< Argument's location
+  ) const;
 
   //! Displays the PrintfDbg
   void outputDbgBuffer(const device::PrintfInfo& info,  //!< printf info
                        const uint32_t* workitemData,    //!< The PrintfDbg dump buffer
                        size_t& i                        //!< index to the data in the buffer
-                       ) const;
+  ) const;
 
  private:
   //! Disable copy constructor
@@ -138,7 +138,7 @@ class PrintfDbg : public amd::HeapObject {
   bool clearWorkitems(VirtualGPU& gpu,  //!< Virtual GPU object
                       size_t idxStart,  //!< Workitem global index start
                       size_t number     //!< Number of workitems to clear
-                      ) const;
+  ) const;
 
   //! Returns the pointer to the workitem data block
   uint32_t* mapWorkitem(VirtualGPU& gpu,  //!< Virtual GPU object
@@ -149,7 +149,7 @@ class PrintfDbg : public amd::HeapObject {
   //! Unamp the staged buffer
   void unmapWorkitem(VirtualGPU& gpu,              //!< Virtual GPU object
                      const uint32_t* workitemData  //!< The PrintfDbg dump buffer
-                     ) const;
+  ) const;
 
   size_t wiDbgSize_;     //!< Workitem debug size
   Memory initCntValue_;  //!< Initialized count value

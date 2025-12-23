@@ -65,73 +65,52 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_StreamCapture") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipStreamBeginCapture",
-            &hipStreamBeginCapture_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipStreamIsCapturing",
-            &hipStreamIsCapturing_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipStreamEndCapture",
-            &hipStreamEndCapture_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipStreamAddCallback",
-            &hipStreamAddCallback_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphInstantiate",
-            &hipGraphInstantiate_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphLaunch",
-            &hipGraphLaunch_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecDestroy",
-            &hipGraphExecDestroy_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipStreamBeginCapture", &hipStreamBeginCapture_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipStreamIsCapturing", &hipStreamIsCapturing_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipStreamEndCapture", &hipStreamEndCapture_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipStreamAddCallback", &hipStreamAddCallback_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphInstantiate", &hipGraphInstantiate_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipGraphLaunch", &hipGraphLaunch_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecDestroy", &hipGraphExecDestroy_ptr, currentHipVersion, 0,
+                              nullptr));
 
-  hipError_t (*dyn_hipStreamBeginCapture_ptr)(
-    hipStream_t, hipStreamCaptureMode) =
-    reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCaptureMode)>
-    (hipStreamBeginCapture_ptr);
+  hipError_t (*dyn_hipStreamBeginCapture_ptr)(hipStream_t, hipStreamCaptureMode) =
+      reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCaptureMode)>(
+          hipStreamBeginCapture_ptr);
 
-  hipError_t (*dyn_hipStreamIsCapturing_ptr)(hipStream_t,
-    hipStreamCaptureStatus *) =
-    reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCaptureStatus *)>
-    (hipStreamIsCapturing_ptr);
+  hipError_t (*dyn_hipStreamIsCapturing_ptr)(hipStream_t, hipStreamCaptureStatus*) =
+      reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCaptureStatus*)>(
+          hipStreamIsCapturing_ptr);
 
-  hipError_t (*dyn_hipStreamEndCapture_ptr)(hipStream_t, hipGraph_t *) =
-    reinterpret_cast<hipError_t (*)(hipStream_t, hipGraph_t *)>
-    (hipStreamEndCapture_ptr);
+  hipError_t (*dyn_hipStreamEndCapture_ptr)(hipStream_t, hipGraph_t*) =
+      reinterpret_cast<hipError_t (*)(hipStream_t, hipGraph_t*)>(hipStreamEndCapture_ptr);
 
-  hipError_t (*dyn_hipStreamAddCallback_ptr)(hipStream_t, hipStreamCallback_t,
-                                             void *, unsigned int) =
-    reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCallback_t,
-                                    void *, unsigned int)>
-                                   (hipStreamAddCallback_ptr);
+  hipError_t (*dyn_hipStreamAddCallback_ptr)(hipStream_t, hipStreamCallback_t, void*,
+                                             unsigned int) =
+      reinterpret_cast<hipError_t (*)(hipStream_t, hipStreamCallback_t, void*, unsigned int)>(
+          hipStreamAddCallback_ptr);
 
-  hipError_t (*dyn_hipGraphInstantiate_ptr)(hipGraphExec_t *, hipGraph_t,
-                                            hipGraphNode_t *, char *, size_t) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t *, hipGraph_t,
-                                    hipGraphNode_t *, char *, size_t)>
-                                   (hipGraphInstantiate_ptr);
+  hipError_t (*dyn_hipGraphInstantiate_ptr)(hipGraphExec_t*, hipGraph_t, hipGraphNode_t*, char*,
+                                            size_t) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t*, hipGraph_t, hipGraphNode_t*, char*, size_t)>(
+          hipGraphInstantiate_ptr);
 
   hipError_t (*dyn_hipGraphLaunch_ptr)(hipGraphExec_t, hipStream_t) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipStream_t)>
-    (hipGraphLaunch_ptr);
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipStream_t)>(hipGraphLaunch_ptr);
 
   hipError_t (*dyn_hipGraphExecDestroy_ptr)(hipGraphExec_t) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t)>
-    (hipGraphExecDestroy_ptr);
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t)>(hipGraphExecDestroy_ptr);
 
   int N = 40;
   int Nbytes = N * sizeof(int);
 
-  int* hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 10);
 
@@ -144,32 +123,28 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_StreamCapture") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   // Validating hipStreamBeginCapture API
-  HIP_CHECK(dyn_hipStreamBeginCapture_ptr(stream,
-                                          hipStreamCaptureModeGlobal));
+  HIP_CHECK(dyn_hipStreamBeginCapture_ptr(stream, hipStreamCaptureModeGlobal));
 
   // Validating hipStreamIsCapturing API
   hipStreamCaptureStatus pCaptureStatus = hipStreamCaptureStatusNone;
   HIP_CHECK(dyn_hipStreamIsCapturing_ptr(stream, &pCaptureStatus));
   REQUIRE(pCaptureStatus == hipStreamCaptureStatusActive);
 
-  HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes,
-                           hipMemcpyHostToDevice, stream));
-  addOneKernel<<< 1, 1, 0, stream >>>(devMem , N);
-  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes,
-                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(devMem, hostMem, Nbytes, hipMemcpyHostToDevice, stream));
+  addOneKernel<<<1, 1, 0, stream>>>(devMem, N);
+  HIP_CHECK(hipMemcpyAsync(hostMem, devMem, Nbytes, hipMemcpyDeviceToHost, stream));
 
   // Validating hipStreamEndCapture API
   HIP_CHECK(dyn_hipStreamEndCapture_ptr(stream, &graph));
 
   // Validating hipStreamAddCallback API
   int data = 100;
-  HIP_CHECK(dyn_hipStreamAddCallback_ptr(stream, callBackFunction,
-            reinterpret_cast<void *>(&data), 0));
+  HIP_CHECK(
+      dyn_hipStreamAddCallback_ptr(stream, callBackFunction, reinterpret_cast<void*>(&data), 0));
 
   // Validating hipGraphInstantiate API
   hipGraphExec_t graphExec;
-  HIP_CHECK(dyn_hipGraphInstantiate_ptr(&graphExec, graph,
-                                        nullptr, nullptr, 0));
+  HIP_CHECK(dyn_hipGraphInstantiate_ptr(&graphExec, graph, nullptr, nullptr, 0));
 
   // Validating hipGraphLaunch API
   HIP_CHECK(dyn_hipGraphLaunch_ptr(graphExec, stream));
@@ -209,33 +184,26 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddMemcpyNode1D",
-            &hipGraphAddMemcpyNode1D_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddKernelNode",
-            &hipGraphAddKernelNode_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddMemcpyNode1D", &hipGraphAddMemcpyNode1D_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddKernelNode", &hipGraphAddKernelNode_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphAddMemcpyNode1D_ptr)(hipGraphNode_t *, hipGraph_t,
-             const hipGraphNode_t *, size_t, void *, const void *, size_t,
-             hipMemcpyKind) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, void *,
-    const void *, size_t, hipMemcpyKind)>
-    (hipGraphAddMemcpyNode1D_ptr);
+  hipError_t (*dyn_hipGraphAddMemcpyNode1D_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                                size_t, void*, const void*, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      void*, const void*, size_t, hipMemcpyKind)>(
+          hipGraphAddMemcpyNode1D_ptr);
 
-  hipError_t (*dyn_hipGraphAddKernelNode_ptr)(hipGraphNode_t *, hipGraph_t,
-              const hipGraphNode_t *, size_t, const hipKernelNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipKernelNodeParams *)>
-    (hipGraphAddKernelNode_ptr);
+  hipError_t (*dyn_hipGraphAddKernelNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                              size_t, const hipKernelNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      const hipKernelNodeParams*)>(hipGraphAddKernelNode_ptr);
 
   int N = 40;
   int Nbytes = N * sizeof(int);
 
-  int* hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 100);
 
@@ -250,8 +218,8 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes") {
 
   // Validating hipGraphAddMemcpyNode1D API
   // Prepare memcpyNodeH2D
-  HIP_CHECK(dyn_hipGraphAddMemcpyNode1D_ptr(&memcpyNodeH2D, graph, nullptr, 0,
-            devMem, hostMem, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(dyn_hipGraphAddMemcpyNode1D_ptr(&memcpyNodeH2D, graph, nullptr, 0, devMem, hostMem,
+                                            Nbytes, hipMemcpyHostToDevice));
 
   // Validating hipGraphAddKernelNode API
   // Prepare kernelNode with memcpyNodeH2D as a dependency
@@ -264,28 +232,24 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes") {
   kernelNodeParams.blockDim = dim3(1, 1, 1);
   kernelNodeParams.sharedMemBytes = 0;
 
-  void* kernelArgs[2] = { reinterpret_cast<void*>(&devMem),
-                          reinterpret_cast<void*>(&N) };
+  void* kernelArgs[2] = {reinterpret_cast<void*>(&devMem), reinterpret_cast<void*>(&N)};
   kernelNodeParams.kernelParams = kernelArgs;
   kernelNodeParams.extra = nullptr;
 
-  HIP_CHECK(dyn_hipGraphAddKernelNode_ptr(&kernelNode, graph,
-            kernelNodeDependencies.data(), kernelNodeDependencies.size(),
-            &kernelNodeParams));
+  HIP_CHECK(dyn_hipGraphAddKernelNode_ptr(&kernelNode, graph, kernelNodeDependencies.data(),
+                                          kernelNodeDependencies.size(), &kernelNodeParams));
 
   // Prepare memcpyNodeD2H with kernelNode as a dependency
   ::std::vector<hipGraphNode_t> memcpyNodeD2HDependencies;
   memcpyNodeD2HDependencies.push_back(kernelNode);
-  HIP_CHECK(dyn_hipGraphAddMemcpyNode1D_ptr(&memcpyNodeD2H, graph,
-            memcpyNodeD2HDependencies.data(), memcpyNodeD2HDependencies.size(),
-            hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(dyn_hipGraphAddMemcpyNode1D_ptr(&memcpyNodeD2H, graph, memcpyNodeD2HDependencies.data(),
+                                            memcpyNodeD2HDependencies.size(), hostMem, devMem,
+                                            Nbytes, hipMemcpyDeviceToHost));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   REQUIRE(validateHostArray(hostMem, N, 101) == true);
 
@@ -318,26 +282,20 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddMemsetNode",
-            &hipGraphAddMemsetNode_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddMemcpyNode",
-            &hipGraphAddMemcpyNode_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddMemsetNode", &hipGraphAddMemsetNode_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddMemcpyNode", &hipGraphAddMemcpyNode_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphAddMemsetNode_ptr)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipMemsetParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipMemsetParams *)>
-    (hipGraphAddMemsetNode_ptr);
+  hipError_t (*dyn_hipGraphAddMemsetNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                              size_t, const hipMemsetParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      const hipMemsetParams*)>(hipGraphAddMemsetNode_ptr);
 
-  hipError_t (*dyn_hipGraphAddMemcpyNode_ptr)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipMemcpy3DParms *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipMemcpy3DParms *)>
-    (hipGraphAddMemcpyNode_ptr);
+  hipError_t (*dyn_hipGraphAddMemcpyNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                              size_t, const hipMemcpy3DParms*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      const hipMemcpy3DParms*)>(hipGraphAddMemcpyNode_ptr);
 
   size_t width = 1024;
   size_t height = 1024;
@@ -345,12 +303,11 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
   int value = 120;
   size_t pitch;
 
-  char *devMemSrc = nullptr;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc),
-                             &pitch, width, height));
+  char* devMemSrc = nullptr;
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height));
   REQUIRE(devMemSrc != nullptr);
 
-  char* hostMemDst = reinterpret_cast<char *>(malloc( N * sizeof(char)));
+  char* hostMemDst = reinterpret_cast<char*>(malloc(N * sizeof(char)));
   REQUIRE(hostMemDst != nullptr);
 
   hipGraphNode_t memsetNode, memcpyNode;
@@ -368,8 +325,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
   pMemsetParams.width = width;
   pMemsetParams.height = height;
 
-  HIP_CHECK(dyn_hipGraphAddMemsetNode_ptr(&memsetNode, graph,
-                                          nullptr, 0, &pMemsetParams));
+  HIP_CHECK(dyn_hipGraphAddMemsetNode_ptr(&memsetNode, graph, nullptr, 0, &pMemsetParams));
 
   // Validating hipGraphAddMemcpyNode API
   // Prepare memcpyNode with memsetNode as a dependency
@@ -383,10 +339,8 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
   myparms.dstPtr = make_hipPitchedPtr(hostMemDst, width, width, height);
   myparms.extent = make_hipExtent(width, height, 1);
   myparms.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(dyn_hipGraphAddMemcpyNode_ptr(&memcpyNode, graph,
-                                          memcpyNodeDependencies.data(),
-                                          memcpyNodeDependencies.size(),
-                                          &myparms));
+  HIP_CHECK(dyn_hipGraphAddMemcpyNode_ptr(&memcpyNode, graph, memcpyNodeDependencies.data(),
+                                          memcpyNodeDependencies.size(), &myparms));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -426,42 +380,30 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemsetNodeSetParams",
-            &hipGraphMemsetNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemsetNodeGetParams",
-            &hipGraphMemsetNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemcpyNodeSetParams",
-            &hipGraphMemcpyNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemcpyNodeGetParams",
-            &hipGraphMemcpyNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemsetNodeSetParams", &hipGraphMemsetNodeSetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemsetNodeGetParams", &hipGraphMemsetNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemcpyNodeSetParams", &hipGraphMemcpyNodeSetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemcpyNodeGetParams", &hipGraphMemcpyNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphMemsetNodeSetParams_ptr)(
-    hipGraphNode_t, const hipMemsetParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipMemsetParams *)>
-    (hipGraphMemsetNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphMemsetNodeSetParams_ptr)(hipGraphNode_t, const hipMemsetParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipMemsetParams*)>(
+          hipGraphMemsetNodeSetParams_ptr);
 
-  hipError_t (*dyn_hipGraphMemsetNodeGetParams_ptr)(
-    hipGraphNode_t, hipMemsetParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemsetParams *)>
-    (hipGraphMemsetNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphMemsetNodeGetParams_ptr)(hipGraphNode_t, hipMemsetParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemsetParams*)>(
+          hipGraphMemsetNodeGetParams_ptr);
 
-  hipError_t (*dyn_hipGraphMemcpyNodeSetParams_ptr)(
-    hipGraphNode_t, const hipMemcpy3DParms *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipMemcpy3DParms *)>
-    (hipGraphMemcpyNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphMemcpyNodeSetParams_ptr)(hipGraphNode_t, const hipMemcpy3DParms*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipMemcpy3DParms*)>(
+          hipGraphMemcpyNodeSetParams_ptr);
 
-  hipError_t (*dyn_hipGraphMemcpyNodeGetParams_ptr)(
-    hipGraphNode_t, hipMemcpy3DParms *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemcpy3DParms *)>
-    (hipGraphMemcpyNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphMemcpyNodeGetParams_ptr)(hipGraphNode_t, hipMemcpy3DParms*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemcpy3DParms*)>(
+          hipGraphMemcpyNodeGetParams_ptr);
 
   size_t width = 1024;
   size_t height = 1024;
@@ -469,21 +411,19 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   int value = 120;
   size_t pitch;
 
-  char *devMemSrc1 = nullptr;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc1),
-                             &pitch, width, height));
+  char* devMemSrc1 = nullptr;
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc1), &pitch, width, height));
   REQUIRE(devMemSrc1 != nullptr);
 
-  char* hostMemDst1 = reinterpret_cast<char *>(malloc( N * sizeof(char)));
+  char* hostMemDst1 = reinterpret_cast<char*>(malloc(N * sizeof(char)));
   REQUIRE(hostMemDst1 != nullptr);
   fillCharHostArray(hostMemDst1, N, 100);
 
-  char *devMemSrc2 = nullptr;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc2),
-                             &pitch, width, height));
+  char* devMemSrc2 = nullptr;
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc2), &pitch, width, height));
   REQUIRE(devMemSrc2 != nullptr);
 
-  char* hostMemDst2 = reinterpret_cast<char *>(malloc( N * sizeof(char)));
+  char* hostMemDst2 = reinterpret_cast<char*>(malloc(N * sizeof(char)));
   REQUIRE(hostMemDst2 != nullptr);
   fillCharHostArray(hostMemDst2, N, 100);
 
@@ -501,12 +441,10 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   initialMemsetParams.width = width;
   initialMemsetParams.height = height;
 
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph,
-                                   nullptr, 0, &initialMemsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &initialMemsetParams));
 
   hipMemsetParams receivedMemsetValues{};
-  HIP_CHECK(dyn_hipGraphMemsetNodeGetParams_ptr(memsetNode,
-                                                &receivedMemsetValues));
+  HIP_CHECK(dyn_hipGraphMemsetNodeGetParams_ptr(memsetNode, &receivedMemsetValues));
 
   REQUIRE(receivedMemsetValues.dst == devMemSrc1);
   REQUIRE(receivedMemsetValues.value == value);
@@ -524,12 +462,10 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   correctedMemsetParams.height = height;
 
   // Validating hipGraphMemsetNodeSetParams API
-  HIP_CHECK(dyn_hipGraphMemsetNodeSetParams_ptr(memsetNode,
-                                                &correctedMemsetParams));
+  HIP_CHECK(dyn_hipGraphMemsetNodeSetParams_ptr(memsetNode, &correctedMemsetParams));
 
   // Validating hipGraphMemsetNodeGetParams API
-  HIP_CHECK(dyn_hipGraphMemsetNodeGetParams_ptr(memsetNode,
-                                                &receivedMemsetValues));
+  HIP_CHECK(dyn_hipGraphMemsetNodeGetParams_ptr(memsetNode, &receivedMemsetValues));
 
   REQUIRE(receivedMemsetValues.dst == devMemSrc2);
   REQUIRE(receivedMemsetValues.value == value);
@@ -545,19 +481,15 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   hipMemcpy3DParms initialParms{};
   initialParms.srcPos = make_hipPos(0, 0, 0);
   initialParms.dstPos = make_hipPos(0, 0, 0);
-  initialParms.srcPtr = make_hipPitchedPtr(devMemSrc1, pitch,
-                                           width, height);
-  initialParms.dstPtr = make_hipPitchedPtr(hostMemDst1, width,
-                                           width, height);
+  initialParms.srcPtr = make_hipPitchedPtr(devMemSrc1, pitch, width, height);
+  initialParms.dstPtr = make_hipPitchedPtr(hostMemDst1, width, width, height);
   initialParms.extent = make_hipExtent(width, height, 1);
   initialParms.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph,
-            memcpyNodeDependencies.data(),
-            memcpyNodeDependencies.size(), &initialParms));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, memcpyNodeDependencies.data(),
+                                  memcpyNodeDependencies.size(), &initialParms));
 
   hipMemcpy3DParms receivedMemcpyValues{};
-  HIP_CHECK(dyn_hipGraphMemcpyNodeGetParams_ptr(memcpyNode,
-                                                &receivedMemcpyValues));
+  HIP_CHECK(dyn_hipGraphMemcpyNodeGetParams_ptr(memcpyNode, &receivedMemcpyValues));
 
   REQUIRE(receivedMemcpyValues.srcArray == nullptr);
   REQUIRE(receivedMemcpyValues.srcPos.x == 0);
@@ -584,8 +516,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   correctedParms.srcPos = make_hipPos(0, 0, 0);
   correctedParms.dstPos = make_hipPos(0, 0, 0);
   correctedParms.srcPtr = make_hipPitchedPtr(devMemSrc2, pitch, width, height);
-  correctedParms.dstPtr = make_hipPitchedPtr(hostMemDst2, width,
-                                             width, height);
+  correctedParms.dstPtr = make_hipPitchedPtr(hostMemDst2, width, width, height);
   correctedParms.extent = make_hipExtent(width, height, 1);
   correctedParms.kind = hipMemcpyDeviceToHost;
 
@@ -593,8 +524,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   HIP_CHECK(dyn_hipGraphMemcpyNodeSetParams_ptr(memcpyNode, &correctedParms));
 
   // Validating hipGraphMemcpyNodeGetParams API
-  HIP_CHECK(dyn_hipGraphMemcpyNodeGetParams_ptr(memcpyNode,
-                                                &receivedMemcpyValues));
+  HIP_CHECK(dyn_hipGraphMemcpyNodeGetParams_ptr(memcpyNode, &receivedMemcpyValues));
 
   REQUIRE(receivedMemcpyValues.srcArray == nullptr);
   REQUIRE(receivedMemcpyValues.srcPos.x == 0);
@@ -620,9 +550,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   REQUIRE(validateArrayT<char>(hostMemDst1, N, 100) == true);
   REQUIRE(validateArrayT<char>(hostMemDst2, N, 120) == true);
@@ -656,29 +584,23 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphKernelNodeGetParams",
-            &hipGraphKernelNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphKernelNodeSetParams",
-            &hipGraphKernelNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphKernelNodeGetParams", &hipGraphKernelNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphKernelNodeSetParams", &hipGraphKernelNodeSetParams_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphKernelNodeGetParams_ptr)(
-    hipGraphNode_t, hipKernelNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeParams *)>
-    (hipGraphKernelNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphKernelNodeGetParams_ptr)(hipGraphNode_t, hipKernelNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeParams*)>(
+          hipGraphKernelNodeGetParams_ptr);
 
-  hipError_t (*dyn_hipGraphKernelNodeSetParams_ptr)(
-    hipGraphNode_t, const hipKernelNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t,
-    const hipKernelNodeParams *)>(hipGraphKernelNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphKernelNodeSetParams_ptr)(hipGraphNode_t, const hipKernelNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipKernelNodeParams*)>(
+          hipGraphKernelNodeSetParams_ptr);
 
   int N = 40;
   int Nbytes = N * sizeof(int);
 
-  int* hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 100);
 
@@ -695,15 +617,14 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // Prepare memcpyNodeH2D
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0,
-            devMem, hostMem, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0, devMem, hostMem, Nbytes,
+                                    hipMemcpyHostToDevice));
 
   // Prepare kernelNode with memcpyNodeH2D as a dependency
   ::std::vector<hipGraphNode_t> kernelNodeDependencies;
   kernelNodeDependencies.push_back(memcpyNodeH2D);
 
-  void* kernelArgs[2] = { reinterpret_cast<void*>(&devMem),
-                          reinterpret_cast<void*>(&N) };
+  void* kernelArgs[2] = {reinterpret_cast<void*>(&devMem), reinterpret_cast<void*>(&N)};
 
   hipKernelNodeParams kernelNodeParams{};
   kernelNodeParams.func = reinterpret_cast<void*>(addOneKernel);
@@ -713,35 +634,33 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
   kernelNodeParams.kernelParams = kernelArgs;
   kernelNodeParams.extra = nullptr;
 
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph,
-            kernelNodeDependencies.data(),
-            kernelNodeDependencies.size(), &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, kernelNodeDependencies.data(),
+                                  kernelNodeDependencies.size(), &kernelNodeParams));
 
   // Prepare memcpyNodeD2H with kernelNode as a dependency
   ::std::vector<hipGraphNode_t> memcpyNodeD2HDependencies;
   memcpyNodeD2HDependencies.push_back(kernelNode);
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H, graph,
-            memcpyNodeD2HDependencies.data(), memcpyNodeD2HDependencies.size(),
-            hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H, graph, memcpyNodeD2HDependencies.data(),
+                                    memcpyNodeD2HDependencies.size(), hostMem, devMem, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
   // Get and set Kernel node params
   hipKernelNodeParams receivedKernelNodeParams;
 
   // Validating hipGraphKernelNodeGetParams API
-  HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode,
-                                                &receivedKernelNodeParams));
+  HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode, &receivedKernelNodeParams));
 
-  REQUIRE(receivedKernelNodeParams.func == addOneKernel);
+  REQUIRE((receivedKernelNodeParams.func == addOneKernel));
   REQUIRE(receivedKernelNodeParams.gridDim.x == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.y == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.z == 1);
   REQUIRE(receivedKernelNodeParams.blockDim.x == 1);
   REQUIRE(receivedKernelNodeParams.blockDim.y == 1);
   REQUIRE(receivedKernelNodeParams.blockDim.z == 1);
-  REQUIRE(*(reinterpret_cast<int *>(receivedKernelNodeParams.kernelParams[0]))
-          == *(reinterpret_cast<int *>(kernelArgs[0])));
-  REQUIRE(*(reinterpret_cast<int *>(receivedKernelNodeParams.kernelParams[1]))
-          == *(reinterpret_cast<int *>(kernelArgs[1])));
+  REQUIRE(*(reinterpret_cast<int*>(receivedKernelNodeParams.kernelParams[0])) ==
+          *(reinterpret_cast<int*>(kernelArgs[0])));
+  REQUIRE(*(reinterpret_cast<int*>(receivedKernelNodeParams.kernelParams[1])) ==
+          *(reinterpret_cast<int*>(kernelArgs[1])));
   REQUIRE(receivedKernelNodeParams.extra == nullptr);
   REQUIRE(receivedKernelNodeParams.sharedMemBytes == 0);
 
@@ -754,23 +673,21 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
   correctedKernelNodeParams.extra = nullptr;
 
   // Validating hipGraphKernelNodeSetParams API
-  HIP_CHECK(dyn_hipGraphKernelNodeSetParams_ptr(kernelNode,
-                                                &correctedKernelNodeParams));
+  HIP_CHECK(dyn_hipGraphKernelNodeSetParams_ptr(kernelNode, &correctedKernelNodeParams));
 
-  HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode,
-                                                &receivedKernelNodeParams));
+  HIP_CHECK(dyn_hipGraphKernelNodeGetParams_ptr(kernelNode, &receivedKernelNodeParams));
 
-  REQUIRE(receivedKernelNodeParams.func == addTwoKernel);
+  REQUIRE((receivedKernelNodeParams.func == addTwoKernel));
   REQUIRE(receivedKernelNodeParams.gridDim.x == 2);
   REQUIRE(receivedKernelNodeParams.gridDim.y == 1);
   REQUIRE(receivedKernelNodeParams.gridDim.z == 1);
   REQUIRE(receivedKernelNodeParams.blockDim.x == 2);
   REQUIRE(receivedKernelNodeParams.blockDim.y == 1);
   REQUIRE(receivedKernelNodeParams.blockDim.z == 1);
-  REQUIRE(*(reinterpret_cast<int *>(receivedKernelNodeParams.kernelParams[0]))
-          == *(reinterpret_cast<int *>(kernelArgs[0])));
-  REQUIRE(*(reinterpret_cast<int *>(receivedKernelNodeParams.kernelParams[1]))
-          == *(reinterpret_cast<int *>(kernelArgs[1])));
+  REQUIRE(*(reinterpret_cast<int*>(receivedKernelNodeParams.kernelParams[0])) ==
+          *(reinterpret_cast<int*>(kernelArgs[0])));
+  REQUIRE(*(reinterpret_cast<int*>(receivedKernelNodeParams.kernelParams[1])) ==
+          *(reinterpret_cast<int*>(kernelArgs[1])));
   REQUIRE(receivedKernelNodeParams.extra == nullptr);
   REQUIRE(receivedKernelNodeParams.sharedMemBytes == 0);
 
@@ -809,24 +726,21 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphKernelNodeSetAttribute",
-            &hipGraphKernelNodeSetAttribute_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphKernelNodeGetAttribute",
-            &hipGraphKernelNodeGetAttribute_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphKernelNodeSetAttribute", &hipGraphKernelNodeSetAttribute_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphKernelNodeGetAttribute", &hipGraphKernelNodeGetAttribute_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphKernelNodeSetAttribute_ptr)(
-    hipGraphNode_t, hipKernelNodeAttrID, const hipKernelNodeAttrValue *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeAttrID,
-    const hipKernelNodeAttrValue *)>(hipGraphKernelNodeSetAttribute_ptr);
+  hipError_t (*dyn_hipGraphKernelNodeSetAttribute_ptr)(hipGraphNode_t, hipKernelNodeAttrID,
+                                                       const hipKernelNodeAttrValue*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeAttrID,
+                                      const hipKernelNodeAttrValue*)>(
+          hipGraphKernelNodeSetAttribute_ptr);
 
-  hipError_t (*dyn_hipGraphKernelNodeGetAttribute_ptr)(hipGraphNode_t,
-    hipKernelNodeAttrID, hipKernelNodeAttrValue *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeAttrID,
-    hipKernelNodeAttrValue *)>(hipGraphKernelNodeGetAttribute_ptr);
+  hipError_t (*dyn_hipGraphKernelNodeGetAttribute_ptr)(hipGraphNode_t, hipKernelNodeAttrID,
+                                                       hipKernelNodeAttrValue*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipKernelNodeAttrID,
+                                      hipKernelNodeAttrValue*)>(hipGraphKernelNodeGetAttribute_ptr);
 
   hipGraphNode_t kernelNode;
 
@@ -841,28 +755,25 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute") {
   kernelNodeParams.kernelParams = nullptr;
   kernelNodeParams.extra = nullptr;
 
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph,
-            nullptr, 0, &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, nullptr, 0, &kernelNodeParams));
 
   hipKernelNodeAttrValue attributeToSet, attributeToGet;
   attributeToSet.cooperative = 1;
 
   // Validating hipGraphKernelNodeSetAttribute API
-  HIP_CHECK(dyn_hipGraphKernelNodeSetAttribute_ptr(kernelNode,
-            hipKernelNodeAttributeCooperative, &attributeToSet));
+  HIP_CHECK(dyn_hipGraphKernelNodeSetAttribute_ptr(kernelNode, hipKernelNodeAttributeCooperative,
+                                                   &attributeToSet));
 
   // Validating hipGraphKernelNodeGetAttribute API
-  HIP_CHECK(dyn_hipGraphKernelNodeGetAttribute_ptr(kernelNode,
-            hipKernelNodeAttributeCooperative, &attributeToGet));
+  HIP_CHECK(dyn_hipGraphKernelNodeGetAttribute_ptr(kernelNode, hipKernelNodeAttributeCooperative,
+                                                   &attributeToGet));
 
   REQUIRE(attributeToGet.cooperative == 1);
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
@@ -891,41 +802,29 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddHostNode",
-            &hipGraphAddHostNode_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphHostNodeGetParams",
-            &hipGraphHostNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphHostNodeSetParams",
-            &hipGraphHostNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecHostNodeSetParams",
-            &hipGraphExecHostNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddHostNode", &hipGraphAddHostNode_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphHostNodeGetParams", &hipGraphHostNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphHostNodeSetParams", &hipGraphHostNodeSetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecHostNodeSetParams", &hipGraphExecHostNodeSetParams_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphAddHostNode_ptr)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipHostNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, const hipHostNodeParams *)>
-    (hipGraphAddHostNode_ptr);
-  hipError_t (*dyn_hipGraphHostNodeGetParams_ptr)(hipGraphNode_t,
-    hipHostNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipHostNodeParams *)>
-    (hipGraphHostNodeGetParams_ptr);
-  hipError_t (*dyn_hipGraphHostNodeSetParams_ptr)(hipGraphNode_t,
-    const hipHostNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipHostNodeParams *)>
-    (hipGraphHostNodeSetParams_ptr);
-  hipError_t (*dyn_hipGraphExecHostNodeSetParams_ptr)(hipGraphExec_t,
-    hipGraphNode_t, const hipHostNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t,
-    const hipHostNodeParams *)>
-    (hipGraphExecHostNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphAddHostNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                            size_t, const hipHostNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      const hipHostNodeParams*)>(hipGraphAddHostNode_ptr);
+  hipError_t (*dyn_hipGraphHostNodeGetParams_ptr)(hipGraphNode_t, hipHostNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipHostNodeParams*)>(
+          hipGraphHostNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphHostNodeSetParams_ptr)(hipGraphNode_t, const hipHostNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, const hipHostNodeParams*)>(
+          hipGraphHostNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphExecHostNodeSetParams_ptr)(hipGraphExec_t, hipGraphNode_t,
+                                                      const hipHostNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t, const hipHostNodeParams*)>(
+          hipGraphExecHostNodeSetParams_ptr);
 
   // Validating hipGraphAddHostNode API
   {
@@ -939,8 +838,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
     hostNodeParams.fn = addTen;
     hostNodeParams.userData = &hostInt;
 
-    HIP_CHECK(dyn_hipGraphAddHostNode_ptr(&hostNode, graph,
-              nullptr, 0, &hostNodeParams));
+    HIP_CHECK(dyn_hipGraphAddHostNode_ptr(&hostNode, graph, nullptr, 0, &hostNodeParams));
 
     hipGraphExec_t graphExec;
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -967,24 +865,21 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
     hostNodeParams.fn = addTen;
     hostNodeParams.userData = &hostInt;
 
-    HIP_CHECK(hipGraphAddHostNode(&hostNode, graph,
-              nullptr, 0, &hostNodeParams));
+    HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostNodeParams));
 
     hipHostNodeParams receivedHostNodeParams;
-    HIP_CHECK(dyn_hipGraphHostNodeGetParams_ptr(hostNode,
-                                                &receivedHostNodeParams));
+    HIP_CHECK(dyn_hipGraphHostNodeGetParams_ptr(hostNode, &receivedHostNodeParams));
     REQUIRE(receivedHostNodeParams.fn == addTen);
-    REQUIRE(*(reinterpret_cast<int *>(receivedHostNodeParams.userData)) == 10);
+    REQUIRE(*(reinterpret_cast<int*>(receivedHostNodeParams.userData)) == 10);
 
     hipHostNodeParams hostNodeParamsNew;
     hostNodeParamsNew.fn = addTwenty;
     hostNodeParamsNew.userData = &hostIntNew;
     HIP_CHECK(dyn_hipGraphHostNodeSetParams_ptr(hostNode, &hostNodeParamsNew));
 
-    HIP_CHECK(dyn_hipGraphHostNodeGetParams_ptr(hostNode,
-                                                &receivedHostNodeParams));
+    HIP_CHECK(dyn_hipGraphHostNodeGetParams_ptr(hostNode, &receivedHostNodeParams));
     REQUIRE(receivedHostNodeParams.fn == addTwenty);
-    REQUIRE(*(reinterpret_cast<int *>(receivedHostNodeParams.userData)) == 20);
+    REQUIRE(*(reinterpret_cast<int*>(receivedHostNodeParams.userData)) == 20);
 
     hipGraphExec_t graphExec;
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -1012,8 +907,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
     hostNodeParams.fn = addTen;
     hostNodeParams.userData = &hostInt;
 
-    HIP_CHECK(hipGraphAddHostNode(&hostNode, graph,
-              nullptr, 0, &hostNodeParams));
+    HIP_CHECK(hipGraphAddHostNode(&hostNode, graph, nullptr, 0, &hostNodeParams));
 
     hipGraphExec_t graphExec;
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -1022,8 +916,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
     hipHostNodeParams hostNodeParamsNew;
     hostNodeParamsNew.fn = addTwenty;
     hostNodeParamsNew.userData = &hostIntNew;
-    HIP_CHECK(dyn_hipGraphExecHostNodeSetParams_ptr(graphExec, hostNode,
-                                                    &hostNodeParamsNew));
+    HIP_CHECK(dyn_hipGraphExecHostNodeSetParams_ptr(graphExec, hostNode, &hostNodeParamsNew));
 
     HIP_CHECK(hipGraphLaunch(graphExec, 0));
     HIP_CHECK(hipStreamSynchronize(0));
@@ -1056,16 +949,13 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecUpdate") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecUpdate",
-            &hipGraphExecUpdate_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecUpdate", &hipGraphExecUpdate_ptr, currentHipVersion, 0,
+                              nullptr));
 
-  hipError_t (*dyn_hipGraphExecUpdate_ptr)(hipGraphExec_t, hipGraph_t,
-    hipGraphNode_t *, hipGraphExecUpdateResult *) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraph_t,
-    hipGraphNode_t *, hipGraphExecUpdateResult *)>
-    (hipGraphExecUpdate_ptr);
+  hipError_t (*dyn_hipGraphExecUpdate_ptr)(hipGraphExec_t, hipGraph_t, hipGraphNode_t*,
+                                           hipGraphExecUpdateResult*) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraph_t, hipGraphNode_t*,
+                                      hipGraphExecUpdateResult*)>(hipGraphExecUpdate_ptr);
 
   int hostInt_1 = 10;
   int hostInt_2 = 20;
@@ -1077,8 +967,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecUpdate") {
   hipHostNodeParams hostNodeParams1;
   hostNodeParams1.fn = addTen;
   hostNodeParams1.userData = &hostInt_1;
-  HIP_CHECK(hipGraphAddHostNode(&hostNode1, graph1,
-            nullptr, 0, &hostNodeParams1));
+  HIP_CHECK(hipGraphAddHostNode(&hostNode1, graph1, nullptr, 0, &hostNodeParams1));
 
   // Prepare graphExec with graph1
   hipGraphExec_t graphExec;
@@ -1091,16 +980,14 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecUpdate") {
   hipHostNodeParams hostNodeParams2;
   hostNodeParams2.fn = addTwenty;
   hostNodeParams2.userData = &hostInt_2;
-  HIP_CHECK(hipGraphAddHostNode(&hostNode2, graph2,
-            nullptr, 0, &hostNodeParams2));
+  HIP_CHECK(hipGraphAddHostNode(&hostNode2, graph2, nullptr, 0, &hostNodeParams2));
 
   // Update graphExec with graph2
   hipGraphNode_t hErrorNode_out = nullptr;
   hipGraphExecUpdateResult updateResult_out;
 
   // Validating hipGraphExecUpdate API
-  HIP_CHECK(dyn_hipGraphExecUpdate_ptr(graphExec, graph2,
-            &hErrorNode_out, &updateResult_out));
+  HIP_CHECK(dyn_hipGraphExecUpdate_ptr(graphExec, graph2, &hErrorNode_out, &updateResult_out));
 
   REQUIRE(hErrorNode_out == nullptr);
   REQUIRE(updateResult_out == hipGraphExecUpdateSuccess);
@@ -1137,32 +1024,26 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemcpyNodeSetParams1D",
-            &hipGraphMemcpyNodeSetParams1D_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecMemcpyNodeSetParams1D",
-            &hipGraphExecMemcpyNodeSetParams1D_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemcpyNodeSetParams1D", &hipGraphMemcpyNodeSetParams1D_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecMemcpyNodeSetParams1D",
+                              &hipGraphExecMemcpyNodeSetParams1D_ptr, currentHipVersion, 0,
+                              nullptr));
 
-  hipError_t (*dyn_hipGraphMemcpyNodeSetParams1D_ptr)(
-    hipGraphNode_t, void *, const void *, size_t, hipMemcpyKind) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, void *,
-    const void *, size_t, hipMemcpyKind)>
-    (hipGraphMemcpyNodeSetParams1D_ptr);
+  hipError_t (*dyn_hipGraphMemcpyNodeSetParams1D_ptr)(hipGraphNode_t, void*, const void*, size_t,
+                                                      hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, void*, const void*, size_t, hipMemcpyKind)>(
+          hipGraphMemcpyNodeSetParams1D_ptr);
 
-  hipError_t (*dyn_hipGraphExecMemcpyNodeSetParams1D_ptr)(
-    hipGraphExec_t, hipGraphNode_t, void *, const void *,
-    size_t, hipMemcpyKind) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t,
-    void *, const void *, size_t, hipMemcpyKind)>
-    (hipGraphExecMemcpyNodeSetParams1D_ptr);
+  hipError_t (*dyn_hipGraphExecMemcpyNodeSetParams1D_ptr)(hipGraphExec_t, hipGraphNode_t, void*,
+                                                          const void*, size_t, hipMemcpyKind) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t, void*, const void*, size_t,
+                                      hipMemcpyKind)>(hipGraphExecMemcpyNodeSetParams1D_ptr);
 
   int N = 40;
   int Nbytes = N * sizeof(int);
 
-  int* hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 20);
 
@@ -1183,18 +1064,16 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams") {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0,
-              devMem_1, hostMem, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0, devMem_1, hostMem, Nbytes,
+                                      hipMemcpyHostToDevice));
 
-    HIP_CHECK(dyn_hipGraphMemcpyNodeSetParams1D_ptr(memcpyNodeH2D, devMem_2,
-              hostMem, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(dyn_hipGraphMemcpyNodeSetParams1D_ptr(memcpyNodeH2D, devMem_2, hostMem, Nbytes,
+                                                    hipMemcpyHostToDevice));
 
     hipGraphExec_t graphExec;
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
     HIP_CHECK(hipGraphLaunch(graphExec, 0));
-    #ifdef _WIN32
     HIP_CHECK(hipStreamSynchronize(0));
-    #endif
 
     REQUIRE(validateDeviceArray(devMem_1, N, 10) == true);
     REQUIRE(validateDeviceArray(devMem_2, N, 20) == true);
@@ -1222,20 +1101,17 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams") {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0,
-              devMem_1, hostMem, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0, devMem_1, hostMem, Nbytes,
+                                      hipMemcpyHostToDevice));
 
     hipGraphExec_t graphExec;
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-    HIP_CHECK(dyn_hipGraphExecMemcpyNodeSetParams1D_ptr(graphExec,
-              memcpyNodeH2D, devMem_2, hostMem,
-              Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(dyn_hipGraphExecMemcpyNodeSetParams1D_ptr(graphExec, memcpyNodeH2D, devMem_2, hostMem,
+                                                        Nbytes, hipMemcpyHostToDevice));
 
     HIP_CHECK(hipGraphLaunch(graphExec, 0));
-    #ifdef _WIN32
     HIP_CHECK(hipStreamSynchronize(0));
-    #endif
 
     REQUIRE(validateDeviceArray(devMem_1, N, 10) == true);
     REQUIRE(validateDeviceArray(devMem_2, N, 20) == true);
@@ -1271,52 +1147,40 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddMemAllocNode",
-            &hipGraphAddMemAllocNode_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphAddMemFreeNode",
-            &hipGraphAddMemFreeNode_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemAllocNodeGetParams",
-            &hipGraphMemAllocNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphMemFreeNodeGetParams",
-            &hipGraphMemFreeNodeGetParams_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddMemAllocNode", &hipGraphAddMemAllocNode_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphAddMemFreeNode", &hipGraphAddMemFreeNode_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemAllocNodeGetParams", &hipGraphMemAllocNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphMemFreeNodeGetParams", &hipGraphMemFreeNodeGetParams_ptr,
+                              currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphAddMemAllocNode_ptr)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, hipMemAllocNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, hipMemAllocNodeParams *)>
-    (hipGraphAddMemAllocNode_ptr);
+  hipError_t (*dyn_hipGraphAddMemAllocNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                                size_t, hipMemAllocNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      hipMemAllocNodeParams*)>(hipGraphAddMemAllocNode_ptr);
 
-  hipError_t (*dyn_hipGraphAddMemFreeNode_ptr)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, void *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t *, hipGraph_t,
-    const hipGraphNode_t *, size_t, void *)>
-    (hipGraphAddMemFreeNode_ptr);
+  hipError_t (*dyn_hipGraphAddMemFreeNode_ptr)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*,
+                                               size_t, void*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t*, hipGraph_t, const hipGraphNode_t*, size_t,
+                                      void*)>(hipGraphAddMemFreeNode_ptr);
 
-  hipError_t (*dyn_hipGraphMemAllocNodeGetParams_ptr)(hipGraphNode_t,
-    hipMemAllocNodeParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemAllocNodeParams *)>
-    (hipGraphMemAllocNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphMemAllocNodeGetParams_ptr)(hipGraphNode_t, hipMemAllocNodeParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, hipMemAllocNodeParams*)>(
+          hipGraphMemAllocNodeGetParams_ptr);
 
-  hipError_t (*dyn_hipGraphMemFreeNodeGetParams_ptr)(hipGraphNode_t, void *) =
-    reinterpret_cast<hipError_t (*)(hipGraphNode_t, void *)>
-    (hipGraphMemFreeNodeGetParams_ptr);
+  hipError_t (*dyn_hipGraphMemFreeNodeGetParams_ptr)(hipGraphNode_t, void*) =
+      reinterpret_cast<hipError_t (*)(hipGraphNode_t, void*)>(hipGraphMemFreeNodeGetParams_ptr);
 
   int N = 300;
   int Nbytes = N * sizeof(int);
 
-  int* hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 10);
 
-  int *devMem = nullptr;
+  int* devMem = nullptr;
 
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -1339,8 +1203,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
   memAllocNodeParams.bytesize = Nbytes;
 
   // Validating hipGraphAddMemAllocNode API
-  HIP_CHECK(dyn_hipGraphAddMemAllocNode_ptr(&memAllocNode, graph,
-                                    nullptr, 0, &memAllocNodeParams));
+  HIP_CHECK(dyn_hipGraphAddMemAllocNode_ptr(&memAllocNode, graph, nullptr, 0, &memAllocNodeParams));
   devMem = reinterpret_cast<int*>(memAllocNodeParams.dptr);
 
   ::std::vector<hipGraphNode_t> kernelNodeDependencies;
@@ -1353,35 +1216,32 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
   kernelNodeParams.sharedMemBytes = 0;
   int value = 20;
 
-  void* kernelArgs[3] = { reinterpret_cast<void*>(&devMem),
-                          reinterpret_cast<void*>(&N),
-                          reinterpret_cast<void*>(&value) };
+  void* kernelArgs[3] = {reinterpret_cast<void*>(&devMem), reinterpret_cast<void*>(&N),
+                         reinterpret_cast<void*>(&value)};
   kernelNodeParams.kernelParams = kernelArgs;
   kernelNodeParams.extra = nullptr;
 
-  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph,
-            kernelNodeDependencies.data(), kernelNodeDependencies.size(),
-            &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, kernelNodeDependencies.data(),
+                                  kernelNodeDependencies.size(), &kernelNodeParams));
 
   ::std::vector<hipGraphNode_t> memcpyNodeD2HDependencies;
   memcpyNodeD2HDependencies.push_back(kernelNode);
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H, graph,
-            memcpyNodeD2HDependencies.data(), memcpyNodeD2HDependencies.size(),
-            hostMem, devMem, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H, graph, memcpyNodeD2HDependencies.data(),
+                                    memcpyNodeD2HDependencies.size(), hostMem, devMem, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
   ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
   memFreeNodeDependencies.push_back(memcpyNodeD2H);
 
   // Validating hipGraphAddMemFreeNode API
-  HIP_CHECK(dyn_hipGraphAddMemFreeNode_ptr(&memFreeNode, graph,
-            memFreeNodeDependencies.data(), memFreeNodeDependencies.size(),
-            reinterpret_cast<void*>(devMem)));
+  HIP_CHECK(dyn_hipGraphAddMemFreeNode_ptr(&memFreeNode, graph, memFreeNodeDependencies.data(),
+                                           memFreeNodeDependencies.size(),
+                                           reinterpret_cast<void*>(devMem)));
 
   // Validating hipGraphMemAllocNodeGetParams API
   hipMemAllocNodeParams recvdParams{};
-  HIP_CHECK(dyn_hipGraphMemAllocNodeGetParams_ptr(memAllocNode,
-                                                  &recvdParams));
+  HIP_CHECK(dyn_hipGraphMemAllocNodeGetParams_ptr(memAllocNode, &recvdParams));
 
   REQUIRE(recvdParams.poolProps.allocType == hipMemAllocationTypePinned);
   REQUIRE(recvdParams.poolProps.handleTypes == hipMemHandleTypeNone);
@@ -1397,16 +1257,13 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
 
   // Validating hipGraphMemFreeNodeGetParams API
   size_t dev_ptr = 0;
-  HIP_CHECK(dyn_hipGraphMemFreeNodeGetParams_ptr(memFreeNode,
-            reinterpret_cast<void *>(&dev_ptr)));
+  HIP_CHECK(dyn_hipGraphMemFreeNodeGetParams_ptr(memFreeNode, reinterpret_cast<void*>(&dev_ptr)));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   REQUIRE(validateHostArray(hostMem, N, 20) == true);
 
@@ -1438,24 +1295,20 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecMemsetNodeSetParams",
-            &hipGraphExecMemsetNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress(
-            "hipGraphExecMemcpyNodeSetParams",
-            &hipGraphExecMemcpyNodeSetParams_ptr,
-            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecMemsetNodeSetParams",
+                              &hipGraphExecMemsetNodeSetParams_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipGraphExecMemcpyNodeSetParams",
+                              &hipGraphExecMemcpyNodeSetParams_ptr, currentHipVersion, 0, nullptr));
 
-  hipError_t (*dyn_hipGraphExecMemsetNodeSetParams_ptr)(hipGraphExec_t,
-    hipGraphNode_t, const hipMemsetParams *) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t,
-    const hipMemsetParams *)>(hipGraphExecMemsetNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphExecMemsetNodeSetParams_ptr)(hipGraphExec_t, hipGraphNode_t,
+                                                        const hipMemsetParams*) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t, const hipMemsetParams*)>(
+          hipGraphExecMemsetNodeSetParams_ptr);
 
-  hipError_t (*dyn_hipGraphExecMemcpyNodeSetParams_ptr)(hipGraphExec_t,
-    hipGraphNode_t, hipMemcpy3DParms *) =
-    reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t,
-    hipMemcpy3DParms *)>(hipGraphExecMemcpyNodeSetParams_ptr);
+  hipError_t (*dyn_hipGraphExecMemcpyNodeSetParams_ptr)(hipGraphExec_t, hipGraphNode_t,
+                                                        hipMemcpy3DParms*) =
+      reinterpret_cast<hipError_t (*)(hipGraphExec_t, hipGraphNode_t, hipMemcpy3DParms*)>(
+          hipGraphExecMemcpyNodeSetParams_ptr);
 
   size_t width = 1024;
   size_t height = 1024;
@@ -1463,21 +1316,19 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
   int value = 120;
   size_t pitch;
 
-  char *devMemSrc1 = nullptr;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc1),
-                             &pitch, width, height));
+  char* devMemSrc1 = nullptr;
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc1), &pitch, width, height));
   REQUIRE(devMemSrc1 != nullptr);
 
-  char* hostMemDst1 = reinterpret_cast<char *>(malloc( N * sizeof(char)));
+  char* hostMemDst1 = reinterpret_cast<char*>(malloc(N * sizeof(char)));
   REQUIRE(hostMemDst1 != nullptr);
   fillCharHostArray(hostMemDst1, N, 100);
 
-  char *devMemSrc2 = nullptr;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc2),
-                             &pitch, width, height));
+  char* devMemSrc2 = nullptr;
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc2), &pitch, width, height));
   REQUIRE(devMemSrc2 != nullptr);
 
-  char* hostMemDst2 = reinterpret_cast<char *>(malloc( N * sizeof(char)));
+  char* hostMemDst2 = reinterpret_cast<char*>(malloc(N * sizeof(char)));
   REQUIRE(hostMemDst2 != nullptr);
   fillCharHostArray(hostMemDst2, N, 100);
 
@@ -1495,8 +1346,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
   initialMemsetParams.width = width;
   initialMemsetParams.height = height;
 
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph,
-            nullptr, 0, &initialMemsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &initialMemsetParams));
 
   // Prepare memcpyNode
   ::std::vector<hipGraphNode_t> memcpyNodeDependencies;
@@ -1509,9 +1359,8 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
   initialParms.dstPtr = make_hipPitchedPtr(hostMemDst1, width, width, height);
   initialParms.extent = make_hipExtent(width, height, 1);
   initialParms.kind = hipMemcpyDeviceToHost;
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph,
-            memcpyNodeDependencies.data(),
-            memcpyNodeDependencies.size(), &initialParms));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, memcpyNodeDependencies.data(),
+                                  memcpyNodeDependencies.size(), &initialParms));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -1525,26 +1374,21 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
   newMemsetParams.height = height;
 
   // Validating hipGraphExecMemsetNodeSetParams API
-  HIP_CHECK(dyn_hipGraphExecMemsetNodeSetParams_ptr(graphExec, memsetNode,
-                                                    &newMemsetParams));
+  HIP_CHECK(dyn_hipGraphExecMemsetNodeSetParams_ptr(graphExec, memsetNode, &newMemsetParams));
 
   hipMemcpy3DParms newMemcpyParms{};
   newMemcpyParms.srcPos = make_hipPos(0, 0, 0);
   newMemcpyParms.dstPos = make_hipPos(0, 0, 0);
   newMemcpyParms.srcPtr = make_hipPitchedPtr(devMemSrc2, pitch, width, height);
-  newMemcpyParms.dstPtr = make_hipPitchedPtr(hostMemDst2, width,
-                                             width, height);
+  newMemcpyParms.dstPtr = make_hipPitchedPtr(hostMemDst2, width, width, height);
   newMemcpyParms.extent = make_hipExtent(width, height, 1);
   newMemcpyParms.kind = hipMemcpyDeviceToHost;
 
   // Validating hipGraphExecMemcpyNodeSetParams API
-  HIP_CHECK(dyn_hipGraphExecMemcpyNodeSetParams_ptr(graphExec, memcpyNode,
-                                                    &newMemcpyParms));
+  HIP_CHECK(dyn_hipGraphExecMemcpyNodeSetParams_ptr(graphExec, memcpyNode, &newMemcpyParms));
 
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   REQUIRE(validateArrayT<char>(hostMemDst1, N, 100) == true);
   REQUIRE(validateArrayT<char>(hostMemDst2, N, 120) == true);

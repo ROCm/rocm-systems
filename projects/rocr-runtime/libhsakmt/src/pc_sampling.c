@@ -65,7 +65,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingQueryCapabilities(HSAuint32 NodeId, void
     args.num_sample_info = sample_info_sz;
     args.flags = 0;
 
-    int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_PC_SAMPLE, &args);
+    int err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_PC_SAMPLE, &args);
 
     *size = args.num_sample_info;
 
@@ -111,7 +111,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingCreate(HSAuint32 NodeId, HsaPcSamplingIn
     args.num_sample_info = 1;
     args.trace_id = INVALID_TRACE_ID;
 
-    int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_PC_SAMPLE, &args);
+    int err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_PC_SAMPLE, &args);
     if (err) {
         switch (errno) {
         case EINVAL:
@@ -151,7 +151,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingDestroy(HSAuint32 NodeId, HsaPcSamplingT
     args.gpu_id = gpu_id;
     args.trace_id = traceId;
 
-    int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_PC_SAMPLE, &args);
+    int err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_PC_SAMPLE, &args);
     if (err) {
         if (errno == EINVAL)
             return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -181,7 +181,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStart(HSAuint32 NodeId, HsaPcSamplingTra
     args.gpu_id = gpu_id;
     args.trace_id = traceId;
 
-    int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_PC_SAMPLE, &args);
+    int err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_PC_SAMPLE, &args);
     if (err) {
         switch (errno) {
         case EINVAL:
@@ -220,7 +220,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStop(HSAuint32 NodeId, HsaPcSamplingTrac
     args.gpu_id = gpu_id;
     args.trace_id = traceId;
 
-    int err = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_PC_SAMPLE, &args);
+    int err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_PC_SAMPLE, &args);
     if (err) {
         switch (errno) {
         case EINVAL:

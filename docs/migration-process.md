@@ -118,7 +118,7 @@ git push origin develop
 
 1. **Update repos-config.json:**
    - Update the true/false values in the [`repos-config.json`](/.github/repos-config.json) file that automated workflows use to determine which way the source gets synchronized..
-   - `auto_subtree_pull` should now be false, `auto_subtree_push` should now be true for this migrated project.
+   - `auto_subtree_pull` should now be false, `auto_subtree_push` should now be true for this migrated project. `monorepo_source_of_truth` should be true to reflect the new source of truth is the monorepo.
    - Make this change on both the `develop` and `release-staging` branches.
    - https://github.com/ROCm/rocm-systems/blob/develop/.github/repos-config.json
    - https://github.com/ROCm/rocm-systems/blob/release-staging/rocm-rel-7.0/.github/repos-config.json

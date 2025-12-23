@@ -27,6 +27,15 @@
 #include "os/alloc.hpp"
 #include "thread/monitor.hpp"
 #include "utils/util.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#include <d3d9.h>
+#include <d3d10_1.h>
+#include <CL/cl_d3d10.h>
+#include <CL/cl_d3d11.h>
+#include <CL/cl_dx9_media_sharing.h>
+#endif
+#include <CL/cl_icd.h>
 
 
 #define KHR_CL_TYPES_DO(F)                                                                         \
@@ -65,8 +74,8 @@ typedef struct _cl_icd_dispatch cl_icd_dispatch;
 
 #define DECLARE_CL_TYPES(CL, AMD)                                                                  \
   typedef struct _##CL {                                                                           \
-    cl_icd_dispatch* dispatch;                                                             \
-  } * CL;
+    cl_icd_dispatch* dispatch;                                                                     \
+  }* CL;
 
 AMD_CL_TYPES_DO(DECLARE_CL_TYPES);
 
@@ -86,21 +95,37 @@ enum cl_token { Tinvalid = 0, CL_TYPES_DO(DEFINE_CL_TOKENS) numTokens };
 const size_t RuntimeObjectAlignment = NextPowerOfTwo<numTokens>::value;
 
 //! \cond ignore
-template <typename T> struct as_internal { typedef void type; };
+template <typename T> struct as_internal {
+  typedef void type;
+};
 
-template <typename T> struct as_external { typedef void type; };
+template <typename T> struct as_external {
+  typedef void type;
+};
 
-template <typename T> struct class_token { static const cl_token value = Tinvalid; };
+template <typename T> struct class_token {
+  static const cl_token value = Tinvalid;
+};
 
 #define DEFINE_CL_TRAITS(CL, AMD)                                                                  \
                                                                                                    \
-  template <> struct class_token<AMD> { static const cl_token value = T##CL; };                    \
+  template <> struct class_token<AMD> {                                                            \
+    static const cl_token value = T##CL;                                                           \
+  };                                                                                               \
                                                                                                    \
-  template <> struct as_internal<_##CL> { typedef AMD type; };                                     \
-  template <> struct as_internal<const _##CL> { typedef AMD const type; };                         \
+  template <> struct as_internal<_##CL> {                                                          \
+    typedef AMD type;                                                                              \
+  };                                                                                               \
+  template <> struct as_internal<const _##CL> {                                                    \
+    typedef AMD const type;                                                                        \
+  };                                                                                               \
                                                                                                    \
-  template <> struct as_external<AMD> { typedef _##CL type; };                                     \
-  template <> struct as_external<const AMD> { typedef _##CL const type; };
+  template <> struct as_external<AMD> {                                                            \
+    typedef _##CL type;                                                                            \
+  };                                                                                               \
+  template <> struct as_external<const AMD> {                                                      \
+    typedef _##CL const type;                                                                      \
+  };
 
 CL_TYPES_DO(DEFINE_CL_TRAITS);
 
@@ -108,7 +133,11 @@ CL_TYPES_DO(DEFINE_CL_TRAITS);
 //! \endcond
 
 struct ICDDispatchedObject {
+#ifdef __HIP_PLATFORM_AMD__
+  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
+#else
   static cl_icd_dispatch icdVendorDispatch_[];
+#endif
   const cl_icd_dispatch* const dispatch_;
 
  protected:
@@ -187,15 +216,12 @@ struct Coord3D {
   bool operator==(const Coord3D& rhs) const {
     return c[0] == rhs.c[0] && c[1] == rhs.c[1] && c[2] == rhs.c[2];
   }
-  explicit operator size_t*() {
-    return &c[0];
-  }
+  explicit operator size_t*() { return &c[0]; }
 };
 
-template <class T>
-class SysmemPool {
-public:
-  SysmemPool(): chunk_access_(true) /* Sysmem Pool Lock */ {}
+template <class T> class SysmemPool {
+ public:
+  SysmemPool() : chunk_access_(true) /* Sysmem Pool Lock */ {}
   ~SysmemPool() {
     if (free_chunk_num_ != max_chunk_idx_) {
       for (int i = 0; i < kActiveAllocSize; ++i) {
@@ -205,7 +231,7 @@ public:
           // Check if this chunk contains unreleased memory objects
           if ((chunk->busy_ + chunk->free_) != kAllocChunkSize) {
             LogPrintfError("Unreleased slots in sysmem pool %ld",
-              kAllocChunkSize - (chunk->busy_ + chunk->free_));
+                           kAllocChunkSize - (chunk->busy_ + chunk->free_));
           }
           delete chunk;
           free_chunk_num_++;
@@ -213,7 +239,7 @@ public:
       }
       // Validate if sysmempool released all memory
       if (free_chunk_num_ != max_chunk_idx_) {
-        LogPrintfError("Unreleased chunk in sysmem pool %ld",  max_chunk_idx_ - free_chunk_num_);
+        LogPrintfError("Unreleased chunk in sysmem pool %ld", max_chunk_idx_ - free_chunk_num_);
       }
     }
   }
@@ -261,11 +287,11 @@ public:
 
   void Free(void* ptr) {
 #if IS_WINDOWS
-    auto obj = reinterpret_cast<MemoryObject*>(
-      reinterpret_cast<address>(ptr) - offsetof(MemoryObject, object_));
+    auto obj = reinterpret_cast<MemoryObject*>(reinterpret_cast<address>(ptr) -
+                                               offsetof(MemoryObject, object_));
 #else
-    auto obj = reinterpret_cast<MemoryObject*>(
-      reinterpret_cast<address>(ptr) - sizeof(AllocChunk*));
+    auto obj =
+        reinterpret_cast<MemoryObject*>(reinterpret_cast<address>(ptr) - sizeof(AllocChunk*));
 #endif
     auto freed = --obj->base_->free_;
     // If it's the last slot in the chunk, then release memory
@@ -286,28 +312,28 @@ public:
     }
   }
 
-private:
+ private:
   static constexpr size_t kAllocChunkSize = 2048;  //!< The total number of allocations in a chunk
   static constexpr size_t kActiveAllocSize = 32;   //!< The number of active chunks
   struct AllocChunk;
   struct MemoryObject {
-    AllocChunk* base_;      //!< The chunk information for this memory object
-    T   object_;            //!< Allocated user object
+    AllocChunk* base_;  //!< The chunk information for this memory object
+    T object_;          //!< Allocated user object
     MemoryObject() {}
   };
   struct AllocChunk {
     MemoryObject* allocs_;        //! Array of allocations
     std::atomic<uint32_t> busy_;  //! The number of commands still available for usage
     std::atomic<uint32_t> free_;  //! The number of commands still available for usage
-    AllocChunk(MemoryObject* alloc): allocs_(alloc), busy_(0), free_(kAllocChunkSize) {}
-    ~AllocChunk() { delete [] allocs_; }
+    AllocChunk(MemoryObject* alloc) : allocs_(alloc), busy_(0), free_(kAllocChunkSize) {}
+    ~AllocChunk() { delete[] allocs_; }
   };
 
-  std::atomic<uint64_t> current_alloc_ = 0; //!< Current allocation, global index
-  std::atomic<size_t> max_chunk_idx_ = 0;   //!< Current max chunk index
-  size_t  free_chunk_num_ = 0;              //!< The number of freed chunks
-  amd::Monitor  chunk_access_;              //!< Lock for the chunk list access
-  MemoryObject* active_allocs_[kActiveAllocSize] = {}; //!< Active chunks for fast access
+  std::atomic<uint64_t> current_alloc_ = 0;             //!< Current allocation, global index
+  std::atomic<size_t> max_chunk_idx_ = 0;               //!< Current max chunk index
+  size_t free_chunk_num_ = 0;                           //!< The number of freed chunks
+  amd::Monitor chunk_access_;                           //!< Lock for the chunk list access
+  MemoryObject* active_allocs_[kActiveAllocSize] = {};  //!< Active chunks for fast access
 };
 
 }  // namespace amd

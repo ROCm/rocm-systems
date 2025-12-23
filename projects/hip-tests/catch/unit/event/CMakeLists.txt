@@ -17,6 +17,11 @@ if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       Unit_hipEventQuery.cc
   )
+  if(UNIX)
+    set(AMD_SRC
+      ${AMD_SRC}
+      Unit_hipEventIpc_shm_cleanup.cc)
+  endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 
