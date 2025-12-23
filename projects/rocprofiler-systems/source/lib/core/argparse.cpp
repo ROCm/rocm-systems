@@ -301,14 +301,24 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     if(_data.environ_filter("trace", _data))
     {
         _parser
-            .add_argument({ "-T", "--trace" },
-                          "Generate a detailed trace (perfetto output)")
+            .add_argument({ "-T", "--trace" }, "Generate a detailed trace with deferred "
+                                               "trace generation (perfetto output)")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
+                update_env(_data, "ROCPROFSYS_TRACE_CACHED", p.get<bool>("trace"));
+            });
+
+        _parser
+            .add_argument(
+                { "-L", "--trace-legacy" },
+                "Generate a detailed trace with direct mode (perfetto output, legacy)")
+            .max_count(1)
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"));
             });
 
         _data.processed_environs.emplace("trace");
+        _data.processed_environs.emplace("trace_legacy");
     }
 
     if(_data.environ_filter("profile", _data))

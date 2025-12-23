@@ -337,16 +337,13 @@ std::vector<HipAPI> extractDeviceAPIs(std::string& apis_list_file,
   main group that shall be considered is HIP API. Before that group is defined, lines
   of code shall not be considered.
   */
-  int line_number{0};
   bool group_start{false};
-  bool device_groups_start{false};
   std::string restriction{""};
   std::string file_restriction_definition{"File restriction: "};
   std::string device_groups_definition{"Device groups: ("};
   std::vector<std::string> device_groups;
 
   while (std::getline(apis_list_file_handler, line)) {
-    ++line_number;
 
     if (line.find("[") != std::string::npos) {
       std::string group_name = line.substr(0, line.rfind(" "));

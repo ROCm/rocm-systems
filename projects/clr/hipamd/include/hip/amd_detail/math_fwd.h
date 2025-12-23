@@ -55,7 +55,6 @@ __device__ __attribute__((const)) unsigned int __ockl_udot8(unsigned int, unsign
                                                             unsigned int, bool);
 #endif
 
-#if !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
 // BEGIN FLOAT
 __device__ __attribute__((const)) float __ocml_acos_f32(float);
 __device__ __attribute__((pure)) float __ocml_acosh_f32(float);
@@ -281,8 +280,6 @@ __device__ __attribute__((const)) double __ocml_fma_rtp_f64(double, double, doub
 __device__ __attribute__((const)) double __ocml_fma_rtz_f64(double, double, double);
 // END INTRINSICS
 // END DOUBLE
-
-#endif  // !__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__
 
 #if defined(__cplusplus)
 }  // extern "C"
