@@ -383,8 +383,7 @@ add_test(
 add_test(
     NAME test_profile_iteration_multiplexing_stochastic
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m
-        test_profile_iteration_multiplexing_stochastic
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_stochastic
         --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )

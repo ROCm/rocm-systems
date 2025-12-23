@@ -623,9 +623,12 @@ class AMDSMILogger():
         if self.store_partition_resources_json_output:
             combined_json["partition_resources"] = self.store_partition_resources_json_output
 
-        self.destination == 'stdout'
-        json_std_output = json.dumps(combined_json, indent=4)
-        print(json_std_output)
+        if self.destination == 'stdout':
+            json_std_output = json.dumps(combined_json, indent=4)
+            print(json_std_output)
+        else:
+            with open(self.destination, 'w', encoding="utf-8") as output_file:
+                json.dump(combined_json, output_file, indent=4)
 
 
     def _print_csv_output(self, multiple_device_enabled=False, watching_output=False):
