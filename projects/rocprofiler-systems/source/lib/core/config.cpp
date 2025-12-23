@@ -838,6 +838,18 @@ configure_settings(bool _init)
         "starting with '_' or containing '::_M'.",
         true, "causal", "analysis", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(int, "ROCPROFSYS_KILL_DELAY",
+                              "Delay (in seconds) before terminating the process "
+                              "after a kill signal is received.",
+                              0, "process", "advanced");
+
+    auto kill_delay_config = _config->find("ROCPROFSYS_KILL_DELAY")->second;
+    auto kill_delay_value  = kill_delay_config->get<int>().second;
+    if(kill_delay_value < 0)
+    {
+        kill_delay_config->set(0);
+    }
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -2554,6 +2566,13 @@ get_caching_perfetto()
 {
     static auto _v = get_config()->at("ROCPROFSYS_TRACE_CACHED");
     return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+int
+get_kill_delay()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_KILL_DELAY");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
 tmp_file::tmp_file(std::string _v)
