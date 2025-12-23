@@ -28,6 +28,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
+#include <logger/debug.hpp>
+
 #include <string>
 #include <utility>
 

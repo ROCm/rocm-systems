@@ -40,6 +40,8 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include <logger/debug.hpp>
+
 #pragma weak pthread_join
 #pragma weak pthread_mutex_lock
 #pragma weak pthread_spin_lock

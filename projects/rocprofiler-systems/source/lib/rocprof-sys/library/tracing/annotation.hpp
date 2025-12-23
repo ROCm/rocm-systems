@@ -33,6 +33,8 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/operations/types/get.hpp>
 
+#include <logger/debug.hpp>
+
 #include <type_traits>
 
 namespace rocprofsys

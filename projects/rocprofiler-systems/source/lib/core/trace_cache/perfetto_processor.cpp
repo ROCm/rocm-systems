@@ -21,16 +21,16 @@
 // SOFTWARE.
 
 #include "core/trace_cache/perfetto_processor.hpp"
-#include "common.hpp"
-#include "config.hpp"
 #include "core/agent_manager.hpp"
 #include "core/categories.hpp"
+#include "core/common.hpp"
 #include "core/common_types.hpp"
+#include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
+#include "core/perfetto.hpp"
 #include "core/utility.hpp"
 #include "library/tracing.hpp"
-#include "perfetto.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 

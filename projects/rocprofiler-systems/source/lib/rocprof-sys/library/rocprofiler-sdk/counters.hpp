@@ -29,6 +29,8 @@
 
 #include <timemory/utility/types.hpp>
 
+#include <logger/debug.hpp>
+
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>

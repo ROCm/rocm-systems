@@ -67,6 +67,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <logger/debug.hpp>
+
 #include <atomic>
 #include <cctype>
 #include <cstdint>
