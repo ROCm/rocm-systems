@@ -37,11 +37,6 @@ static void shmHandleInit(int fd, char* shmPath, size_t shmSize, size_t realShmS
   if (create) {
     int slen = strlen(shmPath);
     handle->shmPath = (char*)malloc(slen + 1);
-    if (handle->shmPath == nullptr) {
-      WARN("Failed to allocate memory for shared memory path");
-      // handle->shmPath remains nullptr, caller should check
-      return;
-    }
     memcpy(handle->shmPath, shmPath, slen + 1);
     if (hptr) memset(hptr, 0, shmSize);
   } else {
@@ -121,11 +116,7 @@ ncclResult_t ncclShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void
   if (devShmPtr) {
     cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
-#if defined(HIP_HOST_UNCACHED_MEMORY)
-    CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached), ret, fail);
-#else
     CUDACHECKGOTO(cudaHostRegister((void*)hptr, realShmSize, cudaHostRegisterPortable | cudaHostRegisterMapped), ret, fail);
-#endif
     CUDACHECKGOTO(cudaHostGetDevicePointer(&dptr, (void*)hptr, 0), ret, fail);
     CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&mode), ret, fail);
   }
@@ -207,12 +198,12 @@ ncclResult_t ncclShmemAllgather(struct ncclComm *comm, struct ncclShmemCollBuff 
 
   memcpy((char*)shmem->ptr[curIndex] + comm->localRank * maxTypeSize, sendbuff, typeSize);
   /* reset the previous round and notify I arrive this round */
-  __atomic_store_n((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * comm->localRank), nextRound, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * comm->localRank), nextRound, std::memory_order_release);
 
   do {
     done = true;
     for (int i = index; i < comm->localRanks; ++i) {
-      if (i != comm->localRank && __atomic_load_n((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * i), __ATOMIC_ACQUIRE) < nextRound) {
+      if (i != comm->localRank && COMPILER_ATOMIC_LOAD((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * i), std::memory_order_acquire) < nextRound) {
         done = false;
         index = i;
         break;

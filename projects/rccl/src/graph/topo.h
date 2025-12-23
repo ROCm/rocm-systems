@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -12,8 +11,7 @@
 #include "core.h"
 #include "xml.h"
 #include "net.h"
-#include "archinfo.h"
-#include <string.h>
+#include "os.h"
 
 #define LOC_BW 5000.0
 #define SM60_NVLINK_BW 18.0
@@ -33,11 +31,6 @@
 #define P9_BW 32.0
 #define ARM_BW 6.0
 #define NET_BW 12.0           // 100Gbit
-#define VEGA_XGMI_WIDTH 24.0
-#define MI200_XGMI_WIDTH 36.0
-#define GFX94X_XGMI_WIDTH 48.0
-#define GFX95X_XGMI_WIDTH 48.0
-#define GFX125X_XGMI_WIDTH 64.0  // placeholder — revisit with measured hardware data
 
 // Intel CPU convert GPU P2P traffic into 64B PCI TLPs, so GPU
 // to GPU traffic consumes more PCI bandwidth.
@@ -133,22 +126,6 @@ struct ncclTopoLinkList {
 #define NCCL_TOPO_LOCAL_NIC_ID(numaid, busid) (((int64_t)numaid << 56) + busid)
 #define NCCL_TOPO_ID(systemid, localid) (((int64_t)systemid << 56) + (localid & NCCL_TOPO_ID_LOCAL_ID_MASK))
 
-#define RCCL_TOPO_CR8G      1
-#define RCCL_TOPO_4P2H_ROME 2
-#define RCCL_TOPO_GDR_ALL   4
-#define RCCL_TOPO_16P1H     8
-#define RCCL_TOPO_FORCE_INTRA 16
-#define RCCL_TOPO_XGMI_ALL  32
-
-/* Rome preset graph: index into romeTopoModels[] in rome_models.cc, or sentinel below. */
-#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE (-1)
-#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_GIO_COLUMBA (1000000)
-/* parse4H4P() applies rome_model_68 directly; this tags the preset, not romeTopoModels[]. */
-#define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
-
-
-#define GCN_ARCH_NAME_LEN 16
-
 struct ncclTopoNode {
   int type;
   int64_t id;
@@ -159,9 +136,6 @@ struct ncclTopoNode {
       int rank;
       int cudaCompCap;
       int gdrSupport;
-      char gcn[GCN_ARCH_NAME_LEN];
-      hipDeviceArch_t arch;
-      int cu;
     }gpu;
     struct {
       int dev; // Plugin dev number
@@ -174,13 +148,12 @@ struct ncclTopoNode {
       int collSupport;
       int maxChannels;
       int localGpu;
-      int64_t busId;
     }net;
     struct {
       int arch;
       int vendor;
       int model;
-      cpu_set_t affinity;
+      ncclAffinity affinity;
     }cpu;
     struct {
       uint64_t device;
@@ -206,28 +179,7 @@ struct ncclTopoSystem {
   struct ncclTopoNodeSet nodes[NCCL_TOPO_NODE_TYPES];
   float maxBw;
   float totalBw;
-  int type;
-  int nRanks;
-  int netGdrLevel;
-  int tuning;
-
-  bool pivotA2AEnabled;
-  int pivotA2ANumBiRings;
-  bool treeDefined;
-  bool ll128Enabled;
-#ifdef ENABLE_WARP_SPEED
-  bool warpSpeedEnabled;
-#endif
-  float baseBw;
-
-  // [RCCL] Track hostIdx to support rail-optimized rings/trees
-  int hostIdx;
-  bool useRailOptimizedTrees;
   int inter;
-  /* RCCL Rome / GIO preset: RCCL_ROME_TOPO_PRESET_MODEL_IDX_* sentinels or romeTopoModels[] index */
-  int romeTopoModelIdx;
-  /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
-  bool skipPresetTopoMatching;
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
@@ -262,15 +214,14 @@ struct ncclTopoNetInfo {
 ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct ncclTopoNetInfo* net);
 ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge);
 
-#define NCCL_TOPO_XML_MAX_NODES 8192
-#define NCCL_GRAPH_XML_MAX_NODES 8192
+#define NCCL_TOPO_XML_MAX_NODES 256
+#define NCCL_GRAPH_XML_MAX_NODES 4096
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem, uint64_t localHostHash);
 ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int* nChannels);
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
-
-void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, float* bw);
 
 static ncclResult_t ncclTopoIdToIndex(struct ncclTopoSystem* system, int type, int64_t id, int* index) {
   *index = -1;
@@ -319,20 +270,6 @@ static ncclResult_t ncclTopoIdToNetDev(struct ncclTopoSystem* system, int64_t id
   }
   WARN("Could not find NET with id %lx", id);
   return ncclInternalError;
-}
-
-// Returns XGMI speed in GB/s
-static float ncclTopoXGMISpeed(const char* gcn) {
-  if (IsArchMatch(gcn, "gfx90a"))
-    return MI200_XGMI_WIDTH;
-  else if (IsArchMatch(gcn, "gfx942"))
-    return GFX94X_XGMI_WIDTH;
-  else if (IsArchMatch(gcn, "gfx95"))
-    return GFX95X_XGMI_WIDTH;
-  else if (IsArchMatch(gcn, "gfx1250"))
-    return GFX125X_XGMI_WIDTH;
-  else
-    return VEGA_XGMI_WIDTH;
 }
 
 // Returns NVLink bw in GB/s

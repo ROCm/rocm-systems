@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2015-2017, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -12,6 +11,9 @@
 #include "comm.h"
 #include "allocator.h"
 #include "register.h"
+#include "utils.h"
+
+#include <thread>
 
 ncclResult_t ncclGroupErrCheck(ncclResult_t ret);
 void ncclGroupCommJoin(struct ncclComm* comm, int type);
@@ -32,7 +34,7 @@ typedef enum ncclGroupJobState {
 
 struct ncclAsyncJob {
   struct ncclAsyncJob* next;
-  pthread_t thread;
+  std::thread thread;
   ncclResult_t result;
   ncclResult_t(*func)(struct ncclAsyncJob*);
   void(*undo)(struct ncclAsyncJob*);
@@ -45,6 +47,12 @@ struct ncclAsyncJob {
   ncclComm_t comm;
   int destroyFlag;
   bool isThreadMain;
+
+  ~ncclAsyncJob() {
+    if (thread.joinable()) {
+      (void)ncclThreadJoin(thread);
+    }
+  }
 };
 
 ncclResult_t ncclAsyncLaunch(
@@ -72,11 +80,16 @@ ncclResult_t ncclAsyncJobComplete(struct ncclAsyncJob* job);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-extern __thread int ncclGroupDepth; // depth of ncclGroupStart nesting
-extern __thread ncclResult_t ncclGroupError;
-extern __thread struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum];
-extern __thread struct ncclComm* ncclGroupCommPreconnectHead;
-extern __thread int ncclGroupBlocking;
+extern thread_local int ncclGroupDepth; // depth of ncclGroupStart nesting
+extern thread_local ncclResult_t ncclGroupError;
+extern thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum];
+extern thread_local struct ncclComm* ncclGroupCommPreconnectHead;
+extern thread_local int ncclGroupBlocking;
+
+inline ncclResult_t ncclGroupStartInternal() {
+  ncclGroupDepth++;
+  return ncclSuccess;
+}
 
 inline bool ncclGroupEnabled() {
   return ncclGroupDepth != 0;
@@ -112,8 +125,18 @@ inline void ncclGroupCommJoin(struct ncclComm* comm, int type) {
     if (type == ncclGroupTaskTypeCollective) {
       // Initialize planner
       ncclKernelPlanner::Peer* tmp = comm->planner.peers;
+      ncclIntruQueue<ncclTaskRma, &ncclTaskRma::next>* tmpRmaQueues = comm->planner.rmaTaskQueues;
+      int numRmaCtx = comm->config.numRmaCtx;
       memset(&comm->planner, 0, sizeof(comm->planner));
       comm->planner.peers = tmp;
+      comm->planner.bcast_info.minBcastPeer = INT_MAX;
+      comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+      comm->planner.rmaTaskQueues = tmpRmaQueues;
+      if (comm->planner.rmaTaskQueues != NULL) {
+        for (int i = 0; i < numRmaCtx; i++) {
+          ncclIntruQueueConstruct(&comm->planner.rmaTaskQueues[i]);
+        }
+      }
     }
   }
   ncclGroupBlocking = comm->config.blocking;

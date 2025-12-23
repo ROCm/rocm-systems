@@ -1,7 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
- * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -14,12 +12,13 @@
 #include "socket.h"
 #include "ipcsocket.h"
 #include "nccl_net.h"
-#include <pthread.h>
 #include "shmutils.h"
 #include "p2p.h"
 #include "collectives.h"
-#include "proxy_trace/proxy_trace.h"
 #include "gin/gin_host.h"
+
+#include <mutex>
+#include <condition_variable>
 
 typedef enum : uint8_t {
   ncclPatternRing,
@@ -41,7 +40,6 @@ typedef enum : uint8_t {
 } ncclPattern_t;
 
 enum ncclProxyOpState { ncclProxyOpNone, ncclProxyOpReady, ncclProxyOpProgress };
-enum { proxyRecv=0, proxySend=1 };
 
 struct ncclProxyArgs;
 typedef ncclResult_t (*proxyProgressFunc_t)(struct ncclProxyState*, struct ncclProxyArgs*);
@@ -54,14 +52,18 @@ union ncclProxyOpSpecifics {
     size_t sizePerRank;
     int nNodes, node;
   } collnetDirect;
+  struct {
+    int sendSlices;
+    int recvSlices;
+    int stepSize;
+  } bcast;
 };
 
 struct ncclProxyOp {
   struct ncclProxyConnection* connection;
   ssize_t nbytes;
   uint64_t opCount;
-  int root:30;
-  uint32_t connIndex:2;
+  int root;
   int next;
   int nsteps;
   size_t chunkSize;
@@ -87,8 +89,6 @@ struct ncclProxyOp {
   uint8_t* recvbuff;
   int isOneRPN;
   RingAlgorithm *ringAlgo;
-  int nextRank;
-  int prevRank;
   union ncclProxyOpSpecifics specifics;
   int nChannels;
   int nPeers;
@@ -114,12 +114,6 @@ struct ncclProxyOp {
   uint64_t workCounter;
 
   struct ncclProxyOp *enqNext;
-
-  // Used to track total real bytes of this op
-  uint32_t totalBytes;
-  // Used to fetch/update the proxyOp in ProxyTrace map
-  facebook_rccl::ProxyTraceRecordKey traceKey;
-  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxySubArgs;
@@ -172,15 +166,6 @@ struct ncclProxySubArgs {
 
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_NET_SEND_ENTRY) && defined(ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
-  int npKitSizesFifo[NCCL_STEPS];
-  uint64_t timestamp[NCCL_STEPS];
-#endif
-
-  // Used to fetch/update the proxyOp in ProxyTrace map
-  facebook_rccl::ProxyTraceRecordKey traceKey;
-  facebook_rccl::ProxyTraceExtraInfo traceInfo;
 };
 
 struct ncclProxyArgs {
@@ -211,7 +196,6 @@ struct ncclProxyArgs {
   int nPeers;
 
   int idle;
-  uint64_t hdp_flushed;
 
   // Element linking
   struct ncclProxyArgs* next;
@@ -219,11 +203,6 @@ struct ncclProxyArgs {
   struct ncclProxyArgs** proxyAppendPtr;
 
   union ncclProxyOpSpecifics specifics;
-
-  int prevRank;
-  int nextRank;
-  int send;
-  int retry_total;
 };
 #define NCCL_MAX_NETDEVS 128
 
@@ -238,8 +217,8 @@ struct ncclProxyOpsPool {
   volatile int nextOps;
   volatile int nextOpsEnd;
   volatile int freeOps[NCCL_MAX_LOCAL_RANKS];
-  pthread_mutex_t mutex;
-  pthread_cond_t cond;
+  std::mutex mutex;
+  std::condition_variable cond;
 };
 
 struct ncclProxyOps {
@@ -253,12 +232,11 @@ struct ncclProxyOps {
 
 struct ncclProxySharedP2p {
   int refcount;
-  int64_t size;
+  int size;
   char* cudaBuff;
   char* hostBuff;
   // CUDA IPC
   ncclIpcDesc ipcDesc;
-  int dmaBufFd;  // DMA-BUF fd for cuMem allocations
   struct ncclProxyArgs* proxyAppend[MAXCHANNELS]; // Separate send and recv
 };
 
@@ -283,7 +261,7 @@ struct ncclProxyProgressState {
   ncclShmHandle_t handle;
   char opsPoolShmSuffix[6];
 
-  pthread_t thread;
+  std::thread thread;
   volatile int stop;
   struct ncclProxyPeer** localPeers;
   struct ncclSharedNetComms* netComms[NCCL_MAX_NETDEVS];
@@ -356,10 +334,9 @@ struct ncclProxyState {
 
   uint32_t* abortFlag;
   bool directMode;
-  struct ncclMemManager* memManager;  // Shared memory manager for proxy allocations
   // Service threads
-  pthread_t thread;
-  pthread_t threadUDS;
+  std::thread thread;
+  std::thread threadUDS;
   struct ncclSocket* listenSock;
   struct ncclIpcSocket ipcSock;
   int stop;
@@ -385,21 +362,8 @@ struct ncclProxyState {
   // Profiler plugin
   void* profilerContext;
 
-#ifdef ENABLE_ROCSHMEM
-  // When ROCshmem GDA is active, the proxy must busy-poll instead of sleeping
-  // to avoid OS scheduling delays at GDA-to-RCCL transitions.
-  bool rocshmemEnabled;
-#endif
-
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
-
-  // A handle to the proxy traces
-  facebook_rccl::ProxyTrace* proxyTrace;
-
-  // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
-  int ll128LineElems;
-  int ll128DataElems;
 };
 
 enum proxyConnectState {
@@ -468,9 +432,9 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
 // UDS support
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void *handle, int* convertedFd);
 ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int localFd, int* rmtFd);
+ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int* localFds, int* rmtFds, int numSegments);
 
 ncclResult_t ncclProxyStop(struct ncclComm* comm);
 ncclResult_t ncclProxyShmUnlink(struct ncclComm* comm);
 ncclResult_t ncclProxyDestroy(struct ncclComm* comm);
-
 #endif

@@ -5,10 +5,11 @@
  ************************************************************************/
 
 #include "strongstream.h"
-#include "rocmwrap.h"
+#include "cudawrap.h"
 #include "checks.h"
 #include "param.h"
 #include <mutex>
+#include <memory>
 
 #if CUDART_VERSION >= 13000
 #define cudaStreamGetCaptureInfo_v3 cudaStreamGetCaptureInfo
@@ -32,18 +33,14 @@ static std::mutex cxtListMutex;
 
 ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
   ncclResult_t result = ncclSuccess;
-  int hcontext;
-  CUCHECK(hipGetDevice(&hcontext));
+  CUcontext hcontext;
+  CUCHECK(cuCtxGetCurrent(&hcontext));
 
   std::lock_guard<std::mutex> lock(cxtListMutex);
   struct ncclCudaContext* p = cxtListHead;
   while (1) {
     if (p == nullptr) {
-      p = (struct ncclCudaContext*)calloc(1, sizeof(struct ncclCudaContext));
-      if (p == nullptr) {
-        result = ncclSystemError;
-        goto leave;
-      }
+      p = new ncclCudaContext{};
       p->refCount = 1;
       p->hcontext = hcontext;
       p->next = cxtListHead;
@@ -70,31 +67,55 @@ void ncclCudaContextDrop(struct ncclCudaContext* cxt) {
     *pp = cxt->next; // remove from list
     // Destroy resources held in cxt
     ncclStrongStreamDestruct(&cxt->launchOrder);
-    free(cxt);
+    delete cxt;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 ncclResult_t ncclCudaGetCapturingGraph(
-    struct ncclCudaGraph* graph, cudaStream_t stream
+    struct ncclCudaGraph* graph, cudaStream_t stream, int graphUsageMode
   ) {
-#if ROCM_VERSION >= 60100
-  hipStreamCaptureStatus status;
-  CUDACHECK(hipStreamGetCaptureInfo_v2(stream, &status, &graph->graphId, &graph->graph, nullptr, nullptr));
-  if (status != hipStreamCaptureStatusActive) {
-    graph->origin = nullptr;
-    graph->graph = nullptr;
-    graph->graphId = ULLONG_MAX;
-  } else {
-    graph->origin = stream;
-  }
-#endif
+  #if CUDART_VERSION >= 10000 // cudaStreamGetCaptureInfo
+    int driver;
+    NCCLCHECK(ncclCudaDriverVersion(&driver));
+    if (CUDART_VERSION < 11030 || driver < 11030) {
+      cudaStreamCaptureStatus status;
+      CUDACHECK(cudaStreamGetCaptureInfo(stream, &status, nullptr));
+      #if CUDART_VERSION >= 11030
+        graph->origin = nullptr;
+        graph->graph = nullptr;
+        graph->graphId = ULLONG_MAX;
+        graph->graphUsageMode = graphUsageMode;
+      #endif
+      if (status != cudaStreamCaptureStatusNone) {
+        WARN("NCCL cannot be captured in a graph if either it wasn't built with CUDA runtime >= 11.3 or if the installed CUDA driver < R465.");
+        return ncclInvalidUsage;
+      }
+    } else {
+      #if CUDART_VERSION >= 11030
+        cudaStreamCaptureStatus status;
+      #if CUDART_VERSION >= 13000
+        CUDACHECK(cudaStreamGetCaptureInfo_v3(stream, &status, &graph->graphId, &graph->graph, nullptr, nullptr, nullptr));
+      #else
+        CUDACHECK(cudaStreamGetCaptureInfo_v2(stream, &status, &graph->graphId, &graph->graph, nullptr, nullptr));
+      #endif
+        if (status != cudaStreamCaptureStatusActive) {
+          graph->origin = nullptr;
+          graph->graph = nullptr;
+          graph->graphId = ULLONG_MAX;
+        } else {
+          graph->origin = stream;
+        }
+        graph->graphUsageMode = graphUsageMode;
+      #endif
+    }
+  #endif
   return ncclSuccess;
 }
 
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, cudaHostFn_t fn, void* arg) {
-  #if ROCM_VERSION >= 60100
+  #if CUDART_VERSION >= 11030
     cudaUserObject_t object;
     CUDACHECK(cudaUserObjectCreate(
       &object, arg, fn, /*initialRefcount=*/1, cudaUserObjectNoDestructorSync
@@ -111,10 +132,9 @@ ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph graph, cudaHostFn_t
 
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   CUDACHECK(cudaStreamCreateWithFlags(&ss->liveStream, cudaStreamNonBlocking));
-  #if ROCM_VERSION >= 60100
+  #if CUDART_VERSION >= 11030
     ss->everCaptured = false;
     ss->captureHead = nullptr;
-    pthread_mutex_init(&ss->lock, nullptr);
     CUDACHECK(cudaEventCreateWithFlags(&ss->serialEvent, cudaEventDisableTiming));
   #endif
   return ncclSuccess;
@@ -122,7 +142,7 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
 
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
   CUDACHECK(cudaStreamDestroy(ss->liveStream));
-  #if ROCM_VERSION >= 60100
+  #if CUDART_VERSION >= 11030
     struct ncclStrongStreamCapture* cap = ss->captureHead;
     while (cap) {
       struct ncclStrongStreamCapture* next = cap->next;
@@ -131,36 +151,35 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
       cap = next;
     }
     CUDACHECK(cudaEventDestroy(ss->serialEvent));
-    pthread_mutex_destroy(&ss->lock);
   #endif
   return ncclSuccess;
 }
 
-NCCL_PARAM(GraphMixingSupport, "GRAPH_MIXING_SUPPORT", 0)
 NCCL_PARAM(LaunchRaceFatal, "LAUNCH_RACE_FATAL", 1);
 constexpr char const* launchRaceFatalMsg = "Fatal: host threads racing to launch NCCL on same device.";
 
-static __thread char threadIdMarker;
+static thread_local char threadIdMarker;
 static void* localThreadId() { return &threadIdMarker; }
 
 ncclResult_t ncclStrongStreamAcquire(
    struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent,
    cudaStream_t* workStream
   ) {
-  #if ROCM_VERSION >= 60100
-    bool mixing = ncclParamGraphMixingSupport();
+  #if CUDART_VERSION >= 11030
+    bool mixing = graph.graphUsageMode == 2;
     if (graph.graphId == ULLONG_MAX) {
       *workStream = ss->liveStream;
       ss->liveAcquiredBy = localThreadId();
-      if (mixing && __atomic_load_n(&ss->everCaptured, __ATOMIC_RELAXED)) {
+      if (mixing && COMPILER_ATOMIC_LOAD(&ss->everCaptured, std::memory_order_relaxed)) {
         CUDACHECK(cudaStreamWaitEvent(ss->liveStream, ss->serialEvent, 0));
       }
     } else {
       bool firstCapture = !ss->everCaptured;
-      __atomic_store_n(&ss->everCaptured, true, __ATOMIC_RELAXED);
+      COMPILER_ATOMIC_STORE(&ss->everCaptured, true, std::memory_order_relaxed);
 
       ncclResult_t ret = ncclSuccess;
-      if (concurrent) pthread_mutex_lock(&ss->lock);
+      std::unique_lock<std::mutex> lock(ss->mutex, std::defer_lock);
+      if (concurrent) lock.lock();
 
       // Look for capture in our list of active captures.
       struct ncclStrongStreamCapture** pcap = &ss->captureHead;
@@ -171,7 +190,6 @@ ncclResult_t ncclStrongStreamAcquire(
         if (cap->graphId == graph.graphId) { // Capture node already exists.
           *workStream = cap->captureStream;
           cap->acquiredBy = localThreadId();
-          if (concurrent) pthread_mutex_unlock(&ss->lock);
           return ncclSuccess;
         } else {
           cudaStreamCaptureStatus status;
@@ -183,7 +201,7 @@ ncclResult_t ncclStrongStreamAcquire(
             if (spare == nullptr) { // Keep one spare to reuse below.
               spare = cap;
             } else {
-              CUDACHECKIGNORE(cudaStreamDestroy(cap->captureStream));
+              cudaStreamDestroy(cap->captureStream);
               free(cap);
             }
           }
@@ -193,10 +211,6 @@ ncclResult_t ncclStrongStreamAcquire(
       cap = spare;
       if (cap == nullptr) {
         cap = (struct ncclStrongStreamCapture*)calloc(1, sizeof(struct ncclStrongStreamCapture));
-        if (cap == nullptr) {
-          ret = ncclSystemError;
-          goto do_unlock;
-        }
         CUDACHECKGOTO(cudaStreamCreateWithFlags(&cap->captureStream, cudaStreamNonBlocking), ret, do_unlock);
       }
       cap->graphId = graph.graphId;
@@ -206,7 +220,7 @@ ncclResult_t ncclStrongStreamAcquire(
       ss->captureHead = cap;
 
     do_unlock:
-      if (concurrent) pthread_mutex_unlock(&ss->lock);
+      if (concurrent) lock.unlock();
       if (ret != ncclSuccess) return ret;
 
       *workStream = cap->captureStream;
@@ -228,7 +242,7 @@ ncclResult_t ncclStrongStreamAcquire(
       }
       if (mixing) {
         // First dependency is to wait on serialEvent
-        CUDACHECK(cudaStreamWaitEvent(cap->captureStream, ss->serialEvent, 0));
+        CUDACHECK(cudaStreamWaitEvent(cap->captureStream, ss->serialEvent, cudaEventWaitExternal));
       }
     }
   #endif
@@ -239,15 +253,15 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(
     struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent,
     cudaStream_t* workStream
   ) {
-  #if ROCM_VERSION >= 60100
+  #if CUDART_VERSION >= 11030
     if (graph.graphId == ULLONG_MAX) {
       *workStream = ss->liveStream;
     } else {
-      if (concurrent) pthread_mutex_lock(&ss->lock);
+      std::unique_lock<std::mutex> lock(ss->mutex, std::defer_lock);
+      if (concurrent) lock.lock();
       struct ncclStrongStreamCapture* cap = ss->captureHead;
       while (cap->graphId != graph.graphId) cap = cap->next;
       *workStream = cap->captureStream;
-      if (concurrent) pthread_mutex_unlock(&ss->lock);
     }
   #else
     *workStream = ss->liveStream
@@ -258,22 +272,23 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(
 ncclResult_t ncclStrongStreamRelease(
     struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool concurrent
   ) {
-  #if ROCM_VERSION >= 60100
-    bool mixing = ncclParamGraphMixingSupport();
+  #if CUDART_VERSION >= 11030
+    bool mixing = graph.graphUsageMode == 2;
     if (mixing) {
       if (graph.graphId == ULLONG_MAX) {
-        if (__atomic_load_n(&ss->everCaptured, __ATOMIC_RELAXED)) {
+        if (COMPILER_ATOMIC_LOAD(&ss->everCaptured, std::memory_order_relaxed)) {
           CUDACHECK(cudaEventRecord(ss->serialEvent, ss->liveStream));
         }
         if (ss->liveAcquiredBy != localThreadId() && ncclParamLaunchRaceFatal()) {
-          ERROR("%s", launchRaceFatalMsg);
+          WARN("%s", launchRaceFatalMsg);
           return ncclInvalidUsage;
         }
       } else {
-        if (concurrent) pthread_mutex_lock(&ss->lock);
+        std::unique_lock<std::mutex> lock(ss->mutex, std::defer_lock);
+        if (concurrent) lock.lock();
         struct ncclStrongStreamCapture* cap = ss->captureHead;
         while (cap->graphId != graph.graphId) cap = cap->next;
-        if (concurrent) pthread_mutex_unlock(&ss->lock);
+        if (concurrent) lock.unlock();
 
         // Add event record node with dependencies added further down.
         cudaGraphNode_t recordNode;
@@ -284,9 +299,9 @@ ncclResult_t ncclStrongStreamRelease(
         cudaGraphNode_t const* nodes;
         size_t count = 0;
         #if CUDART_VERSION >= 13000
-        cudaError_t res = hipStreamGetCaptureInfo_v3(cap->captureStream, &status, nullptr, nullptr, &nodes, nullptr, &count);
+        cudaError_t res = cudaStreamGetCaptureInfo_v3(cap->captureStream, &status, nullptr, nullptr, &nodes, nullptr, &count);
         #else
-        cudaError_t res = hipStreamGetCaptureInfo_v2(cap->captureStream, &status, nullptr, nullptr, &nodes, &count);
+        cudaError_t res = cudaStreamGetCaptureInfo_v2(cap->captureStream, &status, nullptr, nullptr, &nodes, &count);
         #endif
 
         #if CUDART_VERSION >= 12030
@@ -328,7 +343,7 @@ ncclResult_t ncclStrongStreamRelease(
         #endif
 
         if (cap->acquiredBy != localThreadId() && ncclParamLaunchRaceFatal()) {
-          ERROR("%s", launchRaceFatalMsg);
+          WARN("%s", launchRaceFatalMsg);
           return ncclInvalidUsage;
         }
       }
@@ -355,9 +370,9 @@ ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cu
     cudaGraphNode_t const* nodes;
     size_t count = 0;
     #if CUDART_VERSION >= 13000
-    cudaError_t res = hipStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, nullptr, &count);
+    cudaError_t res = cudaStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, nullptr, &count);
     #else
-    cudaError_t res = hipStreamGetCaptureInfo_v2(tmp, &status, nullptr, nullptr, &nodes, &count);
+    cudaError_t res = cudaStreamGetCaptureInfo_v2(tmp, &status, nullptr, nullptr, &nodes, &count);
     #endif
 
     #if CUDART_VERSION >= 12030
@@ -384,7 +399,7 @@ ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cu
 }
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss) {
-  #if ROCM_VERSION >= 60100
+  #if CUDART_VERSION >= 11030
     CUDACHECK(cudaStreamWaitEvent(ss->liveStream, ss->serialEvent, 0));
   #endif
   CUDACHECK(cudaStreamSynchronize(ss->liveStream));

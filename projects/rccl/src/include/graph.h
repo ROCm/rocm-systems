@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -10,6 +9,7 @@
 
 #include "nccl.h"
 #include "device.h"
+#include "os/os.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -25,12 +25,15 @@ ncclResult_t ncclTopoSortSystem(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoPrint(struct ncclTopoSystem* system);
 
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm);
+ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported);
+ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused);
 void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
+ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
-
+ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);
 ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm);
 
 // Query topology
@@ -44,7 +47,7 @@ enum ncclTopoGdrMode {
   ncclTopoGdrModeNum = 3
 };
 ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* topo, int rank, int64_t netId, int read, enum ncclTopoGdrMode* gdrMode);
-ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged, int* flush);
+ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, int* flush);
 ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool *avail);
 ncclResult_t ncclTopoCheckNet(struct ncclTopoSystem* system, int rank1, int rank2, int* net);
 int ncclPxnDisable(struct ncclComm* comm);
@@ -53,12 +56,8 @@ ncclResult_t ncclGetLocalCpu(struct ncclTopoSystem* system, int gpu, int* retCpu
 
 ncclResult_t ncclGetUserP2pLevel(int* level);
 
-#define MAX_XGMI_INTER_GPUS 4
-ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph, int channelId, int type, int64_t* id, int* dev);
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, int cudaDev2, bool* isXGMI, int maxInter=MAX_XGMI_INTER_GPUS, int nInter=0, int *inter=nullptr);
-
 // Find CPU affinity
-ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, cpu_set_t* affinity);
+ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncclAffinity* affinity);
 
 #define NCCL_TOPO_CPU_ARCH_X86 1
 #define NCCL_TOPO_CPU_ARCH_POWER 2
@@ -72,8 +71,6 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, cpu
 #define NCCL_TOPO_CPU_MODEL_INTEL_SKL 2
 #define NCCL_TOPO_CPU_MODEL_INTEL_SRP 3
 #define NCCL_TOPO_CPU_MODEL_INTEL_ERP 4
-#define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
-#define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1
 ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vendor, int* model);
 ncclResult_t ncclTopoGetGpuCount(struct ncclTopoSystem* system, int* count);
@@ -82,7 +79,7 @@ ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev);
 ncclResult_t ncclTopoGetLocalNets(struct ncclTopoSystem* system, int rank, int64_t* localNets, int* localNetCount);
 ncclResult_t ncclTopoGetLocalGpu(struct ncclTopoSystem* system, int64_t netId, int* gpuIndex);
-ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int *count);
+ncclResult_t getLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int *count, float* bw);
 
 enum netDevsPolicy {
   NETDEVS_POLICY_AUTO = 0x0,
@@ -93,7 +90,7 @@ enum netDevsPolicy {
 ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum);
 
 // Allows for up to 32 NICs per node on GB200-NVL72
-#define NCCL_TOPO_MAX_NODES 64
+#define NCCL_TOPO_MAX_NODES 576
 ncclResult_t ncclTopoGetLocal(struct ncclTopoSystem* system, int type, int index, int resultType, int locals[NCCL_TOPO_MAX_NODES], int* localCount, int* pathType);
 
 // Init search. Needs to be done before calling ncclTopoCompute
@@ -124,9 +121,6 @@ struct ncclTopoGraph {
   int nHops;
   int intra[MAXCHANNELS*NCCL_TOPO_MAX_NODES];
   int64_t inter[MAXCHANNELS*2];
-  int nIntraChannels;
-  int intraNets[MAXCHANNELS*NCCL_TOPO_MAX_NODES*2];
-  char treeBase[NCCL_TOPO_MAX_NODES][NCCL_TOPO_MAX_NODES*4];
 };
 ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 
@@ -146,14 +140,13 @@ struct ncclTopoRanks {
   int nvlsHeadNum;
 };
 
-ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph* (&graphs)[NCCL_NUM_ALGORITHMS], struct ncclTopoRanks* topoRanks);
+ncclResult_t ncclTopoPreset(struct ncclComm* comm, struct ncclTopoGraph** graphs, struct ncclTopoRanks* topoRanks);
 
 ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns,
-    struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph** graphs, struct ncclComm* parent, int nc);
-ncclResult_t ncclTreeBasePostset(struct ncclComm* comm, struct ncclTopoGraph* treeGraph);
+    struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph** graphs, struct ncclComm* parent);
 
 ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm);
 ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph** graphs);
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes, int numPipeOps, float* time);
-int rcclGetTuningIndexForArch(const char* gfxarch);
+
 #endif

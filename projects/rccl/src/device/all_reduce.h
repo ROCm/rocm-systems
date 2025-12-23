@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -9,76 +8,26 @@
 #include "collectives.h"
 #include "primitives.h"
 
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit.h"
-#endif
-
 namespace {
-  template<typename T, typename RedOp, typename Proto, int RCCLMetadata>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
-#ifdef ENABLE_WARP_SPEED
-    int warp = threadIdx.x / WARP_SIZE;
-    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
-#else
+  template<typename T, typename RedOp, typename Proto>
+  __device__ __forceinline__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
     ncclRing *ring = &ncclShmem.channel.ring;
-#endif
     int ringIx = ring->index;
-
     const int nranks = ncclShmem.comm.nRanks;
-#if defined(ENABLE_NPKIT)
-    const int bid = ncclShmem.channelId - work->channelLo;
-    int npKitCtxIdx = bid; // unused variable - compiler warning
-#endif
-    ssize_t size;
     ssize_t gridOffset;
     ssize_t channelCount;
     ssize_t chunkCount;
-#ifdef ENABLE_WARP_SPEED
-    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
-#else
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
-#endif
+    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (ssize_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
     const ssize_t loopCount = nranks * chunkCount;
     ssize_t offset;
     int nelem;
     int chunk;
 
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
     // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
     // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
     // coverity[callee_ptr_arith:FALSE]
-    Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC> prims
-      (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex, work);
-
-#if defined(ENABLE_NPKIT)
-    if (tid == 0) {
-      prims.npKitCtxIdx = npKitCtxIdx;
-    }
-#endif
+    Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
+      (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
 
     for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
       ssize_t remCount = channelCount - elemOffset;
@@ -95,34 +44,9 @@ namespace {
       chunkOffset = chunk * chunkCount;
       offset = gridOffset + elemOffset + chunkOffset;
       nelem = (int)min(chunkCount, remCount - chunkOffset);
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_SEND_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_SEND_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       prims.directSend(offset, offset, nelem);
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_SEND_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_SEND_EXIT, nelem*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
       // k-2 steps: reduce and copy to next GPU
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_ENTRY)
-      if (tid == 0 && nranks > 2) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_ENTRY, nelem*(nranks-2)*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       for (int j = 2; j < nranks; ++j) {
         chunk = modRanks(ringIx + nranks - j);
         chunkOffset = chunk * chunkCount;
@@ -131,44 +55,13 @@ namespace {
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_EXIT)
-      if (tid == 0 && nranks > 2) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_RECV_REDUCE_SEND_EXIT, nelem*(nranks-2)*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
       chunk = ringIx + 0;
       chunkOffset = chunk * chunkCount;
       offset = gridOffset + elemOffset + chunkOffset;
       nelem = (int)min(chunkCount, remCount - chunkOffset);
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*postOp=*/true);
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_REDUCE_COPY_SEND_EXIT, nelem*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_ENTRY)
-      if (tid == 0 && nranks > 2) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_ENTRY, nelem*(nranks-2)*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
 
       // k-2 steps: copy to next GPU
       for (int j = 1; j < nranks - 1; ++j) {
@@ -179,21 +72,6 @@ namespace {
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_EXIT)
-      if (tid == 0 && nranks > 2) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_COPY_SEND_EXIT, nelem*(nranks-2)*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       // Make final copy from buffer to dest.
       chunk = modRanks(ringIx + 1);
       chunkOffset = chunk * chunkCount;
@@ -201,84 +79,22 @@ namespace {
       nelem = (int)min(chunkCount, remCount - chunkOffset);
 
       prims.directRecv(offset, nelem);
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_DIRECT_RECV_EXIT, nelem*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_RING_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_RING_EXIT, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
   }
 
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
-#if defined(ENABLE_NPKIT)
-    const int bid = ncclShmem.channelId - work->channelLo;
-    int npKitCtxIdx = bid; // unused variable - compiler warning
-#endif
+  __device__ __forceinline__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
     ncclTree *tree = &ncclShmem.channel.tree;
-    size_t size;
     size_t gridOffset;
     size_t channelCount;
     size_t chunkCount;
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
     size_t offset;
     int nelem;
 
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
     { // Reduce : max number of recv is 3, max number of send is 1 (binary tree + local)
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_TREE_ARITY, 1>, /*Direct=*/1, Proto, 0> prims
         (tid, nthreads, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-#if defined(ENABLE_NPKIT)
-      if (tid == 0) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       if (tree->up == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
           offset = gridOffset + elemOffset;
@@ -300,34 +116,11 @@ namespace {
           prims.directRecvReduceDirectSend(offset, offset, nelem);
         }
       }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_REDUCE_EXIT, size*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
 
     { // Broadcast : max number of recv is 1, max number of send is 3 (binary tree + local)
-      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
+      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_TREE_ARITY>, /*Direct=*/1, Proto, 0> prims
         (tid, nthreads, &tree->up, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-#if defined(ENABLE_NPKIT)
-      if (tid == 0) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_ENTRY)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       if (tree->up == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
           offset = gridOffset + elemOffset;
@@ -349,40 +142,16 @@ namespace {
           prims.directRecvCopyDirectSend(offset, offset, nelem);
         }
       }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_EXIT)
-      if (tid == 0) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_BROADCAST_EXIT, size*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_UPDOWN_EXIT, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
   }
 
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
-#if defined(ENABLE_NPKIT)
-    const int bid = ncclShmem.channelId - work->channelLo; // unused variable - compiler warning
-#endif
+  __device__ __forceinline__ void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
     ncclTree *tree = &ncclShmem.channel.tree;
-    size_t size;
     size_t gridOffset;
     size_t channelCount;
     size_t chunkCount;
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), (size_t*)nullptr, &gridOffset, &channelCount, &chunkCount);
     size_t offset;
     int nelem;
     int nthreadsSplit;
@@ -395,101 +164,30 @@ namespace {
       nthreadsSplit = (nthreads*7/(10*WARP_SIZE))*WARP_SIZE;
     }
 
-#if defined(ENABLE_NPKIT)
-    bool isNpKitThread = false;
-    int npKitCtxIdx = 0;
-    if (threadIdx.x == 0) {
-      isNpKitThread = true;
-      npKitCtxIdx = bid * 2;
-    } else if (tree->up != -1 && threadIdx.x == nthreadsSplit) {
-      isNpKitThread = true;
-      npKitCtxIdx = bid * 2 + 1;
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
-    if (isNpKitThread) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_CPU, 0, 0, NPKIT_GET_CPU_TIMESTAMP_FROM_BLOCK,
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
-    if (isNpKitThread) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_TIME_SYNC_GPU, 0, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_ENTRY)
-    if (isNpKitThread) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
     if (tree->up == -1) {
       // Reduce and broadcast. Max number of recv is 2, max number of send is 2
-      Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanSymmetric<NCCL_MAX_TREE_ARITY_TOP>, /*Direct=*/1, Proto, 0>
         prims(tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-#if defined(ENABLE_NPKIT)
-      if (isNpKitThread) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_ENTRY)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
         offset = gridOffset + elemOffset;
         nelem = min(chunkCount, channelCount - elemOffset);
         prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*doPost=*/true);
       }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_EXIT)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_BROADCAST_EXIT, size*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
     else if (tid < nthreadsSplit) {
       /* Reduce up. Max number of recv is 3, max number of send is 1 (binary tree + local).
-      * Why Direct=1????
-      * Answer: Because despite not performing any direct operations, the ctor
-      * must assume Direct so that it can exchange direct pointers with remote ctors
-      * that are Direct, otherwise it hangs. A cleaner solution would be to seperate
-      * into DirectRecv and DirectSend capabilities, this ctor would have both=0,
-      * but the ctor above for tree roots would be DirectRecv=0 DirectSend=1.
-      */
+       * Why Direct=1????
+       * Answer: Because despite not performing any direct operations, the ctor
+       * must assume Direct so that it can exchange direct pointers with remote ctors
+       * that are Direct, otherwise it hangs. A cleaner solution would be to seperate
+       * into DirectRecv and DirectSend capabilities, this ctor would have both=0,
+       * but the ctor above for tree roots would be DirectRecv=0 DirectSend=1.
+       */
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<n, 1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_TREE_ARITY, 1>, /*Direct=*/1, Proto, 0>
         prims(tid, nthreadsSplit, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0*Proto::MaxGroupWidth, 0, 0, work);
-
-#if defined(ENABLE_NPKIT)
-      if (isNpKitThread) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_ENTRY)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       if (tree->down[0] == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
           offset = gridOffset + elemOffset;
@@ -504,38 +202,15 @@ namespace {
           prims.directRecvReduceDirectSend(offset, offset, nelem);
         }
       }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_EXIT)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_REDUCE_EXIT, size*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
     else {
       // Broadcast down. Max number of recv is 1, max number of send is 3 (binary tree + local)
       // Coverity reports that the callee treats &tree->up as an array.  However, due to the use of
       // FanAsymmetric<1, n>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
+      Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_TREE_ARITY>, /*Direct=*/1, Proto, 0>
         prims(tid-nthreadsSplit, nthreads-nthreadsSplit, &tree->up, tree->down, work->sendbuff, work->recvbuff,
             work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
-
-#if defined(ENABLE_NPKIT)
-      if (isNpKitThread) {
-        prims.npKitCtxIdx = npKitCtxIdx;
-      }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_ENTRY)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_ENTRY, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-        prims.npKitDataProcessTotalTime = 0;
-      }
-#endif
-
       if (tree->down[0] == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
           offset = gridOffset + elemOffset;
@@ -550,81 +225,33 @@ namespace {
           prims.directRecvCopyDirectSend(offset, offset, nelem);
         }
       }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_EXIT)
-      if (isNpKitThread) {
-        NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_BROADCAST_EXIT, size*sizeof(T), prims.npKitDataProcessTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-            ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-      }
-#endif
-
     }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_EXIT)
-    if (isNpKitThread) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_ALL_REDUCE_TREE_SPLIT_EXIT, size*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
   }
 }
-
-#if defined(__gfx942__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
-#define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
-  if(work->rcclUseOneSlice){ \
-    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
-  } \
-  else{ \
-    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
-  }
-#elif defined(__gfx950__) // Use a single slice and single step per slice per simple primitive for a single node on some gfx950 devices.
-#define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
-  if(work->rcclUseOneSlice){ \
-    using Proto = ProtoSimple<1, 1>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
-  } \
-  else{ \
-    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
-  }
-#else
-#define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
-  using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
-  runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work);
-#endif
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-   rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work);
+    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>;
+    runRing<T, RedOp, Proto>(tid, nthreads, work);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    using Proto = ProtoSimple<1, 1>;
-    if (work->acc != nullptr) {
-      runTreeSplit<T, RedOp, Proto>(tid, nthreads, work);
-    } else {
-      runTreeUpDown<T, RedOp, Proto>(tid, nthreads, work);
-    }
-    // Check-here
-    // #if CUDART_VERSION >= 11020 && CUDART_VERSION < 11040 && __CUDA_ARCH__ >= 800
-    //   runTreeUpDown<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
-    // #else
-    //   runTreeSplit<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
-    // #endif
+    #if CUDART_VERSION >= 11020 && CUDART_VERSION < 11040 && __CUDA_ARCH__ >= 800
+      runTreeUpDown<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
+    #else
+      runTreeSplit<T, RedOp, ProtoSimple<1, 1>>(tid, nthreads, work);
+    #endif
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int/*nthreads*/, struct ncclDevWorkColl* work) {
-    static constexpr int COLLNET_COPY_THREADS = 64;
+    static constexpr int COLLNET_COPY_THREADS = 96;
     const int bid = ncclShmem.channelId - work->channelLo;
     const int nChannels = work->channelHi - work->channelLo + 1;
     struct ncclDirect* direct = &ncclShmem.channel.collnetDirect;
@@ -634,9 +261,9 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
 
     const int hasUp = (direct->up[0] >= 0) ? 1 : 0;
     const int hasDn = (direct->down[0] >= 0) ? 1 : 0;
-    const int nThreadsScatter = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 2*COLLNET_COPY_THREADS : 0);
-    const int nThreadsGather  =             ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 1*COLLNET_COPY_THREADS : 0);
-    const int nThreadsBcast   = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 0 : 1*COLLNET_COPY_THREADS);
+    const int nThreadsScatter = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 3*COLLNET_COPY_THREADS : 0);
+    const int nThreadsGather  =             ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 2*COLLNET_COPY_THREADS : 0);
+    const int nThreadsBcast   = WARP_SIZE + ((hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 0 : 2*COLLNET_COPY_THREADS);
     const int nThreadsReduce = work->nWarps*WARP_SIZE - nThreadsScatter - nThreadsGather - nThreadsBcast;
     const int tidStartBcast = nThreadsGather;
     const int tidStartScatter = tidStartBcast + nThreadsBcast;
@@ -645,7 +272,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
 
     if (tid >= tidStartScatter && tid < tidStartReduce && hasUp) {
       // Scatter
-      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/1, Proto, 0>
+      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/0, Proto, 0>
         prims(tid-tidStartScatter, nThreadsScatter, NULL, direct->up, work->sendbuff, work->recvbuff,
            work->redOpArg, 2*Proto::MaxGroupWidth, 1, 1, work);
       ssize_t offsetBase, peerOffset;
@@ -672,7 +299,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
     } else if (tid >= tidStartReduce && direct->out != -1) {
       if (hasDn) {
         // Reduce, send to network
-        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 1>, /*Direct=*/1, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 1>, /*Direct=*/0, Proto, 0>
           prims(tid-tidStartReduce, nThreadsReduce, direct->down, &direct->out, work->sendbuff, work->recvbuff,
              work->redOpArg, 3*Proto::MaxGroupWidth, 1, 1, work);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -685,13 +312,13 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
         // Directly send to network
         if (work->netRegUsed) {
           if (tid == tidStartReduce) {
-            Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/1, Proto, 0>::sendPeerNotify(direct->out, 1, 1);
+            Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/0, Proto, 0>::sendPeerNotify(direct->out, 1, 1);
           }
           __syncwarp();
         } else {
-          Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/1, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<0, 1>, /*Direct=*/0, Proto, 0>
           prims(tid-tidStartReduce, nThreadsReduce, nullptr, &direct->out, work->sendbuff, work->recvbuff,
-            work->redOpArg, 3*Proto::MaxGroupWidth, 1, 1);
+             work->redOpArg, 3*Proto::MaxGroupWidth, 1, 1);
           for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
             ssize_t offset = gridOffset + (bid * direct->nHeads + direct->headRank) * chunkSize;
             int nelem = min(chunkSize, size - offset);
@@ -701,7 +328,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       }
     } else if (tid < tidStartBcast && hasUp) {
       // Gather
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 0>, /*Direct=*/1, Proto, 0>
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 0>, /*Direct=*/0, Proto, 0>
         prims(tid, nThreadsGather, direct->up, NULL, work->sendbuff, work->recvbuff,
            work->redOpArg, 0*Proto::MaxGroupWidth, 0, 0, work);
       ssize_t offsetBase, peerOffset;
@@ -726,9 +353,9 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
         // Coverity complains about a possible overrun inside the class below, but that's actually
         // a false positive.
         // coverity[identity_transfer:FALSE]
-        Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/1, Proto, 0>
+        Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/0, Proto, 0>
           prims(tid-tidStartBcast, nThreadsBcast, &direct->out, direct->down, work->sendbuff, work->recvbuff,
-            work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
+             work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
           ssize_t offset = work->netRegUsed ? gridOffset + (bid + direct->headRank * nChannels) * chunkSize
                                             : gridOffset + (bid * direct->nHeads + direct->headRank) * chunkSize;
@@ -738,12 +365,12 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NCCL_P
       } else {
         if (work->netRegUsed) {
           if (tid == tidStartBcast) {
-            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/1, Proto, 0>::recvPeerNotify(direct->out, 0, 1);
+            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(direct->out, 0, 1);
           }
           __syncwarp();
         } else {
           // Recv from network (no post thread needed)
-          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/1, Proto, 0>
+          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>
             prims(tid - tidStartBcast, nThreadsBcast, &direct->out, nullptr, work->sendbuff, work->recvbuff,
               work->redOpArg, 1 * Proto::MaxGroupWidth, 0, 0);
           for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -787,8 +414,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
 
       if (tid < tidEndScatter) {
         // Scatter
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
           prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
             work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -799,8 +426,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         }
       } else if (tid < tidEndGather) {
         // Gather
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
           prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
             work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -811,7 +438,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         }
       } else if (tid < tidEndReduce && nvls->headRank != -1) {
         // Reduce, broadcast through NVLS
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 1>;
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL, 1, 1>;
         Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0>
           prims(tid - tidEndGather, nThreadsReduce, &nvls->down, &nvls->down, NULL, NULL,
             work->redOpArg, 2 * Proto::MaxGroupWidth, 0, 0, work);
@@ -834,8 +461,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
 
       if (tid < tidEndScatter) {
         // Scatter
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+        Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
           prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
             work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -846,8 +473,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         // coverity[overrun-call] => Coverity think prims.index can be greater than 1
       } else if (tid < tidEndGather) {
         // Gather
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+        Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
           prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
             work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
         for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
@@ -857,7 +484,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         }
       } else if (tid < tidEndReduce && nvls->headRank != -1) {
         // Reduce, send to network
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 0>;
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL, 1, 0>;
         // Coverity complains about a possible overrun inside the class below, but that's actually
         // a false positive.
         // coverity[identity_transfer:FALSE]
@@ -872,7 +499,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_SIMPL
         }
       } else if (tid < tidEndBcast && nvls->headRank != -1) {
         // Recv from network, broadcast
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 0, 1>;
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL, 0, 1>;
         // Coverity complains about a possible overrun inside the class below, but that's actually
         // a false positive.
         // coverity[identity_transfer:FALSE]
@@ -922,8 +549,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
 
     if (tid < tidEndScatter) {
       // Scatter
-      using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
+      using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+      Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
         prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
           work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
       for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -934,8 +561,8 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
       }
     } else if (tid < tidEndGather) {
       // Gather
-      using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
-      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/1, Proto, 0>
+      using Proto = ProtoSimple<1, 1, COLL_UNROLL>;
+      Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0>
         prims(tid - tidEndScatter, nThreadsGather, nvls->up, NULL, NULL, work->recvbuff,
           work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
       for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
@@ -947,7 +574,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
     } else if (tid < tidEndReduce && nvls->headRank != -1) {
       if (!hasUp) {
         // Reduce and Broadcast
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 1>;
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL, 1, 1>;
         Primitives<T, RedOp, FanSymmetric<3>, /*Direct=*/1, Proto, 0>
           prims(tid - tidEndGather, nThreadsReduce, treeDown, treeDown, NULL, NULL,
             work->redOpArg, 2 * Proto::MaxGroupWidth, 0, 0, work);
@@ -961,7 +588,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
         }
       } else {
         // Reduce, send to network
-        using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 0>;
+        using Proto = ProtoSimple<1, 1, COLL_UNROLL, 1, 0>;
         // Coverity reports that the callee treats &treeUp as an array.  However, due to the use of
         // FanAsymmetric<3, 1>, only the first element is ever accessed, so it's fine.
         // coverity[callee_ptr_arith:FALSE]
@@ -979,7 +606,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_NVLS_TREE, NCCL_PROTO_
       }
     } else if (tid < tidEndBcast && nvls->headRank != -1) {
       // Recv from network, broadcast
-      using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 0, 1>;
+      using Proto = ProtoSimple<1, 1, COLL_UNROLL, 0, 1>;
       // Coverity reports that the callee treats &treeUp as an array.  However, due to the use of
       // FanAsymmetric<1, 3>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
@@ -1127,7 +754,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_CHAIN, NCCL_PR
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+    runRing<T, RedOp, ProtoLL>(tid, nthreads, work);
   }
 };
 
@@ -1141,7 +768,7 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);
   }
 };
 

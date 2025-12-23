@@ -8,7 +8,6 @@
 #define NCCL_NVTX_H_
 
 #include "nvtx3/nvtx3.hpp"
-#include "roctx.h"
 
 #include "param.h"
 
@@ -25,26 +24,28 @@
 #define NVTX_SID_CommAbort            3 // same schema as NVTX_SID_CommInitRank
 #define NVTX_SID_AllGather            4
 #define NVTX_SID_AllReduce            5
-#define NVTX_SID_AlltoAll             6
-#define NVTX_SID_AlltoAllv            7
-#define NVTX_SID_Broadcast            8
-#define NVTX_SID_Gather               9
-#define NVTX_SID_MSCCL                10
-#define NVTX_SID_ReduceScatter        11
-#define NVTX_SID_Reduce               12
-#define NVTX_SID_Scatter              13
-#define NVTX_SID_Send                 14
-#define NVTX_SID_Recv                 15
-#define NVTX_SID_CommInitRankConfig   16 // same schema as NVTX_SID_CommInitRank
-#define NVTX_SID_CommInitRankScalable 17 // same schema as NVTX_SID_CommInitRank
-#define NVTX_SID_CommSplit            18
-#define NVTX_SID_CommFinalize         19
-#define NVTX_SID_CommShrink           20
-#define NVTX_SID_CommRevoke           21
+#define NVTX_SID_Broadcast            6
+#define NVTX_SID_ReduceScatter        7
+#define NVTX_SID_Reduce               8
+#define NVTX_SID_Send                 9
+#define NVTX_SID_Recv                 10
+#define NVTX_SID_CommInitRankConfig   11 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_CommInitRankScalable 12 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_CommSplit            13
+#define NVTX_SID_CommFinalize         14
+#define NVTX_SID_CommShrink           15
+#define NVTX_SID_AlltoAll             16
+#define NVTX_SID_Gather               17
+#define NVTX_SID_Scatter              18
+#define NVTX_SID_CommRevoke           19 // same schema as NVTX_SID_CommInitRank
+#define NVTX_SID_CommGrow             20
+#define NVTX_SID_PutSignal            21
+#define NVTX_SID_Signal               22
+#define NVTX_SID_WaitSignal           23
 // When adding new schema IDs, DO NOT re-use/overlap with the enum schema ID below!
 
 // Define static schema ID for the reduction operation.
-#define NVTX_PAYLOAD_ENTRY_NCCL_REDOP 22 + NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START
+#define NVTX_PAYLOAD_ENTRY_NCCL_REDOP 24 + NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START
 
 extern const nvtxDomainHandle_t ncclNvtxDomainHandle;
 
@@ -72,7 +73,7 @@ class payload_schema {
   payload_schema(payload_schema&&) = default;
   payload_schema& operator=(payload_schema&&) = default;
 
-private:
+ private:
   nvtxPayloadSchemaAttr_t schema_attr{
     NVTX_PAYLOAD_SCHEMA_ATTR_TYPE |
     NVTX_PAYLOAD_SCHEMA_ATTR_ENTRIES |
@@ -118,18 +119,6 @@ class ncclOptionalNvtxScopedRange
 // @param N NCCL API name without the `nccl` prefix.
 // @param T name of the used NVTX payload schema without "Schema" suffix.
 // @param P payload parameters/entries
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#define NVTX3_FUNC_WITH_PARAMS(N, T, P) \
-  constexpr uint64_t schemaId = NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START + NVTX_SID_##N; \
-  static const payload_schema schema{T##Schema, std::extent<decltype(T##Schema)>::value - 1, \
-    schemaId, sizeof(T)}; \
-  const T _payload = {P}; \
-  nvtxPayloadData_t nvtx3_bpl__[] = {{schemaId, sizeof(_payload), &_payload}}; \
-  roctx_scoped_range_in const roctx_range__{T##Schema, nvtx3_bpl__, std::extent<decltype(T##Schema)>::value - 1, "RCCL_" #N};
-
-#define NCCL_NVTX3_FUNC_RANGE \
-  roctx_scoped_range_in const roctx_range__(("RCCL_"))
-#else
 #define NVTX3_FUNC_WITH_PARAMS(N, T, P)                                                          \
   ncclOptionalNvtxScopedRange nvtx3_range__;                                                     \
   if (!ncclParamNvtxDisable())                                                                   \
@@ -151,7 +140,6 @@ class ncclOptionalNvtxScopedRange
     static ::nvtx3::v1::event_attributes const nvtx3_func_attr__{nvtx3_func_name__}; \
     nvtx3_range__.push(nvtx3_func_attr__); \
   }
-#endif
 
 /// @brief Creates an NVTX range with extended payload using the RAII pattern.
 /// @tparam PayloadType Data type of the payload.
@@ -188,7 +176,6 @@ class ncclOptionalNvtxPayloadRange {
 
   // Holds the payload data.
   PayloadType payload{};
-  nvtxPayloadData_t payloadData = {NVTX_PAYLOAD_ENTRY_TYPE_INVALID, 0, NULL};
 
   bool isPushed() const noexcept {
     return pushed;
@@ -196,6 +183,7 @@ class ncclOptionalNvtxPayloadRange {
 
  private:
   bool pushed = false;
+  nvtxPayloadData_t payloadData = {NVTX_PAYLOAD_ENTRY_TYPE_INVALID, 0, NULL};
 };
 
 // Create an NVTX range with the function name as the range name. Use RAII pattern.
@@ -214,17 +202,6 @@ class ncclOptionalNvtxPayloadRange {
 // @param N NCCL API name without the `nccl` prefix.
 // @param S name of the used NVTX payload schema.
 // @param P payload parameters/entries
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#define NVTX3_RANGE_ADD_PAYLOAD(N, S, P) do { \
-  constexpr uint64_t schema_id = NVTX_PAYLOAD_ENTRY_TYPE_SCHEMA_ID_STATIC_START + NVTX_SID_##N; \
-  static const payload_schema schema{S, std::extent<decltype(S)>::value - 1, schema_id, \
-    sizeof(nvtx3_range__.payload)}; \
-  nvtx3_range__.payload = {P}; \
-  nvtx3_range__.setPayloadData(schema_id); \
-  nvtxPayloadData_t nvtx3_bpl__[] = {{schema_id, sizeof(nvtx3_range__.payloadData), &nvtx3_range__.payloadData}}; \
-  roctx_scoped_range_in const roctx_range__{S, nvtx3_bpl__, std::extent<decltype(S)>::value - 1, "RCCL_" #N}; \
-} while (0)
-#else
 #define NVTX3_RANGE_ADD_PAYLOAD(N, S, P) do { \
   if (!nvtx3_range__.isPushed()) { \
     break; \
@@ -235,7 +212,6 @@ class ncclOptionalNvtxPayloadRange {
   nvtx3_range__.payload = {P}; \
   nvtx3_range__.setPayloadData(schema_id); \
 } while (0)
-#endif
 
 extern void initNvtxRegisteredEnums();
 

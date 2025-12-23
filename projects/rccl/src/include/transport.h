@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -37,12 +36,29 @@ struct ncclRing;
 struct ncclConnector;
 struct ncclComm;
 
-#define CHANNEL_MASK_OFFSET(nranks, connIndex) (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
+int64_t ncclParamMultiSegmentRegister();
+
+struct ncclPeerInfo {
+  int rank;
+  int cudaDev;
+  int nvmlDev;
+  int gdrSupport;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  dev_t shmDev;
+  int64_t busId;
+  struct ncclComm* comm;
+  int cudaCompCap;
+  size_t totalGlobalMem;
+  // MNNVL support
+  nvmlGpuFabricInfoV_t fabricInfo;
+  int cuMemSupport;
+  int version;
+};
 
 #define CONNECT_SIZE 256
 #define NCCL_MAX_PAGE_SIZE (512L * 1024L * 1024L)
 #define NCCL_REC_PAGE_SIZE (2L * 1024L * 1024L)
-
 struct ncclConnect {
   char data[CONNECT_SIZE];
 };
@@ -91,7 +107,7 @@ struct ncclCollNetSharedRes {
 struct ncclTransportComm {
   ncclResult_t (*setup)(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo*, struct ncclPeerInfo*, struct ncclConnect*, struct ncclConnector*, int channelId, int connIndex);
   ncclResult_t (*connect)(struct ncclComm* comm, struct ncclConnect*, int nranks, int rank, struct ncclConnector*);
-  ncclResult_t (*free)(struct ncclComm* comm, struct ncclConnector*);
+  ncclResult_t (*free)(struct ncclConnector*);
   ncclResult_t (*proxySharedInit)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, int nChannels);
   ncclResult_t (*proxySetup)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
   ncclResult_t (*proxyConnect)(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done);
@@ -109,9 +125,8 @@ struct ncclTransport {
 };
 
 ncclResult_t ncclTransportP2pConnect(struct ncclComm* comm, int channelId, int nrecv, int* peerRecv, int nsend, int* peerSend, int connIndex);
-ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex, bool* needsProxy=NULL);
+ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex);
 ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP2p, bool* directMode, bool* isAllCudaP2p);
-ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirectP2p);
 bool ncclP2pUsesMemcpy();
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);

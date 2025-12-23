@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -12,141 +11,32 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
-#include "device_table.h"
 #include "network/unpack/unpack_defs.h"
-#define NCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
-#define __syncwarp()
-
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-#define STORE(DST, SRC) \
-  { __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST)) *)(DST), (SRC), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
-#elif defined(__GFX9__)
-#define STORE(DST, SRC) \
-  { __atomic_store_n((DST), (SRC), __ATOMIC_RELAXED); }
-#else
-#define STORE(DST, SRC) \
-  { __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST); }
-#endif
-
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
-#define __trace_hwreg() \
-  collTrace->data_0 = 0;
-#else
-#define __trace_hwreg() \
-  { int32_t hwid; \
-    asm volatile ("s_getreg_b32 %0, hwreg(HW_REG_HW_ID)" : "=s" (hwid)); \
-    collTrace->data_0 = hwid >> 4; }
-#endif
-
-#if defined(__gfx942__) || defined(__gfx950__)
-#define __trace_xccid() \
-  { int32_t xccId; \
-    asm volatile ("s_getreg_b32 %0, hwreg(HW_REG_XCC_ID)" : "=s" (xccId)); \
-    collTrace->xccId = xccId; }
-#else
-#define __trace_xccid() \
-  collTrace->xccId = 0;
-#endif
-
-#ifdef ENABLE_COLLTRACE
-  #define INC_COLL_TRACE \
-    uint32_t pos = __hip_atomic_fetch_add(&ncclShmem.collTraceTail->tail, 1, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_WORKGROUP)%COLLTRACE_NUM_ITEMS; \
-    struct ncclCollTrace* collTrace = ncclShmem.collTrace+pos; \
-    collTrace->timeStamp = wall_clock64(); \
-    collTrace->tid = threadIdx.x; \
-    collTrace->channelId = ncclShmem.channelId;
-    // TODO: switch to atomicInc after llvm crash is fixed
-    // uint32_t pos = atomicInc(&ncclShmem.collTraceTail->tail, COLLTRACE_NUM_ITEMS)
-
-  #define traceKernelLaunch(launch_type, ix) { \
-    INC_COLL_TRACE \
-    collTrace->funcIndex = ncclShmem.funcId; \
-    __trace_hwreg() \
-    __trace_xccid() \
-    collTrace->batchIx = ix; \
-    if (ncclShmem.workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)ncclShmem.workStorage; \
-      collTrace->p2p.sendRank = p2pWork->sendRank; \
-      collTrace->p2p.recvRank = p2pWork->recvRank; \
-      collTrace->p2p.nSendChannels = p2pWork->nSendChannels; \
-      collTrace->p2p.nRecvChannels = p2pWork->nRecvChannels; \
-      collTrace->p2p.channelBase = p2pWork->channelBase; \
-      collTrace->p2p.sendConnIndex = p2pWork->sendConnIndex; \
-      collTrace->p2p.recvConnIndex = p2pWork->recvConnIndex; \
-      collTrace->p2p.sendProtoLL = p2pWork->sendProtoLL; \
-      collTrace->p2p.recvProtoLL = p2pWork->recvProtoLL; \
-      collTrace->p2p.sendRegistered = p2pWork->sendNetReg; \
-      collTrace->p2p.recvRegistered = p2pWork->recvNetReg; \
-      collTrace->p2pOpCount[0] = p2pWork->sendOpCount; \
-      collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
-      __hip_atomic_store(&collTrace->type, (launch_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-    } else if (ncclShmem.workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)ncclShmem.workStorage; \
-      collTrace->coll.nWarps = collWork->nWarps; \
-      collTrace->coll.nChannels = collWork->channelHi-collWork->channelLo+1; \
-      collTrace->coll.bid = ncclShmem.channelId - collWork->channelLo; \
-      collTrace->coll.root = collWork->root; \
-      collTrace->opCount = collWork->opCount; \
-      __hip_atomic_store(&collTrace->type, (launch_type) | ncclCollTraceCollElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-    } \
-  }
-  #define traceKernelEnd(end_type)  { \
-    INC_COLL_TRACE \
-    collTrace->funcIndex = ncclShmem.funcId;\
-    if (ncclShmem.workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)ncclShmem.workStorage; \
-      collTrace->p2pOpCount[0] = p2pWork->sendOpCount; \
-      collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
-      __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-    } else if (ncclShmem.workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)ncclShmem.workStorage; \
-      collTrace->opCount = collWork->opCount; \
-      __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceCollElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-    } \
-  }
-  #define traceData(data2, data4, data8_0, data8_1) { \
-    INC_COLL_TRACE \
-    collTrace->funcIndex = data2; \
-    collTrace->data_0 = data4; \
-    collTrace->opCount = data8_0; \
-    collTrace->data_1 = data8_1; \
-    __hip_atomic_store(&collTrace->type, ncclCollTraceDataType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-  }
-  #define traceAbort(){\
-    INC_COLL_TRACE\
-    collTrace->funcIndex = ncclShmem.funcId;\
-    __hip_atomic_store(&collTrace->type, ncclCollTraceAbortType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
-  }
-#else
-#define traceKernelLaunch(launch_type, batchIx)
-#define traceKernelEnd(end_type)
-#define traceData(data2, data4, data8_0, data8_1)
-#define traceAbort()
-#endif
+#define COLL_UNROLL (ncclCollUnroll())
 
 #if __CUDA_ARCH__ >= 700
 // __grid_constant__ appears to break cuda-gdb
-//#define NCCL_GRID_CONSTANT __grid_constant__
-#define NCCL_GRID_CONSTANT
+#define NCCL_GRID_CONSTANT __grid_constant__
 #else
 #define NCCL_GRID_CONSTANT
 #endif
+
+typedef void(*ncclDevFuncPtr_t)();
+extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable[];
 
 struct ncclShmemGroup {
   ncclConnInfo *recvConns[NCCL_MAX_ARITY];
   ncclConnInfo *sendConns[NCCL_MAX_ARITY];
   void* userInput;
   void* userOutput;
-  void* userAcc;
   void* srcs[NCCL_MAX_ARITY+1];
   void* dsts[NCCL_MAX_ARITY+1];
-  void* acc;
-  uint64_t barrier;
   union {
     unpackGroupShmem unpack;
   } devicePlugin;
   int32_t dstSizes[NCCL_MAX_ARITY+1];
+  uint64_t redOpArgs;
 };
 
 struct ncclShmemData {
@@ -155,11 +45,7 @@ struct ncclShmemData {
   int aborted;
   alignas(16) struct ncclKernelComm comm;
   alignas(16) struct ncclDevChannel channel;
-#ifdef ENABLE_WARP_SPEED
-  int warpComm;
-  alignas(16) struct ncclDevChannel warpChannel[NCCL_MAX_GROUPS];
-  int warpChannelId[NCCL_MAX_GROUPS];
-#endif
+
   int batchIx, nextBatchIx;
   enum ncclDevWorkType workType;
   uint8_t directMode;
@@ -169,58 +55,19 @@ struct ncclShmemData {
   uint64_t workCounter;
   bool profilerEnabled;
   struct ncclShmemGroup groups[NCCL_MAX_GROUPS];
-  uint64_t redOpArgs[NCCL_MAX_NVLS_ARITY+1];
 
-  alignas(16) char workStorage[1024];
+  alignas(16) char workStorage[ncclMaxDevWorkBatchBytes()];
 
   alignas(16) union {
     unpackShmem unpack;
   } devicePlugin;
-#ifdef ENABLE_COLLTRACE
-  struct ncclCollTrace* collTrace;
-  union ncclCollTraceTail* collTraceTail;
-#endif
-#ifdef ENABLE_PROFILING
-  struct ncclProf prof;
-#endif
-#ifdef ENABLE_FAULT_INJECTION
-  uint64_t faults;
-#endif
-  uint64_t barrier_pat;
 };
 
-#ifdef RCCL_DEVICE_LINKER
-__shared__ ncclShmemData ncclShmem;
-__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#else
 extern __shared__ ncclShmemData ncclShmem;
 #if __CUDA_ARCH__ >= 700
   extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
 #else
   extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#endif
-#endif
-
-#ifdef ENABLE_FAULT_INJECTION
-__device__ inline void insert_random_delay_per_warp() {
-  if ((ncclShmem.faults & RANDOM_DELAY_ON_WARP_START) && (threadIdx.x%WARP_SIZE == 0)) {
-    switch ((wall_clock64()>>(threadIdx.x/WARP_SIZE*2))&0x3) {
-      case 0:
-        __builtin_amdgcn_s_sleep(0);
-        break;
-      case 1:
-        __builtin_amdgcn_s_sleep(8);
-        break;
-      case 2:
-        __builtin_amdgcn_s_sleep(16);
-        break;
-      case 3:
-      default:
-        __builtin_amdgcn_s_sleep(32);
-        break;
-    }
-  }
-}
 #endif
 
 __device__ inline void* ncclScratchForWarp(int warp) {
@@ -267,27 +114,14 @@ __device__ inline bool barrier_red_or(bool vote, int name, int nThreads) {
   return bool(ans);
 }
 
-#ifdef ENABLE_PROFILING
-#define __insert_timestamp(line_num) do { \
-      if (ncclShmem.prof.count < PROFILE_NUM_ITEMS) { \
-        ncclShmem.prof.elem[ncclShmem.prof.count].line = line_num; \
-        ncclShmem.prof.elem[ncclShmem.prof.count].timeStamp = wall_clock64(); \
-        ncclShmem.prof.count++; \
-      } \
-    } while(0);
-#else
-#define __insert_timestamp(line_num)
-#endif
-
 // Copy 16-byte aligned data. You must call with at least `(bytes+15)/16` threads.
 inline __device__ void copyToShmem16(int tid, void* dst, void const* src, int bytes) {
   int offset = 16*tid;
   if (offset < bytes) {
-    ulong2 *src2, *dst2;
-    src2 = (ulong2*)((char const*)src + offset);
-    dst2 = (ulong2*)((char*)dst + offset);
-    dst2->x = src2->x;
-    dst2->y = src2->y;
+    uint64_t a=0, b=0;
+    asm volatile("ld.v2.u64 {%0,%1},[%2];" : "=l"(a),"=l"(b) : "l"((char const*)src + offset) : "memory");
+    uint32_t udst = (uint32_t)__cvta_generic_to_shared(dst);
+    asm volatile("st.shared.v2.u64 [%0],{%1,%2};" :: "r"(udst + offset), "l"(a), "l"(b) : "memory");
   }
 }
 
@@ -305,29 +139,19 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     // since we know all lanes will be querying the same bitmask we can compute
     // much faster using shared memory.
     uint8_t* fnsOfBitset = (uint8_t*)ncclScratchForWarp(threadIdx.x/WARP_SIZE);
-    int nWorks = 0;
     __syncwarp();
-
-    if (WARP_SIZE == 64) {
-      if (uint64_t(batch.offsetBitset) & (1ull<<lane)) {
-        int nWorksBelow = __popcll(uint64_t(batch.offsetBitset) & ((1ull<<lane)-1));
-        fnsOfBitset[nWorksBelow] = lane;
-      }
-      nWorks = __popcll(uint64_t(batch.offsetBitset));
-    } else {
-      // WARP_SIZE == 32
-      if (uint32_t(batch.offsetBitset) & (1u<<lane)) {
-        int nWorksBelow = __popc(uint32_t(batch.offsetBitset) & ((1u<<lane)-1));
-        fnsOfBitset[nWorksBelow] = lane;
-      }
-      int nWorksLow32 = __popc(uint32_t(batch.offsetBitset)); // just of low 32 bits
-      if (uint32_t(batch.offsetBitset>>32) & (1u<<lane)) {
-        int nWorksBelow = nWorksLow32;
-        nWorksBelow += __popc(uint32_t(batch.offsetBitset>>32) & ((1u<<lane)-1));
-        fnsOfBitset[nWorksBelow] = 32 + lane;
-      }
-      nWorks = nWorksLow32 + __popc(uint32_t(batch.offsetBitset>>32)); // add high 32 bits
+    if (uint32_t(batch.offsetBitset) & (1u<<lane)) {
+      int nWorksBelow = __popc(uint32_t(batch.offsetBitset) & ((1u<<lane)-1));
+      fnsOfBitset[nWorksBelow] = lane;
     }
+    int nWorksLow32 = __popc(uint32_t(batch.offsetBitset)); // just of low 32 bits
+    if (uint32_t(batch.offsetBitset>>32) & (1u<<lane)) {
+      int nWorksBelow = nWorksLow32;
+      nWorksBelow += __popc(uint32_t(batch.offsetBitset>>32) & ((1u<<lane)-1));
+      fnsOfBitset[nWorksBelow] = 32 + lane;
+    }
+    int nWorks = nWorksLow32 + __popc(uint32_t(batch.offsetBitset>>32)); // add high 32 bits
+    __syncwarp();
 
     int workSize;
     int nPacks; // total number of packs loaded, each pack is 16 bytes
@@ -342,6 +166,12 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
       break;
     case (int)ncclDevWorkTypeColl:
       workSize = sizeof(struct ncclDevWorkColl);
+      nPacks = nWorks*(workSize/16);
+      packInWork = tid%(workSize/16);
+      dstWork = tid/(workSize/16);
+      break;
+    case (int)ncclDevWorkTypeBcast:
+      workSize = sizeof(struct ncclDevWorkBcast);
       nPacks = nWorks*(workSize/16);
       packInWork = tid%(workSize/16);
       dstWork = tid/(workSize/16);
@@ -388,8 +218,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
       if (ncclShmem.args.workStorageType == ncclDevWorkStorageTypeArgs) {
         char* src = (char*)args + (batch.offsetBase + srcWork*workSize + packInWork*16);
         tmp = *(ulong2*)src; // becomes ld.param.v2.u64
-      }
-      if (ncclShmem.args.workStorageType != ncclDevWorkStorageTypeArgs) {
+      } else {
         char* src = (char*)ncclShmem.args.workBuf + ((batch.offsetBase + srcWork*workSize + packInWork*16) & ncclShmem.args.workMask);
         tmp = *(ulong2*)src; // becomes ld.v2.u64
       }
@@ -417,31 +246,30 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
 }
 
 __device__ __forceinline__ unsigned long long int globaltimer() {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  return wall_clock64();
-#else
   unsigned long long int timer;
   asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(timer));
   return timer;
-#endif
 }
 
-template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>
+template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWorkColl {
   __device__ void run(int tid, int tn, struct ncclDevWorkColl* work) {
     // Put NOT IMPLEMENTED behavior here.
   }
 };
 
-template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>
+template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWorkBatch;
 
 // Specialized for P2p in sendrecv.h
 template<typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE>;
 
+template<typename T, typename RedOp, int Proto>
+struct RunWorkBatch<ncclFuncAllGatherV, T, RedOp, NCCL_ALGO_RING, Proto>;
+
 // Specialized here for non-P2p (Coll and CollReg)
-template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto,  int USE_ACC, int COLL_UNROLL, int Pipeline>
+template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWorkBatch {
   // This __forceinline__ is necessary. The compiler was inserting a function call
   // here from the LL ncclKernel.
@@ -468,17 +296,10 @@ struct RunWorkBatch {
         if (work->nWarps != workPrev->nWarps) __syncthreads();
       }
       int subtn = work->nWarps*WARP_SIZE;
-#ifdef ENABLE_WARP_SPEED
-      if (tid < subtn) {
-        if(ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING) RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ncclShmem.warpChannelId[tid / WARP_SIZE] >= 0) RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
-      }
-#else
       // Coverity reports a possible thread divergence due to not all threads participating in the collective.
       // However, the code ensures that the participation is on a per-warp basis.
       // coverity[device_thread_diverged:FALSE]
       if (tid < subtn) RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-#endif
     }
   }
 };
@@ -515,19 +336,11 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
-template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
+template<int SpecializedFnId, typename SpecializedRunWorkBatch>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
-  const int tid = threadIdx.x;
+  int tid = threadIdx.x;
   int tn = blockDim.x;
-  int x = tid;
-  int total = 0, y;
-  int num = MAXCHANNELS/64 > 0 ? MAXCHANNELS/64 : 1;
-#ifdef ENABLE_WARP_SPEED
-  int warpCount    = tn / WARP_SIZE;
-  int localWarpId  = tid / WARP_SIZE;
-  int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
-  int laneId = tid % WARP_SIZE;
-#endif
+
   // Copy kernel args to shmem and then only read those. Otherwise the compiler
   // will end up putting the args into thread local stack which is very wasteful.
   if (tid < sizeof(ncclDevKernelArgs)/sizeof(uint32_t)) {
@@ -538,50 +351,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   // is the inverse of counting the number of set bits among the the first n.
   // PTX has the fns instruction which does this but is extremely slow. We can
   // do better when we know all threads are querying the same bitmask.
-  switch (tid/WARP_SIZE) {
-  case 0:
-  //ncclShmem.channelId = blockIdx.x;
-    for (int i = 0; i < num; i++) {
-      if (args->channelMask.masks[i] & (1ull<<x)) {
-        y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
-        y = total + y;
-        if (blockIdx.x == y) {
-          ncclShmem.channelId = x + total;
-          break;
-        }
-      }
-      if (WARP_SIZE < 64) {
-        x = WARP_SIZE + tid;
-        if (args->channelMask.masks[i] & (1ull<<x)) {
-          y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
-          y = y + total;
-          if (blockIdx.x == y) {
-            ncclShmem.channelId = x + total;
-            break;
-          }
-        }
-      }
-      total = total + __popcll(args->channelMask.masks[i]);
-    }
-    break;
-  case 1:
-    if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-      if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-      ncclShmem.groups[tid-WARP_SIZE].barrier = 0;
-    }
-    break;
-  case 2:
-#ifdef ENABLE_FAULT_INJECTION
-    /* load faults injection before first sync threads */
-    if (tid == 2*WARP_SIZE) ncclShmem.faults = args->comm->faults;
-#endif
-    break;
-  case 3:
-    /* set abort flag to 0 */
-    if (tid == 3*WARP_SIZE) ncclShmem.aborted = 0;
-    break;
-  default:
-    break;
+  if (tid < MAXCHANNELS && (args->channelMask & (1ull<<tid))) {
+    int n = __popcll(args->channelMask & ((1ull<<tid)-1));
+    if (blockIdx.x == n) ncclShmem.channelId = tid;
   }
   __syncthreads(); // publish ncclShmem.{args, channelId}
   /* set abort flag to 0 */
@@ -616,143 +388,40 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       loadWorkBatchToShmem(subtid, subtn, args, /*batchIx=*/blockIdx.x);
     } break;
   }
-#ifdef ENABLE_COLLTRACE
-  if (tid == 0) {
-    ncclShmem.collTrace = args->comm->collTrace + COLLTRACE_NUM_ITEMS*ncclShmem.channelId;
-    ncclShmem.collTraceTail = args->comm->collTraceTail + ncclShmem.channelId;
-  }
-#endif
-#ifdef ENABLE_WARP_SPEED
-  if(tid == 0) {
-    ncclShmem.warpComm = args->warpLevelComm;
-  }
-#endif
-  __syncthreads(); // publish shmem
-
-#ifdef ENABLE_WARP_SPEED
-  // Determine per-warp channel assignment for WarpSpeed enablement
-  total = 0;
-  if(ncclShmem.warpComm == 1) {  // If warpComm is enabled, assign warps to channels that have the corresponding channel mask enabled
-    ncclShmem.warpChannelId[localWarpId] = -1;
-     __syncthreads();
-    for (int i = 0; i < num; i++) {
-      if (args->channelMask.masks[i] & (1ull<<laneId)) {
-        y = __popcll(args->channelMask.masks[i] & ((1ull<<laneId)-1));
-        y = total + y;
-        if (globalWarpId == y) {
-          ncclShmem.warpChannelId[localWarpId] = laneId + total;
-          break;
-        }
-      }
-      total = total + __popcll(args->channelMask.masks[i]);
-    }
-    __syncthreads();
-    if(ncclShmem.warpChannelId[localWarpId] >= 0) {
-      void* dst = &ncclShmem.warpChannel[localWarpId];
-      void* src = &((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.warpChannelId[localWarpId]];
-      int bytes = sizeof(ncclDevChannel);
-      static_assert(sizeof(ncclDevChannel) <= 16*WARP_SIZE, "ncclDevChannel cannot be loaded by a single warp in one insn.");
-      // assert((tid-localWarpId*WARP_SIZE) >= 0 && (tid-localWarpId*WARP_SIZE) < WARP_SIZE);
-      copyToShmem16(tid-localWarpId*WARP_SIZE, dst, src, bytes);
-    }
-  } else {  // If warpComm is disabled, all warps use the same channel as the block
-    if(laneId == 0) {
-      ncclShmem.warpChannelId[localWarpId] = ncclShmem.channelId;
-    }
-    // Use all threads in the warp to copy the channel data in parallel
-    void* dst = &ncclShmem.warpChannel[localWarpId];
-    void* src = &ncclShmem.channel;
-    int bytes = sizeof(ncclDevChannel);
-    copyToShmem16(laneId, dst, src, bytes);
-  }
-  __syncthreads();
-#endif
-#ifdef ENABLE_PROFILING
-  if (tid == 0) {
-    ncclShmem.prof.count = 0;
-    ncclShmem.prof.seq = ncclShmem.comm.devProf[blockIdx.x].seq;
-  }
-#endif
-  if (tid == 0) __insert_timestamp(__LINE__);
-  if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceKernelLaunchType, 0);
+  __syncthreads(); // publish ncclShmem
 
   while (ncclShmem.aborted == 0) {
-    if (tid == 0) __insert_timestamp(__LINE__);
     profiler(START);
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifndef RCCL_DEVICE_TABLE_OMIT
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-      if (COLL_UNROLL == 1)
-        ncclDevFuncTable_1[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 2)
-        ncclDevFuncTable_2[ncclShmem.funcId]();
-      else
-        ncclDevFuncTable_4[ncclShmem.funcId]();
-#else
-      if (COLL_UNROLL == 1)
-        NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
-      else if (COLL_UNROLL == 2)
-        NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
-      else
-        NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#endif
-#endif
+      ncclDevFuncTable[ncclShmem.funcId]();
     }
 
     if (ncclShmem.nextBatchIx == -1) break;
     int batchIx = ncclShmem.nextBatchIx;
     __syncthreads();
-    switch (tid/WARP_SIZE) {
-      case 1:
-        if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-          if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-          ncclShmem.groups[tid-WARP_SIZE].barrier = 0;
-        }
-        break;
-      default:
-        break;
-    }
     profiler(STOP);
-    loadWorkBatchToShmem(tid%WARP_SIZE, tn, args, batchIx);
+    loadWorkBatchToShmem(tid, tn, args, batchIx);
     __syncthreads();
-    if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelLaunch(ncclCollTraceCollLaunchType, batchIx);
   }
   profiler(FINI);
-  if (COLLTRACE && tid%WARP_SIZE == 0) traceKernelEnd(ncclCollTraceKernelEndType);
-
-#ifdef ENABLE_PROFILING
-  if (ncclShmem.comm.devProf->seq < PROFILE_NUM_LAUNCHES) {
-    __syncthreads();
-    copyToShmem16(tid, ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x, &ncclShmem.prof, sizeof(struct ncclProf));
-    if (tid == 0) ncclShmem.comm.devProf[blockIdx.x].seq++;
-  }
-#endif
 }
 
-__global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#ifdef ENABLE_COLLTRACE
-__global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-__global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
-#endif
+__global__ void ncclDevKernel_Generic(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K);
+__device__ void ncclDevFunc_Nop();
+
+#define DEFINE_ncclDevKernel(suffix, coll, redop, ty, algo, proto, specializedFnId) \
+  __global__ void ncclDevKernel_##suffix(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K) { \
+    ncclKernelMain<specializedFnId, RunWorkBatch<coll, ty, redop<ty>, algo, proto>>(&args4K.args); \
+  }
 
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
-  __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
+  __global__ void ncclDevKernel_##suffix(ncclDevKernelArgs4K NCCL_GRID_CONSTANT const args4K) {}
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
+#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto) \
   __device__ void ncclDevFunc_##suffix() { \
-    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
+    RunWorkBatch<coll, ty, redop<ty>, algo, proto>().run(); \
   }
-#else
-#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
-    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
-  }
-#endif
 
 #endif

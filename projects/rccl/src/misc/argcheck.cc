@@ -14,10 +14,10 @@ ncclResult_t CudaPtrCheck(const void* pointer, struct ncclComm* comm, const char
     WARN("%s : %s %p is not a valid pointer", opname, ptrname, pointer);
     return ncclInvalidArgument;
   }
-#if ROCM_VERSION < 50500
-  if (attr.memoryType == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
-#else
+#if CUDART_VERSION >= 10000
   if (attr.type == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
+#else
+  if (attr.memoryType == cudaMemoryTypeDevice && attr.device != comm->cudaDev) {
 #endif
     WARN("%s : %s allocated on device %d mismatchs with NCCL device %d", opname, ptrname, attr.device, comm->cudaDev);
     return ncclInvalidArgument;
@@ -25,7 +25,7 @@ ncclResult_t CudaPtrCheck(const void* pointer, struct ncclComm* comm, const char
   return ncclSuccess;
 }
 
-ncclResult_t PtrCheck(void* ptr, const char* opname, const char* ptrname) {
+ncclResult_t PtrCheck(const void* ptr, const char* opname, const char* ptrname) {
   if (ptr == NULL) {
     WARN("%s : %s argument is NULL", opname, ptrname);
     return ncclInvalidArgument;

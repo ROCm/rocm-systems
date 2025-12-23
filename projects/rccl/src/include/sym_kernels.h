@@ -10,17 +10,15 @@
 #include "nccl_device.h"
 #include "nccl_common.h"
 #include "device.h"
+#include "../device/symmetric/gin_scratch__types.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // ncclSymk[Foo]: Kernels built on the device API
-// cuda::memory_order is provided on HIP by hip_compat.h, pulled in transitively via nccl_device.h above.
-#define NCCL_MEM_ORDER_RELAXED cuda::memory_order_relaxed
-#define NCCL_MEM_ORDER_RELEASE cuda::memory_order_release
 
 #define NCCL_SYM_KERNEL_CELL_SIZE 1024 // no less than 16 bytes minimal cell size
 
 constexpr int ncclSymkMaxBlocks = 64;
-constexpr int ncclSymkMaxThreads = 256;
+constexpr int ncclSymkMaxThreads = 512;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {
@@ -43,12 +41,15 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_ReduceScatter_LD,
   ncclSymkKernelId_ReduceScatter_LDMC,
 
+  ncclSymkKernelId_AllGather_GinHier_MCRing,
+
   ncclSymkKernelId_Count
 };
 
 struct ncclSymkDevComm {
   struct ncclDevComm devComm;
   struct ncclLLA2AHandle lsaLLA2A;
+  struct ncclGinSyncHandle ginSyncHandle;
 };
 
 struct ncclSymkState {
@@ -94,6 +95,14 @@ union ncclSymkDevWorkArgs4K {
   char buf4K[4096];
 };
 
+typedef enum {
+  ncclSymSendNonregRecvNonreg = 0,
+  ncclSymSendNonregRecvReg = 1,
+  ncclSymSendRegRecvNonreg = 2,
+  ncclSymSendRegRecvReg = 3,
+  ncclNumSymRegTypes = 4
+} ncclSymRegType_t;
+
 // We assume ncclComm contains a field: `ncclSymkState symkState`
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm);
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm);
@@ -101,8 +110,8 @@ ncclResult_t ncclSymkFinalize(struct ncclComm* comm);
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red,
                        ncclDataType_t ty, size_t nElts);
 ncclResult_t ncclSymkPickKernel(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nEltsTotal, size_t nEltsMax, int nWorks,
-                                float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps);
+                                size_t nEltsTotal, size_t nEltsMax, int nWorks, ncclSymRegType_t winRegType,
+                                float* estTimeUs, ncclSymkKernelId* kernelId, int* nBlocks, int* nWarps, bool* forced);
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
 
@@ -112,5 +121,10 @@ extern void* ncclSymkKernelList[];
 extern int ncclSymkKernelRequirements[/*ncclSymkKernelCount*/];
 void* ncclSymkGetKernelPtr(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 const char* ncclSymkKernelIdToString(int kernelId);
+ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType);
 
+int ncclSymkLLKernelMask();
+
+constexpr int ncclSymkGinWorldBufSize = 16<<10;
+constexpr int ncclSymkGinRailBufSize = 4<<20;
 #endif

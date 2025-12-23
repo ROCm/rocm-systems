@@ -13,16 +13,14 @@
 #define _GLIBCXX_VISIBILITY(V)
 
 #include <cstdint>
-#include "nccl.h"
 
 typedef enum {
   NCCL_LOG_NONE = 0,
-  NCCL_LOG_ERROR = 1,
-  NCCL_LOG_VERSION = 2,
-  NCCL_LOG_WARN = 3,
-  NCCL_LOG_INFO = 4,
-  NCCL_LOG_ABORT = 5,
-  NCCL_LOG_TRACE = 6
+  NCCL_LOG_VERSION = 1,
+  NCCL_LOG_WARN = 2,
+  NCCL_LOG_INFO = 3,
+  NCCL_LOG_ABORT = 4,
+  NCCL_LOG_TRACE = 5
 } ncclDebugLogLevel;
 
 typedef enum {
@@ -42,7 +40,6 @@ typedef enum {
   NCCL_REG = 0x2000,
   NCCL_PROFILE = 0x4000,
   NCCL_RAS = 0x8000,
-  NCCL_VERBS = 0x10000,
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 
@@ -71,10 +68,11 @@ typedef enum {
   ncclFuncAlltoAll = 8,
   ncclFuncScatter = 9,
   ncclFuncGather = 10,
-  ncclFuncAlltoAllPivot = 11,
-  ncclFuncAlltoAllGda = 12,
-  ncclFuncAlltoAllvGda = 13,
-  ncclNumFuncs = 14
+  ncclFuncAllGatherV = 11,
+  ncclFuncPutSignal = 12,
+  ncclFuncSignal = 13,
+  ncclFuncWaitSignal = 14,
+  ncclNumFuncs = 15
 } ncclFunc_t;
 
 

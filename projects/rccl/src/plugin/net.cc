@@ -33,7 +33,6 @@ extern getNcclCollNet_t getNcclCollNet_v8;
 extern getNcclCollNet_t getNcclCollNet_v9;
 extern getNcclCollNet_t getNcclCollNet_v10;
 extern getNcclCollNet_t getNcclCollNet_v11;
-extern int64_t rcclParamAinicRoce();
 extern getNcclGin_t getNcclGin_v11;
 NCCL_PARAM(NetPluginRefCount, "NET_PLUGIN_REF_COUNT", 0);
 #define NCCL_NET_VERSION_COUNT 6
@@ -64,6 +63,8 @@ typedef struct netPluginLib {
   ncclNetPluginState_t ncclCollNetPluginState;  // State of the nccl coll net plugin
   ncclGin_t* ncclGin;                           // Pointer to the ncclGin_t structure
   ncclNetPluginState_t ncclGinPluginState;      // State of the nccl gin plugin
+  ncclGin_t* ncclRma;                           // Pointer to the ncclGin_t structure for RMA
+  ncclNetPluginState_t ncclRmaPluginState;      // State of the nccl gin rma plugin
   int ncclNetPluginRefCount;                    // Reference count for the nccl net plugin
   int netPhysDevs;                              // ncclNet - number of physical devices
   int netVirtDevs;                              // ncclNet - number of virtual devices
@@ -73,7 +74,7 @@ typedef struct netPluginLib {
 
 int pluginCount = 0;
 bool netPluginLibsInitialized = false;
-netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
+netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = { 0 };
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
@@ -203,25 +204,34 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
 
   if (pluginLib->ncclGinPluginState == ncclNetPluginStateInitReady && pluginLib->ncclGin) {
     if ((ncclParamGinType() == -1) && (pluginLib->ncclGin == (ncclGin_t *)-1)) {
-#if !defined(__HIP_PLATFORM_AMD__)
       void* throwAwayContext = nullptr;
       if (ncclGinIbGdaki.init(&throwAwayContext, comm->commHash, ncclDebugLog) == ncclSuccess) {
         if (ncclGinIbGdaki.devices(&ndev) == ncclSuccess && ndev > 0) {
           pluginLib->ncclGin = &ncclGinIbGdaki;
+        } else {
+          pluginLib->ncclGin = &ncclGinIbProxy;
         }
         ncclGinIbGdaki.finalize(throwAwayContext);
       }
       else {
         pluginLib->ncclGin = &ncclGinIbProxy;
       }
-#else
-      pluginLib->ncclGin = &ncclGinIbProxy;
-#endif
     }
     if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
     else if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
     else {
       pluginLib->ncclGinPluginState = ncclNetPluginStateEnabled;
+    }
+  }
+
+  // Initialize RMA plugin
+  if (pluginLib->ncclRmaPluginState == ncclNetPluginStateInitReady && pluginLib->ncclRma) {
+    if (pluginLib->ncclRma->init(&comm->netContext, comm->commHash, ncclDebugLog) != ncclSuccess)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else if (pluginLib->ncclRma->devices(&ndev) != ncclSuccess || ndev <= 0)
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
+    else {
+      pluginLib->ncclRmaPluginState = ncclNetPluginStateEnabled;
     }
   }
 exit:
@@ -234,6 +244,7 @@ fail:
   pluginLib->ncclNetPluginState = ncclNetPluginStateDisabled;
   pluginLib->ncclCollNetPluginState = ncclNetPluginStateDisabled;
   pluginLib->ncclGinPluginState = ncclNetPluginStateDisabled;
+  pluginLib->ncclRmaPluginState = ncclNetPluginStateDisabled;
   goto exit;
 }
 
@@ -254,6 +265,10 @@ static ncclResult_t ncclNetPluginAssignToComm(struct ncclComm* comm, int pluginI
       INFO(NCCL_INIT|NCCL_NET, "Assigned GIN plugin %s to comm", netPluginLibs[pluginIndex].ncclGin->name);
       comm->sharedRes->ginState.ncclGin = netPluginLibs[pluginIndex].ncclGin;
     }
+    if (netPluginLibs[pluginIndex].ncclRmaPluginState >= ncclNetPluginStateEnabled) {
+      INFO(NCCL_INIT|NCCL_NET, "Assigned RMA plugin %s to comm", netPluginLibs[pluginIndex].ncclRma->name);
+      comm->rmaState.rmaProxyState.ncclGin = netPluginLibs[pluginIndex].ncclRma;
+    }
   }
 exit:
   return ncclSuccess;
@@ -262,6 +277,7 @@ fail:
   netPluginLibs[pluginIndex].ncclNetPluginState = ncclNetPluginStateEnabled;
   netPluginLibs[pluginIndex].ncclCollNetPluginState = ncclNetPluginStateEnabled;
   netPluginLibs[pluginIndex].ncclGinPluginState = ncclNetPluginStateEnabled;
+  netPluginLibs[pluginIndex].ncclRmaPluginState = ncclNetPluginStateEnabled;
   goto exit;
 }
 
@@ -284,7 +300,7 @@ static ncclResult_t ncclNetPluginDisableOtherExternal(int pluginIndex) {
 
 static void initPluginLibsOnceFunc() {
   char* netPluginName = nullptr;
-  const char* defaultNetPlugin = "librccl-net.so";
+  const char* defaultNetPlugin = "libnccl-net.so";
   const char* envNetPlugin = nullptr;
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
@@ -326,34 +342,19 @@ static void initPluginLibsOnceFunc() {
   }
 
   // Add 2 internal ib and socket plugins
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &netIbCast;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else {
-#endif
-      netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      netPluginLibs[pluginCounter].ncclGin = NULL;
-      if (ncclParamGinType() == -1)
-        netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
-      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_PROXY)
-        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
-#if !defined(__HIP_PLATFORM_AMD__)
-      else if (ncclParamGinType() == NCCL_NET_DEVICE_GIN_GDAKI)
-        netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
-#endif
-      netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
-      netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
-      ++pluginCounter;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    }
-  }
-#endif
+  netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
+  netPluginLibs[pluginCounter].ncclGin = NULL;
+  if (ncclParamGinType() == -1)
+    netPluginLibs[pluginCounter].ncclGin = (ncclGin_t *)-1;
+  else if (ncclParamGinType() == NCCL_GIN_TYPE_PROXY)
+    netPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
+  else if (ncclParamGinType() == NCCL_GIN_TYPE_GDAKI)
+    netPluginLibs[pluginCounter].ncclGin = &ncclGinIbGdaki;
+  netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
+  netPluginLibs[pluginCounter].ncclGinPluginState = netPluginLibs[pluginCounter].ncclGin ? ncclNetPluginStateInitReady : ncclNetPluginStateLoadFailed;
+  netPluginLibs[pluginCounter].ncclRma = &ncclGinIbProxy;
+  netPluginLibs[pluginCounter].ncclRmaPluginState = ncclNetPluginStateInitReady;
+  ++pluginCounter;
   netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;
   netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
   pluginCount = pluginCounter;
@@ -497,10 +498,6 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       ncclNetProperties_t props;
       NCCLCHECK(comm->ncclNet->getProperties(dev, &props));
       if ((props.ptrSupport & NCCL_PTR_CUDA) == 0) continue;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-      gdrSupportMatrix[comm->cudaDev] = 1;
-      break;
-#endif
 
     // Allocate memory on the GPU and try to register it on the NIC.
     void *lComm = NULL, *sComm = NULL, *rComm = NULL;
@@ -515,7 +512,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     while (!connected) {
 
       // If we're aborting now, skip to cleanup
-      if (__atomic_load_n(comm->abortFlag, __ATOMIC_ACQUIRE)) {
+      if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
         goto cleanup2;
       }
 
@@ -528,7 +525,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       connected = (rComm != NULL) && (sComm != NULL);
     }
 
-    NCCLCHECKGOTONOWARN(ncclCudaMalloc(&gpuPtr, GPU_BUF_SIZE, comm->memManager), ret, cleanup2, NCCL_NET);
+    NCCLCHECKGOTONOWARN(ncclCudaMalloc(&gpuPtr, GPU_BUF_SIZE), ret, cleanup2, NCCL_NET);
     NOWARN(ret = comm->ncclNet->regMr(sComm, gpuPtr, GPU_BUF_SIZE, NCCL_PTR_CUDA, &mHandle), NCCL_NET);
     if (ret == ncclSuccess) {
       NCCLCHECKNOWARN(comm->ncclNet->deregMr(sComm, mHandle), NCCL_NET);
@@ -536,7 +533,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
       NCCLCHECKNOWARN(comm->ncclNet->deregMr(rComm, mHandle), NCCL_NET);
       gdrSupportMatrix[comm->cudaDev] = 1;
     }
-    NCCLCHECK(ncclCudaFree(gpuPtr, comm->memManager));
+    NCCLCHECK(ncclCudaFree(gpuPtr));
 cleanup2:
     if (rComm != NULL)
       NCCLCHECK(comm->ncclNet->closeRecv(rComm));

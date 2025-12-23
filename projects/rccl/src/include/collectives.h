@@ -1,7 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
- * Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -12,23 +10,18 @@
 #include "nccl.h"
 #include "nccl_tuner.h"
 #include "device.h"
+#include "compiler.h"
 
 #define NCCL_MAX_NET_SIZE (1024*1024*1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 
 // CHUNKSIZE must be a multiple of SLICESIZE
-// RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
-// a single slice, so we have separate configurations for single node and multi-node.  Single node configs
-// are suffixed with _SINGLE_NODE.
 #define ALLREDUCE_SLICESTEPS (NCCL_STEPS/4)
-#define ALLREDUCE_SLICESTEPS_SINGLE_NODE (NCCL_STEPS/2)
 #define ALLREDUCE_CHUNKSTEPS (NCCL_STEPS/2)
 #define ALLGATHER_SLICESTEPS (NCCL_STEPS/4)
-#define ALLGATHER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS/2)
 #define ALLGATHER_CHUNKSTEPS (NCCL_STEPS/2)
 #define ALLTOALL_SLICESTEPS 1
 #define ALLTOALL_CHUNKSTEPS 1
 #define REDUCESCATTER_SLICESTEPS (NCCL_STEPS/4)
-#define REDUCESCATTER_SLICESTEPS_SINGLE_NODE (NCCL_STEPS/2)
 #define REDUCESCATTER_CHUNKSTEPS (NCCL_STEPS/2)
 #define BROADCAST_SLICESTEPS 1
 #define BROADCAST_CHUNKSTEPS 1
@@ -40,12 +33,6 @@
 #define REDUCE_CHUNKSTEPS 1
 #define NCCL_MAX_SLICE_PER_CHUNK 2  // max value for CHUNKSTEPS/SLICESTEPS, must accord with above
 #define NCCL_MAX_NET_SIZE (1024*1024*1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
-#define ALLTOALL_PIVOT_SLICESTEPS 2
-#define ALLTOALL_PIVOT_CHUNKSTEPS 4
-
-static_assert(ALLREDUCE_CHUNKSTEPS == ALLREDUCE_SLICESTEPS_SINGLE_NODE, "ALLREDUCE_CHUNKSTEPS must be equal to ALLREDUCE_SLICESTEPS_SINGLE_NODE");
-static_assert(ALLGATHER_CHUNKSTEPS == ALLGATHER_SLICESTEPS_SINGLE_NODE, "ALLGATHER_CHUNKSTEPS must be equal to ALLGATHER_SLICESTEPS_SINGLE_NODE");
-static_assert(REDUCESCATTER_CHUNKSTEPS == REDUCESCATTER_SLICESTEPS_SINGLE_NODE, "REDUCESCATTER_CHUNKSTEPS must be equal to REDUCESCATTER_SLICESTEPS_SINGLE_NODE");
 
 const char* ncclFuncToString(ncclFunc_t op);
 const char* ncclDevRedOpToString(ncclDevRedOp_t op);
@@ -115,10 +102,10 @@ public:
   virtual void getNextSendAddr(int curStep, uint8_t **sendbuffOut, size_t *sizeOut, void **mhandleOut) = 0;
   virtual void getNextRecvAddr(int curStep, uint8_t **recvbuffOut, size_t *sizeOut, void **mhandleOut) = 0;
   int incRefCount() {
-    return __atomic_add_fetch(&refCount, 1, __ATOMIC_RELAXED);
+    return COMPILER_ATOMIC_ADD_FETCH(&refCount, 1, std::memory_order_relaxed);
   }
   int decRefCount() {
-    return __atomic_sub_fetch(&refCount, 1, __ATOMIC_RELEASE);
+    return COMPILER_ATOMIC_SUB_FETCH(&refCount, 1, std::memory_order_release);
   }
   RingAlgorithm() { refCount = 0; }
   virtual ~RingAlgorithm() {};
@@ -404,11 +391,11 @@ public:
 };
 
 #if !defined (__CUDA_ARCH__) || __CUDA_ARCH__ >= 600
-// #include <cuda/atomic>
+#include <cuda/atomic>
 #endif
 
 // Need a power of two to ensure it divides by parallelFactor (which is also a power of two)
-#define NCCL_PAT_NWORKERS 128
+#define NCCL_PAT_NWORKERS 512
 
 static constexpr int PatUsed = 0x1,
                      PatSkipped = 0x2;
@@ -482,7 +469,7 @@ class PatRSAlgorithm{
 #ifdef __CUDA_ARCH__
       __ffs(i);
 #else
-      __builtin_ffs(i);
+      COMPILER_FFS(i);
 #endif
     return ffs ? ffs-1 : max;
   }
@@ -508,7 +495,7 @@ class PatRSAlgorithm{
 #ifdef __CUDA_ARCH__
       __popc(i);
 #else
-      __builtin_popcount(i);
+      COMPILER_POPCOUNT32(i);
 #endif
     return nbits;
   }
@@ -739,7 +726,7 @@ class PatAGAlgorithm{
 #ifdef __CUDA_ARCH__
       __ffs(i);
 #else
-      __builtin_ffs(i);
+      COMPILER_FFS(i);
 #endif
     return ffs ? ffs-1 : max;
   }

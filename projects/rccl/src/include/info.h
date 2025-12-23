@@ -1,6 +1,5 @@
 /*************************************************************************
  * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -29,15 +28,15 @@ struct ncclInfo {
   // Algorithm details
   int chunkSteps;
   int sliceSteps;
-  const void* acc;
-#ifdef ENABLE_ROCSHMEM
-  // Optional per-operation metadata for rocSHMEM collectives.
-  size_t* sizes;
-#endif
-  // When true and coll == ncclFuncAllGather, taskAppend posts the AG as an
-  // A2A-style fan of per-peer Send/Recv P2P tasks (Direct AllGather path)
-  // instead of routing through collTaskAppend (ring/PAT/etc.).
-  bool useDirect;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  // WaitSignal descriptors
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
 };
 
 #endif

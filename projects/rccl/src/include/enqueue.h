@@ -17,8 +17,6 @@
 #define NCCL_SIMPLE_ALIGNMENT (WARP_SIZE * 8LL * 16LL)
 #define NCCL_BYTES_ALIGNMENT 16
 
-void* rcclGetKernelIndex(int unroll, bool useCollTrace, struct ncclTaskColl* task = NULL);
-
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize);
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ncclLaunchPrepare(struct ncclComm* comm);
@@ -35,8 +33,21 @@ static inline size_t ncclFuncSendCount(ncclFunc_t func, int nRanks, size_t count
 static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather ? nRanks*count : count;
 }
-rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
+static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks*count : count;
 }
+
+ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
+ncclResult_t ncclGetAlgoInfo(
+  struct ncclComm* comm, struct ncclTaskColl* task,
+  int collNetSupport, int nvlsSupport, int numPipeOps, ncclSimInfo_t* simInfo = NULL
+);
+bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
+
+void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId, enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch =-1, int p2pRound = -1, bool newBatch = false);
+
+ncclResult_t ncclAddProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
+
+ncclResult_t ncclAddProfilerProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op);
 
 #endif // End include guard

@@ -6,14 +6,14 @@
 
 #ifndef _NCCL_DEVICE_GIN_BARRIER_H_
 #define _NCCL_DEVICE_GIN_BARRIER_H_
-#include "core_tmp.h"
+#include "core.h"
 #include "gin.h"
 
 struct ncclGinBarrierHandle;
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int nBarriers, ncclGinBarrierHandle_t* outHandle, ncclDevResourceRequirements_t* outReq);
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 enum class ncclGinFenceLevel {
   Relaxed
 };

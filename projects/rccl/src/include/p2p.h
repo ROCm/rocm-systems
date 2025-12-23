@@ -13,18 +13,8 @@
 #include <cuda_runtime.h>
 
 #include "core.h"
-#include "mem_manager.h"
 
-
-// #define HIP_FABRIC_API
-#ifdef HIP_FABRIC_API // enable based on the HIP version that adds support for fabric handles
-#define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED hipDeviceAttributeHandleTypeFabricSupported
-#define CU_MEM_HANDLE_TYPE_FABRIC hipMemHandleTypeFabric
-typedef hipMemFabricHandle_t CUmemFabricHandle;
-// HIP equivalents for CU vmm attribute/location constants used across alloc.h and transport files
-#define CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID hipDeviceAttributeHostNumaId
-#define CU_MEM_LOCATION_TYPE_DEVICE      hipMemLocationTypeDevice
-#elif CUDART_VERSION < 12030
+#if CUDART_VERSION < 12030
 // MNNVL: FABRIC handle support lifted from CUDA 12.3
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED ((CUdevice_attribute)128)
 #define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
@@ -59,6 +49,7 @@ struct ncclIpcImpInfo {
   void* rmtRegAddr;
   bool legacyIpcCap;
   uintptr_t offset;
+  int numSegments;
 };
 
 struct ncclIpcRegInfo {
@@ -68,9 +59,9 @@ struct ncclIpcRegInfo {
   struct ncclIpcImpInfo impInfo;
 };
 
-ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr, int peerRank = -1, struct ncclMemManager* manager = nullptr, ncclMemType_t memtype = ncclMemPersist);
+ncclResult_t ncclP2pAllocateShareableBuffer(size_t size, int directMap, ncclIpcDesc *ipcDesc, void **ptr);
 ncclResult_t ncclP2pFreeShareableBuffer(ncclIpcDesc *ipcDesc);
-ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr, void* ownerPtr = nullptr, ncclMemType_t memType = ncclMemPersist);
+ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_t size, ncclIpcDesc *ipcDesc, void **devMemPtr);
 ncclResult_t ncclIpcLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers, ncclIpcRegType type, int* regBufFlag, uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut);
 ncclResult_t ncclIpcGraphRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers, ncclIpcRegType type, int* regBufFlag, uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut, void* cleanupQueuePtr, int* nCleanupQueueElts);
 
