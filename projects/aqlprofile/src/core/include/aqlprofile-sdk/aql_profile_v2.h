@@ -719,7 +719,7 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle);
  * @param[in] handle Handle returned by aqlprofile_spm_create_packets()
  * @retval HSA_STATUS_SUCCESS if draining completed successfully
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED for invalid handle
- * @retval HSA_STATUS_ERROR if draining did not complete within internally set timeout period (5 milliseconds)
+ * @retval HSA_STATUS_ERROR if draining did not complete fully
  * 
  * @note This is a blocking operation that may take several milliseconds to complete
  * @note The SPM session remains active after this call - use aqlprofile_spm_stop() to terminate
