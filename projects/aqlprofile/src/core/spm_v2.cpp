@@ -48,6 +48,7 @@ struct spm_state_t : public spm_set_dest_buffer_args {
 
     std::atomic<bool> draining_requested{false};
     std::atomic<bool> draining_done{false};
+    std::atomic<bool> draining_failed{false};
     std::mutex drain_mutex{};
     std::condition_variable drain_cond{};
 
@@ -81,8 +82,7 @@ public:
         s->stop_cons_thread = false;
         s->stop_prod_thread = false;
 
-        // this is to be done in SDK
-        // status = hsa_amd_spm_acquire(s->hsa_agent);
+        status = hsa_amd_spm_acquire(s->hsa_agent);
         CHECKHSA(status, return);
 
         // This non-blocking (timeout = 0) HsaSpmSetDestBuffer() call will clear up all the
@@ -107,8 +107,7 @@ public:
         if (producer_thread.joinable()) producer_thread.join();
         if (consumer_thread.joinable()) consumer_thread.join();
 
-        // this is to be done in SDK
-        // hsa_amd_spm_release(this->agent);
+        hsa_amd_spm_release(this->agent);
     }
 
     hsa_status_t status = HSA_STATUS_ERROR;
@@ -391,17 +390,16 @@ PUBLIC_API hsa_status_t aqlprofile_spm_drain_counters(aqlprofile_handle_t handle
         std::lock_guard<std::mutex> lock(s->drain_mutex);
         s->draining_requested = true;
         s->draining_done = false;
+        s->draining_failed = false;
     }
 
-    // Wait for draining to complete with timeout
+    // Wait for draining to complete
     std::unique_lock<std::mutex> lock(s->drain_mutex);
-    bool completed = s->drain_cond.wait_for(lock, std::chrono::milliseconds(SPM_DRAIN_TIMEOUT_MS), 
-        [&s]() { return s->draining_done.load(); });
+    s->drain_cond.wait(lock, [&s]() { return s->draining_done.load(); });
 
-    if (!completed) {
-        // Timeout occurred
-        s->draining_requested = false; // Cancel the request
-        return HSA_STATUS_ERROR;
+    // Check if draining failed
+    if (s->draining_failed) {
+        return HSA_STATUS_ERROR;  // Producer couldn't drain after re-tries
     }
 
     return HSA_STATUS_SUCCESS;
@@ -452,7 +450,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
         if (s->stop_prod_thread) exiting = true;
 
         // Check if draining is requested
-        if (s->draining_requested.load() && !draining) {
+        if (s->draining_requested && !draining) {
             draining = true;
             count_down = 0;  // Reset countdown for draining
         }
@@ -509,6 +507,7 @@ static void producer(std::shared_ptr<spm_state_t> s)
                     std::lock_guard<std::mutex> lock(s->drain_mutex);
                     s->draining_done = true;
                     s->draining_requested = false; // Reset for next drain request
+                    s->draining_failed = s->size_copied != 0; // Set failure if data still remaining
                 }
                 s->drain_cond.notify_all();
                 draining = false; // Reset draining state
