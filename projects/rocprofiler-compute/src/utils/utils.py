@@ -835,7 +835,7 @@ def run_prof(
                 options["ROCPROF_MARKER_API_TRACE"] = "1"
             if torch_operators_enabled and ("python3" in app_cmd_list or "python" in app_cmd_list):
                 python_idx = app_cmd_list.index("python3") if "python3" in app_cmd_list else app_cmd_list.index("python")
-                inject_script = str(config.rocprof_compute_home / "inject_roctx.py")
+                inject_script = str(config.rocprof_compute_home / "utils"/ "inject_roctx.py")
                 if inject_script not in app_cmd_list:
                     app_cmd_list.insert(python_idx + 1, inject_script)
             options["APP_CMD"] = app_cmd_list
@@ -867,7 +867,7 @@ def run_prof(
             options = [opt if opt != "--torch-operators" else "--marker-trace" for opt in options ]
             if torch_operators_enabled and ("python3" in app_cmd_list or "python" in app_cmd_list):
                 python_idx = app_cmd_list.index("python3") if "python3" in app_cmd_list else app_cmd_list.index("python")
-                inject_script = str(config.rocprof_compute_home / "inject_roctx.py")
+                inject_script = str(config.rocprof_compute_home / "utils" / "inject_roctx.py")
                 if inject_script not in app_cmd_list:
                     app_cmd_list.insert(python_idx + 1, inject_script)
             options = options[: separator_idx + 1] + app_cmd_list

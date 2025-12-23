@@ -1,7 +1,7 @@
 ##############################################################################
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,12 @@ Usage: python inject_roctx.py main.py --epochs 1 --batch-size 4
 
 import os
 import sys
+from pathlib import Path
+
+# Add parent directory to Python path for config module
+script_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(script_dir.parent))
+
 from utils.logger import console_debug, console_error, console_log, console_warning
 
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
@@ -90,7 +96,7 @@ def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
                 functions[full_name] = (module, name, attr)
         except Exception as e:
             console_warning(type(e))
-            console_warning(f"  ✗ Could not access {prefix}.{name}: {e}")
+            console_warning(f"Could not access {prefix}.{name}: {e}")
     
     return functions
 
@@ -114,14 +120,14 @@ def inject_roctx_into_torch():
         all_operations.update(auto_discover_torch_functions(torch.linalg, 'torch.linalg'))
     except Exception as e:
         console_warning(type(e))
-        console_warning(f"  ✗ Could not access torch.linalg: {e}")
+        console_warning(f"Could not access torch.linalg: {e}")
     
     # torch.fft.* functions (FFT operations)
     try:
         all_operations.update(auto_discover_torch_functions(torch.fft, 'torch.fft'))
     except:
         console_warning(type(e))
-        console_warning(f"  ✗ Could not access torch.fft")
+        console_warning(f"Could not access torch.fft")
     
     console_log(f"Found {len(all_operations)} operations to wrap")
     console_log("🔧 Injecting ROCTX markers into PyTorch operations...")
@@ -145,7 +151,7 @@ def inject_roctx_into_torch():
         except Exception as e:
             failed_count += 1
             if failed_count <= 5:  # Only show first few failures
-                console_warning(f"  ✗ Failed to wrap {full_name}: {e}")
+                console_warning(f"Failed to wrap {full_name}: {e}")
     
     # Wrap tensor methods
     original_backward = torch.Tensor.backward
