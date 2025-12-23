@@ -614,9 +614,10 @@ get_offload_file()
             auto _success = _tmp_v->open();
             if(get_is_continuous_integration() && !_success)
             {
-                throw std::runtime_error(
-                    fmt::format("Error opening sampling offload temporary file '{}'",
-                                _tmp_v->filename));
+                LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
+                             _tmp_v->filename);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::abort();
             }
         }
         return _tmp_v;
@@ -644,6 +645,8 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
     {
         LOG_CRITICAL("Error! sampling allocator tries to offload buffer of samples but "
                      "rocprof-sys was configured to not use temporary files");
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        std::exit(1);
     }
 
     // use homemade atomic_mutex/atomic_lock since contention will be low
@@ -657,7 +660,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
                      "thread {} but the offload file does not exist",
                      _seq);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::exit(-1);
+        std::exit(1);
     }
 
     LOG_DEBUG("Offloading {} samples for thread {} to {}", _buf.count(), _seq,
@@ -670,7 +673,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
                      "during offload for thread {}",
                      _seq);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-        std::exit(-1);
+        std::exit(1);
     }
 
     offload_seq_data[_seq].emplace(_fs.tellg());
@@ -874,6 +877,8 @@ configure(bool _setup, int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
+                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                std::exit(1);
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());

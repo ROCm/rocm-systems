@@ -1488,7 +1488,7 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
 
     if(_old_setting == _config->end()) return;
 
-    if(_new_setting == _config->end())
+    if(get_is_continuous_integration() && _new_setting == _config->end())
     {
         throw std::runtime_error(
             fmt::format("New configuration setting not found: '{}'", _new));
@@ -1686,7 +1686,7 @@ print_settings(
     _ros << std::flush;
 }
 
-// TODO: Use spdlog instead
+// TODO: This maybe should use std::cout instead of LOG_INFO
 void
 print_settings(bool _include_env)
 {
@@ -2113,10 +2113,12 @@ get_category_config()
         {
             LOG_CRITICAL("Error! Conflicting options ROCPROFSYS_ENABLE_CATEGORIES and "
                          "ROCPROFSYS_DISABLE_CATEGORIES were both provided.");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
             std::abort();
         }
 
-        if(_enabled.size() + _disabled.size() != _avail.size())
+        if(get_is_continuous_integration() &&
+           _enabled.size() + _disabled.size() != _avail.size())
         {
             throw std::runtime_error(
                 fmt::format("Error! Internal error for categories: {} (enabled) + {} "

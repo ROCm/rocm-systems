@@ -342,7 +342,7 @@ post_process()
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        if(!_thread_info && get_is_continuous_integration())
+        if(get_is_continuous_integration() && !_thread_info)
         {
             throw std::runtime_error("Missing thread info for thread 0");
         }
@@ -382,7 +382,7 @@ post_process()
         }
 
         const auto& _thread_info = thread_info::get(0, InternalTID);
-        if(!_thread_info && get_is_continuous_integration())
+        if(get_is_continuous_integration() && !_thread_info)
         {
             throw std::runtime_error("Missing thread info for thread 0");
         }

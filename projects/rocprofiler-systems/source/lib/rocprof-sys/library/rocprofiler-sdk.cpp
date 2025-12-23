@@ -1385,9 +1385,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    throw std::runtime_error(
-                        fmt::format("unhandled callback record kind: {}",
-                                    static_cast<int>(record.kind)));
+                    LOG_CRITICAL("Unhandled callback record kind: {}",
+                                 static_cast<int>(record.kind));
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
                 }
                 break;
             }
@@ -1395,8 +1396,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    throw std::runtime_error(
-                        fmt::format("Unhandled callback record: {}", info.str()));
+                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
                 }
                 break;
             }
@@ -1477,9 +1479,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    throw std::runtime_error(
-                        fmt::format("unhandled callback record kind: {}",
-                                    static_cast<int>(record.kind)));
+                    LOG_CRITICAL("Unhandled callback record kind: {}",
+                                 static_cast<int>(record.kind));
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
                 }
                 break;
             }
@@ -1487,8 +1490,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    throw std::runtime_error(
-                        fmt::format("Unhandled callback record: {}", info.str()));
+                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
                 }
                 break;
             }

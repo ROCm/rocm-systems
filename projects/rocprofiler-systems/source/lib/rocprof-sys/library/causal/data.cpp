@@ -89,7 +89,7 @@ auto speedup_dist      = []() {
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    if(_v.back() > 100)
+    if(get_is_continuous_integration() && _v.back() > 100)
     {
         throw std::runtime_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
