@@ -16,8 +16,6 @@
 
 #define PUBLIC_API __attribute__((visibility("default")))
 
-constexpr int SPM_DRAIN_TIMEOUT_MS = 5;
-
 
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);
