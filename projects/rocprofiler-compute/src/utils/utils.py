@@ -890,9 +890,17 @@ def run_prof(
         )
         combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup
+        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
         combined_df["Dispatch_ID"] = combined_df.groupby(
-            ["PID", "Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            [
+                "PID",
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+                "Start_Timestamp",
+                "End_Timestamp",
+            ],
             sort=False,
         ).ngroup()
         # Reset Kernel_ID based on Kernel_Name, Grid_Size,
@@ -958,6 +966,13 @@ def run_prof(
 
         # Overwrite column to ensure unique IDs.
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_results["Kernel_ID"] = combined_results.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
 
         combined_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False

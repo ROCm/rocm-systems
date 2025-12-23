@@ -48,6 +48,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fix the wrong logic in native counter csv to rocprofv3 csv conversion
   * Use kernel_id instead of dispatch_id to correlate native counter csv and kernel trace csv
 
+* Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
