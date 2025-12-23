@@ -748,6 +748,7 @@ if(INSTALL_TESTS)
             tests/hip_dynamic_shared
             tests/laplace_eqn
             tests/mat_mul_max
+            tests/rocflop
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )
