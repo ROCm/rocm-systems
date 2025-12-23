@@ -367,10 +367,10 @@ static bool UncompressAndPopulateCodeObject(
         LogError("Failed to get data size");
         break;
       }
-      LogPrintfInfo("Uncompressed size of co: %s  %zu", item_bundle_id.c_str(), item_size);
 
       if (item_size > 0) {
         char* item_data = new char[item_size];
+        LogPrintfInfo("Uncompressed size of co: %s  %zu", item_bundle_id.c_str(), item_size);
         if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
             comgr_status != AMD_COMGR_STATUS_SUCCESS) {
           LogError("Failed to get data");
