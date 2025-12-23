@@ -33,6 +33,8 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <logger/debug.hpp>
+
 #include <cstddef>
 #include <cstdlib>
 

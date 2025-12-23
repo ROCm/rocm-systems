@@ -34,6 +34,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <logger/debug.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>

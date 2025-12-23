@@ -288,8 +288,6 @@ post_process()
                 fmt::format("Error opening coverage output file: {}", _fname));
         }
     }
-
-    if(get_verbose() >= 0) fprintf(stderr, "\n");
 }
 }  // namespace coverage
 }  // namespace rocprofsys

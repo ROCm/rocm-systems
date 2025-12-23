@@ -319,11 +319,7 @@ extern "C"
         tim::trait::runtime_enabled<kokkosp::memory_tracker>::set(
             rocprofsys::config::get_use_timemory());
 
-        if(rocprofsys::get_verbose() >= 0)
-        {
-            fprintf(stderr, "%sDone\n%s", tim::log::color::info(),
-                    tim::log::color::end());
-        }
+        LOG_DEBUG("Done");
 
         _name_len_limit = rocprofsys::config::get_setting_value<int64_t>(
                               "ROCPROFSYS_KOKKOSP_NAME_LENGTH_MAX")
