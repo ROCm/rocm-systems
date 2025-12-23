@@ -11,7 +11,7 @@ from enum import Enum
 import os
 
 # Use ROCm installation path if running from standard installation
-# With File Reorg rsmiBindings.py and rsmiBindingsInit.py will be installed in 
+# With File Reorg rsmiBindings.py and rsmiBindingsInit.py will be installed in
 # /opt/rocm/libexec/rocm_smi. relative path changed accordingly.
 # if ROCM_SMI_LIB_PATH is set, we can load 'librocm_smi64.so' from that location
 #

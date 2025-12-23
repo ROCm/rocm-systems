@@ -20,6 +20,7 @@
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
+/projects/rocprofiler-sdk/                                            @ROCm/rocm-devtools-team @ROCm/rocprofiler-owners # First Review: @ROCm/rocm-devtools-team, Final Review: @ROCm/rocprofiler-owners 
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
 
