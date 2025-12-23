@@ -56,7 +56,6 @@ set(TEST_SRC
     hipMemMap.cc
     hipMemRelease.cc
     hipMemUnmap.cc
-    hipMemVmm_old.cc
     hipSymmetricMemory.cc)
 
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest

@@ -1,7 +1,7 @@
 "project: amdsmi":
 - changed-files:
   - any-glob-to-any-file: 'projects/amdsmi/**/*'
-  
+
 "project: aqlprofile":
 - changed-files:
   - any-glob-to-any-file: 'projects/aqlprofile/**/*'
@@ -21,6 +21,14 @@
 "project: hip-tests":
 - changed-files:
   - any-glob-to-any-file: 'projects/hip-tests/**/*'
+
+"project: rccl":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rccl/**/*'
+
+"project: rccl-tests":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rccl-tests/**/*'
 
 "project: rdc":
 - changed-files:

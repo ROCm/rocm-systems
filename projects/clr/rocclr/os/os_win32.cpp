@@ -705,6 +705,19 @@ void Os::CxaDemangle(const std::string& name, std::string* result) { *result = n
 namespace numa {
 
 // ================================================================================================
+uint32_t getCurrentNumaNode() {
+  PROCESSOR_NUMBER procNumber{};
+  GetCurrentProcessorNumberEx(&procNumber);
+
+  USHORT numa_node = static_cast<USHORT>(-1);
+  if (!GetNumaProcessorNodeEx(&procNumber, &numa_node)) {
+    return static_cast<uint32_t>(-1);
+  }
+
+  return static_cast<uint32_t>(numa_node);
+}
+
+// ================================================================================================
 NumaPolicy::NumaPolicy(const uint32_t numa_node_count) {
 }
 

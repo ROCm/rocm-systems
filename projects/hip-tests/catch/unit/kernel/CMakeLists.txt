@@ -32,7 +32,7 @@ set(TEST_SRC
     hipTestConstant.cc
     hipTestGlobalVariable.cc
     hipTestMemKernel.cc
-    launch_bounds.cc
+    hipLaunchBoundsBasic.cc
     hipAutoThreadIdx.cc
     hipLaunchKernelEx.cc
 )
@@ -44,7 +44,7 @@ endif()
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
-      hipExtLaunchKernelGGL.cc
+      hipExtLaunchKernelGGLBasic.cc
       hipSetupArgument.cc
       hipConfigureCall.cc
   )
