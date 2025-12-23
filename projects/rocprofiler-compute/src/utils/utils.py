@@ -1112,12 +1112,12 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )[0]
         kernel_data = pd.read_csv(kernel_data_filename)
 
-        # Merge counter_data with kernel_data on kernel_id
+        # Merge counter_data with kernel_data on dispatch_id
         merged_data = pd.merge(
             counter_data,
             kernel_data,
-            left_on="kernel_id",
-            right_on="Kernel_Id",
+            left_on="dispatch_id",
+            right_on="Dispatch_Id",
             how="left",
         )
 
