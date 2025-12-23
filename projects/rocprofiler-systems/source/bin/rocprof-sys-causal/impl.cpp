@@ -189,7 +189,7 @@ get_initial_environment()
     update_env(_env, "ROCPROFSYS_TRACE_CACHED", false);
     update_env(_env, "ROCPROFSYS_PROFILE", false);
     update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", false);
-    update_env(_env, "ROCPROFSYS_TRACE", false);
+    update_env(_env, "ROCPROFSYS_TRACE_LEGACY", false);
     update_env(_env, "ROCPROFSYS_THREAD_POOL_SIZE",
                get_env<int>("ROCPROFSYS_THREAD_POOL_SIZE", 0));
     update_env(_env, "ROCPROFSYS_LAUNCHER", "rocprof-sys-causal");

@@ -354,6 +354,12 @@ class webui_analysis(OmniAnalyze_Base):
                 self._runs[self.dest_dir].raw_pmc
             )
 
+        if self._profiling_config.get("iteration_multiplexing") is not None:
+            self._runs[self.dest_dir].raw_pmc = self.iteration_multiplex_merge_counters(
+                self._runs[self.dest_dir].raw_pmc,
+                policy=self._profiling_config["iteration_multiplexing"],
+            )
+
         file_io.create_df_kernel_top_stats(
             df_in=self._runs[self.dest_dir].raw_pmc,
             raw_data_dir=self.dest_dir,

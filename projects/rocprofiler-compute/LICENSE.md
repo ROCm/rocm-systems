@@ -42,5 +42,4 @@ setuptools python library: MIT
 tabulate python library: MIT
 textual python library: MIT
 textual_plotext python library: MIT
-textual-fspicker python library: MIT
 tqdm python library: MIT

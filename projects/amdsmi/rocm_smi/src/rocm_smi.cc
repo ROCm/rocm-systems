@@ -3350,7 +3350,7 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
           return RSMI_STATUS_NOT_SUPPORTED;
         }
 
-        
+
         std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
         if (file_path == "") {
           LOG_ERROR("Failed to get GPU board temperature metrics file path");
@@ -3365,7 +3365,7 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
           return ret;
         }
 
-        ret = get_gpuboard_temp_value(gpuboard_metric, 
+        ret = get_gpuboard_temp_value(gpuboard_metric,
                 static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
         return ret;
   }
@@ -7499,7 +7499,7 @@ rsmi_event_notification_get(int timeout_ms,
         LOG_ERROR(ss);
         continue;
       }
-      
+
       flockfile(anon_fp); // serialize stdio on this stream
 
       data_item =
@@ -7594,7 +7594,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -7620,7 +7620,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size

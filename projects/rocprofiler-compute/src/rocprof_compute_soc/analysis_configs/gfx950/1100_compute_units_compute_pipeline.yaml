@@ -112,6 +112,11 @@ Panel Config:
           min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
           unit: pct
+        Dual-issue VALU Utilization:
+          avg: AVG((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          min: MIN((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          max: MAX((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          unit: pct
         VALU Co-Issue Efficiency:
           avg: AVG((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
           min: MIN((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
@@ -314,6 +319,11 @@ Panel Config:
       busy executing instructions. Does not include VMEM operations. Computed as the
       ratio of the total number of cycles spent by the scheduler issuing VALU instructions
       over the total CU cycles.
+    Dual-issue VALU Utilization: 
+      Indicates what percent of the kernel's duration the VALU was busy executing
+      dual-issued instructions. Computed as the ratio of the total number of cycles
+      spent by the scheduler co-issuing VALU instructions over the total
+      CU cycles.
     VMEM Utilization: Indicates what percent of the kernel's duration the VMEM unit
       was busy executing instructions, including both global/generic and spill/scratch
       operations (see the VMEM instruction count metrics for more detail). Does not

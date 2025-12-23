@@ -1,4 +1,4 @@
-name: ABI Compliance Check 
+name: ABI Compliance Check
 
 on:
   pull_request:
@@ -218,7 +218,7 @@ jobs:
             echo "skip_check_minor=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           echo "Fetching amdsmi.h from ref: $OLD_VERSION_REF_MINOR (as amdsmi_old.h) for Minor check"
           git show $OLD_VERSION_REF_MINOR:include/amd_smi/amdsmi.h > amdsmi_old.h 2>/dev/null
           if [ $? -ne 0 ] || [ ! -s amdsmi_old.h ]; then
@@ -242,7 +242,7 @@ jobs:
           COMPARE_MSG="$V1_NAME_SUFFIX_CLEAN vs $V2_NAME_CLEAN"
 
           echo "Comparing $COMPARE_MSG for Minor ABI Check (Strict)"
-          
+
           abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 "$V1_NAME_SUFFIX_CLEAN" -v2 "$V2_NAME_CLEAN" -report-path minor-abi-report.html -strict || {
             ACC_EXIT_CODE=$?
             echo "abi-compliance-checker -strict failed with exit code $ACC_EXIT_CODE."
@@ -260,7 +260,7 @@ jobs:
             if grep -q "Problems with.*Data Types.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with data types"; fi
             if grep -q "Problems with.*Symbols.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with symbols"; fi
             if grep -q "Problems with.*Constants.*[1-9]" minor-abi-report.html; then CHANGED=1; echo "::warning::STRICT ABI: Found problems with constants"; fi
-            
+
             if [ "$CHANGED" -eq 1 ]; then
               echo "::error::STRICT ABI CHECK FAILED: Found changes in ABI report comparing $COMPARE_MSG"
               echo "abi_exit_code=1" > $GITHUB_WORKSPACE/minor_abi_status.txt
