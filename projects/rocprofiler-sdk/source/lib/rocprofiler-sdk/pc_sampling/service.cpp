@@ -191,6 +191,7 @@ configure_pc_sampling_service(context::context*                ctx,
 
         // Fully initialize the session under the lock before making it visible
         session->context_id   = rocprofiler_context_id_t{.handle = ctx->context_idx};
+        session->client_idx   = ctx->client_idx;
         session->agent        = agent;
         session->method       = method;
         session->unit         = unit;
@@ -256,25 +257,39 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
         rocprofiler_context_id_t{.handle = buff->context_id});
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
+    // To prevent a weird synthetic case where a client spawns multiple threads
+    // inside tool_init where some of the threads call rocprofiler_flush_buffer
+    // and other rocprofiler_configure_pc_sampling_service,
+    // we're executing the following code under the read lock.
+    // If we found that this is too restrictive for performance,
+    // then we can remove the lock, as the case we explained above
+    // sounds synthetic.
     auto* service = ctx->pc_sampler.get();
     if(service)
     {
-        rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
-        // The context `ctx` (that holds the buffer with `buffer_id`)
-        // is the one containing PC sampling service.
-        // The HSA interception table is registered.
-        for(const auto& [_, agent_session] : service->agent_sessions)
-        {
-            // Find the agent that fills the buffer with `buffer_id`
-            if(agent_session->buffer_id.handle == buffer_id.handle)
+        return get_global_pc_sampling_sessions().rlock([&](const auto& /*sessions*/) {
+            rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
+            // The context `ctx` (that holds the buffer with `buffer_id`)
+            // is the one containing PC sampling service.
+            // The HSA interception table is registered.
+            for(const auto& [_, agent_session] : service->agent_sessions)
             {
-                // Flush internal PC sampling buffers filled by the agent
-                // NOTE: one rocprofiler-SDK PC sampling buffer can be tied
-                // to multiple agent (agent sessions).
-                status = hsa::flush_internal_agent_buffers(agent_session.get());
-                if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+                // Find the agent that fills the buffer with `buffer_id`.
+                // To prevent a weird case where one client tries emptying the buffer
+                // of another client, ensure that client_idx of the agent_session
+                // matches the client_idx of ctx.
+                if(agent_session->buffer_id.handle == buffer_id.handle &&
+                   agent_session->client_idx == ctx->client_idx)
+                {
+                    // Flush internal PC sampling buffers filled by the agent
+                    // NOTE: one rocprofiler-SDK PC sampling buffer can be tied
+                    // to multiple agent (agent sessions).
+                    status = hsa::flush_internal_agent_buffers(agent_session.get());
+                    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+                }
             }
-        }
+            return status;
+        });
     }
 
     // PC sampling service not configured.
