@@ -188,10 +188,10 @@ pthread_create_gotcha::wrapper::operator()() const
         std::call_once(thread_limit_warning_flag, []() {
             ROCPROFSYS_WARNING_F(
                 1,
-                "[rocprof-sys][WARNING] Maximum allowed thread limit (%d) "
+                "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
                 "reached. Further thread creation and profiling will be "
                 "disabled to prevent resource exhaustion.\n",
-                ROCPROFSYS_MAX_THREADS);
+                static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
         });
         return m_routine(m_arg);
     }

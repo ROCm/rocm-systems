@@ -275,9 +275,13 @@ else()
     math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
     compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
 
-    # set the default to 2048 if it could not be calculated
+    # Fatal error if pow2 calculation failed (e.g., Python3 not found)
     if(ROCPROFSYS_THREAD_COUNT LESS 2)
-        set(ROCPROFSYS_THREAD_COUNT 2048)
+        rocprofiler_systems_message(
+            FATAL_ERROR
+            "Failed to compute power of 2 ceiling for ROCPROFSYS_THREAD_COUNT. "
+            "Ensure dependency is available. Processor count: ${ROCPROFSYS_PROCESSOR_COUNT}"
+        )
     endif()
 endif()
 
