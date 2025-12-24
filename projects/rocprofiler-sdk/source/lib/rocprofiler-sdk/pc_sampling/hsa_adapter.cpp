@@ -138,9 +138,10 @@ kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
     if(!is_pc_sample_service_configured(rocp_agent->id)) return;
 
     auto* agent_session = get_agent_session(rocp_agent->id);
-    if (agent_session == nullptr)
+    if(agent_session == nullptr)
     {
-        ROCP_FATAL << "No PC sampling sessions configured for the agent where kernel completion has been intercepted";
+        ROCP_FATAL << "No PC sampling sessions configured for the agent where kernel completion "
+                      "has been intercepted";
     }
     // Mark the correlation ID as completed
     agent_session->cid_manager->cid_async_activity_completed(session.correlation_id);
