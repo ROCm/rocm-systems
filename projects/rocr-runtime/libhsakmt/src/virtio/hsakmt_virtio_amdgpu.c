@@ -332,3 +332,52 @@ int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64
   vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
   return rsp->ret;
 }
+
+int vamdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle vbo = (vhsakmt_bo_handle)bo;
+
+  if (!(vbo->bo_type & VHSA_BO_AMDGPU)) return -EINVAL;
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(MEMORY, sizeof(struct vhsakmt_ccmd_memory_req)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_BO_QUERY_INFO,
+      .res_id = vbo->real.res_id,
+  };
+
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+  if (rsp->ret) return rsp->ret;
+
+  memcpy(info, &rsp->query_bo_info, sizeof(struct amdgpu_bo_info));
+
+  return rsp->ret;
+}
+
+int vamdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info) {
+  CHECK_VIRTIO_KFD_OPEN();
+
+  vhsakmt_device_handle vdev = vhsakmt_dev();
+  vhsakmt_bo_handle vbo = (vhsakmt_bo_handle)bo;
+
+  if (!(vbo->bo_type & VHSA_BO_AMDGPU)) return -EINVAL;
+
+  struct vhsakmt_ccmd_memory_rsp* rsp;
+  struct vhsakmt_ccmd_memory_req req = {
+      .hdr = VHSAKMT_CCMD(
+          MEMORY, sizeof(struct vhsakmt_ccmd_memory_req) + sizeof(struct amdgpu_bo_metadata)),
+      .type = VHSAKMT_CCMD_MEMORY_AMDGPU_BO_SET_METADATA,
+      .res_id = vbo->real.res_id,
+      .amdgpu_bo_metadata = *info,
+  };
+  rsp = vhsakmt_alloc_rsp(vdev, &req.hdr, sizeof(struct vhsakmt_ccmd_memory_rsp));
+  if (!rsp) return -ENOMEM;
+
+  vhsakmt_execbuf_cpu(vdev, &req.hdr, __FUNCTION__);
+  return rsp->ret;
+}

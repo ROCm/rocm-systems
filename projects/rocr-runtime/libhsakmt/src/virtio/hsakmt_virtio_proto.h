@@ -371,6 +371,8 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_SET_MEM_POLICY,
   VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
   VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_QUERY_INFO,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_SET_METADATA,
 };
 
 #define VHSAKMT_MEMORY_MAX_NODES 32
@@ -498,6 +500,7 @@ struct vhsakmt_ccmd_memory_req {
     memory_register_shared_handle_args register_shared_handle_args;
     memory_set_mem_policy_args set_mem_policy_args;
     memory_svm_attr_args svm_attr_args;
+    struct amdgpu_bo_metadata amdgpu_bo_metadata;
   };
   uint64_t blob_id;
   uint32_t type;
@@ -550,6 +553,7 @@ struct vhsakmt_ccmd_memory_rsp {
     uint32_t shared_handle;
     vhsakmt_ccmd_memory_share_memory_rsp share_memory_rsp;
     vhsakmt_ccmd_memory_register_shared_handle_rsp register_shared_handle_rsp;
+    struct amdgpu_bo_info query_bo_info;
   };
   uint8_t payload[];
 };

@@ -76,6 +76,8 @@ vamdgpu_bo_free;
 vamdgpu_bo_export;
 vamdgpu_bo_import;
 vamdgpu_bo_va_op;
+vamdgpu_bo_query_info;
+vamdgpu_bo_set_metadata;
 local: *;
 };
 

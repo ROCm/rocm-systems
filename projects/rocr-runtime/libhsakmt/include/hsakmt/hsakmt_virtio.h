@@ -181,6 +181,8 @@ int vamdgpu_bo_import(amdgpu_device_handle dev, enum amdgpu_bo_handle_type type,
                      uint32_t shared_handle, struct amdgpu_bo_import_result* output);
 int vamdgpu_bo_va_op(amdgpu_bo_handle bo, uint64_t offset, uint64_t size, uint64_t addr,
                     uint64_t flags, uint32_t ops);
+int vamdgpu_bo_query_info(amdgpu_bo_handle bo, struct amdgpu_bo_info* info);
+int vamdgpu_bo_set_metadata(amdgpu_bo_handle bo, struct amdgpu_bo_metadata* info);
 
 #ifdef __cplusplus
 }
