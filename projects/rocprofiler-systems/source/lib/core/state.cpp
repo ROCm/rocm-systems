@@ -25,7 +25,7 @@
 #include "config.hpp"
 #include "utility.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <string>

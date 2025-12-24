@@ -25,7 +25,7 @@
 
 #include <timemory/utility/join.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <exception>
 #include <rocprofiler-sdk/agent.h>

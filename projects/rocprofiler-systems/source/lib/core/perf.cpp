@@ -24,7 +24,7 @@
 
 #include <timemory/units.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

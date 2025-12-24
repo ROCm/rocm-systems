@@ -27,7 +27,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/type_registry.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cassert>
 #include <cstdint>

@@ -52,7 +52,7 @@
 #    include <rocprofiler-sdk/fwd.h>
 #endif
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

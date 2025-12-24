@@ -27,7 +27,7 @@
 
 #include "library/tracing.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

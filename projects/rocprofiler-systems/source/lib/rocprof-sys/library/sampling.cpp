@@ -73,7 +73,7 @@
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 #include <nlohmann/json.hpp>
 
 #include <array>
@@ -587,16 +587,16 @@ start_duration_thread()
                 else
                 {
                     get_duration_disabled().store(true);
-                    LOG_DEBUG("Sampling duration of {} seconds has elapsed. "
-                              "Shutting down sampling...",
-                              config::get_sampling_duration());
+                    LOG_INFO("Sampling duration of {:.6f} seconds has elapsed. "
+                             "Shutting down sampling...",
+                             config::get_sampling_duration());
                     configure(false, 0);
                 }
             }
         };
 
-        LOG_DEBUG("Sampling will be disabled after {} seconds...",
-                  config::get_sampling_duration());
+        LOG_INFO("Sampling will be disabled after {:.6f} seconds",
+                 config::get_sampling_duration());
 
         ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
         get_duration_thread() = std::make_unique<std::thread>(_func);
@@ -937,9 +937,9 @@ configure(bool _setup, int64_t _tid)
                 auto _overflow_event =
                     get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT")
                         .value_or("perf::PERF_COUNT_HW_CACHE_REFERENCES");
-                LOG_DEBUG("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
-                          "{} events...",
-                          itr, _tid, _freq, _overflow_event);
+                LOG_INFO("[SIG{}] Sampler for thread {} will be triggered every {:.1f} "
+                         "{} events...",
+                         itr, _tid, _freq, _overflow_event);
             }
             else
             {
@@ -949,7 +949,7 @@ configure(bool _setup, int64_t _tid)
                     dynamic_cast<const timer*>(_sampler->get_trigger(itr));
                 if(_timer)
                 {
-                    LOG_DEBUG(
+                    LOG_INFO(
                         "[SIG{}] Sampler for thread {} will be triggered {:.1f}x per "
                         "second of {}-time (every {:.3e} milliseconds)...",
                         itr, _tid, _timer->get_frequency(units::sec), _type,

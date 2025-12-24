@@ -88,7 +88,7 @@
 #    include <rocprofiler-sdk/registration.h>
 #endif
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <chrono>

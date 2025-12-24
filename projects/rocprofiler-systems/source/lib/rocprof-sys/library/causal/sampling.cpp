@@ -48,7 +48,7 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <csignal>
 #include <cstring>

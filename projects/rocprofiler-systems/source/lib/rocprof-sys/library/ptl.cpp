@@ -32,7 +32,7 @@
 #include <PTL/ThreadPool.hh>
 #include <PTL/UserTaskQueue.hh>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/declaration.hpp>

@@ -56,7 +56,7 @@
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cassert>
 #include <optional>

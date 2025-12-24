@@ -30,7 +30,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

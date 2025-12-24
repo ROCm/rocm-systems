@@ -55,7 +55,7 @@
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <array>
@@ -220,8 +220,7 @@ configure_settings(bool _init)
 
         auto message = fmt::format("config::configure_settings() called before "
                                    "rocprofsys_init_library. state = {}",
-                                   std::to_string(get_state()));
-        LOG_ERROR(message);
+                                   static_cast<int>(get_state()));
         throw std::runtime_error(message);
     }
 

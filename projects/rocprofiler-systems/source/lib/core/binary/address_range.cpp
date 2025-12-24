@@ -22,7 +22,7 @@
 
 #include "binary/address_range.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -39,10 +39,8 @@ address_range::address_range(uintptr_t _low, uintptr_t _high)
 {
     if(high < low)
     {
-        auto message = fmt::format(
-            "Error! address_range high must be >= low. low={:X}, high={:X}", low, high);
-        LOG_CRITICAL(message);
-        throw std::invalid_argument(message);
+        throw std::invalid_argument(fmt::format(
+            "address_range high must be >= low. low={:X}, high={:X}", low, high));
     }
 }
 

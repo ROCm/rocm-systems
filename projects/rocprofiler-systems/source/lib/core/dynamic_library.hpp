@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <dlfcn.h>
 #include <string>

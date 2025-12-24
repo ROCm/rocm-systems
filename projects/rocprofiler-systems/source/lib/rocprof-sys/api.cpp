@@ -22,8 +22,8 @@
 
 #include "api.hpp"
 
+#include "logger/debug.hpp"
 #include <exception>
-#include <logger/debug.hpp>
 #include <stdexcept>
 
 extern "C" void

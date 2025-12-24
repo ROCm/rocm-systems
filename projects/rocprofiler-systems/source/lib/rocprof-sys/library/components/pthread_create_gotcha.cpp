@@ -42,7 +42,7 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <csignal>
 #include <dlfcn.h>

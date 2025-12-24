@@ -47,7 +47,7 @@
 #include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <ratio>
@@ -253,7 +253,7 @@ experiment::start()
     init_progress   = component::progress_point::get_progress_points();
     start_time      = tracing::now();
 
-    LOG_DEBUG("Starting causal experiment #{}: {}", index, as_string());
+    LOG_INFO("Starting causal experiment #{}: {}", index, as_string());
 
     if(get_state() < State::Finalized)
     {

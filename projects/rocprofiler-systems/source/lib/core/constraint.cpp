@@ -28,7 +28,7 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/delimit.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <cstdint>

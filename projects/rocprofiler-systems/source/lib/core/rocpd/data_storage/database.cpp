@@ -24,7 +24,7 @@
 #include "common/md5sum.hpp"
 #include "node_info.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <config.hpp>
 #include <regex>

@@ -27,7 +27,7 @@
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <set>
 #include <string>
@@ -45,7 +45,7 @@ configure_categories(bool _enable, const std::set<std::string>& _categories)
     auto _name = trait::name<Tp>::value;
     if(_categories.count(_name) > 0)
     {
-        LOG_DEBUG("{} category: {}", (_enable) ? "Enabling" : "Disabling", _name);
+        LOG_DEBUG("{} category: {}", _enable ? "Enabling" : "Disabling", _name);
         trait::runtime_enabled<Tp>::set(_enable);
     }
 }

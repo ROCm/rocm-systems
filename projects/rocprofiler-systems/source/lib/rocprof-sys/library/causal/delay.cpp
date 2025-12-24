@@ -31,7 +31,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <timemory/components/macros.hpp>
 #include <timemory/mpl/concepts.hpp>

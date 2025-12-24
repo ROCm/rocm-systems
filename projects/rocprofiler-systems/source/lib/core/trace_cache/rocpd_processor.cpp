@@ -32,7 +32,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>

@@ -26,7 +26,7 @@
 #include "library/cpu_freq.hpp"
 #include "library/runtime.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <vector>

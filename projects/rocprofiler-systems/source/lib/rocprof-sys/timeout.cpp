@@ -32,7 +32,7 @@
 #include <timemory/signals/types.hpp>
 #include <timemory/unwind/backtrace.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <sstream>

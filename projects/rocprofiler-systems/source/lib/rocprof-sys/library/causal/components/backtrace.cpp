@@ -43,7 +43,7 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <ctime>

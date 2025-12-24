@@ -35,7 +35,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <memory>
@@ -76,8 +76,8 @@ prefork_setup()
     tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
     tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
-    LOG_DEBUG("fork() called on PID {} (rank: {}), TID {}", process::get_id(),
-              dmp::rank(), threading::get_id());
+    LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
+             threading::get_id());
     LOG_WARNING("Calling fork() within an OpenMPI application using libfabric "
                 "may result is segmentation fault");
     // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
@@ -168,7 +168,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(_pid != 0)
     {
-        LOG_DEBUG("fork() called on PID {} created PID {}", getpid(), _pid);
+        LOG_INFO("fork() called on PID {} created PID {}", getpid(), _pid);
 
         postfork_parent();
     }
