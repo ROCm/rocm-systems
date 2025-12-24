@@ -659,6 +659,142 @@ plot.
    :alt: Sample ROCm Compute Profiler roofline output
    :width: 800
 
+.. _torch-operator-mapping:
+
+Torch Operator Mapping
+========================
+
+To analyze performance metrics at the PyTorch operator level, ROCm Compute Profiler
+offers Torch Operator Mapping functionality. This feature maps collected hardware
+counters to specific PyTorch operators, enabling detailed performance analysis of
+PyTorch workloads at the operator granularity.
+
+When enabled, this feature instruments your PyTorch application to correlate GPU
+kernel executions with their originating PyTorch operators, providing insights into
+which operators contribute to specific hardware counter values.
+
+.. important::
+
+   **PyTorch Operators vs GPU Kernels**: PyTorch operators (such as ``conv2d``, 
+   ``linear``, ``relu``) are high-level API functions. When executed on GPU, these 
+   operators may dispatch one or more low-level GPU kernels (such as 
+   ``implicit_convolve_sgemm``) that perform the actual computation on the hardware. 
+   The ``--torch-operators`` feature provides operator-level attribution by injecting 
+   markers that map collected kernel performance counters to their originating PyTorch 
+   operators.
+
+Requirements
+------------
+
+* Valid PyTorch installation in the profiling environment
+* PyTorch application must be run as a Python script or Python command
+* Compatible with ROCm Compute Profiler's native counter collection tool
+
+Usage
+-----
+
+To enable Torch operator mapping, use the ``--torch-operators`` option when profiling
+a PyTorch workload:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name mnist_torch --torch-operators -- python train.py
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 3.4.0
+   Profiler choice: rocprofiler-sdk
+   Path: /home/auser/workloads/mnist_torch/MI300X_A1
+   Target: MI300X_A1
+   Command: python train.py
+   Torch Operators: Enabled
+   Kernel Selection: None
+   Dispatch Selection: None
+   Hardware Blocks: All
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+Output
+------
+
+When Torch operator mapping is enabled, profiling generates additional output files
+in the workload directory that correlate PyTorch operators with GPU kernels and
+their performance counters:
+
+``<workload_name>_torch_trace.csv``
+   Contains the merged operator-to-kernel mapping with performance counter data.
+   Key columns include:
+
+   * ``Function`` - PyTorch operator name (e.g., ``aten::conv2d``, ``aten::linear``)
+   * ``Kernel_Name`` - GPU kernel name dispatched by the operator
+   * ``Counter_Name`` / ``Counter_Value`` - Hardware performance counter measurements
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator execution time
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel execution time
+   * ``Correlation_Id`` - Links operator calls to their kernel dispatches
+
+``torch_operators/`` directory
+   Contains individual CSV files for each PyTorch operator detected during profiling.
+   Each file is named after the operator (e.g., ``nn_functional_conv2d.csv``,
+   ``nn_functional_linear.csv``, ``relu.csv``) and contains all kernel executions and
+   performance counters for that specific operator. Columns include:
+
+   * ``Operator_Name`` - PyTorch operator name
+   * ``Context_Id`` - Source location where operator was called (e.g., ``10@conv.py:543``)
+   * ``Kernel_Name`` - GPU kernel dispatched by this operator invocation
+   * ``Counter_Name`` / ``Counter_Value`` - Hardware counter measurements
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator timing
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel timing
+
+   This per-operator organization enables focused analysis of specific operators without
+   processing the entire trace.
+
+``pmc_perf.csv``
+   Standard performance counter data (same as non-torch profiling)
+
+This data enables analysis such as:
+
+* Identifying which PyTorch operators executed which GPU kernels
+* Aggregating performance counter values by operator
+* Correlating operator-level timing with kernel-level hardware metrics
+* Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
+
+Limitations
+-----------
+
+.. note::
+
+   * The ``--torch-operators`` option requires the application to be a Python command
+     or Python script. 
+   
+   * A valid PyTorch installation must be available in the environment where profiling
+     is executed.
+   
+   * This feature adds instrumentation overhead to track operator boundaries. For
+     performance-critical measurements, consider profiling without this option first.
+
+Combined with Other Options
+----------------------------
+
+Torch operator mapping can be combined with other profiling options:
+
+.. code-block:: shell-session
+
+   # Combine with block filtering for targeted counter collection
+   $ rocprof-compute profile --name mnist --torch-operators -b 11 12 -- python train.py
+
+   # Combine with iteration multiplexing
+   $ rocprof-compute profile --name mnist --torch-operators --iteration-multiplexing kernel -- python train.py
+
+   # Combine with kernel filtering (filters by GPU kernel name)
+   $ rocprof-compute profile --name mnist --torch-operators -k elementwise -- python train.py
 
 .. _iteration-multiplexing:
 
