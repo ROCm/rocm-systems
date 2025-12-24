@@ -493,7 +493,7 @@ TEST_CASE("Unit_hipMemSetAccess_ChangeAccessProp") {
 /**
  * Test Description
  * ------------------------
- *    - Create a VA range split into 3 equal segments. Map all of them.
+ *    - Create a VA range split into 3 segments. Map all of them.
  *    - Verify hipMemSetAccess() works when called on:
  *        - a single segment (3 calls: segment 0, segment 1, segment 2)
  *        - two segments (2 calls: segments 0-1, then segments 1-2)
@@ -516,27 +516,29 @@ TEST_CASE("Unit_hipMemSetAccess_SegmentsAccess") {
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
 
-  const size_t segment_size = granularity;
-  const size_t total_size = 3 * segment_size;
+  const size_t segment0_size = granularity;
+  const size_t segment1_size = granularity * 2;
+  const size_t segment2_size = granularity * 3;
+  const size_t total_size = segment0_size + segment1_size + segment2_size;
 
   void* base = nullptr;
   HIP_CHECK(hipMemAddressReserve(&base, total_size, 0, 0, 0));
 
   auto* base_c = reinterpret_cast<char*>(base);
-  void* segment_0 = base_c + 0 * segment_size;
-  void* segment_1 = base_c + 1 * segment_size;
-  void* segment_2 = base_c + 2 * segment_size;
+  void* segment_0 = base_c;
+  void* segment_1 = base_c + segment0_size;
+  void* segment_2 = base_c + segment0_size + segment1_size;
 
   hipMemGenericAllocationHandle_t handle_0{};
   hipMemGenericAllocationHandle_t handle_1{};
   hipMemGenericAllocationHandle_t handle_2{};
-  HIP_CHECK(hipMemCreate(&handle_0, segment_size, &prop, 0));
-  HIP_CHECK(hipMemCreate(&handle_1, segment_size, &prop, 0));
-  HIP_CHECK(hipMemCreate(&handle_2, segment_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle_0, segment0_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle_1, segment1_size, &prop, 0));
+  HIP_CHECK(hipMemCreate(&handle_2, segment2_size, &prop, 0));
 
-  HIP_CHECK(hipMemMap(segment_0, segment_size, 0, handle_0, 0));
-  HIP_CHECK(hipMemMap(segment_1, segment_size, 0, handle_1, 0));
-  HIP_CHECK(hipMemMap(segment_2, segment_size, 0, handle_2, 0));
+  HIP_CHECK(hipMemMap(segment_0, segment0_size, 0, handle_0, 0));
+  HIP_CHECK(hipMemMap(segment_1, segment1_size, 0, handle_1, 0));
+  HIP_CHECK(hipMemMap(segment_2, segment2_size, 0, handle_2, 0));
 
   HIP_CHECK(hipMemRelease(handle_0));
   HIP_CHECK(hipMemRelease(handle_1));
@@ -553,24 +555,24 @@ TEST_CASE("Unit_hipMemSetAccess_SegmentsAccess") {
 
   unsigned long long flags = 0;
   SECTION("Single segment access") {
-    HIP_CHECK(hipMemSetAccess(segment_0, segment_size, &rw, 1));
+    HIP_CHECK(hipMemSetAccess(segment_0, segment0_size, &rw, 1));
     HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
 
     flags = 0;
-    HIP_CHECK(hipMemSetAccess(segment_1, segment_size, &rw, 1));
+    HIP_CHECK(hipMemSetAccess(segment_1, segment1_size, &rw, 1));
     HIP_CHECK(hipMemGetAccess(&flags, &location, segment_1));
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
 
     flags = 0;
-    HIP_CHECK(hipMemSetAccess(segment_2, segment_size, &rw, 1));
+    HIP_CHECK(hipMemSetAccess(segment_2, segment2_size, &rw, 1));
     HIP_CHECK(hipMemGetAccess(&flags, &location, segment_2));
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   }
 
   SECTION("Two segments access") {
     // First call targets segments 0 and 1.
-    HIP_CHECK(hipMemSetAccess(segment_0, 2 * segment_size, &rw, 1));
+    HIP_CHECK(hipMemSetAccess(segment_0, segment0_size + segment1_size, &rw, 1));
 
     HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
@@ -579,7 +581,7 @@ TEST_CASE("Unit_hipMemSetAccess_SegmentsAccess") {
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
 
     // Second call targets segments 1 and 2.
-    HIP_CHECK(hipMemSetAccess(segment_1, 2 * segment_size, &rw, 1));
+    HIP_CHECK(hipMemSetAccess(segment_1, segment1_size + segment2_size, &rw, 1));
 
     flags = 0;
     HIP_CHECK(hipMemGetAccess(&flags, &location, segment_0));
@@ -605,9 +607,9 @@ TEST_CASE("Unit_hipMemSetAccess_SegmentsAccess") {
     REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
   }
 
-  HIP_CHECK(hipMemUnmap(segment_0, segment_size));
-  HIP_CHECK(hipMemUnmap(segment_1, segment_size));
-  HIP_CHECK(hipMemUnmap(segment_2, segment_size));
+  HIP_CHECK(hipMemUnmap(segment_0, segment0_size));
+  HIP_CHECK(hipMemUnmap(segment_1, segment1_size));
+  HIP_CHECK(hipMemUnmap(segment_2, segment2_size));
   HIP_CHECK(hipMemAddressFree(base, total_size));
   CTX_DESTROY();
 }
