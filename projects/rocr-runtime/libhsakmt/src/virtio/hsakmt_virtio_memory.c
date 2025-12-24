@@ -1350,3 +1350,12 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtReturnAsanHeaderPage(void* addr) {
   // Not implemented so keep the stub here.
   return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                HSAint32 fd, HSAint64 file_offset,
+                                                HsaAisFlags AisFlags, HSAuint64* SizeCopiedInBytes,
+                                                HSAint32* status) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}

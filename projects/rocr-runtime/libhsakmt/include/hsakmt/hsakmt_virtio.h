@@ -162,6 +162,10 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMRelease(HSAuint32 PreferredNode);
 HSAKMT_STATUS HSAKMTAPI vhsaKmtSPMSetDestBuffer(HSAuint32 PreferredNode, HSAuint32 SizeInBytes,
                                                 HSAuint32* timeout, HSAuint32* SizeCopied,
                                                 void* DestMemoryAddress, bool* isSPMDataLoss);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 MemorySizeInBytes,
+                                                HSAint32 fd, HSAint64 file_offset,
+                                                HsaAisFlags AisFlags, HSAuint64* SizeCopiedInBytes,
+                                                HSAint32* status);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
