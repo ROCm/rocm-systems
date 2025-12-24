@@ -53,7 +53,7 @@ for candidate in candidate_paths:
 try:
     import torch
 except ImportError:
-    console_error(
+    console_warning(
         "PyTorch is not installed or not properly configured.\n"
         "The --torch-operators option requires a valid PyTorch installation.\n"
         "Please install PyTorch and try again."
@@ -114,7 +114,7 @@ def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
 def inject_roctx_into_torch():
     """Monkey-patch PyTorch operations to add ROCTX markers."""
     
-    console_log("🔧 Auto-discovering PyTorch operations to wrap...")
+    console_log("Auto-discovering PyTorch operations to wrap...")
     
     # Auto-discover functions from key modules
     all_operations = {}
@@ -140,7 +140,7 @@ def inject_roctx_into_torch():
         console_warning(f"Could not access torch.fft")
     
     console_log(f"Found {len(all_operations)} operations to wrap")
-    console_log("🔧 Injecting ROCTX markers into PyTorch operations...")
+    console_log("Injecting ROCTX markers into PyTorch operations...")
     
     wrapped_count = 0
     failed_count = 0
@@ -154,7 +154,7 @@ def inject_roctx_into_torch():
             
             # Print first 20 and last 5 for visibility
             if wrapped_count <= 20 or wrapped_count > len(all_operations) - 5:
-                console_log(f"  ✓ Wrapped: {full_name}")
+                console_log(f"Wrapped: {full_name}")
             elif wrapped_count == 21:
                 console_log(f"  ... (wrapping {len(all_operations) - 25} more operations)")
                 
@@ -178,11 +178,11 @@ def inject_roctx_into_torch():
     torch.Tensor.backward = backward_with_roctx
 
     wrapped_count += 1
-    console_log(f"  ✓ Wrapped: torch.Tensor.backward")
+    console_log(f"Wrapped: torch.Tensor.backward")
     
-    console_log(f"✅ Wrapped {wrapped_count} operations with ROCTX markers")
+    console_log(f"Wrapped {wrapped_count} operations with ROCTX markers")
     if failed_count > 0:
-        console_warning(f"⚠️  Failed to wrap {failed_count} operations (likely not patchable)")
+        console_warning(f"Failed to wrap {failed_count} operations (likely not patchable)")
     
 
 
@@ -200,7 +200,7 @@ def inject_roctx_into_optimizer():
             rangePop()
     
     Optimizer.step = step_with_roctx
-    console_log("✅ Wrapped optimizer.step() with ROCTX markers\n")
+    console_log("Wrapped optimizer.step() with ROCTX markers\n")
 
 
 def inject_roctx_into_model():
@@ -231,7 +231,7 @@ def inject_roctx_into_model():
             rangePop()
     
     nn.Module.__call__ = call_with_roctx
-    console_log("✅ Wrapped nn.Module forward() with ROCTX markers\n")
+    console_log("Wrapped nn.Module forward() with ROCTX markers\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
