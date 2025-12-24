@@ -337,7 +337,7 @@ struct __attribute__((aligned(2))) __hip_bfloat16 {
 };
 /**@}*/
 
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
 typedef __bf16 __bf16_2 __attribute__((ext_vector_type(2)));
 #else
 typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
@@ -353,7 +353,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
   static_assert(sizeof(__hip_bfloat16[2]) == sizeof(__bf16_2));
 
  public:
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
   union {
     struct {
       __hip_bfloat16 x; /*! \brief raw representation of bfloat16 */
@@ -382,7 +382,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
       : x(a), y(b) {}
 
   /*! \brief create __hip_bfloat162 from vector of __bf16_2 */
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
   __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : __xy_bf162(in) {}
 #else
   __BF16_HOST_DEVICE__ __hip_bfloat162(const __bf16_2 in) : x{in[0]}, y{in[1]} {}
@@ -406,7 +406,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
 
   /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ operator __bf16_2() const {
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
     return __xy_bf162;
 #else
     return __bf16_2{x, y};
@@ -415,7 +415,7 @@ struct __attribute__((aligned(4))) __hip_bfloat162 {
 
   /*! \brief return a vector of bf16 */
   __BF16_HOST_DEVICE__ __hip_bfloat162& operator=(const __bf16_2 in) {
-#if defined(__clang__) && defined(__HIP__)
+#if defined(__clang__)
     __xy_bf162 = in;
 #else
     x = __hip_bfloat16{in[0]};
