@@ -172,7 +172,8 @@ configure_pc_sampling_service(context::context*                ctx,
         return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     }
 
-    // Check if this agent is already configured by another context and register the session
+    // Check if this agent is already configured by another context. If so, report an error.
+    // Otherwise, register the session.
     auto status =
         get_global_pc_sampling_sessions().wlock([&](auto& sessions) -> rocprofiler_status_t {
             if(auto it = sessions.find(agent->id); it != sessions.end())
@@ -215,7 +216,7 @@ configure_pc_sampling_service(context::context*                ctx,
             ctx->pc_sampler->agent_sessions[agent->id] = session;
 
             ROCP_INFO << "PC sampling session with IOCTL id: " << session->ioctl_pcs_id
-                      << " hsa been created!\n";
+                      << " has been created!\n";
 
             return ROCPROFILER_STATUS_SUCCESS;
         });

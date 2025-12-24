@@ -28,8 +28,6 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include "lib/common/utility.hpp"
-
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <vector>
@@ -195,7 +193,7 @@ TEST(pc_sampling, multiple_context_one_context_per_agent)
         printf("[multi_context] Found %zu GPU agent(s) supporting PC sampling\n",
                data->gpu_pcs_agents.size());
 
-        // Create as many contexts as there are agents
+        // Create as many contexts and buffers as there are agents
         data->contexts.resize(data->gpu_pcs_agents.size());
         for(size_t i = 0; i < data->gpu_pcs_agents.size(); i++)
         {
