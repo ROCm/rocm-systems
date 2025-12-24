@@ -48,21 +48,12 @@
         spdlog::source_loc{ __FILE__, __LINE__, __func__ }, spdlog::level::info,         \
         __VA_ARGS__)
 
-#ifdef NDEBUG
+#define LOG_DEBUG(...)                                                                   \
+    rocprofsys::logger_t::instance().log(                                                \
+        spdlog::source_loc{ __FILE__, __LINE__, __func__ }, spdlog::level::debug,        \
+        __VA_ARGS__)
 
-#    define LOG_DEBUG(...) (void) 0
-#    define LOG_TRACE(...) (void) 0
-
-#else
-
-#    define LOG_DEBUG(...)                                                               \
-        rocprofsys::logger_t::instance().log(                                            \
-            spdlog::source_loc{ __FILE__, __LINE__, __func__ }, spdlog::level::debug,    \
-            __VA_ARGS__)
-
-#    define LOG_TRACE(...)                                                               \
-        rocprofsys::logger_t::instance().log(                                            \
-            spdlog::source_loc{ __FILE__, __LINE__, __func__ }, spdlog::level::trace,    \
-            __VA_ARGS__)
-
-#endif
+#define LOG_TRACE(...)                                                                   \
+    rocprofsys::logger_t::instance().log(                                                \
+        spdlog::source_loc{ __FILE__, __LINE__, __func__ }, spdlog::level::trace,        \
+        __VA_ARGS__)
