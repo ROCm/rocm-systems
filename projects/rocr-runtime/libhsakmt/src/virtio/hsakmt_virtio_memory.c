@@ -1359,3 +1359,23 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 M
   // Not implemented so keep the stub here.
   return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMRead(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                             HSAuint64 LocalMemoryArrayCount,
+                                             HsaMemoryRange* RemoteMemoryArray,
+                                             HSAuint64 RemoteMemoryArrayCount,
+                                             HSAuint64* SizeCopied) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMWrite(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                              HSAuint64 LocalMemoryArrayCount,
+                                              HsaMemoryRange* RemoteMemoryArray,
+                                              HSAuint64 RemoteMemoryArrayCount,
+                                              HSAuint64* SizeCopied) {
+  CHECK_VIRTIO_KFD_OPEN();
+  // Not implemented in baremetal so keep the stub here.
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}

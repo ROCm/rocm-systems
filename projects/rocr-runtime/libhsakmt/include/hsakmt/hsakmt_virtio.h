@@ -166,6 +166,16 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtAisReadWriteFile(void* MemoryAddress, HSAuint64 M
                                                 HSAint32 fd, HSAint64 file_offset,
                                                 HsaAisFlags AisFlags, HSAuint64* SizeCopiedInBytes,
                                                 HSAint32* status);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMRead(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                             HSAuint64 LocalMemoryArrayCount,
+                                             HsaMemoryRange* RemoteMemoryArray,
+                                             HSAuint64 RemoteMemoryArrayCount,
+                                             HSAuint64* SizeCopied);
+HSAKMT_STATUS HSAKMTAPI vhsaKmtProcessVMWrite(HSAuint32 Pid, HsaMemoryRange* LocalMemoryArray,
+                                              HSAuint64 LocalMemoryArrayCount,
+                                              HsaMemoryRange* RemoteMemoryArray,
+                                              HSAuint64 RemoteMemoryArrayCount,
+                                              HSAuint64* SizeCopied);
 
 int vamdgpu_query_gpu_info(amdgpu_device_handle dev, void* out);
 int vamdgpu_device_initialize(int fd, uint32_t* major_version, uint32_t* minor_version,
