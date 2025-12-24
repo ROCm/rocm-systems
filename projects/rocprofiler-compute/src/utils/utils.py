@@ -1377,18 +1377,7 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
             continue
 
         all_traces.append(
-            df[
-                [
-                    "Function",
-                    "Kernel_Name",
-                    "Counter_Name",
-                    "Counter_Value",
-                    "Start_Timestamp_function",
-                    "End_Timestamp_function",
-                    "Start_Timestamp_kernel",
-                    "End_Timestamp_kernel",
-                ]
-            ]
+            df[required_columns]
         )
     if not all_traces:
         console_warning("No valid torch trace data to consolidate.")
