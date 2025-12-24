@@ -255,16 +255,6 @@ int list_devices(bool show_primary, const std::string* filter_type) {
         }
     }
     
-    // Group by type
-    std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
-    for (const auto& entry : entries) {
-        // Apply type filter
-        if (filter_type && entry.device_type != filter_device_type) {
-            continue;
-        }
-        grouped[entry.device_type].push_back(entry);
-    }
-    
     if (grouped.empty()) {
         if (filter_type) {
             std::cout << "No " << *filter_type << " devices found." << std::endl;

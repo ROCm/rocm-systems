@@ -47,70 +47,8 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
         // grab everything except the loopback device and hidden entries
         if (strncmp(entry->d_name, "lo", 2) != 0 && entry->d_name[0] != '.') {
             amdcuid_nic_info info = {};
-            info.header.device_type = AMDCUID_DEVICE_TYPE_NIC;
-            info.network_interface = entry->d_name;
             std::string device_path = std::string(nic_base_path) + "/" + entry->d_name + "/device";
-
-            std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
-
-            std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
-            if (vendor.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t vendor_id_bytes[2] = {0};
-                const uint16_t offset = 0x0;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
-                uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
-                info.header.fields.nic.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.nic.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
-            }
-
-            std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
-            if (device.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t device_id_bytes[2] = {0};
-                const uint16_t offset = 0x2;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
-                uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
-                info.header.fields.nic.device_id = (status ==  AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.nic.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
-            }
-
-            std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
-            uint32_t pci_class_integer = 0;
-            if (pci_class.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t class_id_bytes[2] = {0};
-                const uint16_t offset = 0xa;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-                uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
-                pci_class_integer = (status ==  AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
-            }
-            else
-            {
-                pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 0);
-            }
-            info.header.fields.nic.pci_class = (pci_class_integer >> 8) & 0xFFFF;
-
-            std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
-            if (revision_id.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t revision_id_bytes[2] = {0};
-                const uint16_t offset = 0x8;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
-                uint16_t revision_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
-                info.header.fields.nic.revision_id = (status ==  AMDCUID_STATUS_SUCCESS) ? revision_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.nic.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
-            }
-            info.bdf = bdf;
+            discover_single(&info, device_path);
 
             nics.emplace_back(std::make_shared<AmdCuidNic>(info));
         }
@@ -119,6 +57,84 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
     closedir(dir);
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const std::string& device_path) {
+    amdcuid_nic_info info = {};
+    info.header.device_type = AMDCUID_DEVICE_TYPE_NIC;
+
+    std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
+
+    std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
+    if (vendor.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t vendor_id_bytes[2] = {0};
+        const uint16_t offset = 0x0;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
+        uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
+        info.header.fields.nic.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.nic.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
+    }
+
+    std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
+    if (device.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t device_id_bytes[2] = {0};
+        const uint16_t offset = 0x2;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
+        uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
+        info.header.fields.nic.device_id = (status ==  AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.nic.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
+    }
+
+    std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
+    uint32_t pci_class_integer = 0;
+    if (pci_class.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t class_id_bytes[2] = {0};
+        const uint16_t offset = 0xa;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
+        uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
+        pci_class_integer = (status ==  AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
+    }
+    else
+    {
+        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 0);
+    }
+    info.header.fields.nic.pci_class = (pci_class_integer >> 8) & 0xFFFF;
+
+    std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
+    if (revision_id.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t revision_id_bytes[2] = {0};
+        const uint16_t offset = 0x8;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
+        uint16_t revision_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
+        info.header.fields.nic.revision_id = (status ==  AMDCUID_STATUS_SUCCESS) ? revision_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.nic.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
+    }
+    info.bdf = bdf;
+    std::string full_device_node;
+    size_t last_slash = device_path.rfind('/');
+    if (last_slash != std::string::npos && last_slash > 0) {
+        full_device_node = device_path.substr(0, last_slash);
+    }
+    else {
+        full_device_node = device_path;
+    }
+    info.network_interface = full_device_node;
+    *nic_info = info;
+
     return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -143,7 +159,7 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
         }
     }
     // pci config space file does not exist or read failed, so create fingerprint from MAC address
-    std::string mac_path = "/sys/class/net/" + m_info.network_interface + "/address";
+    std::string mac_path = m_info.network_interface + "/address";
     std::string mac_address = AmdCuidUtilities::read_sysfs_file(mac_path);
     if (!mac_address.empty())
     {

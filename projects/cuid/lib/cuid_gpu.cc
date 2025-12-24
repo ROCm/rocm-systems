@@ -47,79 +47,96 @@ amdcuid_status_t AmdCuidGpu::discover(std::vector<DevicePtr> &gpus) {
             std::string render_name(entry->d_name);
             std::string device_path = std::string(drm_path) + "/" + render_name + "/device";
             amdcuid_gpu_info info = {};
-            std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
-
-            std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
-            if (vendor.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t vendor_id_bytes[2] = {0};
-                const uint16_t offset = 0x0;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
-                uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
-                info.header.fields.gpu.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
-            }
-
-            std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
-            if (device.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t device_id_bytes[2] = {0};
-                const uint16_t offset = 0x2;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
-                uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
-                info.header.fields.gpu.device_id = (status ==  AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
-            }
-
-            std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
-            uint32_t pci_class_integer = 0;
-            if (pci_class.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t class_id_bytes[2] = {0};
-                const uint16_t offset = 0xa;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-                uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
-                pci_class_integer = (status ==  AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
-            }
-            else
-            {
-                pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 0);
-            }
-            info.header.fields.gpu.pci_class = (pci_class_integer >> 8) & 0xFFFF;
-
-            std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
-            if (revision_id.empty() && !bdf.empty()){
-                // if file read fails, attempt to get from pci config
-                uint8_t revision_id_bytes[2] = {0};
-                const uint16_t offset = 0x8;
-                amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
-                uint16_t revision_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
-                info.header.fields.gpu.revision_id = (status ==  AMDCUID_STATUS_SUCCESS) ? revision_id_int : 0;
-            }
-            else
-            {
-                info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
-            }
-            // std::string partition_info = AmdCuidUtilities::read_sysfs_file(device_path + "/partition_info");
-
-            std::string full_device_node = std::string(drm_path) + "/" + render_name;
-
-            info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
-            // info.header.fields.gpu.unit_id = partition_info.empty() ? 0 : (uint32_t)strtoul(partition_info.c_str(), nullptr, 0);
-            info.bdf = bdf;
-            info.render_node = full_device_node;
+            discover_single(&info, device_path);
 
             gpus.emplace_back(std::make_shared<AmdCuidGpu>(info));
         }
     }
     closedir(dir);
     return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std::string& device_path) {
+
+    amdcuid_gpu_info info = {};
+    std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
+
+    std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
+    if (vendor.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t vendor_id_bytes[2] = {0};
+        const uint16_t offset = 0x0;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, vendor_id_bytes, 2, offset);
+        uint16_t vendor_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(vendor_id_bytes));
+        info.header.fields.gpu.vendor_id = (status == AMDCUID_STATUS_SUCCESS) ? vendor_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
+    }
+
+    std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
+    if (device.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t device_id_bytes[2] = {0};
+        const uint16_t offset = 0x2;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, device_id_bytes, 2, offset);
+        uint16_t device_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(device_id_bytes));
+        info.header.fields.gpu.device_id = (status ==  AMDCUID_STATUS_SUCCESS) ? device_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
+    }
+
+    std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
+    uint32_t pci_class_integer = 0;
+    if (pci_class.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t class_id_bytes[2] = {0};
+        const uint16_t offset = 0xa;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
+        uint16_t class_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(class_id_bytes));
+        pci_class_integer = (status ==  AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
+    }
+    else
+    {
+        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 0);
+    }
+    info.header.fields.gpu.pci_class = (pci_class_integer >> 8) & 0xFFFF;
+
+    std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
+    if (revision_id.empty() && !bdf.empty()){
+        // if file read fails, attempt to get from pci config
+        uint8_t revision_id_bytes[2] = {0};
+        const uint16_t offset = 0x8;
+        amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, revision_id_bytes, 2, offset);
+        uint16_t revision_id_int = PciUtil::le16_to_be16(*reinterpret_cast<uint16_t*>(revision_id_bytes));
+        info.header.fields.gpu.revision_id = (status ==  AMDCUID_STATUS_SUCCESS) ? revision_id_int : 0;
+    }
+    else
+    {
+        info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
+    }
+    // std::string partition_info = AmdCuidUtilities::read_sysfs_file(device_path + "/partition_info");
+
+    std::string full_device_node;
+    size_t last_slash = device_path.rfind('/');
+    if (last_slash != std::string::npos && last_slash > 0) {
+        full_device_node = device_path.substr(0, last_slash);
+    }
+    else {
+        full_device_node = device_path;
+    }
+
+    info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
+    // info.header.fields.gpu.unit_id = partition_info.empty() ? 0 : (uint32_t)strtoul(partition_info.c_str(), nullptr, 0);
+    info.bdf = bdf;
+    info.render_node = full_device_node;
+
+    *gpu_info = info;
+
+    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
 amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
@@ -182,7 +199,7 @@ amdcuid_status_t AmdCuidGpu::get_primary_cuid(amdcuid& id) const {
     std::vector<CuidFileEntry> entries = primary_file.get_entries();
 
     CuidFileEntry entry;
-    amdcuid_status_t status =primary_file.find_by_device_node(m_info.render_node, entry);
+    amdcuid_status_t status = primary_file.find_by_device_node(m_info.render_node, entry);
     if (status == AMDCUID_STATUS_SUCCESS) {
         id = entry.primary_cuid;
         return AMDCUID_STATUS_SUCCESS;

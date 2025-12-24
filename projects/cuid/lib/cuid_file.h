@@ -71,6 +71,7 @@ public:
     amdcuid_status_t load();
     amdcuid_status_t save();
     amdcuid_status_t add_entry(const CuidFileEntry& entry);
+    amdcuid_status_t remove_entry(const CuidFileEntry& entry);
     
     const std::vector<CuidFileEntry>& get_entries() const { return entries_; }
 

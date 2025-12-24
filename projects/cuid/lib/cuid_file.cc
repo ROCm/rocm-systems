@@ -220,9 +220,7 @@ amdcuid_status_t CuidFile::save() {
     
     // Group entries by type for better organization
     std::map<amdcuid_device_type_t, std::vector<CuidFileEntry>> grouped;
-    for (const auto& entry : entries_) {
-        grouped[entry.device_type].push_back(entry);
-    }
+    get_grouped_entries(grouped);
     
     // Define output order
     std::vector<amdcuid_device_type_t> order = {
@@ -297,19 +295,31 @@ amdcuid_status_t CuidFile::save() {
 }
 
 amdcuid_status_t CuidFile::add_entry(const CuidFileEntry& entry) {
-    // Check if entry with same type and index exists
+    // Check if entry with same secondary CUID exists
     for (auto& existing : entries_) {
-        if (existing.device_type == entry.device_type && 
-            existing.device_index == entry.device_index) {
+        if (memcmp(existing.secondary_cuid.bytes, entry.secondary_cuid.bytes, sizeof(amdcuid::bytes)) == 0) {
             // Update existing entry
             existing = entry;
             return AMDCUID_STATUS_SUCCESS;
         }
     }
-    
+
     // Add new entry
     entries_.push_back(entry);
     return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidFile::remove_entry(const CuidFileEntry& entry) {
+    // search for entry by secondary CUID and move that entry to the back, then erase it
+    auto it = std::remove_if(entries_.begin(), entries_.end(),
+                             [&entry](const CuidFileEntry& e) {
+                                 return (memcmp(e.secondary_cuid.bytes, entry.secondary_cuid.bytes, sizeof(amdcuid::bytes)) == 0);
+                             });
+    if (it != entries_.end()) {
+        entries_.erase(it, entries_.end());
+        return AMDCUID_STATUS_SUCCESS;
+    }
+    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 }
 
 amdcuid_status_t CuidFile::find_by_device_node(const std::string& device_node, 
