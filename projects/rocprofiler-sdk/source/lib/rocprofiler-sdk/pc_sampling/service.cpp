@@ -335,7 +335,7 @@ flush_all_agents_buffers_of_client(rocprofiler_client_id_t client_id)
             // (multiple HSA runtime buffers)
             for(const auto& [_, agent_session] : sessions)
             {
-                // The client with `clint_idx` is not the owner of the PC sampling
+                // The client with `client_idx` is not the owner of the PC sampling
                 // service of this agent, so skip flushing.
                 if(agent_session->client_idx != client_id.handle) continue;
                 status = flush_internal_agent_buffers(agent_session->buffer_id);
