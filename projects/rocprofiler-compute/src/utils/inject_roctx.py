@@ -37,7 +37,7 @@ from pathlib import Path
 script_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(script_dir.parent))
 
-from utils.logger import console_debug, console_error, console_log, console_warning
+from utils.logger import console_log, console_warning
 
 rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
 python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
