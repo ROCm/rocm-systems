@@ -247,7 +247,6 @@ Examples:
         action="store_true",
         help="\t\t\tTorch Operators, maps operators to counter values.",
     )
-
     profile_group.add_argument(
         "-k",
         "--kernel",
