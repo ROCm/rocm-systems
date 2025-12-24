@@ -690,8 +690,7 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
 
     if(get_use_timemory())
     {
-        component::category_region<category::rocm_marker_api>::start<quirk::timemory>(
-            _name);
+        tracing::push_timemory(category::rocm_marker_api{}, _name);
     }
 }
 
@@ -761,8 +760,7 @@ tool_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        component::category_region<category::rocm_marker_api>::stop<quirk::timemory>(
-            _name);
+        tracing::pop_timemory(category::rocm_marker_api{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1102,8 +1100,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 
     if(get_use_timemory())
     {
-        component::category_region<category::rocm_marker_api>::start<quirk::timemory>(
-            _name);
+        tracing::push_timemory(category::rocm_marker_api{}, _name);
     }
 
     if(get_use_perfetto())
@@ -1149,8 +1146,7 @@ ompt_tracing_callback_stop(
 
     if(get_use_timemory())
     {
-        component::category_region<category::rocm_marker_api>::stop<quirk::timemory>(
-            _name);
+        tracing::pop_timemory(category::rocm_marker_api{}, _name);
     }
 
     if(get_use_perfetto())

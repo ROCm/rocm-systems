@@ -705,6 +705,11 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+// Add a static cache for KFD nodes with initialization flag
+static std::once_flag kfd_nodes_initialized;
+static std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> cached_nodes;
+static uint32_t cached_smallest_node_id = std::numeric_limits<uint32_t>::max();
+
 amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
                                 amdsmi_enumeration_info_t *info){
@@ -733,25 +738,26 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     info->drm_render = gpu_device->get_drm_render_minor();
 
     // Retrieve HIP ID (difference from the smallest node ID) and HSA ID
-    std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
-    if (amd::smi::DiscoverKFDNodes(&nodes) == 0) {
-        uint32_t smallest_node_id = std::numeric_limits<uint32_t>::max();
-        for (const auto& node_pair : nodes) {
-            uint32_t node_id = 0;
-            if (node_pair.second->get_node_id(&node_id) == 0) {
-                smallest_node_id = std::min(smallest_node_id, node_id);
+    // Initialize KFD nodes once
+    std::call_once(kfd_nodes_initialized, []() {
+        if (amd::smi::DiscoverKFDNodes(&cached_nodes) == 0) {
+            for (const auto& node_pair : cached_nodes) {
+                uint32_t node_id = 0;
+                if (node_pair.second->get_node_id(&node_id) == 0) {
+                    cached_smallest_node_id = std::min(cached_smallest_node_id, node_id);
+                }
             }
         }
+    });
 
-        // Default to 0xffffffff as not supported
-        info->hsa_id = std::numeric_limits<uint32_t>::max();
-        info->hip_id = std::numeric_limits<uint32_t>::max();
-        amdsmi_kfd_info_t kfd_info;
-        status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            info->hsa_id = kfd_info.node_id;
-            info->hip_id = kfd_info.node_id - smallest_node_id;
-        }
+    // Default to 0xffffffff as not supported
+    info->hsa_id = std::numeric_limits<uint32_t>::max();
+    info->hip_id = std::numeric_limits<uint32_t>::max();
+    amdsmi_kfd_info_t kfd_info;
+    status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        info->hsa_id = kfd_info.node_id;
+        info->hip_id = kfd_info.node_id - cached_smallest_node_id;
     }
 
     // Retrieve HIP UUID
@@ -5249,6 +5255,202 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     drm_free_version(drm_version);
     libdrm.unload();
     return status;
+}
+
+// PTL
+
+bool amdsmi_is_supported_format(
+    const std::vector<amdsmi_ptl_data_format_t> &supported,
+    amdsmi_ptl_data_format_t fmt) {
+  return std::find(supported.begin(), supported.end(), fmt) != supported.end();
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool *enabled) {
+    return rsmi_wrapper(rsmi_get_gpu_ptl_state, processor_handle, 0, enabled);  
+}
+
+amdsmi_status_t
+amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool enable) {
+  return rsmi_wrapper(rsmi_set_gpu_ptl_state, processor_handle, 0, enable);
+}
+
+// Mapping for PTL string <-> enum
+struct PtlFormatMapEntry {
+  const char* token;
+  amdsmi_ptl_data_format_t fmt;
+};
+
+PtlFormatMapEntry kPtlFormatMap[] = {
+  {"I8",   AMDSMI_PTL_DATA_FORMAT_I8},
+  {"F16",  AMDSMI_PTL_DATA_FORMAT_F16},
+  {"BF16", AMDSMI_PTL_DATA_FORMAT_BF16},
+  {"F32",  AMDSMI_PTL_DATA_FORMAT_F32},
+  {"F64",  AMDSMI_PTL_DATA_FORMAT_F64},
+};
+static constexpr size_t kPtlFormatMapSize =
+    sizeof(kPtlFormatMap) / sizeof(kPtlFormatMap[0]);
+
+// Given string, return ptl data format enum
+amdsmi_ptl_data_format_t token_to_amdsmi_fmt(std::string token) {
+  token = amd::smi::trim(token);
+  if (token.empty()) {
+    return AMDSMI_PTL_DATA_FORMAT_INVALID;
+  }
+
+  // Ensure upper case for comparison
+  for (auto &c : token) {
+    c = std::toupper(static_cast<unsigned char>(c));
+  }
+
+  for (size_t i = 0; i < kPtlFormatMapSize; ++i) {
+    if (token == kPtlFormatMap[i].token) {
+      return kPtlFormatMap[i].fmt;
+    }
+  }
+  return AMDSMI_PTL_DATA_FORMAT_INVALID;
+}
+
+// Given ptl format, return string representation
+const char* amdsmi_fmt_to_token(amdsmi_ptl_data_format_t fmt) {
+  for (size_t i = 0; i < kPtlFormatMapSize; ++i) {
+    if (kPtlFormatMap[i].fmt == fmt) {
+      return kPtlFormatMap[i].token;
+    }
+  }
+  return "N/A";
+}
+
+// Internal only helper to create supported ptl formats
+amdsmi_status_t amdsmi_read_supported_ptl_formats(
+    amdsmi_processor_handle processor_handle,
+    std::vector<amdsmi_ptl_data_format_t> &out) {
+
+  out.clear();
+
+  std::string line;
+  {
+    char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
+    amdsmi_status_t st = rsmi_wrapper(
+        rsmi_read_supported_ptl_formats, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
+
+    if (st != AMDSMI_STATUS_SUCCESS) {
+        return st;
+    }
+    line.assign(buf);
+  }
+
+  line = amd::smi::trim(line);
+  auto tokens = split_string(line, ',');
+  if (tokens.empty()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  for (const auto &t : tokens) {
+    amdsmi_ptl_data_format_t f = token_to_amdsmi_fmt(t);
+    if (f == AMDSMI_PTL_DATA_FORMAT_INVALID) {
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+    out.push_back(f);
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                        amdsmi_ptl_data_format_t *data_format1,
+                        amdsmi_ptl_data_format_t *data_format2)
+{
+
+    if (data_format1 == nullptr || data_format2 == nullptr) {
+        return AMDSMI_STATUS_ARG_PTR_NULL;
+    }
+    *data_format1 = AMDSMI_PTL_DATA_FORMAT_INVALID;
+    *data_format2 = AMDSMI_PTL_DATA_FORMAT_INVALID;
+
+    // Ensure PTL enabled
+    bool enabled = false;
+    amdsmi_status_t st = amdsmi_get_gpu_ptl_state(processor_handle, &enabled);
+    if (st != AMDSMI_STATUS_SUCCESS) {
+        return st;
+    }
+    if (!enabled) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Read ptl sysfs
+    std::string line;
+    {
+        char buf[AMDSMI_MAX_STRING_LENGTH] = {0};
+        st = rsmi_wrapper(rsmi_get_gpu_ptl_formats, processor_handle, 0, buf, AMDSMI_MAX_STRING_LENGTH);
+        if (st != AMDSMI_STATUS_SUCCESS) {
+            return st;
+        }
+        line.assign(buf);
+    }
+
+    line = amd::smi::trim(line);
+    auto tokens = split_string(line, ',');
+    if (tokens.empty() || tokens.size() != 2) {
+        return AMDSMI_STATUS_UNEXPECTED_SIZE;  // malformed sysfs content
+    }
+    
+    // Parse tokens
+    amdsmi_ptl_data_format_t f1 = token_to_amdsmi_fmt(tokens[0]);
+    if (f1 == AMDSMI_PTL_DATA_FORMAT_INVALID) {
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+
+    amdsmi_ptl_data_format_t f2 = token_to_amdsmi_fmt(tokens[1]);
+    if (f2 == AMDSMI_PTL_DATA_FORMAT_INVALID) {
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+
+    *data_format1 = f1;
+    *data_format2 = f2;
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t
+amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                          amdsmi_ptl_data_format_t data_format1,
+                          amdsmi_ptl_data_format_t data_format2)
+{
+
+    if (data_format1 == AMDSMI_PTL_DATA_FORMAT_INVALID ||
+        data_format2 == AMDSMI_PTL_DATA_FORMAT_INVALID ||
+        data_format1 == data_format2) {
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+    }
+
+    // Ensure PTL enabled
+    bool enabled = false;
+    amdsmi_status_t st = amdsmi_get_gpu_ptl_state(processor_handle, &enabled);
+    if (st != AMDSMI_STATUS_SUCCESS) {
+        return st;
+    }
+    if (!enabled) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Read supported formats and check both are allowed
+    std::vector<amdsmi_ptl_data_format_t> supported;
+    st = amdsmi_read_supported_ptl_formats(processor_handle, supported);
+    if (st != AMDSMI_STATUS_SUCCESS) {
+        return st;
+    }
+
+    if (!amdsmi_is_supported_format(supported, data_format1) ||
+        !amdsmi_is_supported_format(supported, data_format2)) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Convert enums to string
+    std::string format = 
+        std::string(amdsmi_fmt_to_token(data_format1)) + "," +
+                    amdsmi_fmt_to_token(data_format2);
+
+    return rsmi_wrapper(rsmi_set_gpu_ptl_formats, processor_handle, 0, format.c_str());   
 }
 
 amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,
