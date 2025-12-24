@@ -41,6 +41,29 @@ import pytest
 
 import utils.utils as utils
 
+
+class MockMSpec:
+    def __init__(
+        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
+    ):
+        self.gpu_model = gpu_model
+        self.gpu_arch = gpu_arch
+        self.compute_partition = compute_partition
+        self.l2_banks = l2_banks
+
+
+class MockArgs:
+    def __init__(self, **kwargs):
+        # Set kwargs as attributes
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
+class MockSoc:
+    def __init__(self):
+        pass
+
+
 logging.trace = lambda *args, **kwargs: None
 
 ##################################################
@@ -322,9 +345,7 @@ def test_get_version_git_success(tmp_path, monkeypatch):
         "utils.utils.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    import utils.utils as utils_mod
-
-    result = utils_mod.get_version(tmp_path)
+    result = utils.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == "abc123"
     assert result["mode"] == "dev"
@@ -356,9 +377,7 @@ def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
         "utils.utils.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    import utils.utils as utils_mod
-
-    result = utils_mod.get_version(tmp_path)
+    result = utils.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == sha_content
     assert result["mode"] == "release"
@@ -387,9 +406,8 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
         "utils.utils.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_version(tmp_path)
+    result = utils.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == "unknown"
     assert result["mode"] == "unknown"
@@ -426,10 +444,9 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
         raise RuntimeError("console_error called")
 
     monkeypatch.setattr("utils.utils.console_error", fake_console_error)
-    import utils.utils as utils_mod
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_mod.detect_rocprof(DummyArgs())
+        utils.detect_rocprof(DummyArgs())
     assert any(
         "Please verify installation or set ROCPROF environment variable" in e
         for e in errors
@@ -457,9 +474,8 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
-    import utils.utils as utils_mod
 
-    result = utils_mod.detect_rocprof(DummyArgs())
+    result = utils.detect_rocprof(DummyArgs())
     assert result == "rocprof"
     assert any(
         "ROC Profiler: /usr/bin/rocprof" in log_entry
@@ -483,9 +499,8 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
-    import utils.utils as utils_mod
 
-    result = utils_mod.detect_rocprof(DummyArgs())
+    result = utils.detect_rocprof(DummyArgs())
     assert result == "rocprofiler-sdk"
     assert any(
         "rocprofiler_sdk_path is /fake/path" in log_entry
@@ -510,9 +525,8 @@ def test_detect_rocprof_sdk(monkeypatch):
     monkeypatch.setattr(
         "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
-    import utils.utils as utils_mod
 
-    result = utils_mod.detect_rocprof(DummyArgs())
+    result = utils.detect_rocprof(DummyArgs())
     assert result == "rocprofiler-sdk"
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
@@ -562,10 +576,8 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
     custom_env = {"CUSTOM_VAR": "test_value"}
-    utils_mod.capture_subprocess_output(["echo", "test"], new_env=custom_env)
+    utils.capture_subprocess_output(["echo", "test"], new_env=custom_env)
 
     # Verify that custom environment was passed
     assert len(popen_calls) == 1
@@ -606,9 +618,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
-    success, output = utils_mod.capture_subprocess_output(
+    success, output = utils.capture_subprocess_output(
         ["echo", "test"], profileMode=True, enable_logging=False
     )
 
@@ -683,9 +693,8 @@ def test_capture_subprocess_output_failure(monkeypatch):
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    import utils.utils as utils_mod
 
-    success, output = utils_mod.capture_subprocess_output(["fail", "test"])
+    success, output = utils.capture_subprocess_output(["fail", "test"])
     assert success is False
     assert "fail" in output
 
@@ -754,9 +763,8 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    import utils.utils as utils_mod
 
-    success, output = utils_mod.capture_subprocess_output(["echo", "test"])
+    success, output = utils.capture_subprocess_output(["echo", "test"])
     assert success is True
     assert output == ""
 
@@ -2447,9 +2455,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
         "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
     )
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
     assert Path(workload_dir + "/test.csv").exists()
 
@@ -2495,9 +2501,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -2542,9 +2546,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(
+    utils.run_prof(
         str(fname), profiler_options, workload_dir, mspec, logging.INFO, "csv"
     )
 
@@ -2587,9 +2589,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
         "yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}}
     )
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
@@ -2629,12 +2629,8 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.console_error", mock_console_error)
 
-    import utils.utils as utils_mod
-
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_mod.run_prof(
-            str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-        )
+        utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
@@ -2677,12 +2673,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
-
-    assert "ROCPROFILER_INDIVIDUAL_XCC_MODE" in captured_env
-    assert captured_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] == "1"
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
@@ -2742,9 +2733,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_no_results_files(tmp_path, monkeypatch):
@@ -2779,9 +2768,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_header_standardization(tmp_path, monkeypatch):
@@ -2837,9 +2824,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    import utils.utils as utils_mod
-
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
     final_headers = write_calls[-1][1] if write_calls else []
     assert "Kernel_Name" in final_headers
@@ -2891,23 +2876,8 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
 
-    import utils.utils as utils_mod
-
     # Execute function
-    utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
-
-
-import utils.utils as utils_mod  # noqa
-
-
-class MockMSpec:
-    def __init__(
-        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
-    ):
-        self.gpu_model = gpu_model
-        self.gpu_arch = gpu_arch
-        self.compute_partition = compute_partition
-        self.l2_banks = l2_banks
+    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
 
 
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
@@ -2947,7 +2917,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     mock_fname_path_obj.stem = "counters"
     mock_fname_path_obj.name = "counters.txt"
     mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=Path)
+
+    mock_div_result = mock.Mock(spec=Path)
+    mock_div_result.parent = "dummy_path"
+    mock_fname_path_obj.__truediv__.return_value = mock_div_result
 
     mock_out_path_obj = mock.Mock(spec=Path)
     mock_out_path_obj.exists.return_value = False
@@ -2972,11 +2945,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
-    original_env_var = "original_value"
-    monkeypatch.setenv("EXISTING_VAR", original_env_var)
-    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)
-
-    profiler_options = {"APP_CMD": "my_app --arg"}
     mspec = MockMSpec(gpu_model="mi250")
     loglevel = logging.DEBUG
     format_rocprof_output = True
@@ -2986,17 +2954,50 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("tempfile.mkdtemp", lambda *a, **k: None)
+    monkeypatch.setattr("yaml.dump", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
 
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options.copy(),
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
+    from rocprof_compute_profile.profiler_rocprofiler_sdk import (
+        rocprofiler_sdk_profiler as rocprofiler_sdk_profiler,
     )
+
+    profiler = rocprofiler_sdk_profiler(
+        profiling_args=MockArgs(
+            rocprofiler_sdk_tool_path="sdk_tool",
+            roof_only=True,
+            format_rocprof_output="format",
+            path="path",
+            remaining="remaining",
+            iteration_multiplexing=None,
+            attach_pid=None,
+            kokkos_trace=None,
+            hip_trace=None,
+            kernel=None,
+            dispatch=None,
+        ),
+        profiler_mode="rocprofiler-sdk",
+        soc=MockSoc(),
+    )
+
+    # Since we check all env. vars. in test,
+    # empty them out while calling profiling function
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert len(os.environ) == 0
+        original_env_var = "original_value"
+        monkeypatch.setenv("EXISTING_VAR", original_env_var)
+        monkeypatch.setenv("LD_LIBRARY_PATH", original_env_var)
+        profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
+
+        utils.run_prof(
+            fname_str,
+            profiler_options,
+            workload_dir_str,
+            mspec,
+            loglevel,
+            format_rocprof_output,
+        )
 
     assert capture_subprocess_called_with_env is not None, (
         "new_env should have been created"
@@ -3004,8 +3005,22 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert "EXISTING_VAR" in capture_subprocess_called_with_env, (
         "new_env should be a copy of os.environ"
     )
+    # Ensure existing env. vars. are preserved
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
-    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
+    # Ensure LD_LIBRARY_PATH is not touched
+    assert capture_subprocess_called_with_env["LD_LIBRARY_PATH"] == original_env_var
+    assert (
+        capture_subprocess_called_with_env["ROCPROFILER_METRICS_PATH"] == "dummy_path"
+    )
+    assert capture_subprocess_called_with_env["ROCPROF_COUNTER_COLLECTION"] == "0"
+    assert capture_subprocess_called_with_env["LD_PRELOAD"] == "sdk_tool:native_tool"
+    assert capture_subprocess_called_with_env["ROCPROF_KERNEL_TRACE"] == "1"
+    assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_FORMAT"] == "format"
+    assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_PATH"] == "path/out/pmc_1"
+    assert (
+        capture_subprocess_called_with_env["ROCPROF_COUNTERS"]
+        == "pmc: COUNTER1 COUNTER2"
+    )
     assert "APP_CMD" not in capture_subprocess_called_with_env
 
 
@@ -3103,7 +3118,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     hip_trace_called_with = None
     kokkos_trace_called_with = None
 
-    utils_mod.run_prof(
+    utils.run_prof(
         fname_str,
         profiler_options_sdk_hip.copy(),
         workload_dir_str,
@@ -3120,7 +3135,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     hip_trace_called_with = None
     kokkos_trace_called_with = None
 
-    utils_mod.run_prof(
+    utils.run_prof(
         fname_str,
         profiler_options_cli_kokkos,
         workload_dir_str,
@@ -3135,7 +3150,7 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     hip_trace_called_with = None
     kokkos_trace_called_with = None
 
-    utils_mod.run_prof(
+    utils.run_prof(
         fname_str,
         profiler_options_cli_hip,
         workload_dir_str,
@@ -3190,9 +3205,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
         "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output(workload_dir, False)
+    result = utils.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 1
     assert str(converted_file) in result
@@ -3236,9 +3249,7 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
     warnings = []
     monkeypatch.setattr("utils.utils.console_warning", lambda msg: warnings.append(msg))
 
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output(workload_dir, False)
+    result = utils.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
     assert len(warnings) == 1
@@ -3270,10 +3281,8 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
 
     monkeypatch.setattr("glob.glob", mock_glob)
 
-    import utils.utils as utils_mod
-
     with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
-        utils_mod.process_rocprofv3_output(workload_dir, False)
+        utils.process_rocprofv3_output(workload_dir, False)
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
@@ -3294,9 +3303,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
 
     monkeypatch.setattr("glob.glob", lambda pattern: [])
 
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output(workload_dir, False)
+    result = utils.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
 
@@ -3347,9 +3354,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
         "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    import utils.utils as utils_mod
-
-    result = utils_mod.process_rocprofv3_output(workload_dir, False)
+    result = utils.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 2
     assert str(converted_file1) in result
@@ -3383,9 +3388,7 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     )
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
 
-    import utils.utils as utils_mod
-
-    success, output = utils_mod.capture_subprocess_output(
+    success, output = utils.capture_subprocess_output(
         ["echo", "test"], enable_logging=False
     )
 
@@ -3427,9 +3430,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
 
     fbase = "single_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     # Check output file in pmc_1 directory
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
@@ -3472,9 +3473,8 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     )
 
     fbase = "test_workload"
-    import utils.utils as utils_mod
 
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists(), "The primary output file was not created."
@@ -3523,10 +3523,8 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+        utils.process_kokkos_trace_output(workload_dir, fbase)
 
         output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
         assert output_file.exists()
@@ -3585,9 +3583,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.read_csv", mock_read_csv)
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3643,10 +3639,8 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+        utils.process_kokkos_trace_output(workload_dir, fbase)
 
         # Should not copy file to workload directory since /out doesn't exist
         copied_file = tmp_path / f"{fbase}_marker_api_trace.csv"
@@ -3685,9 +3679,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
 
     fbase = "headers_only"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3735,9 +3727,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
 
     fbase = "large_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3776,9 +3766,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
 
     fbase = "unicode_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3824,9 +3812,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
 
     fbase = "schema_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+    utils.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3875,43 +3861,40 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv_permission_error)
 
-    import utils.utils as utils_mod
-
     with pytest.raises(PermissionError):
-        utils_mod.process_kokkos_trace_output(workload_dir, fbase)
+        utils.process_kokkos_trace_output(workload_dir, fbase)
 
 
 # =============================================================================
 # HIP TRACE PROCESSING TESTS
+#
+# These test cases comprehensively cover:
+#
+# Multiple valid CSV files concatenation
+# Single file processing
+# Different CSV schemas handling
+# Edge Cases:
+#
+# No files found
+# Files listed by glob but don't exist
+# Empty CSV files
+# CSV files with only headers
+# Corrupted/malformed CSV data
+# Error Conditions:
+#
+# Permission errors during file operations
+# Invalid filename characters
+# Output directory doesn't exist
+# Performance & Special Content:
+#
+# Large files (memory handling)
+# Unicode content handling
+# Mixed file states (valid, empty, corrupted)
+# File System Edge Cases:
+#
+# Missing output directory for copy operation
+# File I/O errors
 # =============================================================================
-"""
-These test cases comprehensively cover:
-
-Multiple valid CSV files concatenation
-Single file processing
-Different CSV schemas handling
-Edge Cases:
-
-No files found
-Files listed by glob but don't exist
-Empty CSV files
-CSV files with only headers
-Corrupted/malformed CSV data
-Error Conditions:
-
-Permission errors during file operations
-Invalid filename characters
-Output directory doesn't exist
-Performance & Special Content:
-
-Large files (memory handling)
-Unicode content handling
-Mixed file states (valid, empty, corrupted)
-File System Edge Cases:
-
-Missing output directory for copy operation
-File I/O errors
-"""
 
 
 def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
@@ -3942,9 +3925,8 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     )
 
     fbase = "test_workload"
-    import utils.utils as utils_mod
 
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists(), "The primary output file was not created."
@@ -3986,9 +3968,7 @@ def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
 
     fbase = "single_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4025,10 +4005,8 @@ def test_process_hip_trace_output_no_files_found(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
         output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
         assert output_file.exists()
@@ -4076,10 +4054,8 @@ def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
         output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
         assert output_file.exists()
@@ -4118,9 +4094,7 @@ def test_process_hip_trace_output_empty_csv_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.read_csv", mock_read_csv)
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4149,9 +4123,7 @@ def test_process_hip_trace_output_different_schemas(tmp_path, monkeypatch):
 
     fbase = "mixed_schema"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4199,10 +4171,8 @@ def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", mock_path_exists)
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
         copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
         assert not copied_file.exists()
@@ -4237,10 +4207,8 @@ def test_process_hip_trace_output_file_permission_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr("shutil.copyfile", mock_copyfile)
 
-    import utils.utils as utils_mod
-
     with pytest.raises(PermissionError):
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
 
 def test_process_hip_trace_output_corrupted_csv_files(tmp_path, monkeypatch):
@@ -4263,10 +4231,8 @@ def test_process_hip_trace_output_corrupted_csv_files(tmp_path, monkeypatch):
 
     fbase = "corrupted_test"
 
-    import utils.utils as utils_mod
-
     try:
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
         output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
         assert output_file.exists()
@@ -4306,9 +4272,7 @@ def test_process_hip_trace_output_large_files(tmp_path, monkeypatch):
 
     fbase = "large_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4340,9 +4304,7 @@ def test_process_hip_trace_output_unicode_content(tmp_path, monkeypatch):
 
     fbase = "unicode_test"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4371,9 +4333,7 @@ def test_process_hip_trace_output_csv_with_only_headers(tmp_path, monkeypatch):
 
     fbase = "headers_only"
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4421,9 +4381,7 @@ def test_process_hip_trace_output_mixed_file_states(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.read_csv", mock_read_csv)
 
-    import utils.utils as utils_mod
-
-    utils_mod.process_hip_trace_output(workload_dir, fbase)
+    utils.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
     assert output_file.exists()
@@ -4450,45 +4408,43 @@ def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch
 
     fbase = "test\x00invalid"
 
-    import utils.utils as utils_mod
-
     with pytest.raises((OSError, ValueError)):
-        utils_mod.process_hip_trace_output(workload_dir, fbase)
+        utils.process_hip_trace_output(workload_dir, fbase)
 
 
-"""
-Normal Functionality:
-
-Basic submodule listing with real packages
-Correct name processing with underscores
-Multiple underscore handling
-Base module filtering
-Edge Cases:
-
-Empty packages (no submodules)
-Non-existent packages
-Names without underscores (IndexError case)
-Empty name parts
-Packages without __path__ attribute
-Error Conditions:
-
-ModuleNotFoundError for invalid packages
-AttributeError for packages without __path__
-TypeError for invalid input types
-ImportError from pkgutil.walk_packages
-Special Scenarios:
-
-Large numbers of submodules
-Special characters in names
-Unicode character handling
-Import isolation testing
-Mixed module types
-Data Integrity:
-
-Return type consistency
-Docstring verification
-Behavior validation
-"""
+# =============================================================================
+# Normal Functionality:
+#
+# Basic submodule listing with real packages
+# Correct name processing with underscores
+# Multiple underscore handling
+# Base module filtering
+# Edge Cases:
+#
+# Empty packages (no submodules)
+# Non-existent packages
+# Names without underscores (IndexError case)
+# Empty name parts
+# Packages without __path__ attribute
+# Error Conditions:
+#
+# ModuleNotFoundError for invalid packages
+# AttributeError for packages without __path__
+# TypeError for invalid input types
+# ImportError from pkgutil.walk_packages
+# Special Scenarios:
+#
+# Large numbers of submodules
+# Special characters in names
+# Unicode character handling
+# Import isolation testing
+# Mixed module types
+# Data Integrity:
+#
+# Return type consistency
+# Docstring verification
+# Behavior validation
+# =============================================================================
 
 
 mock_package = mock.MagicMock()
@@ -4510,9 +4466,7 @@ def test_get_submodules_basic_functionality(mock_walk, mock_import):
         None: Asserts function correctly lists submodules from a real package.
     """
 
-    import utils.utils as utils_mod
-
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert len(result) == 3
@@ -4529,14 +4483,12 @@ def test_get_submodules_empty_package():
     """
     from unittest.mock import MagicMock, patch
 
-    import utils.utils as utils_mod
-
     mock_package = MagicMock()
     mock_package.__path__ = ["/fake/path"]
 
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=[]):
-            result = utils_mod.get_submodules("empty_package")
+            result = utils.get_submodules("empty_package")
 
             assert isinstance(result, list)
             assert len(result) == 0
@@ -4549,10 +4501,9 @@ def test_get_submodules_package_not_found():
     Returns:
         None: Asserts ModuleNotFoundError is raised for non-existent packages.
     """
-    import utils.utils as utils_mod
 
     with pytest.raises(ModuleNotFoundError):
-        utils_mod.get_submodules("nonexistent_package_12345")
+        utils.get_submodules("nonexistent_package_12345")
 
 
 mock_package_single = mock.MagicMock()
@@ -4573,9 +4524,8 @@ def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import
     Returns:
         None: Asserts correct name processing for submodules with single underscore.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["parser", "request", "error"]
     assert result == expected
 
@@ -4598,9 +4548,8 @@ def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_imp
     Returns:
         None: Asserts correct name processing for complex underscore patterns.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["somecomplexname", "anothertestcase", "simple"]
     assert result == expected
 
@@ -4623,9 +4572,8 @@ def test_get_submodules_base_module_filtered(mock_walk, mock_import):
     Returns:
         None: Asserts 'base' submodules are excluded from results.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["parser", "handler"]
     assert result == expected
     assert "base" not in result
@@ -4648,10 +4596,9 @@ def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
     Returns:
         None: Asserts function handles names without underscores by raising IndexError.
     """
-    import utils.utils as utils_mod
 
     with pytest.raises(IndexError):
-        utils_mod.get_submodules("test_package")
+        utils.get_submodules("test_package")
 
 
 mock_package_empty_parts = mock.MagicMock()
@@ -4672,10 +4619,9 @@ def test_get_submodules_empty_name_parts(mock_walk, mock_import):
     Returns:
         None: Asserts function handles edge cases in name processing.
     """
-    import utils.utils as utils_mod
 
     try:
-        result = utils_mod.get_submodules("test_package")
+        result = utils.get_submodules("test_package")
         expected = ["", "", "double"]  # noqa - Empty strings for edge cases
         assert len(result) == 3
     except IndexError:
@@ -4691,14 +4637,12 @@ def test_get_submodules_package_without_path_attribute():
     """
     from unittest.mock import MagicMock, patch
 
-    import utils.utils as utils_mod
-
     mock_package = MagicMock()
     del mock_package.__path__
 
     with patch("importlib.import_module", return_value=mock_package):
         with pytest.raises(AttributeError):
-            utils_mod.get_submodules("test_package")
+            utils.get_submodules("test_package")
 
 
 mock_package_exception = mock.MagicMock()
@@ -4714,10 +4658,9 @@ def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
     Returns:
         None: Asserts exceptions from pkgutil.walk_packages are properly handled.
     """
-    import utils.utils as utils_mod
 
     with pytest.raises(ImportError):
-        utils_mod.get_submodules("test_package")
+        utils.get_submodules("test_package")
 
 
 mock_package_mixed = mock.MagicMock()
@@ -4740,9 +4683,8 @@ def test_get_submodules_mixed_module_types(mock_walk, mock_import):
     Returns:
         None: Asserts function correctly processes various submodule patterns.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["parser", "testcase", "simple", "anotherbase"]
     assert result == expected
     assert "base" not in result
@@ -4767,9 +4709,8 @@ def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
     Returns:
         None: Asserts function handles large numbers of submodules correctly.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     assert len(result) == 100
     assert result == expected_results_large
 
@@ -4782,16 +4723,15 @@ def test_get_submodules_string_input_validation():
         None: Asserts function handles invalid input types
         but may not validate properly.
     """
-    import utils.utils as utils_mod
 
     with pytest.raises((TypeError, AttributeError)):
-        utils_mod.get_submodules(None)
+        utils.get_submodules(None)
 
     with pytest.raises((TypeError, AttributeError)):
-        utils_mod.get_submodules(123)
+        utils.get_submodules(123)
 
     with pytest.raises((TypeError, AttributeError)):
-        utils_mod.get_submodules(["list", "input"])
+        utils.get_submodules(["list", "input"])
 
 
 def test_get_submodules_return_type_consistency():
@@ -4803,21 +4743,19 @@ def test_get_submodules_return_type_consistency():
     """
     from unittest.mock import MagicMock, patch
 
-    import utils.utils as utils_mod
-
     mock_package = MagicMock()
     mock_package.__path__ = ["/fake/path"]
 
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=[]):
-            result = utils_mod.get_submodules("test_package")
+            result = utils.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
     mock_submodules = [(None, "module_base", False)]
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils_mod.get_submodules("test_package")
+            result = utils.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
@@ -4840,9 +4778,8 @@ def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
     Returns:
         None: Asserts function processes special characters in names correctly.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["test-case", "test.case", "test123"]
     assert result == expected
 
@@ -4863,12 +4800,10 @@ def test_get_submodules_imports_isolation(mock_walk, mock_import):
     """
     import sys
 
-    import utils.utils as utils_mod
-
     original_importlib = sys.modules.get("importlib")
     original_pkgutil = sys.modules.get("pkgutil")
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
 
     assert sys.modules.get("importlib") == original_importlib
     assert sys.modules.get("pkgutil") == original_pkgutil
@@ -4894,9 +4829,8 @@ def test_get_submodules_unicode_names(mock_walk, mock_import):
     Returns:
         None: Asserts function handles Unicode characters appropriately.
     """
-    import utils.utils as utils_mod
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
     expected = ["tëst", "测试", "тест"]
     assert result == expected
 
@@ -4918,14 +4852,11 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
     Returns:
         None: Asserts function behavior aligns with documented purpose.
     """
-    import utils.utils as utils_mod
 
-    assert utils_mod.get_submodules.__doc__ is not None
-    assert (
-        "List all submodules for a target package" in utils_mod.get_submodules.__doc__
-    )  # noqa
+    assert utils.get_submodules.__doc__ is not None
+    assert "List all submodules for a target package" in utils.get_submodules.__doc__  # noqa
 
-    result = utils_mod.get_submodules("test_package")
+    result = utils.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert "submodule1" in result
@@ -4934,40 +4865,39 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
+#
+# Normal Functionality:
+#
+# Valid CSV files with data
+# Mixed valid and invalid data
+# Large datasets
+# Unicode content handling
+# Edge Cases:
+#
+# Empty CSV files
+# CSV with only headers
+# Files with all NaN values that become empty after dropna()
+# Malformed CSV files
+# Missing pmc_perf.csv file
+# Nonexistent directories
+# Error Conditions:
+#
+# File permission errors
+# CSV reading errors
+# Directory access issues
+# String Formatting and Dependencies:
+#
+# Console error message formatting
+# Path handling (string vs Path)
+# Pandas dependency verification
+# Return value consistency
+# Special Scenarios:
+#
+# Special characters in paths
+# Unicode content in CSV files
+# Large datasets with performance implications
+# Different input path types
 # =============================================================================
-"""
-Normal Functionality:
-
-Valid CSV files with data
-Mixed valid and invalid data
-Large datasets
-Unicode content handling
-Edge Cases:
-
-Empty CSV files
-CSV with only headers
-Files with all NaN values that become empty after dropna()
-Malformed CSV files
-Missing pmc_perf.csv file
-Nonexistent directories
-Error Conditions:
-
-File permission errors
-CSV reading errors
-Directory access issues
-String Formatting and Dependencies:
-
-Console error message formatting
-Path handling (string vs Path)
-Pandas dependency verification
-Return value consistency
-Special Scenarios:
-
-Special characters in paths
-Unicode content in CSV files
-Large datasets with performance implications
-Different input path types
-"""
 
 
 def test_is_workload_empty_valid_data_file(tmp_path):
@@ -4981,8 +4911,6 @@ def test_is_workload_empty_valid_data_file(tmp_path):
         None: Asserts function handles valid data files without errors.
     """
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
@@ -5000,7 +4928,7 @@ kernel3,0,120,220"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -5016,8 +4944,6 @@ def test_is_workload_empty_file_with_nan_values(tmp_path):
         None: Asserts function detects and reports empty cells after dropping NaN.
     """
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
@@ -5035,7 +4961,7 @@ NaN,,,"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5057,8 +4983,6 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5072,7 +4996,7 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
         try:
-            utils_mod.is_workload_empty(str(workload_dir))
+            utils.is_workload_empty(str(workload_dir))
         except Exception:
             pass
 
@@ -5089,8 +5013,6 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5104,7 +5026,7 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5124,8 +5046,6 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5135,7 +5055,7 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5152,15 +5072,13 @@ def test_is_workload_empty_nonexistent_directory():
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty("/nonexistent/path")
+        utils.is_workload_empty("/nonexistent/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5180,8 +5098,6 @@ def test_is_workload_empty_malformed_csv(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5199,7 +5115,7 @@ incomplete_row"""
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
         try:
-            utils_mod.is_workload_empty(str(workload_dir))
+            utils.is_workload_empty(str(workload_dir))
         except Exception:
             pass
 
@@ -5215,8 +5131,6 @@ def test_is_workload_empty_mixed_valid_invalid_data(tmp_path):
         None: Asserts function handles mixed data correctly.
     """
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
@@ -5235,7 +5149,7 @@ kernel3,1,120,
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -5251,8 +5165,6 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
         None: Asserts function correctly processes large datasets.
     """
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
@@ -5271,7 +5183,7 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5291,8 +5203,6 @@ def test_is_workload_empty_unicode_content(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5309,7 +5219,7 @@ kernel_tëst,0,120,220"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -5326,8 +5236,6 @@ def test_is_workload_empty_special_path_characters(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload-test_dir.with.dots"
     workload_dir.mkdir()
 
@@ -5342,7 +5250,7 @@ kernel1,0,100,200"""
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -5359,8 +5267,6 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
     """
     import os
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     if os.name == "nt":
         pytest.skip("Permission test not applicable on Windows")
@@ -5379,7 +5285,7 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
 
     try:
         with patch("utils.utils.console_error", side_effect=mock_console_error):
-            utils_mod.is_workload_empty(str(workload_dir))
+            utils.is_workload_empty(str(workload_dir))
     except PermissionError:
         pass
     finally:
@@ -5395,15 +5301,13 @@ def test_is_workload_empty_string_path_input():
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty("/nonexistent/string/path")
+        utils.is_workload_empty("/nonexistent/string/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5423,8 +5327,6 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5437,7 +5339,7 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
         console_error_calls.append((args, kwargs))
 
     with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils_mod.is_workload_empty(str(workload_dir))
+        utils.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -5460,8 +5362,6 @@ def test_is_workload_empty_function_return_value(tmp_path):
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     workload_dir = tmp_path / "workload"
     workload_dir.mkdir()
 
@@ -5469,7 +5369,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
 
     with patch("utils.utils.console_error"):
-        result = utils_mod.is_workload_empty(str(workload_dir))
+        result = utils.is_workload_empty(str(workload_dir))
 
     assert result is None
 
@@ -5477,7 +5377,7 @@ def test_is_workload_empty_function_return_value(tmp_path):
     workload_dir2.mkdir()
 
     with patch("utils.utils.console_error"):
-        result2 = utils_mod.is_workload_empty(str(workload_dir2))
+        result2 = utils.is_workload_empty(str(workload_dir2))
 
     assert result2 is None
 
@@ -5491,8 +5391,6 @@ def test_is_workload_empty_pandas_import_dependency():
     """
     from unittest.mock import MagicMock, patch
 
-    import utils.utils as utils_mod
-
     mock_pandas = MagicMock()
     mock_df = MagicMock()
     mock_df.dropna.return_value.empty = False
@@ -5502,7 +5400,7 @@ def test_is_workload_empty_pandas_import_dependency():
         with patch("utils.utils.pd", mock_pandas):
             with patch("utils.utils.console_error"):
                 with patch("pathlib.Path.is_file", return_value=True):
-                    utils_mod.is_workload_empty("/test/path")
+                    utils.is_workload_empty("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
     mock_df.dropna.assert_called_once()
@@ -5510,39 +5408,38 @@ def test_is_workload_empty_pandas_import_dependency():
 
 # =============================================================================
 # TESTS FOR LOCAL ENCODING FUNCTION
+#
+# Normal Functionality:
+#
+# Successful C.UTF-8 locale setting
+# Fallback to current UTF-8 locale when C.UTF-8 fails
+# Various UTF-8 encoding formats and case variations
+# Edge Cases:
+#
+# getdefaultlocale returning None or partial None values
+# Empty encoding strings
+# Unusual but valid locale names
+# Multiple function calls
+# Error Conditions:
+#
+# C.UTF-8 locale not available
+# Fallback locale setting failures
+# No UTF-8 locales available on system
+# getdefaultlocale exceptions
+# Various locale.Error scenarios
+# String Handling and Dependencies:
+#
+# UTF-8 substring detection in encoding names
+# Console error message formatting and parameters
+# Locale module dependency verification
+# Return value consistency
+# Special Scenarios:
+#
+# Thread safety simulation
+# Different locale error types and messages
+# Comprehensive error path coverage
+# Module import dependencies
 # =============================================================================
-"""
-Normal Functionality:
-
-Successful C.UTF-8 locale setting
-Fallback to current UTF-8 locale when C.UTF-8 fails
-Various UTF-8 encoding formats and case variations
-Edge Cases:
-
-getdefaultlocale returning None or partial None values
-Empty encoding strings
-Unusual but valid locale names
-Multiple function calls
-Error Conditions:
-
-C.UTF-8 locale not available
-Fallback locale setting failures
-No UTF-8 locales available on system
-getdefaultlocale exceptions
-Various locale.Error scenarios
-String Handling and Dependencies:
-
-UTF-8 substring detection in encoding names
-Console error message formatting and parameters
-Locale module dependency verification
-Return value consistency
-Special Scenarios:
-
-Thread safety simulation
-Different locale error types and messages
-Comprehensive error path coverage
-Module import dependencies
-"""
 
 
 def test_set_locale_encoding_successful_c_utf8():
@@ -5555,8 +5452,6 @@ def test_set_locale_encoding_successful_c_utf8():
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5566,7 +5461,7 @@ def test_set_locale_encoding_successful_c_utf8():
         with patch("utils.utils.console_error", side_effect=mock_console_error):
             mock_setlocale.return_value = None
 
-            utils_mod.set_locale_encoding()
+            utils.set_locale_encoding()
 
             mock_setlocale.assert_called_once_with(locale.LC_ALL, "C.UTF-8")
             assert len(console_error_calls) == 0
@@ -5582,8 +5477,6 @@ def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5598,7 +5491,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
                 ]
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert mock_setlocale.call_count == 2
                 mock_setlocale.assert_any_call(locale.LC_ALL, "C.UTF-8")
@@ -5616,8 +5509,6 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5633,7 +5524,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
                 ]
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5653,8 +5544,6 @@ def test_set_locale_encoding_no_utf8_locale_available():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5666,7 +5555,7 @@ def test_set_locale_encoding_no_utf8_locale_available():
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5688,8 +5577,6 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5701,7 +5588,7 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = None
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5720,8 +5607,6 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5735,7 +5620,7 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
                 mock_getdefaultlocale.return_value = ("en_US", None)
 
                 try:
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
                 except TypeError as e:
                     if "argument of type 'NoneType' is not iterable" in str(e):
                         pytest.skip(
@@ -5762,8 +5647,6 @@ def test_set_locale_encoding_utf8_case_variations():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     utf8_variations = ["UTF-8", "utf-8", "UTF8", "utf8"]
 
     for utf8_variant in utf8_variations:
@@ -5781,7 +5664,7 @@ def test_set_locale_encoding_utf8_case_variations():
                     ]
                     mock_getdefaultlocale.return_value = ("en_US", utf8_variant)
 
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
 
                     if "UTF-8" in utf8_variant:
                         assert len(console_error_calls) == 0
@@ -5800,8 +5683,6 @@ def test_set_locale_encoding_empty_encoding():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5813,7 +5694,7 @@ def test_set_locale_encoding_empty_encoding():
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5832,8 +5713,6 @@ def test_set_locale_encoding_locale_with_utf8_substring():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5851,7 +5730,7 @@ def test_set_locale_encoding_locale_with_utf8_substring():
                     "ISO-8859-1.UTF-8.EXTENDED",
                 )
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 0
                 assert mock_setlocale.call_count == 2
@@ -5866,8 +5745,6 @@ def test_set_locale_encoding_different_locale_error_types():
     """
     import locale
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     error_scenarios = [
         "Locale not supported",
@@ -5892,7 +5769,7 @@ def test_set_locale_encoding_different_locale_error_types():
                     ]
                     mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
 
                     assert len(console_error_calls) == 1
                     assert str(fallback_error) in console_error_calls[0][0][0]
@@ -5907,8 +5784,6 @@ def test_set_locale_encoding_unusual_locale_names():
     """
     import locale
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     unusual_locales = [
         ("C", "UTF-8"),
@@ -5933,7 +5808,7 @@ def test_set_locale_encoding_unusual_locale_names():
                     ]
                     mock_getdefaultlocale.return_value = (locale_name, encoding)
 
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
 
                     assert len(console_error_calls) == 0
                     assert mock_setlocale.call_count == 2
@@ -5950,8 +5825,6 @@ def test_set_locale_encoding_getdefaultlocale_exception():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5964,7 +5837,7 @@ def test_set_locale_encoding_getdefaultlocale_exception():
                 mock_getdefaultlocale.side_effect = Exception("getdefaultlocale failed")
 
                 try:
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
                 except Exception:
                     pass
 
@@ -5979,8 +5852,6 @@ def test_set_locale_encoding_console_error_parameters():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -5992,7 +5863,7 @@ def test_set_locale_encoding_console_error_parameters():
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 args, kwargs = console_error_calls[0]
@@ -6011,13 +5882,11 @@ def test_set_locale_encoding_return_value():
     import locale
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     with patch("locale.setlocale") as mock_setlocale:
         with patch("utils.utils.console_error"):
             mock_setlocale.return_value = None
 
-            result = utils_mod.set_locale_encoding()
+            result = utils.set_locale_encoding()
             assert result is None
 
     with patch("locale.setlocale") as mock_setlocale:
@@ -6026,7 +5895,7 @@ def test_set_locale_encoding_return_value():
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                result = utils_mod.set_locale_encoding()
+                result = utils.set_locale_encoding()
                 assert result is None
 
 
@@ -6039,8 +5908,6 @@ def test_set_locale_encoding_locale_module_import():
     """
     import locale
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     setlocale_calls = []
     getdefaultlocale_calls = []
@@ -6061,7 +5928,7 @@ def test_set_locale_encoding_locale_module_import():
     with patch("locale.setlocale", side_effect=mock_setlocale):
         with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
             with patch("utils.utils.console_error", side_effect=mock_console_error):
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
     assert len(setlocale_calls) == 1
     assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
@@ -6081,7 +5948,7 @@ def test_set_locale_encoding_locale_module_import():
     with patch("locale.setlocale", side_effect=mock_setlocale_with_error):
         with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
             with patch("utils.utils.console_error", side_effect=mock_console_error):
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
     assert len(setlocale_calls) == 2
     assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
@@ -6099,8 +5966,6 @@ def test_set_locale_encoding_multiple_calls():
     """
     from unittest.mock import patch
 
-    import utils.utils as utils_mod
-
     console_error_calls = []
 
     def mock_console_error(*args, **kwargs):
@@ -6110,9 +5975,9 @@ def test_set_locale_encoding_multiple_calls():
         with patch("utils.utils.console_error", side_effect=mock_console_error):
             mock_setlocale.return_value = None
 
-            utils_mod.set_locale_encoding()
-            utils_mod.set_locale_encoding()
-            utils_mod.set_locale_encoding()
+            utils.set_locale_encoding()
+            utils.set_locale_encoding()
+            utils.set_locale_encoding()
 
             assert mock_setlocale.call_count == 3
             assert len(console_error_calls) == 0
@@ -6127,8 +5992,6 @@ def test_set_locale_encoding_thread_safety_simulation():
     """
     import locale
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     call_count = 0
 
@@ -6149,7 +6012,7 @@ def test_set_locale_encoding_thread_safety_simulation():
             with patch("utils.utils.console_error", side_effect=mock_console_error):
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils_mod.set_locale_encoding()
+                utils.set_locale_encoding()
 
                 assert call_count == 2
                 assert len(console_error_calls) == 0
@@ -6164,8 +6027,6 @@ def test_set_locale_encoding_comprehensive_error_handling():
     """
     import locale
     from unittest.mock import patch
-
-    import utils.utils as utils_mod
 
     console_error_calls = []
 
@@ -6213,7 +6074,7 @@ def test_set_locale_encoding_comprehensive_error_handling():
                         "getdefaultlocale_return"
                     ]
 
-                    utils_mod.set_locale_encoding()
+                    utils.set_locale_encoding()
 
                     assert len(console_error_calls) == scenario["expected_errors"], (
                         f"Failed scenario: {scenario['name']}"
@@ -6222,44 +6083,43 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
 # =============================================================================
 # TESTS FOR reverse_multi_index_df_pmc FUNCTION
+#
+# Normal Functionality:
+#
+# Basic multi-index DataFrame decomposition
+# Multiple levels with different column counts
+# Data type preservation
+# Column order preservation
+# Edge Cases:
+#
+# Single-level columns (error case)
+# Empty DataFrames
+# Single column per level
+# Uneven column distribution
+# Single row DataFrames
+# Error Conditions:
+#
+# Non-multi-index columns raising ValueError
+# Proper error message validation
+# Data Integrity:
+#
+# Mixed data types preservation
+# NaN value handling
+# Index preservation
+# Memory efficiency
+# Special Scenarios:
+#
+# Special characters in column names
+# Numeric level names
+# Three-level MultiIndex handling
+# Large DataFrame performance
+# Duplicate level name handling
+# Return Value Validation:
+#
+# Correct return types (list of DataFrames, list of levels)
+# Proper DataFrame structure in results
+# Consistent length of returned lists
 # =============================================================================
-"""
-Normal Functionality:
-
-Basic multi-index DataFrame decomposition
-Multiple levels with different column counts
-Data type preservation
-Column order preservation
-Edge Cases:
-
-Single-level columns (error case)
-Empty DataFrames
-Single column per level
-Uneven column distribution
-Single row DataFrames
-Error Conditions:
-
-Non-multi-index columns raising ValueError
-Proper error message validation
-Data Integrity:
-
-Mixed data types preservation
-NaN value handling
-Index preservation
-Memory efficiency
-Special Scenarios:
-
-Special characters in column names
-Numeric level names
-Three-level MultiIndex handling
-Large DataFrame performance
-Duplicate level name handling
-Return Value Validation:
-
-Correct return types (list of DataFrames, list of levels)
-Proper DataFrame structure in results
-Consistent length of returned lists
-"""
 
 
 def test_reverse_multi_index_df_pmc_basic_functionality():
@@ -6271,8 +6131,6 @@ def test_reverse_multi_index_df_pmc_basic_functionality():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file1", "col2"): [4, 5, 6],
@@ -6282,7 +6140,7 @@ def test_reverse_multi_index_df_pmc_basic_functionality():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -6307,12 +6165,10 @@ def test_reverse_multi_index_df_pmc_empty_dataframe():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
     df = pd.DataFrame(columns=columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 1
     assert len(coll_levels) == 1
@@ -6330,8 +6186,6 @@ def test_reverse_multi_index_df_pmc_single_column_per_level():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("level1", "col1"): [1, 2, 3],
         ("level2", "col1"): [4, 5, 6],
@@ -6340,7 +6194,7 @@ def test_reverse_multi_index_df_pmc_single_column_per_level():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert len(coll_levels) == 3
@@ -6361,8 +6215,6 @@ def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file1", "col2"): [4, 5, 6],
@@ -6374,7 +6226,7 @@ def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert len(coll_levels) == 3
@@ -6400,8 +6252,6 @@ def test_reverse_multi_index_df_pmc_duplicate_level_names():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file1", "col2"): [4, 5, 6],
@@ -6410,7 +6260,7 @@ def test_reverse_multi_index_df_pmc_duplicate_level_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 1
     assert len(coll_levels) == 1
@@ -6428,8 +6278,6 @@ def test_reverse_multi_index_df_pmc_mixed_data_types():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "integers"): [1, 2, 3],
         ("file1", "floats"): [1.1, 2.2, 3.3],
@@ -6440,7 +6288,7 @@ def test_reverse_multi_index_df_pmc_mixed_data_types():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -6465,8 +6313,6 @@ def test_reverse_multi_index_df_pmc_nan_values():
     import numpy as np
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, np.nan, 3],
         ("file1", "col2"): [np.nan, 5, 6],
@@ -6475,7 +6321,7 @@ def test_reverse_multi_index_df_pmc_nan_values():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
 
@@ -6496,8 +6342,6 @@ def test_reverse_multi_index_df_pmc_special_column_names():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file-1", "col_1"): [1, 2, 3],
         ("file-1", "col.2"): [4, 5, 6],
@@ -6507,7 +6351,7 @@ def test_reverse_multi_index_df_pmc_special_column_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert "file-1" in coll_levels
@@ -6531,8 +6375,6 @@ def test_reverse_multi_index_df_pmc_numeric_level_names():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         (1, "col1"): [1, 2, 3],
         (1, "col2"): [4, 5, 6],
@@ -6542,7 +6384,7 @@ def test_reverse_multi_index_df_pmc_numeric_level_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert set(coll_levels) == {1, 2, 3.5}
@@ -6563,8 +6405,6 @@ def test_reverse_multi_index_df_pmc_large_dataframe():
     import numpy as np
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     num_rows = 1000
     num_levels = 5
     num_cols_per_level = 10
@@ -6577,7 +6417,7 @@ def test_reverse_multi_index_df_pmc_large_dataframe():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == num_levels
     assert len(coll_levels) == num_levels
@@ -6596,8 +6436,6 @@ def test_reverse_multi_index_df_pmc_three_level_index():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "group1", "col1"): [1, 2, 3],
         ("file1", "group1", "col2"): [4, 5, 6],
@@ -6607,7 +6445,7 @@ def test_reverse_multi_index_df_pmc_three_level_index():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert set(coll_levels) == {"file1", "file2"}
@@ -6625,8 +6463,6 @@ def test_reverse_multi_index_df_pmc_return_type_validation():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file2", "col1"): [4, 5, 6],
@@ -6634,7 +6470,7 @@ def test_reverse_multi_index_df_pmc_return_type_validation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert isinstance(dfs, list)
     assert isinstance(coll_levels, list)
@@ -6651,8 +6487,6 @@ def test_reverse_multi_index_df_pmc_column_order_preservation():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "z_col"): [1, 2, 3],
         ("file1", "a_col"): [4, 5, 6],
@@ -6663,7 +6497,7 @@ def test_reverse_multi_index_df_pmc_column_order_preservation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
     assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
@@ -6681,8 +6515,6 @@ def test_reverse_multi_index_df_pmc_index_preservation():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file1", "col2"): [4, 5, 6],
@@ -6691,7 +6523,7 @@ def test_reverse_multi_index_df_pmc_index_preservation():
     df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     for df_result in dfs:
         assert list(df_result.index) == ["row_a", "row_b", "row_c"]
@@ -6706,8 +6538,6 @@ def test_reverse_multi_index_df_pmc_memory_efficiency():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [1, 2, 3],
         ("file2", "col1"): [4, 5, 6],
@@ -6717,7 +6547,7 @@ def test_reverse_multi_index_df_pmc_memory_efficiency():
 
     original_memory = df.memory_usage(deep=True).sum()
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
 
@@ -6733,8 +6563,6 @@ def test_reverse_multi_index_df_pmc_edge_case_single_row():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "col1"): [100],
         ("file1", "col2"): [200],
@@ -6743,7 +6571,7 @@ def test_reverse_multi_index_df_pmc_edge_case_single_row():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils_mod.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -6772,8 +6600,6 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
         None: Asserts function correctly merges counter values for spatial multiplexing.
     """
     import pandas as pd
-
-    import utils.utils as utils_mod
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -6812,7 +6638,7 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils_mod.merge_counters_spatial_multiplex(df)
+    result = utils.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert isinstance(result.columns, pd.MultiIndex)
@@ -6827,8 +6653,6 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
         None: Asserts function uses Name column when Kernel_Name is not available.
     """
     import pandas as pd
-
-    import utils.utils as utils_mod
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2],
@@ -6854,7 +6678,7 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
     try:
-        result = utils_mod.merge_counters_spatial_multiplex(df)
+        result = utils.merge_counters_spatial_multiplex(df)
 
         assert isinstance(result, pd.DataFrame)
         assert len(result) > 0
@@ -6879,8 +6703,6 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     """
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 1, 2],
@@ -6902,7 +6724,7 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils_mod.merge_counters_spatial_multiplex(df)
+    result = utils.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
@@ -6916,8 +6738,6 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
         None: Asserts function correctly handles multiple kernel duplicates.
     """
     import pandas as pd
-
-    import utils.utils as utils_mod
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6],
@@ -6947,7 +6767,7 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils_mod.merge_counters_spatial_multiplex(df)
+    result = utils.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
@@ -6961,8 +6781,6 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
         None: Asserts function correctly calculates median timestamps.
     """
     import pandas as pd
-
-    import utils.utils as utils_mod
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -6985,7 +6803,7 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils_mod.merge_counters_spatial_multiplex(df)
+    result = utils.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 1
@@ -7218,9 +7036,6 @@ def test_add_counter_overwrite_existing():
 # =============================================================================
 # additional test detect_rocprof console error
 # =============================================================================
-class MockArgs:
-    def __init__(self, rocprofiler_sdk_tool_path):
-        self.rocprofiler_sdk_tool_path = rocprofiler_sdk_tool_path
 
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
@@ -7251,16 +7066,6 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
 
     mock_path_constructor.assert_called_once_with(fake_library_path)
     mock_path_instance.exists.assert_called_once()
-
-
-class MockArgs:  # noqa
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __eq__(self, other):
-        if not isinstance(other, MockArgs):
-            return NotImplemented
-        return self.__dict__ == other.__dict__
 
 
 # =============================================================================
@@ -7858,8 +7663,6 @@ def test_merge_counters_iteration_multiplex():
     """Test merge_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
-    import utils.utils as utils_mod
-
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 0, 0],
@@ -7882,12 +7685,14 @@ def test_merge_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    result = utils.merge_counters_iteration_multiplex(df, "kernel")
+
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
 
     # For "kernel_launch_params" policy
-    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 2
 
@@ -7912,7 +7717,8 @@ def test_merge_counters_iteration_multiplex():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
 
@@ -7939,12 +7745,14 @@ def test_merge_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel")
+    result = utils.merge_counters_iteration_multiplex(df, "kernel")
+
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 2
 
     # For "kernel_launch_params" policy
-    result = utils_mod.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
 
