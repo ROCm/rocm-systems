@@ -297,7 +297,7 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
 }
 
 rocprofiler_status_t
-flush_all_agent_buffers()
+flush_all_agents_buffers()
 {
     return get_global_pc_sampling_sessions().rlock(
         [](const auto& sessions) -> rocprofiler_status_t {
@@ -321,16 +321,50 @@ flush_all_agent_buffers()
         });
 }
 
-void
-service_sync()
+rocprofiler_status_t
+flush_all_agents_buffers_of_client(rocprofiler_client_id_t client_id)
 {
-    flush_all_agent_buffers();
+    return get_global_pc_sampling_sessions().rlock(
+        [&](const auto& sessions) -> rocprofiler_status_t {
+            if(sessions.empty()) return ROCPROFILER_STATUS_ERROR;
+
+            rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
+            // Loop over all agents that have PC sampling service configured
+            // and drain their internal buffers.
+            // NOTE: one SDK buffer can consume data from multiple agents
+            // (multiple HSA runtime buffers)
+            for(const auto& [_, agent_session] : sessions)
+            {
+                // The client with `clint_idx` is not the owner of the PC sampling
+                // service of this agent, so skip flushing.
+                if(agent_session->client_idx != client_id.handle) continue;
+                status = flush_internal_agent_buffers(agent_session->buffer_id);
+                if(status != ROCPROFILER_STATUS_SUCCESS)
+                {
+                    ROCP_ERROR << "Failed to flush internal HSA buffers tied to rocp buffer "
+                               << agent_session->buffer_id.handle;
+                }
+            }
+            return status;
+        });
+}
+
+void
+service_sync(rocprofiler_client_id_t client_id)
+{
+    // This function ensures that only agents on which this client with `client_id`
+    // configured PC sampling service will flush their internal buffers.
+    // In case we think it's safe to flush buffers of agents that
+    // some other clients locked for PC sampling, we could simply use the
+    // `flush_all_agents_buffers` function and remove the following
+    // `flush_all_agents_buffers_of_client` function.
+    flush_all_agents_buffers_of_client(client_id);
 }
 
 void
 service_fini()
 {
-    flush_all_agent_buffers();
+    flush_all_agents_buffers();
 }
 
 }  // namespace pc_sampling

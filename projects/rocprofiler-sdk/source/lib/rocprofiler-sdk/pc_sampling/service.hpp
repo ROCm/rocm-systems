@@ -33,6 +33,7 @@
 
 #    include <rocprofiler-sdk/fwd.h>
 #    include <rocprofiler-sdk/pc_sampling.h>
+#    include <rocprofiler-sdk/registration.h>
 
 #    include <hsa/hsa_api_trace.h>
 
@@ -79,7 +80,7 @@ rocprofiler_status_t
 flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id);
 
 void
-service_sync();
+service_sync(rocprofiler_client_id_t client_id);
 
 void
 service_fini();
