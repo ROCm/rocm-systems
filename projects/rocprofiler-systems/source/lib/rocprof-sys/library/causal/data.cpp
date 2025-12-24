@@ -53,7 +53,7 @@
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <atomic>

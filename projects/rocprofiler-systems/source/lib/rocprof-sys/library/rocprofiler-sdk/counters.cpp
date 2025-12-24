@@ -30,7 +30,7 @@
 #include <memory>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

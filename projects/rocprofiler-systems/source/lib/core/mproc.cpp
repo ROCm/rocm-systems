@@ -31,7 +31,7 @@
 #include <thread>
 #include <unistd.h>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -105,16 +105,12 @@ diagnose_status(pid_t _pid, int _status, int _verbose)
     int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
     int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
 
-    if(_verbose >= 4)
-    {
-        LOG_DEBUG(
-            "diagnosing status for process {} :: status: {}... normal exit: {}, "
-            "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "
-            "signal: {}, exit code: {}",
-            _pid, _status, std::to_string(_normal_exit),
-            std::to_string(_unhandled_signal), std::to_string(_core_dump),
-            std::to_string(_stopped), _exit_status, _stop_signal, _ec);
-    }
+    LOG_TRACE("diagnosing status for process {} :: status: {}... normal exit: {}, "
+              "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "
+              "signal: {}, exit code: {}",
+              _pid, _status, std::to_string(_normal_exit),
+              std::to_string(_unhandled_signal), std::to_string(_core_dump),
+              std::to_string(_stopped), _exit_status, _stop_signal, _ec);
 
     if(!_normal_exit)
     {
@@ -132,6 +128,13 @@ diagnose_status(pid_t _pid, int _status, int _verbose)
     {
         LOG_CRITICAL("process {} terminated and produced a core dump. exit code: {}",
                      _pid, _ec);
+    }
+
+    if(_unhandled_signal)
+    {
+        LOG_ERROR("process {} terminated because it received a signal "
+                  "({}) that was not handled. exit code: {}",
+                  _pid, _ec, _ec);
     }
 
     if(!_normal_exit && _exit_status > 0)

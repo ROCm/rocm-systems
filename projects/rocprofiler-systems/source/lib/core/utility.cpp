@@ -22,7 +22,7 @@
 
 #include "utility.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

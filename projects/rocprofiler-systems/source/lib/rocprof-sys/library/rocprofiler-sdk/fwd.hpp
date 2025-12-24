@@ -36,7 +36,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <vector>

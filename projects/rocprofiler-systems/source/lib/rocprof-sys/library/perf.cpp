@@ -31,7 +31,7 @@
 #include <timemory/log/macros.hpp>
 #include <timemory/units.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <asm/unistd.h>
 #include <ctime>

@@ -155,7 +155,7 @@ public:
                     std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file, true));
             }
 
-            const auto* logger_name = "rocprofsys";
+            const auto* logger_name = "rocprofiler-systems";
             auto        log =
                 std::make_shared<spdlog::logger>(logger_name, sinks.begin(), sinks.end());
 
@@ -165,11 +165,6 @@ public:
             spdlog::register_logger(log);
             return log;
         }();
-
-        auto _settings = logger_settings_t{};
-        _instance->set_level(_settings.get_log_level());
-        _instance->set_pattern(_settings.get_log_pattern());
-
         return *_instance;
     }
 

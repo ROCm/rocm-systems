@@ -34,7 +34,7 @@
 #include <timemory/utility/macros.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstddef>
 #include <cstdint>

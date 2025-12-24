@@ -42,7 +42,7 @@
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/signals.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <array>
 #include <csignal>

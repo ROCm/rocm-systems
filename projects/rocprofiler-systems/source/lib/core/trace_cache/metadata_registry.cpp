@@ -22,7 +22,7 @@
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include "core/config.hpp"
 

@@ -35,7 +35,7 @@
 #include <timemory/utility/procfs/cpuinfo.hpp>
 #include <timemory/utility/type_list.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace cpuinfo = tim::procfs::cpuinfo;
 
@@ -150,7 +150,7 @@ cpu_freq::configure()
         _enabled_freqs.clear();
     }
 
-    if(get_is_continuous_integration())
+    if(get_is_continuous_integration() && !cpuinfo::freq{})
     {
         LOG_CRITICAL("[cpu_freq::config] CPU frequencies are disabled :: unable to open "
                      "/proc/cpuinfo");

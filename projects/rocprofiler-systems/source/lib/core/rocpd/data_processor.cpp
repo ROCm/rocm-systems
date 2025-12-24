@@ -24,7 +24,7 @@
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/rocpd/data_storage/table_insert_query.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <stdexcept>

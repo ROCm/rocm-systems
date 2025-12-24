@@ -35,7 +35,7 @@
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/process/threading.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdint>
 

@@ -30,7 +30,7 @@
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/popen.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <algorithm>
 #include <map>
@@ -205,8 +205,8 @@ post_process()
         std::swap(_coverage_data, _tmp);
     }
 
-    LOG_INFO("code coverage     :: {:.2f}%", _coverage() * 100.0);
-    LOG_INFO("module coverage   :: {:.2f}%", _coverage(code_coverage::MODULE) * 100.0);
+    LOG_INFO("code coverage :: {:.2f}%", _coverage() * 100.0);
+    LOG_INFO("module coverage :: {:.2f}%", _coverage(code_coverage::MODULE) * 100.0);
     LOG_INFO("function coverage :: {:.2f}%", _coverage(code_coverage::FUNCTION) * 100.0);
 
     std::sort(_coverage_data.begin(), _coverage_data.end(),

@@ -306,7 +306,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             }
             else
             {
-                LOG_DEBUG("Successfully executed: {}", _command);
+                LOG_INFO("Successfully executed: {}", _command);
             }
         }
     }

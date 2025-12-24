@@ -27,7 +27,7 @@
 #include <limits>
 #include <sys/utsname.h>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {

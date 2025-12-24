@@ -46,7 +46,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <sstream>

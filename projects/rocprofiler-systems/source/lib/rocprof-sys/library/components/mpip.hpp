@@ -35,7 +35,7 @@
 #include <timemory/utility/demangle.hpp>
 #include <timemory/variadic/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <set>

@@ -30,7 +30,7 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstddef>
 #include <cstdio>
@@ -96,20 +96,14 @@ exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) co
 
         if(get_state() < ::rocprofsys::State::Finalized && !is_child_process())
         {
-            if(config::settings_are_configured())
-            {
-                LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(),
-                          _data.tool_id, _ec);
-            }
+            LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(),
+                      _data.tool_id, _ec);
 
             rocprofsys_finalize();
         }
 
-        if(config::settings_are_configured())
-        {
-            LOG_DEBUG("Calling _exit({}) in {} to avoid AMD SMI cleanup issues...", _ec,
-                      get_exe_name().c_str());
-        }
+        LOG_DEBUG("Calling _exit({}) in {} to avoid AMD SMI cleanup issues...", _ec,
+                  get_exe_name().c_str());
 
         std::fflush(nullptr);
         _exit(_ec);

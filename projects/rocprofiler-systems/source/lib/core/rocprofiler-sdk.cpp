@@ -25,7 +25,7 @@
 #include "timemory.hpp"
 #include <regex>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 

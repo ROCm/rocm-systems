@@ -43,7 +43,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <string_view>
 #include <utility>

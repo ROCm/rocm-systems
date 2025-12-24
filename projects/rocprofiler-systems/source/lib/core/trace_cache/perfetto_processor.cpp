@@ -34,8 +34,8 @@
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 
+#include "logger/debug.hpp"
 #include <cstdint>
-#include <logger/debug.hpp>
 #include <nlohmann/json.hpp>
 
 #include <memory>

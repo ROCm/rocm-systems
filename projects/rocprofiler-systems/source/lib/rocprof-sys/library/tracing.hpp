@@ -50,7 +50,7 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <functional>

@@ -23,7 +23,7 @@
 #include "kill_gotcha.hpp"
 #include "core/config.hpp"
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <unistd.h>

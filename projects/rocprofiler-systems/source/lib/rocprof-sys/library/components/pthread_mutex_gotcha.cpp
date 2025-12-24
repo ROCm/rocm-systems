@@ -31,7 +31,7 @@
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <pthread.h>

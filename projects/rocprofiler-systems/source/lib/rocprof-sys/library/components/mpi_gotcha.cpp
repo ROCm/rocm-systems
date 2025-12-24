@@ -35,7 +35,7 @@
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/locking.hpp>
 
-#include <logger/debug.hpp>
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>
