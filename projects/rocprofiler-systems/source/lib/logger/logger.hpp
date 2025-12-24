@@ -165,6 +165,11 @@ public:
             spdlog::register_logger(log);
             return log;
         }();
+
+        auto _settings = logger_settings_t{};
+        _instance->set_level(_settings.get_log_level());
+        _instance->set_pattern(_settings.get_log_pattern());
+
         return *_instance;
     }
 
