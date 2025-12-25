@@ -308,11 +308,10 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
  * internal HSA buffers by flushing them to the SDK buffers.
  *
  * @param client_id Optional client ID to filter which agents to flush.
- *                  - If provided: Only flushes buffers for agents owned by this client.
- *                    This prevents flushing buffers belonging to other clients' PC sampling
- * sessions.
- *                  - If omitted (std::nullopt): Flushes buffers for all agents regardless of client
- * ownership. Used during finalization to drain all remaining data.
+ * - If provided: Only flushes buffers for agents owned by this client.
+ *   This prevents flushing buffers belonging to other clients' PC sampling sessions.
+ * - If omitted (std::nullopt): Flushes buffers for all agents regardless of client
+ *   ownership. Used during finalization to drain all remaining data.
  *
  * @return ROCPROFILER_STATUS_SUCCESS if successful, ROCPROFILER_STATUS_ERROR if no sessions exist,
  *         or the status of the last failed flush operation.
