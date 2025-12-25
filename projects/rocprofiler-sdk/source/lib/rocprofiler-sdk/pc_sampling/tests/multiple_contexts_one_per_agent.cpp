@@ -161,7 +161,7 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
 
 }  // namespace
 
-TEST(pc_sampling, multiple_context_one_context_per_agent)
+TEST(pc_sampling, multiple_contexts_one_per_agent)
 {
     // The following test ensures that multiple contexts with PC sampling can be configured
     // with the constraint that at most one context per agent is allowed.
@@ -272,9 +272,8 @@ TEST(pc_sampling, multiple_context_one_context_per_agent)
 
                 EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED)
                     << "Expected ERROR_SERVICE_ALREADY_CONFIGURED when trying to configure agent "
-                    << agent_id.handle << " (" << agent->name << ") in context handle "
-                    << data->contexts[ctx_idx].context_id.handle
-                    << " (already owned by context handle "
+                    << agent_id.handle << " (" << agent->name << ") in context "
+                    << data->contexts[ctx_idx].context_id.handle << " (already owned by context "
                     << data->contexts[agent_idx].context_id.handle << ")";
             }
         }
