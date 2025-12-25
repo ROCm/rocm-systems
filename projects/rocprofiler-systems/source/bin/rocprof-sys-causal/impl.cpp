@@ -400,6 +400,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
 
     parser.start_group("DEBUG OPTIONS", "");
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"));
+        });
+
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
@@ -422,7 +431,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             auto _v = p.get<int>("verbose");
             verbose = _v;
             update_env(_env, "ROCPROFSYS_VERBOSE", _v);
-            update_env(_env, "ROCPROFSYS_LOG_LEVEL", "trace");
+
+            constexpr const char* log_levels[] = { "info", "debug", "debug", "trace" };
+            constexpr int         _log_level_last =
+                sizeof(log_levels) / sizeof(log_levels[0]) - 1;
+
+            const char* _log_level =
+                _v < 0 ? "off" : log_levels[std::min(_v, _log_level_last)];
+
+            update_env(_env, "ROCPROFSYS_LOG_LEVEL", _log_level);
         });
 
     std::string _config_file      = {};

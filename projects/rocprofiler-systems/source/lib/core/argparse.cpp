@@ -32,6 +32,8 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
+#include "logger/debug.hpp"
+
 namespace rocprofsys
 {
 namespace argparse
@@ -269,7 +271,16 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _v       = p.get<int>("verbose");
                 _data.verbose = _v;
                 update_env(_data, "ROCPROFSYS_VERBOSE", _v);
-                update_env(_data, "ROCPROFSYS_LOG_LEVEL", "trace");
+
+                constexpr const char* log_levels[] = { "info", "debug", "debug",
+                                                       "trace" };
+                constexpr int         _log_level_last =
+                    sizeof(log_levels) / sizeof(log_levels[0]) - 1;
+
+                const char* _log_level =
+                    _v < 0 ? "off" : log_levels[std::min(_v, _log_level_last)];
+
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL", _log_level);
             });
 
         _data.processed_environs.emplace("verbose");
@@ -1173,8 +1184,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
         }
         else
         {
-            TIMEMORY_PRINTF_WARNING(stderr, "Warning! Option %s (%s) is not enabled\n",
-                                    _name.c_str(), itr->get_env_name().c_str());
+            LOG_WARNING("Option {} ({}) is not enabled", _name, itr->get_env_name());
             _parser.add_argument({ _opt_name }, itr->get_description())
                 .action([&](parser_t& p) {
                     using namespace timemory::join;

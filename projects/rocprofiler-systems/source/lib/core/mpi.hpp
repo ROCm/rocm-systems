@@ -344,7 +344,7 @@ initialize(int& argc, char**& argv)
                 auto ret     = MPI_Init_thread(&argc, &argv, itr, &_actual);
                 if(_actual != itr)
                 {
-                    LOG_WARNING("Warning! MPI_Init_thread does not support: {}", _type);
+                    LOG_WARNING("MPI_Init_thread does not support: {}", _type);
                 }
                 return ROCPROFSYS_MPI_ERROR_CHECK(ret);
             };

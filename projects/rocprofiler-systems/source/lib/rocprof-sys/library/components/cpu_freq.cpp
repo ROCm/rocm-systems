@@ -139,13 +139,13 @@ cpu_freq::configure()
             _enabled_freqs.emplace(itr);
         else
         {
-            LOG_DEBUG("[cpu_freq::config] Warning! Removing invalid cpu {}...", itr);
+            LOG_DEBUG("[cpu_freq::config] Removing invalid cpu {}...", itr);
         }
     }
 
     if(!cpuinfo::freq{})
     {
-        LOG_WARNING("[cpu_freq::config] Warning! CPU frequencies are disabled "
+        LOG_WARNING("[cpu_freq::config] CPU frequencies are disabled "
                     ":: unable to open /proc/cpuinfo");
         _enabled_freqs.clear();
     }

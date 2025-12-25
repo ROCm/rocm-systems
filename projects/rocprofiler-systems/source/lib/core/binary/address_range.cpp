@@ -188,8 +188,6 @@ address_range::operator+=(address_range _v)
 {
     if(!contiguous_with(_v))
     {
-        LOG_CRITICAL(
-            "Error! attempting to add two address ranges that are not contiguous");
         throw std::invalid_argument(
             "Error! attempting to add two address ranges that are not contiguous");
     }
