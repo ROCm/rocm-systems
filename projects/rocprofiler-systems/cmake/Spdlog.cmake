@@ -4,12 +4,16 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     message(STATUS "Building spdlog from source!")
 
     include(FetchContent)
-    FetchContent_Declare(
-        spdlog
-        GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG v1.14.1
-        GIT_SHALLOW TRUE
+
+    rocprofiler_systems_checkout_git_submodule(
+        RELATIVE_PATH external/spdlog
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/gabime/spdlog.git
+        TEST_FILE CMakeLists.txt
+        REPO_BRANCH "v1.16.0"
     )
+
+    FetchContent_Declare(spdlog SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/spdlog)
 
     set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)

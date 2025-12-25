@@ -340,7 +340,7 @@ experiment::stop()
     if(ROCPROFSYS_UNLIKELY(global_scaling_increments >= 5))
     {
         LOG_WARNING(
-            "Warning! causal experimentation hasn't seen at least 5 progress points "
+            "causal experimentation hasn't seen at least 5 progress points "
             "in the last {} experiments. Progress points are necessary for measuring "
             "the effect of the virtual speed-up. Please visit "
             "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/ for "

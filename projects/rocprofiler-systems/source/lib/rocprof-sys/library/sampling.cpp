@@ -643,7 +643,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 {
     if(!get_use_tmp_files())
     {
-        LOG_CRITICAL("Error! sampling allocator tries to offload buffer of samples but "
+        LOG_CRITICAL("sampling allocator tries to offload buffer of samples but "
                      "rocprof-sys was configured to not use temporary files");
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
         std::exit(1);
@@ -656,7 +656,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 
     if(!_file)
     {
-        LOG_CRITICAL("Error! sampling allocator tried to offload buffer of samples for "
+        LOG_CRITICAL("sampling allocator tried to offload buffer of samples for "
                      "thread {} but the offload file does not exist",
                      _seq);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);
@@ -669,7 +669,7 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 
     if(!_fs.good())
     {
-        LOG_CRITICAL("Error! temporary file for offloading buffer is in an invalid state "
+        LOG_CRITICAL("temporary file for offloading buffer is in an invalid state "
                      "during offload for thread {}",
                      _seq);
         ::rocprofsys::set_state(::rocprofsys::State::Finalized);

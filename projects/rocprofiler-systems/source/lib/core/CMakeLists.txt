@@ -9,7 +9,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.cpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/debug.cpp
+    # ${CMAKE_CURRENT_LIST_DIR}/debug.cpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.cpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.cpp
@@ -37,8 +37,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/debug.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/defines.hpp
+    # ${CMAKE_CURRENT_LIST_DIR}/debug.hpp
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp

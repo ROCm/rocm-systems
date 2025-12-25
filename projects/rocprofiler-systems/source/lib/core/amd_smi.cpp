@@ -55,8 +55,8 @@ get_setting_name(std::string _v)
                                        __VA_ARGS__ });                                   \
             if(!_ret.second)                                                             \
             {                                                                            \
-                LOG_WARNING("Warning! Duplicate setting: {} / {}",                       \
-                            get_setting_name(ENV_NAME), ENV_NAME);                       \
+                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
+                            ENV_NAME);                                                   \
             }                                                                            \
             return _config->find(ENV_NAME)->second;                                      \
         }()

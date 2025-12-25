@@ -183,7 +183,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(!_fdata)
             {
-                LOG_ERROR("Error! perfetto temp trace file '{}' could not be read",
+                LOG_ERROR("perfetto temp trace file '{}' could not be read",
                           _tmp_file->filename);
                 return char_vec_t{ tracing_session->ReadTraceBlocking() };
             }
@@ -199,7 +199,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
             {
                 throw std::runtime_error(fmt::format(
-                    "Error! read {} elements from perfetto trace file '{}'. Expected {}",
+                    "read {} elements from perfetto trace file '{}'. Expected {}",
                     _fnum_read, _tmp_file->filename, _fnum_elem));
             }
         }
