@@ -31,6 +31,8 @@
 #    include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
 
+#    include <optional>
+
 namespace rocprofiler
 {
 namespace pc_sampling
@@ -296,48 +298,37 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
+/**
+ * @brief Flushes internal PC sampling buffers for agents.
+ *
+ * Loops over all agents that have PC sampling service configured and drains their
+ * internal HSA buffers by flushing them to the SDK buffers.
+ *
+ * @param client_id Optional client ID to filter which agents to flush.
+ *                  - If provided: Only flushes buffers for agents owned by this client.
+ *                    This prevents flushing buffers belonging to other clients' PC sampling
+ * sessions.
+ *                  - If omitted (std::nullopt): Flushes buffers for all agents regardless of client
+ * ownership. Used during finalization to drain all remaining data.
+ *
+ * @return ROCPROFILER_STATUS_SUCCESS if successful, ROCPROFILER_STATUS_ERROR if no sessions exist,
+ *         or the status of the last failed flush operation.
+ *
+ * @note One SDK buffer can consume data from multiple agents (multiple HSA runtime buffers).
+ */
 rocprofiler_status_t
-flush_all_agents_buffers()
-{
-    return get_global_pc_sampling_sessions().rlock(
-        [](const auto& sessions) -> rocprofiler_status_t {
-            if(sessions.empty()) return ROCPROFILER_STATUS_ERROR;
-
-            rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
-            // Loop over all agents that have PC sampling service configured
-            // and drain their internal buffers.
-            // NOTE: one SDK buffer can consume data from multiple agents
-            // (multiple HSA runtime buffers)
-            for(const auto& [_, agent_session] : sessions)
-            {
-                status = flush_internal_agent_buffers(agent_session->buffer_id);
-                if(status != ROCPROFILER_STATUS_SUCCESS)
-                {
-                    ROCP_ERROR << "Failed to flush internal HSA buffers tied to rocp buffer "
-                               << agent_session->buffer_id.handle;
-                }
-            }
-            return status;
-        });
-}
-
-rocprofiler_status_t
-flush_all_agents_buffers_of_client(rocprofiler_client_id_t client_id)
+flush_all_agents_buffers(std::optional<rocprofiler_client_id_t> client_id = std::nullopt)
 {
     return get_global_pc_sampling_sessions().rlock(
         [&](const auto& sessions) -> rocprofiler_status_t {
             if(sessions.empty()) return ROCPROFILER_STATUS_ERROR;
 
             rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
-            // Loop over all agents that have PC sampling service configured
-            // and drain their internal buffers.
-            // NOTE: one SDK buffer can consume data from multiple agents
-            // (multiple HSA runtime buffers)
             for(const auto& [_, agent_session] : sessions)
             {
-                // The client with `client_idx` is not the owner of the PC sampling
-                // service of this agent, so skip flushing.
-                if(agent_session->client_idx != client_id.handle) continue;
+                // Filter by client if specified
+                if(client_id && agent_session->client_idx != client_id->handle) continue;
+
                 status = flush_internal_agent_buffers(agent_session->buffer_id);
                 if(status != ROCPROFILER_STATUS_SUCCESS)
                 {
@@ -352,18 +343,22 @@ flush_all_agents_buffers_of_client(rocprofiler_client_id_t client_id)
 void
 service_sync(rocprofiler_client_id_t client_id)
 {
-    // This function ensures that only agents on which this client with `client_id`
-    // configured PC sampling service will flush their internal buffers.
-    // In case we think it's safe to flush buffers of agents that
-    // some other clients locked for PC sampling, we could simply use the
-    // `flush_all_agents_buffers` function and remove the following
-    // `flush_all_agents_buffers_of_client` function.
-    flush_all_agents_buffers_of_client(client_id);
+    // Flush buffers only for agents owned by this specific client.
+    // This ensures we don't interfere with PC sampling sessions
+    // that other clients may have configured on different agents.
+    // If this function is always called after `service_fini`,
+    // then there should be no harm in flushing all buffers when
+    // detaching each client. This would increase overhead of
+    // the finalization a bit, but would reduce the complexity of the code.
+    flush_all_agents_buffers(client_id);
 }
 
 void
 service_fini()
 {
+    // Flush buffers for all agents regardless of client ownership.
+    // During finalization, we need to drain all remaining PC sampling data
+    // across all clients to ensure no data is lost.
     flush_all_agents_buffers();
 }
 
