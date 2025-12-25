@@ -272,8 +272,8 @@ TEST(pc_sampling, multiple_context_one_context_per_agent)
 
                 EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED)
                     << "Expected ERROR_SERVICE_ALREADY_CONFIGURED when trying to configure agent "
-                    << agent_id.handle << " (" << agent->name
-                    << ") in context handle " << data->contexts[ctx_idx].context_id.handle
+                    << agent_id.handle << " (" << agent->name << ") in context handle "
+                    << data->contexts[ctx_idx].context_id.handle
                     << " (already owned by context handle "
                     << data->contexts[agent_idx].context_id.handle << ")";
             }
