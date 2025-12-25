@@ -56,13 +56,84 @@ amdcuid_status_t AmdCuidGpu::discover(std::vector<DevicePtr> &gpus) {
     return AMDCUID_STATUS_SUCCESS;
 }
 
+std::string get_parent_device_path(const std::string& device_path, uint16_t unit_id) {
+    if (unit_id == 0) return device_path;
+
+    size_t render_pos = device_path.find("renderD");
+    if (render_pos != std::string::npos) {
+        size_t num_start = render_pos + 7; // length of "renderD"
+        size_t num_end = device_path.find('/', num_start);
+        if (num_end != std::string::npos) {
+            std::string render_num_str = device_path.substr(num_start, num_end - num_start);
+            int render_num = std::stoi(render_num_str);
+            int parent_render_num = render_num - unit_id;
+            std::string parent_device_path = device_path.substr(0, render_pos) + "renderD" +
+                                             std::to_string(parent_render_num) +
+                                             device_path.substr(num_end);
+            return parent_device_path;
+        }
+    }
+    return device_path;
+}
+
 amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std::string& device_path) {
 
+    std::string device_path_in_use = device_path;
     amdcuid_gpu_info info = {};
     std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
+    info.header.fields.gpu.unit_id = 0;
 
-    std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
-    if (vendor.empty() && !bdf.empty()){
+    // If BDF is empty, this might be a partition device - try to get BDF from parent
+    // and determine unit_id from the renderD number difference
+    if (bdf.empty()) {
+        // Extract renderD number from device_path
+        size_t render_pos = device_path.find("renderD");
+        if (render_pos != std::string::npos) {
+            size_t num_start = render_pos + 7;
+            size_t num_end = device_path.find('/', num_start);
+            if (num_end != std::string::npos) {
+                int render_num = std::stoi(device_path.substr(num_start, num_end - num_start));
+                // Try parent renderD nodes (up to 7 partitions possible based on function numbers 1-7)
+                for (int offset = 1; offset <= 7; ++offset) {
+                    std::string parent_path = device_path.substr(0, render_pos) + "renderD" +
+                                              std::to_string(render_num - offset) +
+                                              device_path.substr(num_end);
+                    std::string parent_bdf = AmdCuidUtilities::readlink_bdf(parent_path);
+                    if (!parent_bdf.empty()) {
+                        // Found parent - unit_id is the offset, construct partition BDF
+                        info.header.fields.gpu.unit_id = static_cast<uint16_t>(offset);
+                        // Replace the function number in BDF with the unit_id
+                        size_t dot_pos = parent_bdf.rfind('.');
+                        if (dot_pos != std::string::npos) {
+                            bdf = parent_bdf.substr(0, dot_pos + 1) + std::to_string(offset);
+                        }
+                        device_path_in_use = parent_path;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // if bdf ends in non zero digit, then we have a partitioned device and we will use that as unit id
+    else {
+        size_t last_dot = bdf.rfind('.');
+        if (last_dot != std::string::npos && last_dot + 1 < bdf.size()) {
+            char last_char = bdf[last_dot + 1];
+            if (isdigit(last_char) && last_char != '0') {
+                uint16_t unit_id = static_cast<uint16_t>(last_char - '0');
+                info.header.fields.gpu.unit_id = unit_id;
+
+                // partition device path will not have any of the other info, so we need to get parent device path
+                // Calculate parent renderD number by subtracting unit_id from current renderD number
+                // e.g., /sys/class/drm/renderD129/device with unit_id=1 -> /sys/class/drm/renderD128/device
+                device_path_in_use = get_parent_device_path(device_path, unit_id);
+            }
+        }
+    }
+
+    std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path_in_use + "/vendor");
+    // if this is a partitioned device, we won't be able to get information from pci config space so skip in the check
+    if (vendor.empty() && !bdf.empty() && info.header.fields.gpu.unit_id == 0){
         // if file read fails, attempt to get from pci config
         uint8_t vendor_id_bytes[2] = {0};
         const uint16_t offset = 0x0;
@@ -75,8 +146,8 @@ amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const s
         info.header.fields.gpu.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
     }
 
-    std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
-    if (device.empty() && !bdf.empty()){
+    std::string device = AmdCuidUtilities::read_sysfs_file(device_path_in_use + "/device");
+    if (device.empty() && !bdf.empty() && info.header.fields.gpu.unit_id == 0){
         // if file read fails, attempt to get from pci config
         uint8_t device_id_bytes[2] = {0};
         const uint16_t offset = 0x2;
@@ -89,9 +160,9 @@ amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const s
         info.header.fields.gpu.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
     }
 
-    std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
+    std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path_in_use + "/class");
     uint32_t pci_class_integer = 0;
-    if (pci_class.empty() && !bdf.empty()){
+    if (pci_class.empty() && !bdf.empty() && info.header.fields.gpu.unit_id == 0){
         // if file read fails, attempt to get from pci config
         uint8_t class_id_bytes[2] = {0};
         const uint16_t offset = 0xa;
@@ -105,8 +176,8 @@ amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const s
     }
     info.header.fields.gpu.pci_class = (pci_class_integer >> 8) & 0xFFFF;
 
-    std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
-    if (revision_id.empty() && !bdf.empty()){
+    std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path_in_use + "/revision");
+    if (revision_id.empty() && !bdf.empty() && info.header.fields.gpu.unit_id == 0){
         // if file read fails, attempt to get from pci config
         uint8_t revision_id_bytes[2] = {0};
         const uint16_t offset = 0x8;
@@ -118,11 +189,12 @@ amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const s
     {
         info.header.fields.gpu.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
     }
-    // std::string partition_info = AmdCuidUtilities::read_sysfs_file(device_path + "/partition_info");
 
+    // we use the original device path to get render node
     std::string full_device_node;
     size_t last_slash = device_path.rfind('/');
     if (last_slash != std::string::npos && last_slash > 0) {
+        // Trim to just /sys/class/drm/renderDXXX;
         full_device_node = device_path.substr(0, last_slash);
     }
     else {
@@ -130,7 +202,6 @@ amdcuid_status_t AmdCuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const s
     }
 
     info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
-    // info.header.fields.gpu.unit_id = partition_info.empty() ? 0 : (uint32_t)strtoul(partition_info.c_str(), nullptr, 0);
     info.bdf = bdf;
     info.render_node = full_device_node;
 
@@ -144,11 +215,32 @@ amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) con
     {
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
-    // Try to read the unique_id from the device sysfs
+
     std::string unique_id_path = m_info.render_node + "/device/unique_id";
+    // check if device is partition first by checking unit id
+    if (m_info.header.fields.gpu.unit_id != 0) {
+        unique_id_path = get_parent_device_path(unique_id_path, m_info.header.fields.gpu.unit_id);
+    }
+    // Try to read the unique_id from the device sysfs file
     std::ifstream fin(unique_id_path);
-    if (!fin.is_open()) {
-        // attempt to get fingerprint through PCI Config Space
+    if (fin.is_open()) {
+        std::string hex_str;
+        std::getline(fin, hex_str);
+        fin.close();
+        if (hex_str.empty()) {
+            fingerprint = 0;
+            return AMDCUID_STATUS_FILE_NOT_FOUND;
+        }
+        // Parse as 64-bit hex value (if possible)
+        try {
+            fingerprint = std::stoull(hex_str, nullptr, 16);
+        } catch (...) {
+            fingerprint = 0;
+            return AMDCUID_STATUS_UNSUPPORTED;
+        }
+    }
+    else if (m_info.header.fields.gpu.unit_id == 0) {
+        // attempt to get fingerprint through PCI Config Space if not a partition
         uint16_t offset = 0;
         amdcuid_status_t status = PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
         if (status != AMDCUID_STATUS_SUCCESS) {
@@ -168,20 +260,9 @@ amdcuid_status_t AmdCuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) con
         delete[] fingerprint_buffer;
     }
     else {
-        std::string hex_str;
-        std::getline(fin, hex_str);
-        fin.close();
-        if (hex_str.empty()) {
-            fingerprint = 0;
-            return AMDCUID_STATUS_FILE_NOT_FOUND;
-        }
-        // Parse as 64-bit hex value (if possible)
-        try {
-            fingerprint = std::stoull(hex_str, nullptr, 16);
-        } catch (...) {
-            fingerprint = 0;
-            return AMDCUID_STATUS_UNSUPPORTED;
-        }
+        // partitioned device without unique_id file cannot get fingerprint
+        fingerprint = 0;
+        return AMDCUID_STATUS_UNSUPPORTED;
     }
     return AMDCUID_STATUS_SUCCESS;
 }

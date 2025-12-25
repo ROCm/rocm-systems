@@ -98,14 +98,26 @@ amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primar
         return status;
     }
 
+    // Get the unit id parts from the primary ID
+    uint8_t unit_id_part1 = ((primary_id->bytes[8] & 0x3) << 6) | ((primary_id->bytes[9] & 0xFC) >> 2); // lower 2 bits of byte 8 and upper 6 bits of byte 9
+    uint8_t unit_id_part2 = ((primary_id->bytes[14] & 0x3) << 4) | ((primary_id->bytes[15] & 0xF0) >> 4); // lower 2 bits of byte 14 and upper 4 bits of byte 15 and 2 more leading bits of padding
+
     // Map the 256-bit hash to 122-bit CUID format
-    uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)
+    uint8_t id_bits[16] = {0}; // 128 bits total (104 bits of hash + 18 bits of unit ids  )
 
-    // Copy first 15 bytes (120 bits) from hash
-    memcpy(id_bits, hash, 15);
+    // Copy first 8 bytes (64 bits) from hash
+    memcpy(id_bits, hash, 8);
 
-    // Copy 2 more bits from the 16th byte of hash to complete 122 bits
-    id_bits[15] = hash[15] & 0x03; // Take only the lower 2 bits
+    // insert unit id part 1 at bits 64-71
+    id_bits[8] = unit_id_part1;
+
+    // copy next 5 bytes (40 bits) from hash to bits 72-111
+    memcpy(id_bits + 9, hash + 8, 5);
+
+    // bits 112-117: UnitID part 2 (6 bits) + Bits 118-119: padding (2 bits)
+    id_bits[14] = unit_id_part2;
+    // last 8 bits are padding (bits 120-127)
+    id_bits[15] = 0;
 
     // Apply UUIDv8 format according to RFC 9562
     // Bits 0-47: ID value part 1 (LSB)
@@ -117,18 +129,19 @@ amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primar
     secondary_id->bytes[5] = id_bits[5];
 
     // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-    secondary_id->bytes[6] = (id_bits[6] & 0x0F) | 0x80; // Version 8 in upper 4 bits
-    secondary_id->bytes[7] = id_bits[7];
+    secondary_id->bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
+    secondary_id->bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
 
     // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-    secondary_id->bytes[8] = (id_bits[8] & 0x3F) | 0x80; // Variant 10b in upper 2 bits
-    secondary_id->bytes[9] = id_bits[9];
-    secondary_id->bytes[10] = id_bits[10];
-    secondary_id->bytes[11] = id_bits[11];
-    secondary_id->bytes[12] = id_bits[12];
-    secondary_id->bytes[13] = id_bits[13];
-    secondary_id->bytes[14] = id_bits[14];
-    secondary_id->bytes[15] = id_bits[15];
+    secondary_id->bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
+    // everything past here is now shifted by 6 bits
+    secondary_id->bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
+    secondary_id->bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
+    secondary_id->bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
+    secondary_id->bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
+    secondary_id->bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
+    secondary_id->bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
+    secondary_id->bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
 
     return AMDCUID_STATUS_SUCCESS;
 }
@@ -162,7 +175,8 @@ amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number,
     id_bits[13] = (vendor_id >> 8) & 0xFF;
     
     // Bits 112-117: UnitID part 2 (6 bits) + Bits 118-121: Component Type (4 bits)
-    id_bits[14] = unit_id_part2 | (component_type << 6);
+    id_bits[14] = (unit_id_part2 << 2) | ((component_type & 0xC) >> 2);
+    id_bits[15] = (component_type & 0x3) << 6; // Last 6 bits are padding
     
     // Apply UUIDv8 format according to RFC 9562
     // Bits 0-47: ID value part 1 (LSB)
@@ -174,18 +188,19 @@ amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number,
     id->bytes[5] = id_bits[5];
     
     // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-    id->bytes[6] = (id_bits[6] & 0x0F) | 0x80; // Version 8 in upper 4 bits
-    id->bytes[7] = id_bits[7];
+    id->bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
+    id->bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
 
     // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-    id->bytes[8] = (id_bits[8] & 0x3F) | 0x80; // Variant 10b in upper 2 bits
-    id->bytes[9] = id_bits[9];
-    id->bytes[10] = id_bits[10];
-    id->bytes[11] = id_bits[11];
-    id->bytes[12] = id_bits[12];
-    id->bytes[13] = id_bits[13];
-    id->bytes[14] = id_bits[14];
-    id->bytes[15] = id_bits[15];
+    id->bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
+    // everything past here is now shifted by 6 bits
+    id->bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
+    id->bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
+    id->bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
+    id->bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
+    id->bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
+    id->bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
+    id->bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
 
     return AMDCUID_STATUS_SUCCESS;
 }
