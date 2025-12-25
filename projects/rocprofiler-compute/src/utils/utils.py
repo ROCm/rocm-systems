@@ -1118,7 +1118,7 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             kernel_data,
             left_on="dispatch_id",
             right_on="Dispatch_Id",
-            how="left",
+            how="inner",
         )
 
         rocprofv3_counter_data = pd.DataFrame({
