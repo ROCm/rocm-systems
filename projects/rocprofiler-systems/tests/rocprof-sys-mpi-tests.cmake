@@ -47,7 +47,7 @@ rocprofiler_systems_add_test(
         args
         --min-instructions
         0
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_LOG_LEVEL=trace"
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_VERBOSE=1"
     REWRITE_RUN_PASS_REGEX
         "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
     REWRITE_RUN_FAIL_REGEX
@@ -73,7 +73,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_LOG_LEVEL=trace;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
         "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
