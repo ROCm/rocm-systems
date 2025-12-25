@@ -17,7 +17,14 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
     set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
 
+    # Spdlog workaround for building static library
+    set(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+
     FetchContent_MakeAvailable(spdlog)
+
+    set(BUILD_SHARED_LIBS ${_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP})
+    unset(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP)
 
     target_link_libraries(rocprofiler-systems-spdlog INTERFACE spdlog::spdlog)
 else()

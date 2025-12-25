@@ -25,9 +25,7 @@ add_subdirectory(library)
 
 target_link_libraries(
     rocprofiler-systems-object-library
-    PRIVATE
-        rocprofiler-systems::rocprofiler-systems-interface-library
-        rocprofiler-systems::rocprofiler-systems-logger
+    PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
 # ------------------------------------------------------------------------------#
