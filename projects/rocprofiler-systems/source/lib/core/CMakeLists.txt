@@ -20,13 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/defines.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp
-    @ONLY
-)
-
 set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
@@ -64,6 +57,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/constraint.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/debug.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/defines.hpp
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
@@ -88,10 +82,7 @@ add_library(
     ALIAS rocprofiler-systems-core-library
 )
 
-target_sources(
-    rocprofiler-systems-core-library
-    PRIVATE ${core_sources} ${core_headers} ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp
-)
+target_sources(rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers})
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
