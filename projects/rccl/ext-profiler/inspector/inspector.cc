@@ -1,4 +1,6 @@
 #include "inspector.h"
+#include "inspector_prom.h"
+#include "inspector_cudawrap.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -10,33 +12,25 @@
 #include <unistd.h>
 #include <errno.h>
 #include <cstring>
+#include <cuda_runtime.h>
 
 #include "common.h"
 
-#define JSON_CHK(expr)                                                  \
-  do {                                                                  \
-    const jsonResult_t res = (expr);                                    \
-    if (res != jsonSuccess) {                                           \
-      INFO(NCCL_INSPECTOR, "jsonError: %s\n", jsonErrorString(res));    \
-      return inspectorJsonError;                                        \
-    }                                                                   \
+#define JSON_CHK(expr)                                          \
+  do {                                                          \
+    const jsonResult_t res = (expr);                            \
+    if (res != jsonSuccess) {                                   \
+      INFO_INSPECTOR("jsonError: %s\n", jsonErrorString(res));  \
+      return inspectorJsonError;                                \
+    }                                                           \
   } while (0)
 
-#define INS_CHK(call)                                                   \
-  do {                                                                  \
-    inspectorResult_t res = call;                                       \
-    if (inspectorSuccess != res) {                                      \
-      INFO(NCCL_INSPECTOR, "%s:%d -> error %d: %s", __FILE__, __LINE__, res, \
-           inspectorErrorString(res));                                  \
-      return res;                                                       \
-    }                                                                   \
-  } while (0);
 
 #define JSON_CHK_GOTO(expr, res, label)                                 \
   do {                                                                  \
     const jsonResult_t macro_res = (expr);                              \
     if (macro_res != jsonSuccess) {                                     \
-      INFO(NCCL_INSPECTOR, "jsonError: %s\n", jsonErrorString(macro_res)); \
+      INFO_INSPECTOR("jsonError: %s\n", jsonErrorString(macro_res));    \
       res = inspectorJsonError;                                         \
       goto label;                                                       \
     }                                                                   \
@@ -46,7 +40,7 @@
   do {                                                                  \
     cudaError_t err = cmd;                                              \
     if (err != cudaSuccess) {                                           \
-      INFO(NCCL_INSPECTOR, "Cuda failure '%s'", cudaGetErrorString(err)); \
+      INFO_INSPECTOR("Cuda failure '%s'", cudaGetErrorString(err));     \
       return inspectorCudaError;                                        \
     }                                                                   \
   } while (false)
@@ -58,6 +52,10 @@ static bool enableNcclInspector = false;
 static bool enableNcclInspectorDumpThread = false;
 // Global flag to control verbose dumping (event_trace)
 static bool enableNcclInspectorDumpVerbose = false;
+// Global flag to control prometheus format dumping
+static bool enableNcclInspectorPromDump = false;
+// Global dump interval in microseconds
+static uint64_t ncclInspectorDumpIntervalUsecs = 0;
 // Extra guard to prevent spurious messages for eager pollers that try to dump
 // out results before we have initialized
 static bool ncclInspectorInit = false;
@@ -98,6 +96,48 @@ uint64_t inspectorGetTime() {
   gettimeofday(&tv, 0);
   ts = tv.tv_sec * 1000000 + tv.tv_usec;
   return ts;
+}
+
+/*
+ * Description:
+ *
+ *   Wrapper around inspectorGetTime() that returns formatted UTC datetime string.
+ *
+ * Thread Safety:
+ *
+ *   Not thread-safe. Onus of thread safety is on the caller/owner of
+ *   the buffer.
+ *
+ * Input:
+ *   char* buffer - output buffer for datetime string.
+ *   size_t bufferSize - size of output buffer.
+ *
+ * Output:
+ *   buffer contains UTC datetime string in ISO 8601 format.
+ *
+ * Return:
+ *   inspectorResult_t - success or error code.
+ */
+inspectorResult_t inspectorGetTimeUTC(char* buffer, size_t bufferSize) {
+  if (!buffer || bufferSize < 21) {  // Need at least 20 chars for "YYYY-MM-DDTHH:MM:SSZ"
+    return inspectorMemoryError;
+  }
+
+  uint64_t timestampUsec = inspectorGetTime();
+  time_t timestampSec = timestampUsec / 1000000;  // Convert microseconds to seconds
+  struct tm* utc_tm = gmtime(&timestampSec);
+
+  if (utc_tm) {
+    // Format as ISO 8601 datetime: YYYY-MM-DDTHH:MM:SSZ
+    if (strftime(buffer, bufferSize, "%Y-%m-%dT%H:%M:%SZ", utc_tm) == 0) {
+      return inspectorMemoryError;  // Buffer too small
+    }
+  } else {
+    // Fallback if gmtime fails
+    snprintf(buffer, bufferSize, "unknown");
+  }
+
+  return inspectorSuccess;
 }
 
 /*
@@ -227,44 +267,10 @@ inspectorResult_t inspectorUnlockRWLock(pthread_rwlock_t* lockRef) {
   }
 }
 
-// TODO inspect these retvals
-#define INSPECTOR_LOCK_RD_FLAG(lockRef, lockFlag, debug)        \
-  do {                                                          \
-    if (!lockFlag) {                                            \
-      INS_CHK(inspectorLockRd(lockRef));                 \
-    }                                                           \
-    lockFlag = true;                                            \
-  } while (0);
-
-#define INSPECTOR_LOCK_WR_FLAG(lockRef, lockFlag, debug)        \
-  do {                                                          \
-    if (!lockFlag) {                                            \
-      INS_CHK(inspectorLockWr(lockRef));                 \
-    }                                                           \
-    lockFlag = true;                                            \
-  } while (0);
-
-#define INSPECTOR_UNLOCK_RW_LOCK_FLAG(lockRef, lockFlag, debug) \
-  do {                                                          \
-    if (lockFlag) {                                             \
-      INS_CHK(inspectorUnlockRWLock(lockRef));           \
-    }                                                           \
-    lockFlag = false;                                           \
-  } while (0);
-
-struct inspectorCommInfoList {
-  struct inspectorCommInfo* comms;
-  uint32_t ncomms;
-  pthread_rwlock_t guard;
-};
-
-struct inspectorState {
-  struct inspectorCommInfoList liveComms;
-  struct inspectorCommInfoList deletedComms;
-};
 
 
-static inspectorState g_state;
+
+inspectorState g_state;
 
 static inspectorResult_t inspectorCommInfoListInit(struct inspectorCommInfoList* commList) {
   if (commList->comms) {
@@ -300,7 +306,7 @@ static inspectorResult_t inspectorGlobalStateInit() {
  * Return:
  *   const char* - string representation of the timing source.
  */
-static const char* inspectorTimingSourceToString(inspectorTimingSource_t timingSource) {
+const char* inspectorTimingSourceToString(inspectorTimingSource_t timingSource) {
   switch (timingSource) {
   case inspectorTimingSourceKernelGpu:
     return "kernel_gpu";
@@ -369,12 +375,7 @@ static inspectorResult_t inspectorCommInfoMetaHeader(jsonFileOutput* jfo) {
     JSON_CHK(jsonKey(jfo, "rec_mechanism")); JSON_CHK(jsonStr(jfo, "nccl_profiler_interface"));
     JSON_CHK(jsonKey(jfo, "dump_timestamp_us")); JSON_CHK(jsonUint64(jfo, inspectorGetTime()));
     char hostname[256];
-    // RCCL: gethostname() does not NUL-terminate on truncation.
-    if (gethostname(hostname, sizeof(hostname)) != 0) {
-      hostname[0] = '\0';
-    } else {
-      hostname[sizeof(hostname) - 1] = 0;
-    }
+    gethostname(hostname, 255);
     JSON_CHK(jsonKey(jfo, "hostname")); JSON_CHK(jsonStr(jfo, hostname));
     JSON_CHK(jsonKey(jfo, "pid")); JSON_CHK(jsonUint64(jfo, getpid()));
   }
@@ -475,7 +476,7 @@ static inline inspectorResult_t inspectorCompletedCollVerbose(jsonFileOutput* jf
  *
  */
 static inline inspectorResult_t inspectorCompletedColl(jsonFileOutput* jfo,
-                                                        struct inspectorCompletedCollInfo* collInfo) {
+                                                       struct inspectorCompletedCollInfo* collInfo) {
   JSON_CHK(jsonStartObject(jfo));
   {
 
@@ -596,18 +597,18 @@ static inspectorResult_t inspectorCommInfoListDump(jsonFileOutput* jfo,
          itr != nullptr;
          itr = itr->next) {
       bool needs_writing;
-      INS_CHK_GOTO(inspectorCommInfoDump(jfo, itr, &needs_writing), res, finalize);
+      INS_CHK_GOTO(inspectorCommInfoDump(jfo, itr, &needs_writing), res, exit);
       if (needs_writing) {
         flush = true;
       }
     }
     if (flush) {
-      JSON_CHK_GOTO(jsonLockOutput(jfo), res, finalize);
-      JSON_CHK_GOTO(jsonFlushOutput(jfo), res, finalize);
-      JSON_CHK_GOTO(jsonUnlockOutput(jfo), res, finalize);
+      JSON_CHK_GOTO(jsonLockOutput(jfo), res, exit);
+      JSON_CHK_GOTO(jsonFlushOutput(jfo), res, exit);
+      JSON_CHK_GOTO(jsonUnlockOutput(jfo), res, exit);
     }
   }
-finalize:
+exit:
   INS_CHK(inspectorUnlockRWLock(&commList->guard));
   return res;
 }
@@ -629,12 +630,12 @@ finalize:
  *   inspectorResult_t - success or error code.
  *
  */
-static inspectorResult_t inspectorCommInfoListFinalize(struct inspectorCommInfoList* commList) {
+inspectorResult_t inspectorCommInfoListFinalize(struct inspectorCommInfoList* commList) {
   struct inspectorCommInfo* nextComm = nullptr;
   INS_CHK(inspectorLockWr(&commList->guard));
   while (commList->comms != nullptr && commList->ncomms != 0) {
-    INFO(NCCL_INSPECTOR, "NCCL Inspector: comm %lu still in tracker",
-         commList->comms->commHash);
+    TRACE_INSPECTOR("NCCL Inspector: comm %lu still in tracker",
+                    commList->comms->commHash);
     nextComm = commList->comms->next;
     INS_CHK(inspectorLockDestroy(&commList->comms->guard));
     free(commList->comms);
@@ -674,18 +675,18 @@ static bool ensureDir(char* workdir) {
       // Directory exists, check if it's writable
       if (access(workdir, W_OK) == 0) {
         return true; // Directory exists and is writable
-      } else {
-        INFO(NCCL_INSPECTOR,
-             "NCCL Inspectoer: dump directory %s exists, but is not "
-             "writable",
-             workdir);
-        return false;
-      }
     } else {
-      INFO(NCCL_INSPECTOR,
-           "NCCL Inspector: dump location %s exists, but is not a "
-           "directory",
-           workdir);
+      INFO_INSPECTOR(
+        "NCCL Inspectoer: dump directory %s exists, but is not "
+        "writable",
+        workdir);
+      return false;
+    }
+    } else {
+      INFO_INSPECTOR(
+        "NCCL Inspector: dump location %s exists, but is not a "
+        "directory",
+        workdir);
       return false;
     }
   } else {
@@ -694,9 +695,9 @@ static bool ensureDir(char* workdir) {
     if (mkdir(workdir, mode) == 0) {
       return true; // Directory created successfully
     } else {
-      INFO(NCCL_INSPECTOR,
-           "NCCL Inspector: failed to create dump directory %s: %s", workdir,
-           strerror(errno));
+      INFO_INSPECTOR(
+        "NCCL Inspector: failed to create dump directory %s: %s", workdir,
+        strerror(errno));
       return false;
     }
   }
@@ -721,14 +722,14 @@ static bool ensureDir(char* workdir) {
  *   None.
  */
 static void genDumpDir(char** workdir) {
-  char* dumpdir = getenv("NCCL_INSPECTOR_DUMP_DIR");
+  const char* dumpdir = getenv("NCCL_INSPECTOR_DUMP_DIR");
   if (dumpdir != NULL) {
     *workdir = strdup(dumpdir);
     // TODO check errors here
     return;
   }
 
-  char* jobid = getenv("SLURM_JOBID");
+  const char* jobid = getenv("SLURM_JOBID");
   bool badJobId = true;
   if (jobid != NULL) {
     errno = 0;
@@ -746,161 +747,284 @@ static void genDumpDir(char** workdir) {
   }
 }
 
-// RCCL: rewritten as a plain struct with pthread condvar sleep replacing
-// std::this_thread::sleep_for. Fixes teardown hang.
-// For upcoming syncs with Prometheus/ROCm extensions — do not sync without manual review.
-struct inspectorDumpThread {
-  bool run{false};
-  bool threadStarted{false};
-  jsonFileOutput* jfo;
-  char* outputRoot;
-  uint64_t sampleIntervalUsecs;
-  pthread_t pthread;
-  // Mutex + condvar replacing nanosleep-based polling; wakes immediately on stopThread.
-  pthread_mutex_t sleepMutex;
-  pthread_cond_t  sleepCond;
-  clockid_t       sleepCondClock{CLOCK_MONOTONIC}; // clock used for timedwait deadlines
 
-  inspectorDumpThread(const char* outputRoot, uint64_t sampleIntervalUsecs)
-    : jfo(nullptr), outputRoot(strdup(outputRoot)), sampleIntervalUsecs(sampleIntervalUsecs) {
-    pthread_mutex_init(&sleepMutex, nullptr);
-    pthread_condattr_t condAttr;
-    bool useMonotonic = (pthread_condattr_init(&condAttr) == 0 &&
-                         pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC) == 0);
-    if (useMonotonic) {
-      pthread_cond_init(&sleepCond, &condAttr);
-      pthread_condattr_destroy(&condAttr);
-    } else {
-      // CLOCK_MONOTONIC condvar not supported; fall back to default (CLOCK_REALTIME).
-      // dumpMain will detect this and use CLOCK_REALTIME for its deadline.
-      INFO(NCCL_INSPECTOR,
-           "NCCL Inspector: CLOCK_MONOTONIC condvar unavailable; using CLOCK_REALTIME");
-      pthread_condattr_destroy(&condAttr);
-      pthread_cond_init(&sleepCond, nullptr);
-      sleepCondClock = CLOCK_REALTIME;
-    }
+inspectorDumpThread::inspectorDumpThread(const char* _outputRoot, uint64_t _sampleIntervalUsecs)
+  : jfo(nullptr), outputRoot(strdup(_outputRoot)), sampleIntervalUsecs(_sampleIntervalUsecs) {
+  if (inspectorLockInit(&guard) != inspectorSuccess) {
+    INFO_INSPECTOR("NCCL Inspector inspectorDumpThread: couldn't init lock");
   }
+}
 
-  ~inspectorDumpThread() {
-    if (jfo != nullptr) {
-      jsonFinalizeFileOutput(jfo);
-      jfo = nullptr;
-    }
-    if (outputRoot != nullptr) {
-      free(outputRoot);
-      outputRoot = nullptr;
-    }
-    pthread_cond_destroy(&sleepCond);
-    pthread_mutex_destroy(&sleepMutex);
-  }
-
-  void startThread() {
-    pthread_mutex_lock(&sleepMutex);
-    run = true;
-    pthread_mutex_unlock(&sleepMutex);
-    if (pthread_create(&pthread, NULL, dumpMain, this) != 0) {
-      INFO(NCCL_INSPECTOR,
-           "NCCL Inspector inspectorDumpThread: couldn't create dump thread!");
-      pthread_mutex_lock(&sleepMutex);
-      run = false;
-      pthread_mutex_unlock(&sleepMutex);
-      return;
-    }
-    threadStarted = true;
-    INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: created");
-  }
-
-  void stopThread() {
-    INFO(NCCL_INSPECTOR, "NCCL Inspector Stopping Dump thread");
-    // Set run = false and signal under sleepMutex so the dump thread cannot
-    // miss the wakeup regardless of where it is in its loop.
-    pthread_mutex_lock(&sleepMutex);
-    run = false;
-    pthread_cond_signal(&sleepCond);
-    pthread_mutex_unlock(&sleepMutex);
-    if (threadStarted) pthread_join(pthread, NULL);
-    INFO(NCCL_INSPECTOR, "NCCL Inspector inspectorDumpThread: stopped");
-  }
-
-  inspectorResult_t inspectorStateDump(const char* output_root) {
-    if (!ncclInspectorInit) {
-      return inspectorUninitializedError;
-    }
-    if (!enableNcclInspector) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector is not enabled, will not do ncclAllCommTallyDump");
-      return inspectorDisabledError;
-    }
-
-    if (jfo == 0) {
-      char hostname[256];
-      // RCCL: gethostname() does not NUL-terminate on truncation.
-      if (gethostname(hostname, sizeof(hostname)) != 0) {
-        hostname[0] = '\0';
-      } else {
-        hostname[sizeof(hostname) - 1] = 0;
+inspectorDumpThread::~inspectorDumpThread() {
+  // Close and cleanup Prometheus files, only in Prom mode
+  if (enableNcclInspectorPromDump) {
+    // Close any open Prometheus file handles
+    for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
+      if (deviceFlushEntries[i].fileHandle) {
+        fclose(deviceFlushEntries[i].fileHandle);
+        deviceFlushEntries[i].fileHandle = NULL;
       }
-      char tmp[2048];
-      snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
-      jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
-      if (jsonSuccess != result) {
-        INFO(NCCL_INSPECTOR, "Cannot open %s for writing: %s", tmp, jsonErrorString(result));
-        return inspectorFileOpenError;
+    }
+
+    // Cleanup (delete) prom files after closing them
+    for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
+      if (deviceFlushEntries[i].filename[0] != '\0') {
+        if (unlink(deviceFlushEntries[i].filename) == 0) {
+          TRACE_INSPECTOR("NCCL Inspector: Cleaned up Prometheus file %s",
+                          deviceFlushEntries[i].filename);
+        } else {
+          INFO_INSPECTOR("NCCL Inspector: Failed to cleanup Prometheus file %s: %s",
+                         deviceFlushEntries[i].filename, strerror(errno));
+        }
       }
-      chmod(tmp, 0666);
+    }
+  }
+
+  if (jfo != nullptr) {
+    jsonFinalizeFileOutput(jfo);
+    jfo = nullptr;
+  }
+  if (outputRoot != nullptr) {
+    free(outputRoot);
+    outputRoot = nullptr;
+  }
+  if (inspectorLockDestroy(&guard) != inspectorSuccess) {
+    INFO_INSPECTOR("NCCL Inspector inspectorDumpThread: couldn't destroy lock");
+  }
+}
+
+// Implementation of inspectorDumpThread methods
+FILE* inspectorDumpThread::getOrCreateFileHandle(const char* deviceUuidStr,
+                                                 const char* filename,
+                                                 uint64_t currentTime) {
+  int flushIndex = -1;
+  bool needsFlush = false;
+
+  // Find existing entry for this device UUID
+  for (size_t i = 0; i < deviceFlushEntries.size(); i++) {
+    if (strncmp(deviceFlushEntries[i].deviceUuidStr,
+                deviceUuidStr,
+                sizeof(deviceFlushEntries[i].deviceUuidStr) - 1) == 0) {
+      flushIndex = static_cast<int>(i);
+
+      // Check if we need to flush (clear) the file
+      if (deviceFlushEntries[i].lastFlushTime == 0
+          || ((currentTime - deviceFlushEntries[i].lastFlushTime)
+              >= sampleIntervalUsecs)) {
+        needsFlush = true;
+      }
+      break;
+    }
+  }
+
+  // If not found, add new entry
+  if (flushIndex == -1) {
+    deviceFlushInfo newEntry;
+    strncpy(newEntry.deviceUuidStr, deviceUuidStr, sizeof(newEntry.deviceUuidStr));
+    newEntry.deviceUuidStr[sizeof(newEntry.deviceUuidStr) - 1] = '\0';
+    strncpy(newEntry.filename, filename, sizeof(newEntry.filename) - 1);
+    newEntry.filename[sizeof(newEntry.filename) - 1] = '\0';
+    newEntry.lastFlushTime = 0;
+    newEntry.fileHandle = NULL;
+    newEntry.needsCreation = true;
+
+    deviceFlushEntries.push_back(newEntry);
+    flushIndex = static_cast<int>(deviceFlushEntries.size() - 1);
+    needsFlush = true;
+  }
+
+  // Close existing handle if we need to flush (recreate file)
+  if (needsFlush && deviceFlushEntries[flushIndex].fileHandle) {
+    fclose(deviceFlushEntries[flushIndex].fileHandle);
+    deviceFlushEntries[flushIndex].fileHandle = NULL;
+  }
+
+  // Open/create file if needed
+  if (!deviceFlushEntries[flushIndex].fileHandle) {
+    // Create file if flushing, otherwise append
+    const char* mode = needsFlush ? "w" : "a";
+    FILE* file = fopen(filename, mode);
+
+    if (!file) {
+      INFO_INSPECTOR("NCCL Inspector: Failed to open Prometheus file %s", filename);
+      return NULL;
     }
 
-    if (jfo != nullptr) {
-      inspectorCommInfoListDump(jfo, &g_state.liveComms);
-      inspectorCommInfoListDump(jfo, &g_state.deletedComms);
-    }
+    chmod(filename, 0777);
 
-    // RCCL: re-read ncomms under lock to avoid TOCTOU after inspectorCommInfoListDump.
-    inspectorLockRd(&g_state.deletedComms.guard);
-    bool hasDeleted = (g_state.deletedComms.ncomms > 0);
-    inspectorUnlockRWLock(&g_state.deletedComms.guard);
-    if (hasDeleted) {
-      inspectorCommInfoListFinalize(&g_state.deletedComms);
+    deviceFlushEntries[flushIndex].fileHandle = file;
+
+    if (needsFlush) {
+      TRACE_INSPECTOR("NCCL Inspector: Created/flushed Prometheus file %s", filename);
+      deviceFlushEntries[flushIndex].lastFlushTime = currentTime;
     }
+  }
+
+  return deviceFlushEntries[flushIndex].fileHandle;
+}
+
+void inspectorDumpThread::startThread() {
+  inspectorLockWr(&guard);
+  run = true;
+  inspectorUnlockRWLock(&guard);
+  if (pthread_create(&pthread, NULL, dumpMain, this) != 0) {
+    INFO_INSPECTOR(
+      "NCCL Inspector inspectorDumpThread: couldn't create dump thread!");
+    return;
+  }
+  TRACE_INSPECTOR("NCCL Inspector inspectorDumpThread: created");
+}
+
+void inspectorDumpThread::stopThread() {
+  INFO(NCCL_ENV, "NCCL Inspector Stopping Dump thread");
+  inspectorLockWr(&guard);
+  run = false;
+  inspectorUnlockRWLock(&guard);
+  struct timespec ts;
+  ts.tv_sec = 0;
+  ts.tv_nsec = 1000000; // 1ms
+  nanosleep(&ts, NULL);
+  INFO_INSPECTOR( "NCCL Inspector inspectorDumpThread: stopped");
+}
+
+inspectorResult_t inspectorDumpThread::inspectorStateDump(const char* output_root) {
+  if (!ncclInspectorInit) {
+    return inspectorUninitializedError;
+  }
+  if (!enableNcclInspector) {
+    INFO_INSPECTOR( "NCCL Inspector is not enabled, will not do ncclAllCommTallyDump");
+    return inspectorDisabledError;
+  }
+
+  if (enableNcclInspectorPromDump) {
+    return inspectorStateDumpProm(output_root);
+  } else {
+    return inspectorStateDumpJSON(output_root);
+  }
+}
+
+inspectorResult_t inspectorDumpThread::inspectorStateDumpJSON(const char* output_root) {
+  if (jfo == 0) {
+    char hostname[256];
+    gethostname(hostname, 255);
+    char tmp[2048];
+    snprintf(tmp, sizeof(tmp), "%s/%s-pid%d.log", output_root, hostname, getpid());
+    jsonResult_t result = jsonInitFileOutput(&jfo, tmp);
+    if (jsonSuccess != result) {
+      INFO_INSPECTOR("Cannot open %s for writing: %s", tmp, jsonErrorString(result));
+      return inspectorFileOpenError;
+    }
+    chmod(tmp, 0666);
+  }
+
+  if (jfo != nullptr) {
+    inspectorCommInfoListDump(jfo, &g_state.liveComms);
+    inspectorCommInfoListDump(jfo, &g_state.deletedComms);
+  }
+
+  if (g_state.deletedComms.ncomms > 0) {
+    inspectorCommInfoListFinalize(&g_state.deletedComms);
+  }
+  return inspectorSuccess;
+}
+
+inspectorResult_t inspectorDumpThread::inspectorStateDumpProm(const char* output_root) {
+  // Write communicators directly to files with per-device flushing handled inside
+  inspectorResult_t dumpResult
+    = inspectorPromCommInfoListDump(&g_state.liveComms,
+                                    output_root,
+                                    this);
+  if (dumpResult != inspectorSuccess) {
+    INFO_INSPECTOR("NCCL Inspector: Direct Prometheus dump failed: %s",
+                   inspectorErrorString(dumpResult));
+    return dumpResult;
+  }
+
+  // Finalize deleted communicators
+  if (g_state.deletedComms.ncomms > 0) {
+    inspectorCommInfoListFinalize(&g_state.deletedComms);
+  }
+
+  return inspectorSuccess;
+}
+
+void* inspectorDumpThread::dumpMain(void* arg) {
+  inspectorDumpThread* dumper = (inspectorDumpThread*)arg;
+  inspectorResult_t res = inspectorSuccess;
+  struct timespec ts;
+  ts.tv_sec = dumper->sampleIntervalUsecs / 1000000;
+  ts.tv_nsec = dumper->sampleIntervalUsecs % 1000000;
+
+  while (dumper->run) {
+    inspectorLockWr(&dumper->guard);
+    if (!dumper->run) {
+      inspectorUnlockRWLock(&dumper->guard);
+      break;
+    }
+    res = dumper->inspectorStateDump(dumper->outputRoot);
+    if (res == inspectorFileOpenError || res == inspectorDisabledError) {
+      inspectorUnlockRWLock(&dumper->guard);
+      break;
+    }
+    inspectorUnlockRWLock(&dumper->guard);
+
+    nanosleep(&ts, NULL);
+  }
+
+  return 0;
+}
+
+/*
+ * Description:
+ *
+ *   Starts the internal dump thread with the specified interval.
+ *
+ * Thread Safety:
+ *   Not thread-safe (should be called during initialization).
+ *
+ * Input:
+ *   uint64_t intervalUsecs - dump interval in microseconds.
+ *
+ * Output:
+ *   Dump thread is started if successful.
+ *
+ * Return:
+ *   inspectorResult_t - success or error code.
+ */
+static inspectorResult_t inspectorStartDumpThread(uint64_t intervalUsecs) {
+  if (intervalUsecs == 0) {
+    INFO_INSPECTOR( "NCCL Inspector: dump thread enabled but "
+                    "dump interval is 0; not starting internal dump thread.");
     return inspectorSuccess;
   }
 
-  static void* dumpMain(void* arg) {
-    inspectorDumpThread* dumper = (inspectorDumpThread*)arg;
-    inspectorResult_t res = inspectorSuccess;
+  char* dumpdir;
+  genDumpDir(&dumpdir);
 
-    while (true) {
-      // Check run flag under sleepMutex so stopThread's signal is never missed.
-      pthread_mutex_lock(&dumper->sleepMutex);
-      bool shouldRun = dumper->run;
-      pthread_mutex_unlock(&dumper->sleepMutex);
-      if (!shouldRun) break;
-
-      res = dumper->inspectorStateDump(dumper->outputRoot);
-      if (res == inspectorFileOpenError || res == inspectorDisabledError) break;
-
-      // Interruptible sleep: wakes immediately when stopThread signals the condvar.
-      struct timespec deadline;
-      clock_gettime(dumper->sleepCondClock, &deadline);
-      uint64_t nsTotal = dumper->sampleIntervalUsecs * 1000ULL;  // µs → ns
-      deadline.tv_sec  += nsTotal / 1000000000ULL;
-      deadline.tv_nsec += nsTotal % 1000000000ULL;
-      if (deadline.tv_nsec >= 1000000000L) {
-        deadline.tv_sec  += 1;
-        deadline.tv_nsec -= 1000000000L;
-      }
-      pthread_mutex_lock(&dumper->sleepMutex);
-      // Loop to handle spurious wakeups: keep waiting until the deadline
-      // expires or run becomes false (stopThread signalled us).
-      while (dumper->run) {
-        int rc = pthread_cond_timedwait(&dumper->sleepCond, &dumper->sleepMutex, &deadline);
-        if (rc == ETIMEDOUT) break;
-      }
-      pthread_mutex_unlock(&dumper->sleepMutex);
+  if (dumpdir != nullptr) {
+    if (!ensureDir(dumpdir)) {
+      free(dumpdir);
+      INFO_INSPECTOR( "NCCL Inspector: failed to generate a dump dir; not "
+                      "starting internal dump thread.");
+      return inspectorSuccess;
     }
 
-    return 0;
+    dumper = new inspectorDumpThread(dumpdir, intervalUsecs);
+    INFO_INSPECTOR(
+      "NCCL Inspector enabled with polling interval %lu us, "
+      "output directory %s, format %s",
+      intervalUsecs, dumpdir,
+      enableNcclInspectorPromDump ? "Prometheus" : "JSON");
+    dumper->startThread();
+
+    free(dumpdir);
+  } else {
+    INFO_INSPECTOR( "NCCL Inspector: failed to generate a dump "
+                    "dir; not starting internal dump thread.");
   }
-};
+
+  return inspectorSuccess;
+}
 
 /*
  * Description:
@@ -954,7 +1078,8 @@ static void showInspectorEnvVars() {
     {"NCCL_INSPECTOR_DUMP_THREAD_ENABLE", getenv("NCCL_INSPECTOR_DUMP_THREAD_ENABLE"), "1", "Enable/disable dump thread"},
     {"NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS", getenv("NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS"), "0", "Dump thread interval in microseconds"},
     {"NCCL_INSPECTOR_DUMP_DIR", getenv("NCCL_INSPECTOR_DUMP_DIR"), "(auto-generated)", "Output directory for inspector logs"},
-    {"NCCL_INSPECTOR_DUMP_VERBOSE", getenv("NCCL_INSPECTOR_DUMP_VERBOSE"), "0", "Enable/disable verbose dumping (event_trace)"}
+    {"NCCL_INSPECTOR_DUMP_VERBOSE", getenv("NCCL_INSPECTOR_DUMP_VERBOSE"), "0", "Enable/disable verbose dumping (event_trace)"},
+    {"NCCL_INSPECTOR_PROM_DUMP", getenv("NCCL_INSPECTOR_PROM_DUMP"), "0", "Enable/disable Prometheus format output dump"}
   };
 
   const int numEnvVars = sizeof(envVars) / sizeof(envVars[0]);
@@ -989,7 +1114,8 @@ static void showInspectorEnvVars() {
  *   inspectorResult_t - success or error code.
  */
 inspectorResult_t inspectorGlobalInit(int rank) {
-  char* str = getenv("NCCL_INSPECTOR_ENABLE");
+  TRACE_INSPECTOR("NCCL Inspector: inspectorGlobalInit");
+  const char* str = getenv("NCCL_INSPECTOR_ENABLE");
   int enable = str ? atoi(str) : 0; // default disable
   enableNcclInspector = enable == 0 ? false : true;
   ncclInspectorInit = true;
@@ -1006,6 +1132,13 @@ inspectorResult_t inspectorGlobalInit(int rank) {
     return inspectorDisabledError;
   }
 
+  // Initialize CUDA wrapper for inspector
+  inspectorResult_t cudaInitResult = inspectorCudaWrapInit();
+  if (cudaInitResult != inspectorSuccess) {
+    INFO_INSPECTOR("NCCL Inspector: Failed to initialize CUDA wrapper");
+    return cudaInitResult;
+  }
+
   INS_CHK(inspectorGlobalStateInit());
 
   str = getenv("NCCL_INSPECTOR_DUMP_THREAD_ENABLE");
@@ -1016,46 +1149,28 @@ inspectorResult_t inspectorGlobalInit(int rank) {
   enable = str ? atoi(str) : 0; // default disable
   enableNcclInspectorDumpVerbose = enable == 0 ? false : true;
 
+  // Check for Prometheus dump format
+  str = getenv("NCCL_INSPECTOR_PROM_DUMP");
+  enable = str ? atoi(str) : 0; // default disable
+  enableNcclInspectorPromDump = enable == 0 ? false : true;
+
+  // Read and validate dump interval once
+  str = getenv("NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS");
+  ncclInspectorDumpIntervalUsecs = str ? strtoull(str, 0, 0) : 0;
+
+  // Apply Prometheus-specific interval validation if enabled
+  if (enableNcclInspectorPromDump && enableNcclInspectorDumpThread) {
+    ncclInspectorDumpIntervalUsecs
+      = inspectorPromValidateInterval(ncclInspectorDumpIntervalUsecs);
+  }
+
   if (enableNcclInspectorDumpThread) {
-    str = getenv("NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS");
-    const uint64_t interval = str ? strtoull(str, 0, 0) : 0;
-
-    if (interval == 0) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector: dump thread enabled but "
-           "NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS is 0; not "
-           "starting internal dump "
-           "thread.");
-      return inspectorSuccess;
-    }
-
-    char* dumpdir;
-    genDumpDir(&dumpdir);
-
-    if (dumpdir != nullptr) {
-      if (!ensureDir(dumpdir)) {
-        free(dumpdir);
-        INFO(NCCL_INSPECTOR, "NCCL Inspector: failed to generate a dump dir; not "
-             "starting internal dump thread.");
-        return inspectorSuccess;
-      }
-
-      dumper = new inspectorDumpThread(dumpdir, interval);
-      dumper->startThread();
-
-      INFO(NCCL_INSPECTOR,
-           "NCCL Inspector enabled with polling interval %lu us and "
-           "output directory %s",
-           interval, dumpdir);
-      free(dumpdir);
-    } else {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector: failed to generate a dump "
-           "dir; not starting internal dump thread.");
-    }
+    INS_CHK(inspectorStartDumpThread(ncclInspectorDumpIntervalUsecs));
   } else {
-    INFO(NCCL_INSPECTOR,
-         "NCCL Inspector: NCCL_INSPECTOR_DUMP_THREAD_ENABLE set to 0; not "
-         "starting internal dump "
-         "thread.");
+    INFO_INSPECTOR(
+      "NCCL Inspector: NCCL_INSPECTOR_DUMP_THREAD_ENABLE set to 0; not "
+      "starting internal dump "
+      "thread.");
   }
   return inspectorSuccess;
 }
@@ -1204,8 +1319,53 @@ static inspectorResult_t inspectorFillCommInfo(struct inspectorCommInfo* commInf
   commInfo->nranks = nranks;
   commInfo->nnodes = nnodes;
   commInfo->dump = false;
+
+  // Capture current CUDA device ID and convert to UUID string
+  int cudaDeviceId = -1;
+  cudaError_t err = cudaGetDevice(&cudaDeviceId);
+  if (err != cudaSuccess) {
+    INFO_INSPECTOR("Inspector: Failed to get CUDA device ID: %s", cudaGetErrorString(err));
+    return inspectorCudaError;
+  }
+
+  commInfo->cudaDeviceId = cudaDeviceId;
+
+  // Get CUDA device handle for driver API
+  CUdevice cuDevice;
+  CUresult cuErr = INSPECTOR_CUPFN(cuDeviceGet)(&cuDevice, cudaDeviceId);
+  if (cuErr != CUDA_SUCCESS) {
+    INFO_INSPECTOR("Inspector: Failed to get CUDA device handle for device %d", cudaDeviceId);
+    return inspectorCudaError;
+  }
+
+  // Get device UUID and convert to string
+  CUuuid deviceUuid;
+  cuErr = INSPECTOR_CUPFN(cuDeviceGetUuid)(&deviceUuid, cuDevice);
+  if (cuErr != CUDA_SUCCESS) {
+    INFO_INSPECTOR("Inspector: Failed to get device UUID for device %d", cudaDeviceId);
+    return inspectorCudaError;
+  }
+
+  // Format UUID as string (standard UUID format)
+  snprintf(commInfo->deviceUuidStr, sizeof(commInfo->deviceUuidStr),
+           "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+           (unsigned char)deviceUuid.bytes[0], (unsigned char)deviceUuid.bytes[1],
+           (unsigned char)deviceUuid.bytes[2], (unsigned char)deviceUuid.bytes[3],
+           (unsigned char)deviceUuid.bytes[4], (unsigned char)deviceUuid.bytes[5],
+           (unsigned char)deviceUuid.bytes[6], (unsigned char)deviceUuid.bytes[7],
+           (unsigned char)deviceUuid.bytes[8], (unsigned char)deviceUuid.bytes[9],
+           (unsigned char)deviceUuid.bytes[10], (unsigned char)deviceUuid.bytes[11],
+           (unsigned char)deviceUuid.bytes[12], (unsigned char)deviceUuid.bytes[13],
+           (unsigned char)deviceUuid.bytes[14], (unsigned char)deviceUuid.bytes[15]);
+
   INS_CHK(inspectorLockInit(&commInfo->guard));
   commInfo->next = nullptr;
+
+  // Cache static Prometheus labels if Prometheus mode is enabled
+  if (enableNcclInspectorPromDump) {
+    INS_CHK(inspectorPromCacheStaticLabels(commInfo));
+  }
+
   return inspectorSuccess;
 }
 
@@ -1250,10 +1410,10 @@ inspectorResult_t inspectorAddComm(struct inspectorCommInfo **commInfo,
        itr != nullptr;
        itr = itr->next) {
     if (comm_eq(commHash, itr->commHash, rank, itr->rank)) {
-      INFO(NCCL_INSPECTOR, "NCCL Inspector: comm 0x%lx already in tracker",
-           commHash);
+      INFO_INSPECTOR("NCCL Inspector: comm 0x%lx already in tracker",
+                     commHash);
       res = inspectorAddDuplicateCommError;
-      goto finalize;
+      goto exit;
     }
   }
   INSPECTOR_UNLOCK_RW_LOCK_FLAG(&liveCommInfoList->guard, locked,
@@ -1262,7 +1422,7 @@ inspectorResult_t inspectorAddComm(struct inspectorCommInfo **commInfo,
     = (struct inspectorCommInfo*)calloc(1, sizeof(struct inspectorCommInfo));
   if (0 == commInfoPtr) {
     res = inspectorMemoryError;
-    goto finalize;
+    goto exit;
   }
   INS_CHK_GOTO(inspectorFillCommInfo(commInfoPtr,
                                      commName,
@@ -1278,7 +1438,7 @@ inspectorResult_t inspectorAddComm(struct inspectorCommInfo **commInfo,
   commInfoPtr->next = liveCommInfoList->comms;
   liveCommInfoList->comms = commInfoPtr;
 
-finalize:
+exit:
   INSPECTOR_UNLOCK_RW_LOCK_FLAG(&liveCommInfoList->guard, locked,
                                 "inspectorAddComm: commList::guard");
   *commInfo = commInfoPtr;
@@ -1288,7 +1448,7 @@ fail:
     free(commInfoPtr);
     commInfoPtr = nullptr;
   }
-  goto finalize;
+  goto exit;
 }
 
 /*
@@ -1315,8 +1475,8 @@ inspectorResult_t inspectorDelComm(struct inspectorCommInfo *commInfo) {
   struct inspectorCommInfo* commInfoPtr = nullptr;
   bool locked = false;
 
-  INFO(NCCL_INSPECTOR, "NCCL Inspector: DelComm removing 0x%lx",
-       commInfo->commHash);
+  TRACE_INSPECTOR("NCCL Inspector: DelComm removing 0x%lx",
+                  commInfo->commHash);
 
   INSPECTOR_LOCK_WR_FLAG(&liveCommInfoList->guard, locked,
                          "inspectorDelComm: liveCommInfoList::guard -wr");
@@ -1337,8 +1497,8 @@ inspectorResult_t inspectorDelComm(struct inspectorCommInfo *commInfo) {
                                 "inspectorDelComm: liveCommInfoList::guard -unlock");
 
   if (!commInfoPtr) {
-    INFO(NCCL_INSPECTOR, "NCCL Inspector: DelComm can't remove 0x%lx, not present",
-         commInfo->commHash);
+    INFO_INSPECTOR("NCCL Inspector: DelComm can't remove 0x%lx, not present",
+                   commInfo->commHash);
     return inspectorDeleteUnknownCommError;
   }
 
@@ -1409,13 +1569,11 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
     factor = ((double)(2 * (commInfo->nranks - 1))) / ((double)commInfo->nranks);
     break;
   case ncclFuncReduceScatter:
-    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
-    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
+    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncAllGather:
-    // RCCL: cast before multiply to avoid uint64 overflow on large messages.
-    trafficSize = (double)completedColl->msgSizeBytes * (double)commInfo->nranks;
+    trafficSize = (double)(completedColl->msgSizeBytes * commInfo->nranks);
     factor = ((double)(commInfo->nranks - 1)) / ((double)commInfo->nranks);
     break;
   case ncclFuncSendRecv:
@@ -1436,8 +1594,8 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
  * Description:
  *
  *   Helper function to calculate kernel execution time using GPU
- *   clock values, which are ticks from `wall_clock64()` (100 MHz, 10 ns per tick)
- *   divide by 100 to convert to microseconds.
+ *   clock values.  The GPU clock values are measured in nanoseconds
+ *   from the globaltimer register.
  *
  * Thread Safety:
  *   Thread-safe (read-only operations on kernel info).
@@ -1456,10 +1614,8 @@ void inspectorComputeCollBw(struct inspectorCommInfo *commInfo,
 static uint64_t calculateKernelGpuExecTimeUsecs(struct inspectorKernelChInfo *kernelCh) {
   if (kernelCh->startGpuClk != 0 && kernelCh->stopGpuClk != 0) {
     if (kernelCh->stopGpuClk > kernelCh->startGpuClk) {
-      uint64_t ticks = kernelCh->stopGpuClk - kernelCh->startGpuClk;
-      // RCCL: AMD wall_clock64() runs at 100 MHz (10 ns/tick); divide by 100 for µs.
-      // NCCL uses CUDA globaltimer at ~1 GHz (divide by 1000). Do not sync from NCCL.
-      return ticks / 100;
+      uint64_t execTimeNanosecs = kernelCh->stopGpuClk - kernelCh->startGpuClk;
+      return execTimeNanosecs / 1000;
     }
   }
   return 0;
@@ -1495,9 +1651,7 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
   uint64_t maxKernelExecTimeUsecs = 0;
   inspectorTimingSource_t bestTimingSource = inspectorTimingSourceCollectiveCpu;
 
-  // RCCL: cap iteration to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  uint32_t nCh = (collInfo->nChannels < MAX_CHANNELS) ? collInfo->nChannels : MAX_CHANNELS;
-  for (uint32_t i = 0; i < nCh; i++) {
+  for (uint32_t i = 0; i < collInfo->nChannels; i++) {
     struct inspectorKernelChInfo *kernelCh = &collInfo->kernelCh[i];
     uint64_t gpuExecTimeUsecs = calculateKernelGpuExecTimeUsecs(kernelCh);
     if (gpuExecTimeUsecs > 0) {
@@ -1521,7 +1675,6 @@ static uint64_t calculateMaxKernelExecTimeUsecs(struct inspectorCollInfo *collIn
     return maxKernelExecTimeUsecs;
   } else {
     *timingSource = inspectorTimingSourceCollectiveCpu;
-    if (collInfo->tsCompletedUsec <= collInfo->tsStartUsec) return 0; // RCCL: underflow guard
     return collInfo->tsCompletedUsec - collInfo->tsStartUsec;
   }
 }
@@ -1576,6 +1729,8 @@ void inspectorUpdateCollPerf(struct inspectorCompletedCollInfo *completedColl,
  *
  */
 inspectorResult_t inspectorGlobalFinalize() {
+  // Cleanup CUDA wrapper
+  inspectorCudaWrapCleanup();
   if (dumper) {
     dumper->stopThread();
     delete dumper;
