@@ -216,6 +216,9 @@ configure_pc_sampling_service(context::context*                ctx,
         // Keeping this under the same lock ensures atomicity of the entire operation
         ctx->pc_sampler->agent_sessions[agent->id] = session;
 
+        // Note: This log reflects successful session creation and is intentionally
+        // reported at ROCP_INFO (it was previously logged at ROCP_ERROR, which
+        // was misleading for a non-error code path).
         ROCP_INFO << "PC sampling session with IOCTL id: " << session->ioctl_pcs_id
                   << " has been created!\n";
 
