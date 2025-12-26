@@ -17,7 +17,7 @@ For example, starting with the following base configuration:
    export ROCPROFSYS_TIME_OUTPUT=ON
    export ROCPROFSYS_USE_PID=OFF
    export ROCPROFSYS_PROFILE=ON
-   export ROCPROFSYS_TRACE_CACHED=ON
+   export ROCPROFSYS_TRACE=ON
 
 .. code-block:: shell
 
