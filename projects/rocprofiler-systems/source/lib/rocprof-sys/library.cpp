@@ -97,6 +97,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <pthread.h>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <unistd.h>
@@ -223,11 +224,12 @@ ensure_finalization(bool _static_init = false)
     {
         auto _verbose =
             get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
-        auto _search_paths = JOIN(':', tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
-                                  tim::get_env<std::string>("PWD"), ".",
-                                  tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("LIBRARY_PATH", ""),
-                                  tim::get_env<std::string>("PATH", ""));
+        auto _search_paths = fmt::format("{}:{}:{}:{}:{}",
+                                         tim::get_env<std::string>("ROCPROFSYS_PATH", ""),
+                                         tim::get_env<std::string>("PWD"), ".",
+                                         tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
+                                         tim::get_env<std::string>("LIBRARY_PATH", ""),
+                                         tim::get_env<std::string>("PATH", ""));
         common::setup_environ(_verbose, _search_paths);
     }
 
@@ -977,7 +979,9 @@ rocprofsys_finalize_hidden(void)
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
-        std::string _msg = JOIN("", *get_main_bundle());
+        std::ostringstream _oss;
+        _oss << *get_main_bundle();
+        std::string _msg = _oss.str();
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
         LOG_INFO("{}", _msg);
@@ -997,7 +1001,9 @@ rocprofsys_finalize_hidden(void)
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
             {
-                std::string _msg = JOIN("", *itr);
+                std::ostringstream _oss;
+                _oss << *itr;
+                std::string _msg = _oss.str();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
                 if(_thr_verbose >= 0)

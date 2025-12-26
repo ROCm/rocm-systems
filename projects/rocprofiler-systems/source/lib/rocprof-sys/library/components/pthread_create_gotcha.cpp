@@ -607,7 +607,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
             std::to_string(_use_causal), std::to_string(_use_sampling),
             std::to_string(_sample_child), std::to_string(_tid),
             std::to_string(_use_bundle), std::to_string(_enable_causal),
-            std::to_string(_enable_sampling), JOIN("", *_info));
+            std::to_string(_enable_sampling), _info->as_string());
 
         std::stringstream _backtrace_ss;
         timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},

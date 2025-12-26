@@ -61,7 +61,7 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
         if(!counter_track::exists(_idx))
         {
             std::string _label =
-                (_idx > 0) ? JOIN(" ", Tp::label, JOIN("", '[', _idx, ']')) : Tp::label;
+                (_idx > 0) ? fmt::format("{} [{}]", Tp::label, _idx) : Tp::label;
             counter_track::emplace(_idx, _label, "bytes");
         }
 
@@ -70,8 +70,8 @@ write_perfetto_counter_track(uint64_t _val, uint64_t _begin_ts, uint64_t _end_ts
     }
 }
 
-static auto
-rccl_type_size(ncclDataType_t datatype)
+inline auto
+rccl_type_size(ncclDataType_t datatype) noexcept
 {
     switch(datatype)
     {

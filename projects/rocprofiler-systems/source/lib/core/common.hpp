@@ -125,8 +125,3 @@ struct construct_on_thread
     int64_t index = threading::get_id();
 };
 }  // namespace rocprofsys
-
-// same sort of functionality as python's " ".join([...])
-#if !defined(JOIN)
-#    define JOIN(...) ::rocprofsys::common::join(__VA_ARGS__)
-#endif
