@@ -272,15 +272,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _data.verbose = _v;
                 update_env(_data, "ROCPROFSYS_VERBOSE", _v);
 
-                constexpr const char* log_levels[] = { "info", "debug", "debug",
-                                                       "trace" };
-                constexpr int         _log_level_last =
-                    sizeof(log_levels) / sizeof(log_levels[0]) - 1;
+                constexpr std::array<const char*, 5> log_levels = { "off", "info",
+                                                                    "debug", "debug",
+                                                                    "trace" };
 
-                const char* _log_level =
-                    _v < 0 ? "off" : log_levels[std::min(_v, _log_level_last)];
-
-                update_env(_data, "ROCPROFSYS_LOG_LEVEL", _log_level);
+                auto index =
+                    std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+                update_env(_data, "ROCPROFSYS_LOG_LEVEL", log_levels[index]);
             });
 
         _data.processed_environs.emplace("verbose");

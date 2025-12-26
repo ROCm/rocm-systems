@@ -251,14 +251,13 @@ extern "C"
         if(_version > 0) _settings->requires_global_fencing = false;
     }
 
-    void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
+    void kokkosp_init_library([[maybe_unused]] const int      loadSeq,
+                              [[maybe_unused]] const uint64_t interfaceVer,
                               const uint32_t devInfoCount, void* deviceInfo)
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
         tim::consume_parameters(devInfoCount, deviceInfo);
 
-        (void) loadSeq;
-        (void) interfaceVer;
         LOG_DEBUG(
             "Initializing rocprof-sys kokkos connector (sequence {}, version: {})...",
             loadSeq, interfaceVer);

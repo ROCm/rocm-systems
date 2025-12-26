@@ -93,10 +93,8 @@ wait_pid(pid_t _pid, int _opts)
 }
 
 int
-diagnose_status(pid_t _pid, int _status, int _verbose)
+diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 {
-    (void) _verbose;
-
     bool _normal_exit      = (WIFEXITED(_status) > 0);
     bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
     bool _core_dump        = (WCOREDUMP(_status) > 0);

@@ -268,9 +268,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
+mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 {
-    (void) _data;
     LOG_DEBUG("{}()", _data.tool_id);
 
     auto _blocked = get_sampling_signals();
