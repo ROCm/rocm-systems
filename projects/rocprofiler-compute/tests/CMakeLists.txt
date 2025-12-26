@@ -67,3 +67,11 @@ set_target_properties(
     laplace_eqn
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
 )
+
+set(ROCFLOP_SOURCES ../sample/rocflop.cpp)
+set_source_files_properties(${ROCFLOP_SOURCES} PROPERTIES LANGUAGE HIP)
+add_executable(rocflop ${ROCFLOP_SOURCES})
+set_target_properties(
+    rocflop
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/tests
+)

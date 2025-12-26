@@ -955,6 +955,15 @@ void Os::CxaDemangle(const std::string& name, std::string* result) {
 namespace numa {
 
 // ================================================================================================
+uint32_t getCurrentNumaNode() {
+  unsigned cpu, node;
+  if (syscall(__NR_getcpu, &cpu, &node, nullptr) < 0) {
+    return static_cast<uint32_t>(-1);
+  }
+  return static_cast<uint32_t>(node);
+}
+
+// ================================================================================================
 NumaPolicy::NumaPolicy(const uint32_t numa_node_count) :
   node_map_((numa_node_count + kBitsPerUInt64 - 1) / kBitsPerUInt64, 0) { }
 
