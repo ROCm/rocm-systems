@@ -786,7 +786,7 @@ def run_prof(
     mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
-    torch_operators_enabled: bool,
+    torch_operators_enabled: bool = False,
     retain_rocpd_output: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
