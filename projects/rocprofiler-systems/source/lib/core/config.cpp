@@ -883,7 +883,6 @@ configure_settings(bool _init)
     _add_rocprofsys_category(_config->find("ROCPROFSYS_CONFIG_FILE"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_DEBUG"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_VERBOSE"));
-    // TODO: Check is needed
     _add_rocprofsys_category(_config->find("ROCPROFSYS_LOG_LEVEL"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_TIME_OUTPUT"));
     _add_rocprofsys_category(_config->find("ROCPROFSYS_OUTPUT_PREFIX"));
@@ -1683,7 +1682,6 @@ print_settings(
     _ros << std::flush;
 }
 
-// TODO: This maybe should use std::cout instead of LOG_INFO
 void
 print_settings(bool _include_env)
 {

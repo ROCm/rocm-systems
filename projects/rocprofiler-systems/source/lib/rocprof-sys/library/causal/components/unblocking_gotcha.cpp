@@ -38,8 +38,6 @@
 #include <pthread.h>
 #include <stdexcept>
 
-#include "logger/debug.hpp"
-
 #pragma weak pthread_mutex_unlock
 #pragma weak pthread_spin_unlock
 #pragma weak pthread_cond_signal
