@@ -1461,12 +1461,13 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                 size_t _n = 0;
                                 for(const auto& line : _lines)
                                 {
-                                    auto _label = JOIN('-', "lineinfo", _n++);
+                                    auto _label = fmt::format("lineinfo-{}", _n++);
                                     tracing::add_perfetto_annotation(
                                         ctx, _label.c_str(),
-                                        JOIN('@',
-                                             rocprofsys::utility::demangle(line.name),
-                                             JOIN(':', line.location, line.line)));
+                                        fmt::format(
+                                            "{}@{}:{}",
+                                            rocprofsys::utility::demangle(line.name),
+                                            line.location, line.line));
                                 }
                             }
                         }
@@ -1559,7 +1560,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                             static_strings
                                 .emplace(rocprofsys::utility::demangle(line.name))
                                 .first->c_str();
-                        auto _info = JOIN(':', line.location, line.line);
+                        auto _info = fmt::format("{}:{}", line.location, line.line);
                         tracing::push_perfetto_track(
                             category::timer_sampling{}, _name, _track, _beg,
                             [&](::perfetto::EventContext ctx) {
@@ -1602,12 +1603,13 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
                                     size_t _n = 0;
                                     for(const auto& line : _lines)
                                     {
-                                        auto _label = JOIN('-', "lineinfo", _n++);
+                                        auto _label = fmt::format("lineinfo-{}", _n++);
                                         tracing::add_perfetto_annotation(
                                             ctx, _label.c_str(),
-                                            JOIN('@',
-                                                 rocprofsys::utility::demangle(line.name),
-                                                 JOIN(':', line.location, line.line)));
+                                            fmt::format(
+                                                "@{}@{}:{}",
+                                                rocprofsys::utility::demangle(line.name),
+                                                line.location, line.line));
                                     }
                                 }
                             }

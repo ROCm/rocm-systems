@@ -1586,7 +1586,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
     if(num_headers == 0 || headers == nullptr) return;
 
     auto _track_desc_stream = [](uint64_t _stream_id) {
-        return JOIN("", "HIP Activity Stream ", _stream_id);
+        return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
     const bool _default_group_by_queue = get_group_by_queue();
@@ -1629,8 +1629,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 {
                     cache_category<category::rocm_kernel_dispatch>();
                     cache_add_thread_info(record->thread_id);
-                    cache_add_track(JOIN("", "GPU Kernel Dispatch [", _agent->device_id,
-                                         "] Queue ", _queue_id.handle)
+                    cache_add_track(fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                                _agent->device_id, _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
                     cache_kernel_dispatch(record, _stream_id);
@@ -1677,26 +1677,24 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                                 record->dispatch_info.group_segment_size);
                             tracing::add_perfetto_annotation(
                                 ctx, "workgroup_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.workgroup_size.x,
-                                          record->dispatch_info.workgroup_size.y,
-                                          record->dispatch_info.workgroup_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.workgroup_size.x,
+                                            record->dispatch_info.workgroup_size.y,
+                                            record->dispatch_info.workgroup_size.z));
                             tracing::add_perfetto_annotation(
                                 ctx, "grid_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.grid_size.x,
-                                          record->dispatch_info.grid_size.y,
-                                          record->dispatch_info.grid_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.grid_size.x,
+                                            record->dispatch_info.grid_size.y,
+                                            record->dispatch_info.grid_size.z));
                         }
                     };
 
                     if(_group_by_queue)
                     {
                         auto _track_desc = [](int32_t _device_id_v, int64_t _queue_id_v) {
-                            return JOIN("", "GPU Kernel Dispatch [", _device_id_v,
-                                        "] Queue ", _queue_id_v);
+                            return fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                               _device_id_v, _queue_id_v);
                         };
 
                         const auto _track = tracing::get_perfetto_track(
@@ -1755,9 +1753,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     size_t      thread_idx = record->thread_id;
                     std::string track_name;
 
-                    track_name =
-                        JOIN("", "GPU Memory Copy to Agent [",
-                             _dst_agent->logical_node_id, "] Thread ", thread_idx);
+                    track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                             _dst_agent->logical_node_id, thread_idx);
 
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -1802,8 +1799,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         auto _track_desc = [](int32_t                 _device_id_v,
                                               rocprofiler_thread_id_t _tid) {
                             const auto& _tid_v = thread_info::get(_tid, SystemTID);
-                            return JOIN("", "GPU Memory Copy to Agent [", _device_id_v,
-                                        "] Thread ", _tid_v->index_data->sequent_value);
+                            return fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                               _device_id_v,
+                                               _tid_v->index_data->sequent_value);
                         };
 
                         const auto _track = tracing::get_perfetto_track(

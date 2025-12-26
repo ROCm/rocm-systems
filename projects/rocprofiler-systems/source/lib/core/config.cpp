@@ -2200,8 +2200,8 @@ get_perfetto_output_filename()
 
     if(!_val.empty() && _val.at(0) != '/')
     {
-        auto _result =
-            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
         LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
@@ -2456,7 +2456,8 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
     setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
 
     if(!_val.empty() && _val.at(0) != '/')
-        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        return settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                get_config()->get_tag());
     return _val;
 }
 
@@ -2514,8 +2515,8 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     if(!_val.empty() && _val.at(0) != '/')
     {
-        auto _result =
-            settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
+                                        get_config()->get_tag());
         LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
         return _result;
     }
@@ -2731,7 +2732,7 @@ get_tmp_file(std::string _basename, std::string _ext)
     _cfg.use_suffix    = true;
     _cfg.suffix        = "%pid%";
     _cfg.explicit_path = get_tmpdir();
-    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
+    _cfg.subdirectory  = fmt::format("{}/{}", settings::output_path(), "%ppid%");
     auto _fname =
         settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
 
