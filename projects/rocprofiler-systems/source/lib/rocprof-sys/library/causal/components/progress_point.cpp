@@ -31,8 +31,6 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/units.hpp>
 
-#include "logger/debug.hpp"
-
 namespace rocprofsys
 {
 namespace causal

@@ -55,8 +55,6 @@
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
-#include "logger/debug.hpp"
-
 #include <array>
 #include <cstring>
 #include <ctime>
