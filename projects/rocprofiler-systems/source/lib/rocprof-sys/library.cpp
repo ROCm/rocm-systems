@@ -598,7 +598,7 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_ucx())
     {
         ROCPROFSYS_VERBOSE_F(1, "Setting up UCX traces...\n");
-        component::ucx_gotcha::start();
+        component::ucx_gotcha<rocprofsys::UCXGotchaPolicy>::start();
     }
 
     if(get_use_vaapi_tracing())
@@ -894,7 +894,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_ucx())
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down UCX tracing...\n");
-        component::ucx_gotcha::shutdown();
+        component::ucx_gotcha<rocprofsys::UCXGotchaPolicy>::shutdown();
     }
 
     if(get_use_vaapi_tracing())

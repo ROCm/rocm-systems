@@ -21,18 +21,18 @@
 # THE SOFTWARE.
 
 # Component Tests
-add_library(lib-components-tests OBJECT test_ucx_gotcha.cpp test_comm_data.cpp)
+add_library(lib-components-tests OBJECT test_ucx_gotcha.cpp)
 
 target_link_libraries(
     lib-components-tests
     PUBLIC
-        rocprofiler-systems-compile-options
-        rocprofiler-systems-headers
+        rocprofiler-systems-headers # defines.hpp
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
-        rocprofiler-systems-libva
-        rocprofiler-systems-perfetto
+        rocprofiler-systems-libva # VA-API # keep for now, remove later
         rocprofiler-systems-object-library
+        rocprofiler-systems-perfetto # Perfetto # keep for now, remove later
+    # rocprofiler-systems-compile-options
 )
 
 target_include_directories(

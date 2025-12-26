@@ -20,264 +20,436 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/config.hpp"
 #include "rocprof-sys/library/components/ucx_gotcha.hpp"
 
-#include <cstdint>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdexcept>
 #include <string>
 
-namespace rocprofsys
+struct MockedItem
 {
-namespace component
+    int verbose = 0;
+};
+
+struct MockedGotchaData
 {
-namespace testing
+    std::string tool_id;
+};
+
+struct GMockUCXGotcha
 {
+    MOCK_METHOD(void, configure, (std::string func_name));
+    MOCK_METHOD(size_t, capacity, ());
+    MOCK_METHOD(MockedItem*, at, (size_t index));
+    MOCK_METHOD(void, disable, ());
+    MOCK_METHOD(bool, get_is_running, (), (const));
+    MOCK_METHOD(void, start, ());
+    MOCK_METHOD(void, stop, ());
+    MOCK_METHOD(std::function<void()>&, get_initializer, ());
+};
+
+struct GMockCommData
+{
+    // ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const
+    // void* param)
+    MOCK_METHOD(void, audit_incoming_tag_send,
+                (const MockedGotchaData& data, void* ep, const void* buffer, size_t count,
+                 uint64_t tag, const void* param));
+
+    // ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t
+    // tag_mask, const void* param)
+    MOCK_METHOD(void, audit_incoming_tag_recv,
+                (const MockedGotchaData& data, void* worker, void* buffer, size_t count,
+                 uint64_t tag, uint64_t tag_mask, const void* param));
+
+    // ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr,
+    // void* rkey, const void* param)
+    MOCK_METHOD(void, audit_incoming_rma_put,
+                (const MockedGotchaData& data, void* ep, const void* buffer, size_t count,
+                 uint64_t remote_addr, void* rkey, const void* param));
+
+    // ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void*
+    // rkey, const void* param)
+    MOCK_METHOD(void, audit_incoming_rma_get,
+                (const MockedGotchaData& data, void* ep, void* buffer, size_t count,
+                 uint64_t remote_addr, void* rkey, const void* param));
+
+    // ucp_am_send_nbx: (void* ep, unsigned id, const void* header, size_t header_length,
+    // const void* buffer, size_t count, const void* param)
+    MOCK_METHOD(void, audit_incoming_am_send,
+                (const MockedGotchaData& data, void* ep, unsigned id, const void* header,
+                 size_t header_length, const void* buffer, size_t count,
+                 const void* param));
+
+    // ucp_stream_send_nbx: (void* ep, const void* buffer, size_t count, const void*
+    // param)
+    MOCK_METHOD(void, audit_incoming_stream_send,
+                (const MockedGotchaData& data, void* ep, const void* buffer, size_t count,
+                 const void* param));
+
+    // ucp_stream_recv_nbx: (void* ep, void* buffer, size_t count, size_t* length, const
+    // void* param)
+    MOCK_METHOD(void, audit_incoming_stream_recv,
+                (const MockedGotchaData& data, void* ep, void* buffer, size_t count,
+                 size_t* length, const void* param));
+
+    // outgoing audit with void* return
+    MOCK_METHOD(void, audit_outgoing_ptr, (const MockedGotchaData& data, void* ret));
+
+    // outgoing audit with int return
+    MOCK_METHOD(void, audit_outgoing_int, (const MockedGotchaData& data, int ret));
+
+    // get_initializer
+    MOCK_METHOD(std::function<void()>&, get_initializer, ());
+};
+
+struct GMockCategoryRegion
+{
+    // Generic start (from header template audit)
+    MOCK_METHOD(void, start_generic, (std::string_view name));
+
+    // ucp_tag_send_nbx: start(name, "ep", ep, "buffer", buffer, "count", count, "tag",
+    // tag, "param", param)
+    MOCK_METHOD(void, start_tag_send,
+                (std::string_view name, void* ep, const void* buffer, size_t count,
+                 uint64_t tag, const void* param));
+
+    // ucp_tag_recv_nbx: start(name, "worker", worker, "buffer", buffer, "count", count,
+    // "tag", tag, "tag_mask", tag_mask, "param", param)
+    MOCK_METHOD(void, start_tag_recv,
+                (std::string_view name, void* worker, void* buffer, size_t count,
+                 uint64_t tag, uint64_t tag_mask, const void* param));
+
+    // ucp_put_nbx: start(name, "ep", ep, "buffer", buffer, "count", count, "remote_addr",
+    // remote_addr, "rkey", rkey, "param", param)
+    MOCK_METHOD(void, start_rma_put,
+                (std::string_view name, void* ep, const void* buffer, size_t count,
+                 uint64_t remote_addr, void* rkey, const void* param));
+
+    // ucp_get_nbx: start(name, "ep", ep, "buffer", buffer, "count", count, "remote_addr",
+    // remote_addr, "rkey", rkey, "param", param)
+    MOCK_METHOD(void, start_rma_get,
+                (std::string_view name, void* ep, void* buffer, size_t count,
+                 uint64_t remote_addr, void* rkey, const void* param));
+
+    // ucp_am_send_nbx: start(name, "ep", ep, "id", id, "header", header, "header_length",
+    // header_length, "buffer", buffer, "count", count, "param", param)
+    MOCK_METHOD(void, start_am_send,
+                (std::string_view name, void* ep, unsigned id, const void* header,
+                 size_t header_length, const void* buffer, size_t count,
+                 const void* param));
+
+    // ucp_stream_send_nbx: start(name, "ep", ep, "buffer", buffer, "count", count,
+    // "param", param)
+    MOCK_METHOD(void, start_stream_send,
+                (std::string_view name, void* ep, const void* buffer, size_t count,
+                 const void* param));
+
+    // ucp_stream_recv_nbx: start(name, "ep", ep, "buffer", buffer, "count", count,
+    // "length", length, "param", param)
+    MOCK_METHOD(void, start_stream_recv,
+                (std::string_view name, void* ep, void* buffer, size_t count,
+                 size_t* length, const void* param));
+
+    // stop with void* return
+    MOCK_METHOD(void, stop_ptr, (std::string_view name, void* ret));
+
+    // stop with int return
+    MOCK_METHOD(void, stop_int, (std::string_view name, int ret));
+};
+
+namespace test_globals
+{
+std::unique_ptr<GMockUCXGotcha>      g_ucx_gotcha_gmock;
+std::unique_ptr<GMockCommData>       g_comm_data_gmock;
+std::unique_ptr<GMockCategoryRegion> g_category_region_gmock;
+}  // namespace test_globals
+
+struct MockedUCXGotcha
+{
+    template <int N, typename... Args>
+    static void configure(std::string func_name)
+    {
+        test_globals::g_ucx_gotcha_gmock->configure(func_name);
+    }
+    static size_t      capacity() { return test_globals::g_ucx_gotcha_gmock->capacity(); }
+    static MockedItem* at(size_t index)
+    {
+        return test_globals::g_ucx_gotcha_gmock->at(index);
+    }
+    static void disable() { test_globals::g_ucx_gotcha_gmock->disable(); }
+    bool        get_is_running() const
+    {
+        return test_globals::g_ucx_gotcha_gmock->get_is_running();
+    }
+    void                          start() { test_globals::g_ucx_gotcha_gmock->start(); }
+    void                          stop() { test_globals::g_ucx_gotcha_gmock->stop(); }
+    static std::function<void()>& get_initializer()
+    {
+        return test_globals::g_ucx_gotcha_gmock->get_initializer();
+    }
+};
+
+template <typename GotchaData>
+struct MockedCommData
+{
+    template <typename... Args>
+    static void audit(const GotchaData&, tim::audit::incoming, Args&&...)
+    {
+        FAIL() << "Unexpected call of comm_data::audit(incoming)";
+    }
+
+    template <typename... Args>
+    static void audit(const GotchaData&, tim::audit::outgoing, Args&&...)
+    {
+        FAIL() << "Unexpected call of comm_data::audit(outgoing)";
+    }
+
+    // ucp_tag_send_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      const void* buffer, size_t count, uint64_t tag, const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_tag_send(_data, ep, buffer, count,
+                                                                 tag, param);
+    }
+
+    // ucp_tag_recv_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* worker,
+                      void* buffer, size_t count, uint64_t tag, uint64_t tag_mask,
+                      const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_tag_recv(
+            _data, worker, buffer, count, tag, tag_mask, param);
+    }
+
+    // ucp_put_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      const void* buffer, size_t count, uint64_t remote_addr, void* rkey,
+                      const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_rma_put(_data, ep, buffer, count,
+                                                                remote_addr, rkey, param);
+    }
+
+    // ucp_get_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      void* buffer, size_t count, uint64_t remote_addr, void* rkey,
+                      const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_rma_get(_data, ep, buffer, count,
+                                                                remote_addr, rkey, param);
+    }
+
+    // ucp_am_send_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      unsigned id, const void* header, size_t header_length,
+                      const void* buffer, size_t count, const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_am_send(
+            _data, ep, id, header, header_length, buffer, count, param);
+    }
+
+    // ucp_stream_send_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      const void* buffer, size_t count, const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_stream_send(_data, ep, buffer,
+                                                                    count, param);
+    }
+
+    // ucp_stream_recv_nbx
+    static void audit(const GotchaData& _data, tim::audit::incoming, void* ep,
+                      void* buffer, size_t count, size_t* length, const void* param)
+    {
+        test_globals::g_comm_data_gmock->audit_incoming_stream_recv(_data, ep, buffer,
+                                                                    count, length, param);
+    }
+
+    // outgoing with void* return
+    static void audit(const GotchaData& _data, tim::audit::outgoing, void* ret)
+    {
+        test_globals::g_comm_data_gmock->audit_outgoing_ptr(_data, ret);
+    }
+
+    // outgoing with int return
+    static void audit(const GotchaData& _data, tim::audit::outgoing, int ret)
+    {
+        test_globals::g_comm_data_gmock->audit_outgoing_int(_data, ret);
+    }
+};
+
+struct MockedCategoryRegion
+{
+    template <typename... Args>
+    static void start(std::string_view, Args&&...)
+    {
+        FAIL() << "Unexpected call of category_region::start";
+    }
+
+    template <typename... Args>
+    static void stop(std::string_view, Args&&...)
+    {
+        FAIL() << "Unexpected call of category_region::stop call";
+    }
+
+    // Generic start (from header template audit)
+    static void start(std::string_view name)
+    {
+        test_globals::g_category_region_gmock->start_generic(name);
+    }
+
+    // ucp_tag_send_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      const void* buffer, const char*, size_t count, const char*,
+                      uint64_t tag, const char*, const void* param)
+    {
+        test_globals::g_category_region_gmock->start_tag_send(name, ep, buffer, count,
+                                                              tag, param);
+    }
+
+    // ucp_tag_recv_nbx
+    static void start(std::string_view name, const char*, void* worker, const char*,
+                      void* buffer, const char*, size_t count, const char*, uint64_t tag,
+                      const char*, uint64_t tag_mask, const char*, const void* param)
+    {
+        test_globals::g_category_region_gmock->start_tag_recv(name, worker, buffer, count,
+                                                              tag, tag_mask, param);
+    }
+
+    // ucp_put_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      const void* buffer, const char*, size_t count, const char*,
+                      uint64_t remote_addr, const char*, void* rkey, const char*,
+                      const void* param)
+    {
+        test_globals::g_category_region_gmock->start_rma_put(name, ep, buffer, count,
+                                                             remote_addr, rkey, param);
+    }
+
+    // ucp_get_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      void* buffer, const char*, size_t count, const char*,
+                      uint64_t remote_addr, const char*, void* rkey, const char*,
+                      const void* param)
+    {
+        test_globals::g_category_region_gmock->start_rma_get(name, ep, buffer, count,
+                                                             remote_addr, rkey, param);
+    }
+
+    // ucp_am_send_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      unsigned id, const char*, const void* header, const char*,
+                      size_t header_length, const char*, const void* buffer, const char*,
+                      size_t count, const char*, const void* param)
+    {
+        test_globals::g_category_region_gmock->start_am_send(
+            name, ep, id, header, header_length, buffer, count, param);
+    }
+
+    // ucp_stream_send_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      const void* buffer, const char*, size_t count, const char*,
+                      const void* param)
+    {
+        test_globals::g_category_region_gmock->start_stream_send(name, ep, buffer, count,
+                                                                 param);
+    }
+
+    // ucp_stream_recv_nbx
+    static void start(std::string_view name, const char*, void* ep, const char*,
+                      void* buffer, const char*, size_t count, const char*,
+                      size_t* length, const char*, const void* param)
+    {
+        test_globals::g_category_region_gmock->start_stream_recv(name, ep, buffer, count,
+                                                                 length, param);
+    }
+
+    // stop with void* return
+    static void stop(std::string_view name, const char*, void* ret)
+    {
+        test_globals::g_category_region_gmock->stop_ptr(name, ret);
+    }
+
+    // stop with int return
+    static void stop(std::string_view name, const char*, int ret)
+    {
+        test_globals::g_category_region_gmock->stop_int(name, ret);
+    }
+};
+
+struct MockedUCXGotchaPolicy
+{
+    using gotcha_data     = MockedGotchaData;
+    using comm_data       = MockedCommData<gotcha_data>;
+    using category_region = MockedCategoryRegion;
+    using ucx_bundle_t    = void;  // unused
+    using ucx_gotcha_t    = MockedUCXGotcha;
+};
+
+template struct rocprofsys::component::ucx_gotcha<MockedUCXGotchaPolicy>;
+
+using ucx_gotcha_under_test_t = rocprofsys::component::ucx_gotcha<MockedUCXGotchaPolicy>;
 
 class ucx_gotcha_test : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        // Initialize test data
-        test_gotcha_data.tool_id = "test_ucx_function";
-        test_ep                  = reinterpret_cast<void*>(0x12345678);
-        test_buffer              = reinterpret_cast<void*>(0x87654321);
-        test_count               = 1024;
-        test_tag                 = 0xABCDEF;
-        test_remote_addr         = 0x1122334455667788ULL;
+        test_globals::g_ucx_gotcha_gmock      = std::make_unique<GMockUCXGotcha>();
+        test_globals::g_comm_data_gmock       = std::make_unique<GMockCommData>();
+        test_globals::g_category_region_gmock = std::make_unique<GMockCategoryRegion>();
     }
 
     void TearDown() override
     {
-        // Stop any running gotcha
-        ucx_gotcha::stop();
+        test_globals::g_ucx_gotcha_gmock.reset();
+        test_globals::g_comm_data_gmock.reset();
+        test_globals::g_category_region_gmock.reset();
     }
-
-    // Test data
-    tim::component::gotcha_data test_gotcha_data;
-    void*                       test_ep;
-    void*                       test_buffer;
-    size_t                      test_count;
-    uint64_t                    test_tag;
-    uint64_t                    test_remote_addr;
 };
 
-TEST_F(ucx_gotcha_test, component_label) { EXPECT_EQ(ucx_gotcha::label(), "ucx_gotcha"); }
-
-TEST_F(ucx_gotcha_test, configure_function_called)
+TEST_F(ucx_gotcha_test, test_dummy)
 {
-    // Configure should not throw
-    EXPECT_NO_THROW(ucx_gotcha::configure());
+    ucx_gotcha_under_test_t g;
+    EXPECT_EQ(g.label(), "ucx_gotcha");
+    EXPECT_EQ(g.gotcha_capacity, 100);
 }
 
-TEST_F(ucx_gotcha_test, start_function_called) { EXPECT_NO_THROW(ucx_gotcha::start()); }
-
-TEST_F(ucx_gotcha_test, stop_function_called) { EXPECT_NO_THROW(ucx_gotcha::stop()); }
-
-TEST_F(ucx_gotcha_test, shutdown_function_called)
+TEST_F(ucx_gotcha_test, test_shutdown)
 {
-    EXPECT_NO_THROW(ucx_gotcha::shutdown());
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, disable()).Times(1);
+
+    EXPECT_NO_THROW(ucx_gotcha_under_test_t::shutdown());
 }
 
-TEST_F(ucx_gotcha_test, audit_incoming_no_args)
+TEST_F(ucx_gotcha_test, test_start)
 {
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}));
+    std::function<void()> initializer;
+
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, get_is_running())
+        .Times(1)
+        .WillOnce(::testing::Return(false));
+
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, at(::testing::Ge(0)))
+        .Times(100)
+        .WillRepeatedly(::testing::Return(nullptr));
+
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, capacity())
+        .WillRepeatedly(::testing::Return(100));
+
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, get_initializer())
+        .Times(1)
+        .WillOnce(::testing::ReturnRef(initializer));
+
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, start()).Times(1);
+
+    EXPECT_NO_THROW(ucx_gotcha_under_test_t::start());
+
+    // inside start, it's only initializing initilaizer,
+    // calling to be sure that all configs are set
+
+    ASSERT_TRUE(initializer);
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, configure(::testing::_)).Times(89);
+    initializer();
 }
-
-TEST_F(ucx_gotcha_test, audit_incoming_single_arg)
-{
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep));
-}
-
-TEST_F(ucx_gotcha_test, audit_incoming_multiple_args)
-{
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, reinterpret_cast<void*>(test_count)));
-}
-
-TEST_F(ucx_gotcha_test, audit_tag_send_nbx)
-{
-    const void* param = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, test_tag, param));
-}
-
-TEST_F(ucx_gotcha_test, audit_tag_recv_nbx)
-{
-    uint64_t    tag_mask = 0xFFFFFF;
-    const void* param    = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, test_tag, tag_mask,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_put_nbx)
-{
-    void*       rkey  = reinterpret_cast<void*>(0xAAA);
-    const void* param = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, test_remote_addr, rkey,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_get_nbx)
-{
-    void*       rkey  = reinterpret_cast<void*>(0xAAA);
-    const void* param = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, test_remote_addr, rkey,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_am_send_nbx)
-{
-    unsigned    id            = 42;
-    const void* header        = reinterpret_cast<const void*>(0xBBB);
-    size_t      header_length = 16;
-    const void* param         = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep, id,
-                                      header, header_length, test_buffer, test_count,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_stream_send_nbx)
-{
-    const void* param = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, param));
-}
-
-TEST_F(ucx_gotcha_test, audit_stream_recv_nbx)
-{
-    size_t      length     = 512;
-    size_t*     length_ptr = &length;
-    const void* param      = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, length_ptr, param));
-}
-
-TEST_F(ucx_gotcha_test, audit_outgoing_void_ptr)
-{
-    void* return_val = reinterpret_cast<void*>(0xDEADBEEF);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::outgoing{}, return_val));
-}
-
-TEST_F(ucx_gotcha_test, audit_outgoing_int)
-{
-    int return_val = 42;
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::outgoing{}, return_val));
-}
-
-// Edge case tests
-TEST_F(ucx_gotcha_test, zero_size_message_handling)
-{
-    // Test zero-size messages should return early without processing
-    const void* header        = nullptr;
-    size_t      header_length = 0;
-    size_t      zero_count    = 0;
-    unsigned    id            = 42;
-    const void* param         = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep, id,
-                                      header, header_length, test_buffer, zero_count,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_null_buffer_zero_size)
-{
-    // Test with null buffer (valid for zero-size messages)
-    size_t      zero_count = 0;
-    const void* param      = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      nullptr, zero_count, test_tag, param));
-}
-
-TEST_F(ucx_gotcha_test, audit_large_message_size)
-{
-    // Test with large message size (1 GB)
-    size_t      large_count = 1024 * 1024 * 1024;
-    void*       rkey        = reinterpret_cast<void*>(0xAAA);
-    const void* param       = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, large_count, test_remote_addr, rkey,
-                                      param));
-}
-
-TEST_F(ucx_gotcha_test, audit_maximum_tag_value)
-{
-    // Test with maximum tag value
-    uint64_t    max_tag = UINT64_MAX;
-    const void* param   = reinterpret_cast<const void*>(0x999);
-
-    EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                      test_buffer, test_count, max_tag, param));
-}
-
-TEST_F(ucx_gotcha_test, multiple_consecutive_audits)
-{
-    // Test multiple consecutive audit calls
-    const void* param = reinterpret_cast<const void*>(0x999);
-
-    for(int i = 0; i < 100; ++i)
-    {
-        EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                          test_buffer, test_count, test_tag, param));
-    }
-}
-
-TEST_F(ucx_gotcha_test, interleaved_send_recv_audits)
-{
-    // Test interleaved send and recv audits
-    uint64_t    tag_mask = 0xFFFFFFFFUL;
-    const void* param    = reinterpret_cast<const void*>(0x999);
-
-    for(int i = 0; i < 10; ++i)
-    {
-        // Send audit (5 args)
-        EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                          test_buffer, test_count, test_tag, param));
-
-        // Recv audit (6 args)
-        EXPECT_NO_THROW(ucx_gotcha::audit(test_gotcha_data, audit::incoming{}, test_ep,
-                                          test_buffer, test_count, test_tag, tag_mask,
-                                          param));
-    }
-}
-
-// Idempotence tests
-TEST_F(ucx_gotcha_test, start_idempotence)
-{
-    EXPECT_NO_THROW(ucx_gotcha::start());
-    EXPECT_NO_THROW(ucx_gotcha::start());  // Second call should be safe
-}
-
-TEST_F(ucx_gotcha_test, shutdown_idempotence)
-{
-    EXPECT_NO_THROW(ucx_gotcha::shutdown());
-    EXPECT_NO_THROW(ucx_gotcha::shutdown());
-    EXPECT_NO_THROW(ucx_gotcha::shutdown());
-}
-
-TEST_F(ucx_gotcha_test, start_stop_idempotence)
-{
-    EXPECT_NO_THROW(ucx_gotcha::start());
-    EXPECT_NO_THROW(ucx_gotcha::start());
-    EXPECT_NO_THROW(ucx_gotcha::stop());
-    EXPECT_NO_THROW(ucx_gotcha::stop());
-}
-
-}  // namespace testing
-}  // namespace component
-}  // namespace rocprofsys
