@@ -583,9 +583,10 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t image_get_mipmap_level(
     hsa_agent_t agent, const hsa_ext_image_t* mipmapped_array, uint32_t mip_level,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
     hsa_ext_image_t* level_image_out) {
     return ROCR_DYN(hsa_ext_image_mipmap_array_get_level)(
-        agent, mipmapped_array, mip_level, level_image_out);
+        agent, mipmapped_array, mip_level, image_descriptor, level_image_out);
   }
  private:
   static RocrEntryPoints cep_;

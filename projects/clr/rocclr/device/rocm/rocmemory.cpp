@@ -1444,22 +1444,32 @@ bool Image::createView(const Memory& parent) {
     status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
                                deviceMemory_, permission_, &hsaImageObject_);
   } else {
-     auto* parent_image = static_cast<const Image*>(&parent);
-     const auto parent_mipmap_levels = parent_image->getHsaImageDescriptor().mipmap_levels;
-     if (parent_mipmap_levels > 1) {
-       const auto level = owner()->asImage()->getBaseMipLevel();
-       if (level >= parent_mipmap_levels) {
-         LogPrintfError("Wrong mipmap level %u >= parent levels %u", level, parent_mipmap_levels);
+     auto* ancestor_image = static_cast<Image*>(ancestor->getDeviceMemory(dev()));
+     const auto ancestor_mipmap_levels = ancestor->asImage()->getMipLevels();
+
+     if (imageDescriptor_.mipmap_levels == 1 && ancestor_mipmap_levels > 1) {
+       // This is on leveled image view
+       auto level = owner()->asImage()->getBaseMipLevel();
+       if (level == 0) {
+         const auto parent_level = parent.owner()->asImage()->getBaseMipLevel();
+         if ( parent_level > 0) {
+           // This is view of leveled image view
+           level = parent_level;
+         }
+       }
+       if (level >= ancestor_mipmap_levels) {
+         LogPrintfError("Wrong mipmap level %u >= ancestor levels %u", level, ancestor_mipmap_levels);
          return false;
        }
-       status = Hsa::image_get_mipmap_level(dev().getBackendDevice(), &parent_image->hsaImageObject_,
-                                            level, &hsaImageObject_);
-      std::string cs = "createView:image_get_mipmap_level:";
-      printImage(cs, parent_mipmap_levels, level);
-      const uint32_t* sRD = reinterpret_cast<const uint32_t*>(hsaImageObject_.handle);
-      cs+=", SRD:";
-      printSRD(sRD, HIP_IMAGE_OBJECT_SIZE_DWORD, cs.c_str());
+       status = Hsa::image_get_mipmap_level(dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
+                                            level,  &imageDescriptor_, &hsaImageObject_);
+       std::string cs = "createView:image_get_mipmap_level:";
+       printImage(cs, ancestor_mipmap_levels, level);
+       const uint32_t* sRD = reinterpret_cast<const uint32_t*>(hsaImageObject_.handle);
+       cs+=", SRD:";
+       printSRD(sRD, HIP_IMAGE_OBJECT_SIZE_DWORD, cs.c_str());
      } else {
+      // This is view of regular image or mipmap image
       status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
                                  permission_, &hsaImageObject_);
       std::string cs = "createView:image_create:";
