@@ -125,7 +125,6 @@ else()
   set(TEST_SRC ${TEST_SRC} ${NOT_FOR_gfx90a_AND_ABOVE_TEST})
 endif()
 
-# Mipmap APIs are not supported on Linux
 set(TEST_SRC
     ${TEST_SRC}
     hipBindTextureToMipmappedArray.cc

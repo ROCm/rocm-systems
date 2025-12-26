@@ -783,10 +783,10 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
 
   manager->PopulateMipmapSrd(*mipmap_array);
   debug_print("Populating mipmapped array SRD...");
-  if (core::Runtime::runtime_singleton_->flag().image_print_srd())
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
     mipmap_array->printSRD();
-
-  manager->printSRDDetailed(mipmap_array->srd);
+    manager->printSRDDetailed(mipmap_array->srd);
+  }
 
   // assert(mipmap_array->size == required_size);
   image_handle.handle = mipmap_array->Convert();
@@ -809,7 +809,12 @@ hsa_status_t ImageRuntime::DestroyMipmapArrayHandle(
 
 hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
     hsa_agent_t component, const hsa_ext_image_t& mipmapped_array,
-    uint32_t mip_level, hsa_ext_image_t& level_image_out) {
+    uint32_t mip_level, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_ext_image_t& level_image_out) {
+  ImageManager * manager = image_manager(component);
+  if (!manager) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   level_image_out.handle = 0;
 
@@ -844,28 +849,33 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
   MipmappedArray* level_view = MipmappedArray::Create(component);
   if (!level_view) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  // Copy entire parent structure (srd is a fixed array, so it's deep-copied automatically)
-  *level_view = *array;
-
-  // Modify SRD to select only the specific mip level
-  ImageManager* manager = image_manager(component);
-  if (!manager) {
-    MipmappedArray::Destroy(level_view);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  auto format = image_descriptor ? &image_descriptor->format : nullptr;
+   if (format &&
+       (array->desc.format.channel_type != format->channel_type ||
+        array->desc.format.channel_order != format->channel_order)) {
+    MipmappedArray tempArray = *array;
+    tempArray.desc.format.channel_type = format->channel_type;
+    tempArray.desc.format.channel_order = format->channel_order;
+    status = manager->PopulateMipmapSrd(tempArray);
+    if (status == HSA_STATUS_SUCCESS) {
+      status = manager->PopulateMipLevelSrd(*level_view, tempArray, mip_level);
+    }
+    else {
+      debug_print("PopulateMipmapSrd() failed with status %d", status);
+    }
   }
-
-  status = manager->PopulateMipLevelSrd(*level_view, *array, mip_level);
+  else {
+    status = manager->PopulateMipLevelSrd(*level_view, *array, mip_level);
+  }
   if (status != HSA_STATUS_SUCCESS) {
     MipmappedArray::Destroy(level_view);
     return status;
   }
 
-  debug_print("Created mip level view using SRD fields");
-  if (core::Runtime::runtime_singleton_->flag().image_print_srd())
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
     level_view->printSRD();
-
-  manager->printSRDDetailed(level_view->srd);
-
+    manager->printSRDDetailed(level_view->srd);
+  }
   // Return handle
   level_image_out.handle = level_view->Convert();
   return HSA_STATUS_SUCCESS;

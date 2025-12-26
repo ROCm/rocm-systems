@@ -26,6 +26,7 @@
 #include "platform/sampler.hpp"
 
 void printSRD(const uint32_t* srd, const int size,const char* whoes) {
+  if (srd == nullptr) return;
   fprintf(stderr, "\n%s:", whoes);
   for (int i = 0; i < size; i++) {
     fprintf(stderr, " %08X,", srd[i]);
