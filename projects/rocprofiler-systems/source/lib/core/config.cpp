@@ -915,7 +915,6 @@ configure_settings(bool _init)
     _add_advanced_category("ROCPROFSYS_TEXT_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DIFF_OUTPUT");
     _add_advanced_category("ROCPROFSYS_DEBUG");
-    // TODO: Check is needed
     _add_advanced_category("ROCPROFSYS_LOG_LEVEL");
     _add_advanced_category("ROCPROFSYS_ENABLE_SIGNAL_HANDLER");
     _add_advanced_category("ROCPROFSYS_FLAT_PROFILE");
@@ -1114,7 +1113,7 @@ configure_settings(bool _init)
     configure_signal_handler(_config);
     configure_disabled_settings(_config);
 
-    LOG_DEBUG("Config configuration complete");
+    LOG_DEBUG("Configuration complete");
 
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
@@ -1579,7 +1578,6 @@ print_banner(std::ostream& _os)
     _os << std::endl;
 }
 
-// TODO: Use spdlog instead
 void
 print_settings(
     std::ostream&                                                                _ros,

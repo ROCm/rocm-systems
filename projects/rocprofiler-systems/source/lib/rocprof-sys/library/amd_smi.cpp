@@ -432,18 +432,16 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
         return;
     }
 
-    const char* _msg = nullptr;
-    auto        _err = amdsmi_status_code_to_string(_code, &_msg);
-    if(_err != AMDSMI_STATUS_SUCCESS)
-    {
-        throw std::runtime_error(fmt::format(
-            "amdsmi_status_code_to_string failed. No error message available. "
-            "Error code {} originated at {}:{}",
-            static_cast<int>(_code), _file, _line));
-    }
+    constexpr const char* _unknown_error_message =
+        "amdsmi_status_code_to_string failed. No error message available.";
 
-    throw std::runtime_error(fmt::format("[{}:{}] Error code {} :: {}", _file, _line,
-                                         static_cast<int>(_code), _msg));
+    const char* _msg = nullptr;
+    auto        _error_code_is_known =
+        amdsmi_status_code_to_string(_code, &_msg) == AMDSMI_STATUS_SUCCESS;
+
+    throw std::runtime_error(
+        fmt::format("[{}:{}] Error code {} :: {}", _file, _line, static_cast<int>(_code),
+                    _error_code_is_known ? _msg : _unknown_error_message));
 }
 
 std::atomic<State>&
