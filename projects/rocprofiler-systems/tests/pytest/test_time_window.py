@@ -51,7 +51,7 @@ from rocprofsys import (
 
 
 @pytest.fixture
-def time_window_env(base_env: dict[str, str]) -> dict[str, str]:
+def time_window_env() -> dict[str, str]:
     """Environment variables for time window tests."""
     return {
         "ROCPROFSYS_USE_SAMPLING": "OFF",

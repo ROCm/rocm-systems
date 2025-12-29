@@ -66,15 +66,11 @@ from rocprofsys import (
 
 
 @pytest.fixture
-def transpose_env(base_env: dict[str, str]) -> dict[str, str]:
+def transpose_env() -> dict[str, str]:
     """Environment variables for transpose tests."""
-    env = base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api",
-        }
-    )
-    return env
+    return {
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,hsa_api"
+    }
 
 
 @pytest.fixture

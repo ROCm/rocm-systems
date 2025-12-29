@@ -183,7 +183,8 @@ class RocprofsysConfig:
         return {
             "ROCPROFSYS_CI": "ON",
             "ROCPROFSYS_CONFIG_FILE": "",
-            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_TRACE_LEGACY": "OFF",
+            "ROCPROFSYS_TRACE_CACHED": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
@@ -202,7 +203,8 @@ class RocprofsysConfig:
     def get_base_binary_environment(self) -> dict[str, str]:
         """Get base environment variables for rocprof-sys binary test execution."""
         return {
-            "ROCPROFSYS_TRACE": "ON",
+            "ROCPROFSYS_TRACE_LEGACY": "OFF",
+            "ROCPROFSYS_TRACE_CACHED": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",

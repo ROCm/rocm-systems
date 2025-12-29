@@ -41,6 +41,7 @@ from rocprofsys import (
     BinaryRewriteRunner,
     SysRunRunner,
     validate_rocpd_database,
+    validate_perfetto_trace,
 )
 
 
@@ -50,11 +51,24 @@ from rocprofsys import (
 
 
 @pytest.fixture
-def roctx_env(base_env: dict[str, str]) -> dict[str, str]:
+def roctx_env() -> dict[str, str]:
     """Environment variables for rocTX tests."""
     return {
+        "ROCPROFSYS_TRACE_LEGACY": "ON",
+        "ROCPROFSYS_TRACE_CACHED": "OFF",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
     }
+
+
+@pytest.fixture
+def roctx_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for rocTX tests."""
+    rules_dir = validation_rules_dir / "roctx"
+    return [
+        rules_dir / "validation-rules.json",
+        rules_dir / "amd-smi-rules.json",
+        rules_dir / "sdk-metrics-rules.json",
+    ]
 
 
 # ============================================================================
@@ -66,15 +80,45 @@ def roctx_env(base_env: dict[str, str]) -> dict[str, str]:
 class TestRoctx:
     """Tests for rocTX marker API."""
 
-    @pytest.fixture
-    def roctx_rules(self, validation_rules_dir: Path) -> list[Path]:
-        """Get validation rules for rocTX tests."""
-        rules_dir = validation_rules_dir / "roctx"
+    def roctx_legacy_labels(self) -> list[str]:
         return [
-            rules_dir / "validation-rules.json",
-            rules_dir / "amd-smi-rules.json",
-            rules_dir / "sdk-metrics-rules.json",
+            "roctxMark_GPU_workload",
+            "roctxRangePush_run_profiling",
+            "roctxRangeStart_GPU_Compute",
+            "roctxRangeStart_GPU_Compute",
+            "roctxRangePush_HIP_Kernel",
+            "roctxRangePush_HIP_Kernel",
+            "roctxGetThreadId",
+            "roctxMark_RoctxProfilerPause_End",
+            "roctxMark_Thread_Start",
+            "roctxMark_End",
+            "roctxMark_Finished_GPU",
         ]
+
+    def roctx_legacy_count(self) -> list[int]:
+        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+    def roctx_legacy_depth(self) -> list[int]:
+        return [1, 1, 2, 0, 3, 1, 2, 2, 0, 0, 1]
+
+    def roctx_cached_labels(self) -> list[str]:
+        return [
+            "roctxMark_GPU_workload",
+            "roctxRangePush_HIP_Kernel",
+            "roctxRangeStart_GPU_Compute",
+            "roctxGetThreadId",
+            "roctxMark_RoctxProfilerPause_End",
+            "roctxMark_Thread_Start",
+            "roctxMark_End",
+            "roctxRangePush_run_profiling",
+            "roctxMark_Finished_GPU",
+        ]
+
+    def roctx_cached_count(self) -> list[int]:
+        return [1, 2, 2, 1, 1, 1, 1, 1, 1]
+
+    def roctx_cached_depth(self) -> list[int]:
+        return [1, 1, 1, 1, 1, 2, 1, 1, 1]
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
@@ -108,6 +152,7 @@ class TestRoctx:
         roctx_env: dict[str, str],
         roctx_rules: list[Path],
         use_rocpd: bool,
+        use_perfetto: bool,
         subtests,
         collect_result,
     ):
@@ -129,6 +174,33 @@ class TestRoctx:
         collect_result(result)
         if not result.success:
             pytest.fail(f"rocTX sampling failed: {result.test_output}")
+
+        with subtests.test("Validate Perfetto Counters"):
+            if not use_perfetto:
+                pytest.skip("Perfetto is not enabled")
+            perfetto = result.perfetto_file
+            if perfetto is None:
+                pytest.fail(f"Perfetto trace not created")
+            if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
+                validation = validate_perfetto_trace(
+                    perfetto,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["rocm_marker_api"],
+                    labels=self.roctx_legacy_labels(),
+                    counts=self.roctx_legacy_count(),
+                    depths=self.roctx_legacy_depth(),
+                )
+            else:
+                validation = validate_perfetto_trace(
+                    perfetto,
+                    tests_dir=rocprof_config.rocprofsys_tests_dir,
+                    categories=["rocm_marker_api"],
+                    labels=self.roctx_cached_labels(),
+                    counts=self.roctx_cached_count(),
+                    depths=self.roctx_cached_depth(),
+                )
+            if not validation.is_valid:
+                pytest.fail(f"Perfetto validation failed: {validation.message}")
 
         # ROCpd validation
         with subtests.test("ROCpd validation"):

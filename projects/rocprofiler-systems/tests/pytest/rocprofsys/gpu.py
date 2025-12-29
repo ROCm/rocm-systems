@@ -130,7 +130,7 @@ def lookup_gpu_category(arch: str) -> list[str]:
     ]
 
     # Also includes PRO GPUs
-    # We ignore Radeon VII (gfx906)
+    # Ignore Radeon VII (gfx906)
     radeon_list = [
         "gfx1010",
         "gfx1011",
@@ -171,17 +171,35 @@ def lookup_gpu_category(arch: str) -> list[str]:
     return categories
 
 
-def get_target_gpu_arch(target_path: Path) -> list[str]:
-    """Uses llvm-objdump --offloading to get the GPU architectures the binary was compiled for.
+def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
+    """Get the list of gpu architectures (gfx) the target was compiled for.
+
+    Attempts to find ROCm LLVM's llvm-objdump and uses it if version >= 15.
+        - Attempts to find llvm-objdump in the ROCm install directory
+        - Fallbacks to PATH lookup
 
     Args:
+        rocm_path: Path to the ROCm installation directory
         target_path: Path to the binary to check
 
     Returns:
         List of GPU architectures the target was compiled for
     """
     target_archs: list[str] = []
-    llvm_objdump = shutil.which("llvm-objdump")
+
+    # Find llvm-objdump
+    if rocm_path:
+        llvm_objdump_candidates = [
+            rocm_path / "llvm" / "bin" / "llvm-objdump",
+            rocm_path / "bin" / "llvm-objdump",
+        ]
+        for candidate in llvm_objdump_candidates:
+            if candidate.exists():
+                llvm_objdump = candidate
+                break
+    if not llvm_objdump:
+        llvm_objdump = shutil.which("llvm-objdump")
+
     if llvm_objdump:
         try:
             result = subprocess.run(

@@ -66,7 +66,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Show runner output on test pass",
+        help="Show runner output on test pass (requires -s flag)",
     )
     group.addoption(
         "--no-output",
@@ -98,7 +98,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
     config.addinivalue_line(
         "markers",
-        "rocm_min_version(version): mark test as requiring minimum ROCm version (e.g., '7.0', '6.2.1')",
+        "rocm_min_version(version): mark test as requiring minimum ROCm version",
     )
     # Register plugin to handle --no-output flag
     config.pluginmanager.register(NoOutputPlugin(config), "no_output_plugin")
@@ -113,7 +113,7 @@ class NoOutputPlugin:
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         if self.no_output and report.failed:
-            # Use empty string instead of None to remain compatible with junitxml plugin
+            # Must use empty string for compatibility with junitxml plugin
             report.longrepr = ""
 
 
@@ -199,9 +199,9 @@ def use_perfetto() -> bool:
 
     Perfetto requires:
     - Perfetto Python module installed
-    - ROCPROFSYS_TRACE not set to OFF (default: ON)
+    - ROCPROFSYS_VALIDATE_PERFETTO not set to OFF (default: ON)
     """
-    if os.environ.get("ROCPROFSYS_TRACE", "").upper() == "OFF":
+    if os.environ.get("ROCPROFSYS_VALIDATE_PERFETTO", "").upper() == "OFF":
         return False
     try:
         import perfetto  # noqa
@@ -311,7 +311,7 @@ def _result_output(request):
     if hasattr(request, "fixturenames"):
         uses_subtests = "subtests" in request.fixturenames
 
-    # Detect probable subtest failures (heuristic: test uses subtests, runners passed, but test failed)
+    # Detect probable subtest failures (test uses subtests, runners passed, but test failed)
     has_subtest_failures = False
     if uses_subtests and test_failed:
         all_results_succeeded = all(getattr(r, "success", True) for r in results)
@@ -320,12 +320,12 @@ def _result_output(request):
 
     should_show = False
     if has_subtest_failures and show_on_subtest_fail:
-        # Actual subtest failed - show output
+        # Actual subtest failed
         should_show = True
     elif not test_failed and show_output:
-        # Test passed and --show-output is set - show output
+        # Test passed and --show-output is set
         should_show = True
-    # Main test body failure (no subtests): pytest handles it via captured output, don't duplicate
+    # Main test body failure (no subtests): pytest handles it
     if not should_show:
         return
 

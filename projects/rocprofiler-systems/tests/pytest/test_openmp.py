@@ -61,10 +61,11 @@ from rocprofsys import (
 
 
 @pytest.fixture
-def ompt_env(base_env: dict[str, str]) -> dict[str, str]:
+def ompt_env() -> dict[str, str]:
     """Environment variables for OMPT tests."""
     return {
-        "ROCPROFSYS_TRACE": "ON",
+        "ROCPROFSYS_TRACE_LEGACY": "OFF",
+        "ROCPROFSYS_TRACE_CACHED": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_USE_OMPT": "ON",
@@ -72,7 +73,6 @@ def ompt_env(base_env: dict[str, str]) -> dict[str, str]:
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 

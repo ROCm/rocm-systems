@@ -533,7 +533,10 @@ class TestAvailBinary:
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]
-        fail_regex = [r"ROCPROFSYS_TRACE", "|ROCPROFSYS_ABORT_FAIL_REGEX"]
+        fail_regex = [
+            r"ROCPROFSYS_TRACE_LEGACY|ROCPROFSYS_TRACE_CACHED",
+            "|ROCPROFSYS_ABORT_FAIL_REGEX",
+        ]
 
         try:
             runner = SysBinaryRunner(
@@ -630,7 +633,8 @@ class TestAvailBinary:
         config_base = test_output_dir / "rocprof-sys-tweak"
 
         env_overrides = {
-            "ROCPROFSYS_TRACE": "OFF",
+            "ROCPROFSYS_TRACE_LEGACY": "OFF",
+            "ROCPROFSYS_TRACE_CACHED": "OFF",
             "ROCPROFSYS_PROFILE": "ON",
         }
 
