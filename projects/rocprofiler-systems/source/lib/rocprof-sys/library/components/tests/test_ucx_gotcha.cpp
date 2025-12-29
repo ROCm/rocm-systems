@@ -106,7 +106,7 @@ struct GMockCommData
 
 struct GMockCategoryRegion
 {
-    // Generic start (from header template audit)
+    // Generic start
     MOCK_METHOD(void, start_generic, (std::string_view name));
 
     // ucp_tag_send_nbx: start(name, "ep", ep, "buffer", buffer, "count", count, "tag",
@@ -293,7 +293,7 @@ struct MockedCategoryRegion
         FAIL() << "Unexpected call of category_region::stop call";
     }
 
-    // Generic start (from header template audit)
+    // Generic start (no args)
     static void start(std::string_view name)
     {
         test_globals::g_category_region_gmock->start_generic(name);
@@ -378,7 +378,7 @@ struct MockedCategoryRegion
     }
 };
 
-struct MockedUCXGotchaPolicy
+struct MockedUCXPolicy
 {
     using gotcha_data     = MockedGotchaData;
     using comm_data       = MockedCommData<gotcha_data>;
@@ -387,9 +387,7 @@ struct MockedUCXGotchaPolicy
     using ucx_gotcha_t    = MockedUCXGotcha;
 };
 
-template struct rocprofsys::component::ucx_gotcha<MockedUCXGotchaPolicy>;
-
-using ucx_gotcha_under_test_t = rocprofsys::component::ucx_gotcha<MockedUCXGotchaPolicy>;
+using ucx_gotcha_under_test_t = rocprofsys::component::ucx_gotcha<MockedUCXPolicy>;
 
 class ucx_gotcha_test : public ::testing::Test
 {

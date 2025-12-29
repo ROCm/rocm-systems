@@ -39,12 +39,68 @@ namespace rocprofsys
 namespace component
 {
 
-template <typename GotchaPolicy>
-struct ucx_gotcha : tim::component::base<ucx_gotcha<GotchaPolicy>, void>
+namespace traits
 {
+template <typename Policy, typename = void>
+struct has_comm_data : std::false_type
+{};
+
+template <typename Policy>
+struct has_comm_data<Policy, std::void_t<typename Policy::comm_data>> : std::true_type
+{};
+
+template <typename Policy, typename = void>
+struct has_gotcha_data : std::false_type
+{};
+
+template <typename Policy>
+struct has_gotcha_data<Policy, std::void_t<typename Policy::gotcha_data>> : std::true_type
+{};
+
+template <typename Policy, typename = void>
+struct has_category_region : std::false_type
+{};
+
+template <typename Policy>
+struct has_category_region<Policy, std::void_t<typename Policy::category_region>>
+: std::true_type
+{};
+
+template <typename Policy, typename = void>
+struct has_ucx_bundle_t : std::false_type
+{};
+
+template <typename Policy>
+struct has_ucx_bundle_t<Policy, std::void_t<typename Policy::ucx_bundle_t>>
+: std::true_type
+{};
+
+template <typename Policy, typename = void>
+struct has_ucx_gotcha_t : std::false_type
+{};
+
+template <typename Policy>
+struct has_ucx_gotcha_t<Policy, std::void_t<typename Policy::ucx_gotcha_t>>
+: std::true_type
+{};
+
+}  // namespace traits
+
+template <typename UCXPolicy>
+struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
+{
+    static_assert(traits::has_comm_data<UCXPolicy>::value,
+                  "UCXPolicy must have a comm_data type");
+
+    static_assert(traits::has_gotcha_data<UCXPolicy>::value,
+                  "UCXPolicy must have a gotcha_data type");
+
+    static_assert(traits::has_category_region<UCXPolicy>::value,
+                  "UCXPolicy must have a category_region type");
+
     static constexpr size_t gotcha_capacity = 100;
 
-    ROCPROFSYS_DEFAULT_OBJECT(ucx_gotcha<GotchaPolicy>)
+    ROCPROFSYS_DEFAULT_OBJECT(ucx_gotcha<UCXPolicy>)
 
     static std::string label() { return "ucx_gotcha"; }
 
@@ -55,55 +111,60 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha<GotchaPolicy>, void>
     static void stop();
 
     template <typename... Args>
-    static void audit(const typename GotchaPolicy::gotcha_data& _data, audit::incoming,
+    static void audit(const typename UCXPolicy::gotcha_data& _data, audit::incoming,
                       Args...)
     {
-        GotchaPolicy::category_region::start(std::string_view{ _data.tool_id });
+        UCXPolicy::category_region::start(std::string_view{ _data.tool_id });
     }
 
 public:
     // ucp_tag_send_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       const void*, size_t, uint64_t, const void*);
     // ucp_tag_recv_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       void*, size_t, uint64_t, uint64_t, const void*);
     // ucp_put_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       const void*, size_t, uint64_t, void*, const void*);
     // ucp_get_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       void*, size_t, uint64_t, void*, const void*);
     // ucp_am_send_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       unsigned, const void*, size_t, const void*, size_t, const void*);
     // ucp_stream_send_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       const void*, size_t, const void*);
     // ucp_stream_recv_nbx
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::incoming, void*,
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::incoming, void*,
                       void*, size_t, size_t*, const void*);
     // outgoing
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::outgoing, void*);
-    static void audit(const typename GotchaPolicy::gotcha_data&, audit::outgoing, int);
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::outgoing, void*);
+    static void audit(const typename UCXPolicy::gotcha_data&, audit::outgoing, int);
 };
 
 namespace detail
 {
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 auto&
 get_ucx_gotcha()
 {
-    static auto _v = tim::lightweight_tuple<typename GotchaPolicy::ucx_gotcha_t>{};
+    static auto _v = tim::lightweight_tuple<typename UCXPolicy::ucx_gotcha_t>{};
     return _v;
 }
 }  // namespace detail
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::configure()
+ucx_gotcha<UCXPolicy>::configure()
 {
-    using ucx_gotcha_t = typename GotchaPolicy::ucx_gotcha_t;
+    static_assert(traits::has_ucx_bundle_t<UCXPolicy>::value,
+                  "UCXPolicy must have a ucx_bundle_t type");
+    static_assert(traits::has_ucx_gotcha_t<UCXPolicy>::value,
+                  "UCXPolicy must have a ucx_gotcha_t type");
+
+    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
 
     for(size_t i = 0; i < ucx_gotcha_t::capacity(); ++i)
     {
@@ -295,154 +356,150 @@ ucx_gotcha<GotchaPolicy>::configure()
     };
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::shutdown()
+ucx_gotcha<UCXPolicy>::shutdown()
 {
-    using ucx_gotcha_t = typename GotchaPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
     ucx_gotcha_t::disable();
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::start()
+ucx_gotcha<UCXPolicy>::start()
 {
-    using ucx_gotcha_t = typename GotchaPolicy::ucx_gotcha_t;
+    using ucx_gotcha_t = typename UCXPolicy::ucx_gotcha_t;
 
-    if(!detail::get_ucx_gotcha<GotchaPolicy>()
+    if(!detail::get_ucx_gotcha<UCXPolicy>()
             .template get<ucx_gotcha_t>()
             ->get_is_running())
     {
         configure();
-        detail::get_ucx_gotcha<GotchaPolicy>().template get<ucx_gotcha_t>()->start();
+        detail::get_ucx_gotcha<UCXPolicy>().template get<ucx_gotcha_t>()->start();
     }
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::stop()
+ucx_gotcha<UCXPolicy>::stop()
 {}
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, const void* arg2,
-                                size_t arg3, uint64_t arg4, const void* arg5)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, const void* arg2, size_t arg3,
+                             uint64_t arg4, const void* arg5)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
-                                         "buffer", arg2, "count", arg3, "tag", arg4,
-                                         "param", arg5);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4,
-                                   arg5);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
+                                      "buffer", arg2, "count", arg3, "tag", arg4, "param",
+                                      arg5);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, void* arg2, size_t arg3,
-                                uint64_t arg4, uint64_t arg5, const void* arg6)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, void* arg2, size_t arg3,
+                             uint64_t arg4, uint64_t arg5, const void* arg6)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "worker",
-                                         arg1, "buffer", arg2, "count", arg3, "tag", arg4,
-                                         "tag_mask", arg5, "param", arg6);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
-                                   arg6);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "worker", arg1,
+                                      "buffer", arg2, "count", arg3, "tag", arg4,
+                                      "tag_mask", arg5, "param", arg6);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
+                                arg6);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, const void* arg2,
-                                size_t arg3, uint64_t arg4, void* arg5, const void* arg6)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, const void* arg2, size_t arg3,
+                             uint64_t arg4, void* arg5, const void* arg6)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
-                                         "buffer", arg2, "count", arg3, "remote_addr",
-                                         arg4, "rkey", arg5, "param", arg6);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
-                                   arg6);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
+                                      "buffer", arg2, "count", arg3, "remote_addr", arg4,
+                                      "rkey", arg5, "param", arg6);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
+                                arg6);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, void* arg2, size_t arg3,
-                                uint64_t arg4, void* arg5, const void* arg6)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, void* arg2, size_t arg3,
+                             uint64_t arg4, void* arg5, const void* arg6)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
-                                         "buffer", arg2, "count", arg3, "remote_addr",
-                                         arg4, "rkey", arg5, "param", arg6);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
-                                   arg6);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
+                                      "buffer", arg2, "count", arg3, "remote_addr", arg4,
+                                      "rkey", arg5, "param", arg6);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
+                                arg6);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, unsigned arg2,
-                                const void* arg3, size_t arg4, const void* arg5,
-                                size_t arg6, const void* arg7)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, unsigned arg2, const void* arg3,
+                             size_t arg4, const void* arg5, size_t arg6, const void* arg7)
 {
-    GotchaPolicy::category_region::start(
-        std::string_view{ _data.tool_id }, "ep", arg1, "id", arg2, "header", arg3,
-        "header_length", arg4, "buffer", arg5, "count", arg6, "param", arg7);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
-                                   arg6, arg7);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1, "id",
+                                      arg2, "header", arg3, "header_length", arg4,
+                                      "buffer", arg5, "count", arg6, "param", arg7);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5,
+                                arg6, arg7);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, const void* arg2,
-                                size_t arg3, const void* arg4)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, const void* arg2, size_t arg3,
+                             const void* arg4)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
-                                         "buffer", arg2, "count", arg3, "param", arg4);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
+                                      "buffer", arg2, "count", arg3, "param", arg4);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::incoming, void* arg1, void* arg2, size_t arg3,
-                                size_t* arg4, const void* arg5)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::incoming, void* arg1, void* arg2, size_t arg3,
+                             size_t* arg4, const void* arg5)
 {
-    GotchaPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
-                                         "buffer", arg2, "count", arg3, "length", arg4,
-                                         "param", arg5);
-    GotchaPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4,
-                                   arg5);
+    UCXPolicy::category_region::start(std::string_view{ _data.tool_id }, "ep", arg1,
+                                      "buffer", arg2, "count", arg3, "length", arg4,
+                                      "param", arg5);
+    UCXPolicy::comm_data::audit(_data, audit::incoming{}, arg1, arg2, arg3, arg4, arg5);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::outgoing, void* ret)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::outgoing, void* ret)
 {
-    GotchaPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
+    UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
-template <typename GotchaPolicy>
+template <typename UCXPolicy>
 void
-ucx_gotcha<GotchaPolicy>::audit(const typename GotchaPolicy::gotcha_data& _data,
-                                audit::outgoing, int ret)
+ucx_gotcha<UCXPolicy>::audit(const typename UCXPolicy::gotcha_data& _data,
+                             audit::outgoing, int ret)
 {
-    GotchaPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
+    UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }
 
 }  // namespace component
 
-struct UCXGotchaPolicy
+struct DefaultUCXPolicy
 {
     using comm_data       = component::comm_data;
     using gotcha_data     = tim::component::gotcha_data;
     using category_region = component::category_region<category::ucx>;
 
-    using ucx_bundle_t =
-        tim::component_bundle<category::ucx, component::ucx_gotcha<UCXGotchaPolicy>,
-                              comm_data>;
+    using component_t = component::ucx_gotcha<DefaultUCXPolicy>;
+
+    using ucx_bundle_t = tim::component_bundle<category::ucx, component_t, comm_data>;
     using ucx_gotcha_t =
-        tim::component::gotcha<component::ucx_gotcha<UCXGotchaPolicy>::gotcha_capacity,
-                               ucx_bundle_t, category::ucx>;
+        tim::component::gotcha<component_t::gotcha_capacity, ucx_bundle_t, category::ucx>;
 };
 
 }  // namespace rocprofsys

@@ -25,4 +25,4 @@
 #include <timemory/components/macros.hpp>
 
 TIMEMORY_STORAGE_INITIALIZER(
-    rocprofsys::component::ucx_gotcha<rocprofsys::UCXGotchaPolicy>)
+    rocprofsys::component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>)
