@@ -582,7 +582,7 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
-# function rocprofiler_systems_get_gpu()
+# function rocprofiler_systems_get_gfx_archs()
 # If a regex is provided, it will be used to filter the architectures.
 # Otherwise, all architectures will be returned.
 # Uses rocm_agent_enumerator to detect GPU architectures.
@@ -1081,8 +1081,7 @@ function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
 endfunction()
 
 # ----------------------------------------------------------------------------
-# GPU Architecture Classification
-#
+# function rocprofiler_systems_lookup_gfx()
 # Classifies AMD GPU architectures (gfx IDs) into instinct, radeon, and apu.
 #
 # ARGS:
