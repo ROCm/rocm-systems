@@ -352,7 +352,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
     }
   }
 
-  // The hsa copy api would result in a dirty cache state
+  // The ROCR copy api guarantees coherency after the copy
   gpu().setFenceDirty(false);
   return true;
 }
@@ -590,7 +590,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
 
   if (status == HSA_STATUS_SUCCESS) {
     gpu().addSystemScope();
-    // The hsa copy api would result in a dirty cache state
+    // The ROCR copy api guarantees coherency after the copy
     gpu().setFenceDirty(false);
   } else {
     gpu().Barriers().ResetCurrentSignal();
@@ -2682,7 +2682,8 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
-    DevLogPrintfError("Buffer create failed, Buffer: 0x%x \n", amdMemory);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+             "Buffer create failed, Buffer: 0x%x \n", amdMemory);
     amdMemory->release();
     return nullptr;
   }

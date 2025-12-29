@@ -38,6 +38,7 @@ COUNTERS_COLLECTION_QUERY = """
 SELECT
     agent_id as GPU_ID,
     dispatch_id as Dispatch_ID,
+    pid as PID,
     grid_size as Grid_Size,
     workgroup_size as Workgroup_Size,
     lds_block_size as LDS_Per_Workgroup,
@@ -61,24 +62,28 @@ TABLE_NAME_PREFIX_QUERY = (
 INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
 
-def convert_db_to_csv(
-    db_path: str,
+def convert_dbs_to_csv(
+    db_paths: list[str],
     csv_file_path: str,
 ) -> None:
     """
-    Read rocpd database and write to CSV file
+    Read rocpd databases and write to CSV file
     """
-    # Read counters_collection view from the database and write to CSV
+    # Read counters_collection view from the databases and write to CSV
     try:
-        with closing(sqlite3.connect(db_path)) as conn:
-            with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
-                with open(csv_file_path, "w", newline="") as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow([
-                        description[0] for description in cursor.description
-                    ])
-                    for row in cursor:
-                        writer.writerow(row)
+        with open(csv_file_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            header_written = False
+            for db_path in db_paths:
+                with closing(sqlite3.connect(db_path)) as conn:
+                    with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
+                        if not header_written:
+                            writer.writerow([
+                                description[0] for description in cursor.description
+                            ])
+                            header_written = True
+                        for row in cursor:
+                            writer.writerow(row)
     except OSError as e:
         console_error(f"Database error while converting to CSV: {e}")
     except Exception as e:
