@@ -4599,26 +4599,26 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.fan is not None,
-                        args.perf_level,
-                        args.profile,
-                        args.compute_partition,
-                        args.memory_partition,
-                        args.perf_determinism is not None,
-                        args.power_cap is not None,
-                        args.soc_pstate is not None,
-                        args.xgmi_plpd is not None,
-                        args.clk_level is not None,
-                        args.clk_limit is not None,
-                        args.ptl_status is not None,
-                        args.ptl_format is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'fan', None) is not None,
+                        getattr(args, 'perf_level', None) is not None,
+                        getattr(args, 'profile', None) is not None,
+                        getattr(args, 'compute_partition', None) is not None,
+                        getattr(args, 'memory_partition', None) is not None,
+                        getattr(args, 'perf_determinism', None) is not None,
+                        getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'soc_pstate', None) is not None,
+                        getattr(args, 'xgmi_plpd', None) is not None,
+                        getattr(args, 'clk_level', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'ptl_status', None) is not None,
+                        getattr(args, 'ptl_format', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.power_cap is not None,
-                        args.clk_limit is not None,
-                        args.process_isolation is not None]):
+            if not any([getattr(args, 'power_cap', None) is not None,
+                        getattr(args, 'clk_limit', None) is not None,
+                        getattr(args, 'process_isolation', None) is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 

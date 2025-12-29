@@ -4,6 +4,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.3.0
+
+### Resolved Issues
+
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.
+  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
+  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+
 ## amd_smi_lib for ROCm 7.2.0
 
 ### Added
