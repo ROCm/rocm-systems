@@ -31,6 +31,7 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
+#include "library/thread_data_growth.hpp"
 #include "library/thread_deleter.hpp"
 
 #include <timemory/utility/macros.hpp>
@@ -54,15 +55,6 @@ using instrumentation_bundle_t =
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
 
-using grow_functor_t = int64_t (*)(int64_t);
-
-inline auto&
-grow_functors()
-{
-    static auto _v = container::stable_vector<grow_functor_t>{};
-    return _v;
-}
-
 template <typename Tp>
 struct base_thread_data
 {
@@ -77,7 +69,16 @@ struct base_thread_data
             }
             return (_v) ? _v->capacity() : 0;
         };
-        grow_functors().emplace_back(std::move(_func));
+        grow_functors().emplace_back(_func);
+
+        // Immediately sync this container to current peak_num_threads.
+        // This ensures containers instantiated after threads exceed
+        // max_supported_threads are properly sized.
+        auto _current_peak = get_current_peak_num_threads();
+        if(_current_peak > static_cast<int64_t>(max_supported_threads))
+        {
+            _func(_current_peak);
+        }
     }
 };
 

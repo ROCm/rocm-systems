@@ -7,10 +7,6 @@ on:
         type: string
       project_to_test:
         type: string
-      amdgpu_families:
-        type: string
-      test_runs_on:
-        type: string
 
 
 permissions:
@@ -30,7 +26,7 @@ jobs:
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      AMDGPU_FAMILIES: "gfx94X-dcgpu"
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
@@ -42,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: bfcaf6e0bcd4bfe3c21990f49bbccb7d2a087d5d # 2025-12-15 commit
+          ref: 5cee24b272e0c58d2ce7c5ab01aee3400e562812 # 2025-12-12 commit
 
       - name: Install python deps
         run: |
@@ -72,6 +68,8 @@ jobs:
           # rm ./TheRock/patches/amd-mainline/rocm-systems/*.patch
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
           rm ./TheRock/patches/amd-mainline/rocm-systems/0002-Revert-hsakmt-bump-vgpr-count-for-gfx1151-1807.patch
+
+
 
       - name: Patch rocm-systems
         run: |
@@ -130,6 +128,6 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: ${{ inputs.amdgpu_families }}
-      test_runs_on: ${{ inputs.test_runs_on }}
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
