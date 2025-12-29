@@ -77,11 +77,11 @@ for the agent and returns a pointer to it.
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <random>
 #include <set>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -148,7 +148,7 @@ struct counter_info_record_t {
 // Tool data struct, now includes a vector of counter_info_record_t
 struct tool_data_t {
   std::mutex mut{};
-  std::unique_ptr<std::ostream> output_stream{nullptr};
+  std::string output_filename{};
   std::unordered_map<uint64_t, std::string> counter_id_name_map{};
   std::string requested_counters{};
   std::string kernel_filter_include_regex{};
@@ -614,14 +614,28 @@ void generate_output(tool_data_t *tool_data) {
                        }),
         tool_data->counter_records.end());
   }
-
+  if (tool_data->counter_records.empty()) {
+    return;
+  }
   // Write collected counter records and clean up
-  if (auto &os = tool_data->output_stream) {
+  if (!tool_data->output_filename.empty()) {
+    std::ofstream ofs(tool_data->output_filename);
+    if (!ofs.is_open()) {
+      std::cerr << "Failed to open output file: " << tool_data->output_filename
+                << std::endl;
+      return;
+    }
+    // Write header at the beginning of the file
+    ofs << "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
+           "counter_id,counter_name,counter_value\n";
     for (const auto &r : tool_data->counter_records)
-      *os << r.dispatch_id << ',' << r.agent_id << "," << r.kernel_id << ','
+      ofs << r.dispatch_id << ',' << r.agent_id << "," << r.kernel_id << ','
           << r.LDS_memory_size << ',' << r.counter_id << ',' << r.counter_name
           << ',' << r.counter_value << '\n';
-    os->flush();
+    ofs.flush();
+    std::clog << "[rocprofiler-compute] [" << __FUNCTION__
+              << "] Counter collection data has been written to: "
+              << tool_data->output_filename << std::endl;
   }
 }
 
@@ -638,18 +652,13 @@ void tool_fini(void *user_data) {
 
 } // namespace
 
-std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t *id) {
+std::unique_ptr<tool_data_t>
+create_tool_data(rocprofiler_client_id_t * /*id*/) {
   auto tool_data = std::make_unique<tool_data_t>();
 
-  // Generate a unique output filename using a random hex string (no libuuid
-  // dependency)
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<uint32_t> dis(0, 0xFFFFFFFF);
-  std::stringstream filename_ss;
-  filename_ss << std::hex << dis(gen);
+  // Generate a unique output filename using the process ID
   std::string base_filename =
-      "counter_collection_" + filename_ss.str().substr(0, 8) + ".csv";
+      std::to_string(getpid()) + "_native_counter_collection.csv";
 
   // Require ROCPROF_OUTPUT_PATH to be set, otherwise error out
   std::string filename;
@@ -664,20 +673,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t *id) {
   // Use the generated base filename along with ROCPROF_OUTPUT_PATH
   filename += base_filename;
 
-  // Set output stream to file
-  auto ofs = std::make_unique<std::ofstream>(filename);
-  if (!ofs->is_open()) {
-    throw std::runtime_error("Failed to open output file: " + filename);
-  }
-  tool_data->output_stream = std::move(ofs);
-  // Write header at the beginning of the file
-  *tool_data->output_stream << "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
-                               "counter_id,counter_name,counter_value\n";
-  tool_data->output_stream->flush();
-
-  // Write to clog the path of the logging file
-  std::clog << id->name << " [" << __FUNCTION__
-            << "] Logging counter collection to: " << filename << std::endl;
+  tool_data->output_filename = filename;
 
   // Store ROCPROF env. vars. in tool_data
 

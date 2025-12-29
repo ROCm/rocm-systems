@@ -148,7 +148,7 @@ void TestFrequenciesRead::Run(void) {
                                                               << std::endl;
         // Verify api support checking functionality is working
         err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
-        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
           std::cout << "\t**Get PCIE Bandwidth "
                     << ": Not implemented on this machine" << std::endl;
