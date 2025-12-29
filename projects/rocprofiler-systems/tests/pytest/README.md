@@ -23,9 +23,9 @@ cd <path to rocprofiler-systems>
 pytest tests/pytest/
 ```
 
-If auto detection of the build directory fails, specify `ROCPROFSYS_BUILD_DIR=<path to build-dir>`
-
 Default output directory: `<build-dir>/rocprof-sys-pytest-output/`
+
+If auto detection of the build directory fails, specify `ROCPROFSYS_BUILD_DIR=<path to build-dir>`
 
 #### Install Mode
 
@@ -34,8 +34,8 @@ Runs tests using binaries from your install location.
 ```bash
 ROCPROFSYS_INSTALL_DIR=<install prefix> pytest <install prefix>/share/rocprofiler-systems/tests/pytest/
 
-# Using /opt/rocm
-ROCPROFSYS_INSTALL_DIR=/opt/rocm pytest /opt/rocm/share/rocprofiler-systems/tests/pytest/
+# Using /opt/rocprofiler-systems
+ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest /opt/rocprofiler-systems/share/rocprofiler-systems/tests/pytest/
 ```
 
 Default output directory: `/tmp/rocprof-sys-pytest-output/`
