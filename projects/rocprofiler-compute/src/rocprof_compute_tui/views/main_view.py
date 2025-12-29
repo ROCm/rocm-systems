@@ -40,7 +40,6 @@ from textual.reactive import reactive
 from textual.widgets import DataTable
 
 from rocprof_compute_tui.analysis_tui import tui_analysis
-from rocprof_compute_tui.tui_debug import dbg
 from rocprof_compute_tui.utils.tui_utils import Logger, LogLevel
 from rocprof_compute_tui.views.kernel_view import OpenMemTree
 from rocprof_compute_tui.widgets.center_panel.center_tabs import CenterTabs
@@ -67,8 +66,6 @@ class MainView(Horizontal):
         pass
 
     def compose(self) -> ComposeResult:
-        dbg("MainView.compose CALLED")
-
         self.logger.info("Composing main view layout", update_ui=False)
         yield MenuBar()
 
@@ -76,7 +73,6 @@ class MainView(Horizontal):
         with Horizontal(id="center-container"):
             with Container(id="center-left", classes="vstack"):
                 center_tabs = CenterTabs()
-                dbg(f"Creating CenterTabs instance: {id(center_tabs)}")
                 self.center_tabs = center_tabs
                 yield center_tabs
 
@@ -275,10 +271,6 @@ class MainView(Horizontal):
             return
 
         kernel_view = self.center_tabs.get_kernel_view()
-        dbg(
-            f"refresh_results called, kernel_view: {id(kernel_view)}"
-            f" mounted={kernel_view.is_mounted if kernel_view else None}"
-        )
 
         if kernel_view:
             kernel_view.update_results(

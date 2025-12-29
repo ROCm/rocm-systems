@@ -30,7 +30,6 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import TabbedContent, TabPane
 
-from rocprof_compute_tui.tui_debug import dbg
 from rocprof_compute_tui.views.kernel_view import KernelView
 from rocprof_compute_tui.widgets.center_panel.mem_bw_tree_panel import MemBwTreePanel
 
@@ -51,7 +50,6 @@ class CenterTabs(Container):
         with TabbedContent(id="center-tabbed"):
             with TabPane("Kernel View", id="tab-kernel-view"):
                 kv = KernelView()
-                dbg(f"CenterTabs created KernelView instance: {id(kv)}")
                 self._kernel_view = kv
                 yield kv
 
@@ -84,3 +82,6 @@ class CenterTabs(Container):
 
         tabbed = self.query_one("#center-tabbed", TabbedContent)
         tabbed.active = "tab-mem-tree"
+
+    def on_mount(self) -> None:
+        self.add_class("section")

@@ -38,7 +38,6 @@ from textual.widgets import Footer, Header
 
 import config
 from rocprof_compute_tui.config import APP_TITLE
-from rocprof_compute_tui.tui_debug import dbg
 from rocprof_compute_tui.views.main_view import MainView
 from utils.specs import generate_machine_specs
 from utils.utils import get_version

@@ -25,20 +25,11 @@ Screen {
     grid-columns: 8fr 1fr;
 }
 
-#activity-container {
+#center-left {
     layout: grid;
     grid-size: 1 2;
     /* 1 column, 2 rows */
     grid-rows: 4fr 1fr;
-}
-
-/* Panel styling */
-#left-panel,
-#right-panel,
-#center-panel,
-#bottom-panel {
-    border: solid $primary;
-    background: $surface-darken-1;
 }
 
 /* Collapsible sections */
@@ -358,18 +349,6 @@ Terminal {
     overflow-y: auto;
 }
 
-#center-left,
-#center-panel,
-#center-tabbed,
-#tab-mem-tree,
-#tab-kernel-view {
-    min-width: 0;
-}
-
-#right-panel {
-    min-width: 0;
-}
-
 #mem-bw-tree-scroll {
     width: 1fr;
     height: 1fr;
@@ -383,9 +362,11 @@ Terminal {
 
 #center-left,
 #center-panel,
+#right-panel,
 #center-tabbed,
 #top-container,
 #bottom-container,
+#tab-kernel-view,
 #tab-mem-tree {
     min-width: 0;
 }
