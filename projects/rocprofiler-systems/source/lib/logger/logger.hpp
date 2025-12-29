@@ -26,10 +26,14 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
 #include <cstdlib>
+#include <mutex>
+#include <pthread.h>
 #include <string>
 #include <string_view>
 #include <sys/cdefs.h>
+#include <unistd.h>
 #include <vector>
 
 namespace rocprofsys
@@ -50,34 +54,60 @@ to_lower(std::string_view s)
     return result;
 }
 
+std::string
+include_process_id_in_filename(std::string_view filename)
+{
+    if(filename.empty())
+    {
+        return std::string{};
+    }
+
+    auto last_sep       = filename.find_last_of('/');
+    auto filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
+    auto dot_pos        = filename.find_last_of('.');
+
+    bool has_extension =
+        (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
+
+    std::string pid_suffix = "_" + std::to_string(getpid());
+
+    if(!has_extension)
+    {
+        return std::string(filename) + pid_suffix;
+    }
+
+    return std::string(filename.substr(0, dot_pos)) + pid_suffix +
+           std::string(filename.substr(dot_pos));
+}
+
+inline bool
+parse_boolean_env(const char* env)
+{
+    if(!env)
+    {
+        return false;
+    }
+    constexpr std::array<const char*, 4> true_values = { "1", "on", "true", "yes" };
+
+    auto lower = to_lower(env);
+    return std::any_of(true_values.begin(), true_values.end(),
+                       [&](const std::string& value) { return value == lower; });
+}
+
 }  // namespace
 
 struct logger_settings_t
 {
     logger_settings_t()
     : m_log_level(log_level_from_env(std::getenv("ROCPROFSYS_LOG_LEVEL")))
-    , m_log_file(std::getenv("ROCPROFSYS_LOG_OUTPUT_FILENAME"))
+    , m_log_file(std::getenv("ROCPROFSYS_LOG_FILE"))
     {
         const char* rocprofsys_monochrome_env = std::getenv("ROCPROFSYS_MONOCHROME");
         const char* monochrome_env            = std::getenv("MONOCHROME");
         if(rocprofsys_monochrome_env || monochrome_env)
         {
-            const auto parse_monochrome_env = [](const char* env) {
-                if(!env)
-                {
-                    return false;
-                }
-                const std::vector<std::string> true_values = { "1", "on", "true", "yes" };
-                if(std::find(true_values.begin(), true_values.end(), std::string(env)) !=
-                   true_values.end())
-                {
-                    return true;
-                }
-                return false;
-            };
-
-            m_monochrome = parse_monochrome_env(rocprofsys_monochrome_env) ||
-                           parse_monochrome_env(monochrome_env);
+            m_monochrome = parse_boolean_env(rocprofsys_monochrome_env) ||
+                           parse_boolean_env(monochrome_env);
         }
     }
 
@@ -141,34 +171,64 @@ class logger_t
 public:
     static spdlog::logger& instance()
     {
-        static auto _instance = [] {
-            logger_settings_t logger_settings;
+        static std::shared_ptr<spdlog::logger> _instance;
+        static std::atomic<bool>               _initialized{ false };
+        static std::mutex                      _init_mutex;
 
-            std::vector<spdlog::sink_ptr> sinks;
+        static std::once_flag _atfork_flag;
+        std::call_once(_atfork_flag, [] {
+            pthread_atfork(nullptr, nullptr, [] {
+                spdlog::drop(s_logger_name);
+                _instance.reset();
+                _initialized.store(false, std::memory_order_release);
+            });
+        });
 
-            sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+        if(!_initialized.load(std::memory_order_acquire))
+        {
+            std::lock_guard<std::mutex> lock(_init_mutex);
 
-            auto log_file = logger_settings.get_log_file();
-            if(!log_file.empty())
+            if(!_initialized.load(std::memory_order_relaxed))
             {
-                sinks.push_back(
-                    std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file, true));
+                _instance = create_logger();
+                _initialized.store(true, std::memory_order_release);
             }
+        }
 
-            const auto* logger_name = "rocprofiler-systems";
-            auto        log =
-                std::make_shared<spdlog::logger>(logger_name, sinks.begin(), sinks.end());
-
-            log->set_pattern(logger_settings.get_log_pattern());
-            log->set_level(logger_settings.get_log_level());
-
-            spdlog::register_logger(log);
-            return log;
-        }();
         return *_instance;
     }
 
     logger_t() = delete;
+
+private:
+    static std::shared_ptr<spdlog::logger> create_logger()
+    {
+        logger_settings_t logger_settings;
+
+        std::vector<spdlog::sink_ptr> sinks;
+
+        sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+
+        auto log_file = logger_settings.get_log_file();
+        if(!log_file.empty())
+        {
+            log_file = include_process_id_in_filename(log_file);
+
+            sinks.push_back(
+                std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file, true));
+        }
+
+        auto log =
+            std::make_shared<spdlog::logger>(s_logger_name, sinks.begin(), sinks.end());
+
+        log->set_pattern(logger_settings.get_log_pattern());
+        log->set_level(logger_settings.get_log_level());
+
+        spdlog::register_logger(log);
+        return log;
+    }
+
+    static constexpr const char* s_logger_name = "rocprofiler-systems";
 };
 
 }  // namespace rocprofsys

@@ -27,3 +27,7 @@ target_link_libraries(
     rocprofiler-systems-logger
     INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-spdlog>
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

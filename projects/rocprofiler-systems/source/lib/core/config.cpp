@@ -263,6 +263,11 @@ configure_settings(bool _init)
                               "Rocprofiler-systems log level", "info", "debugging",
                               "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_LOG_FILE",
+                              "Filename for the Rocprofiler-systems log file. Leave "
+                              "empty to not write to a file.",
+                              "rocprof-sys-log.txt", "debugging", "advanced");
+
     auto _rocprofsys_debug = _config->get<bool>("ROCPROFSYS_DEBUG");
     if(_rocprofsys_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
 
