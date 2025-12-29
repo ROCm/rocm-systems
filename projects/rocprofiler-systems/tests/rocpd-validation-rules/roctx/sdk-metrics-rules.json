@@ -60,24 +60,24 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'roctxMarkA' appears at 5 times in table 'regions'",
-                    "error_message": "Expected 5 'roctxMarkA' entries in `regions` table",
+                    "description": "Verify that roctxMark markers appear 5 times in table 'regions'",
+                    "error_message": "Expected 5 roctxMark marker entries in `regions` table",
                     "expected_result": 5,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name = 'roctxMarkA';"
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxMark_%';"
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'roctxRangePop' appears at 3 times in table 'regions'",
-                    "error_message": "Expected 3 'roctxRangePop' entries in `regions` table",
+                    "description": "Verify that roctxRangePush markers appear 3 times in table 'regions'",
+                    "error_message": "Expected 3 roctxRangePush marker entries in `regions` table",
                     "expected_result": 3,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name = 'roctxRangePop';"
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangePush_%';"
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that 'roctxRangeStop' appears at 2 times in table 'regions'",
-                    "error_message": "Expected 2 'roctxRangeStop' entries in `regions` table",
+                    "description": "Verify that roctxRangeStart markers appear 2 times in table 'regions'",
+                    "error_message": "Expected 2 roctxRangeStart marker entries in `regions` table",
                     "expected_result": 2,
-                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name = 'roctxRangeStop';"
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxRangeStart_%';"
                 }
             ]
         },

@@ -1,0 +1,45 @@
+root: index
+subtrees:
+
+- entries:
+  - file: what-is-rccl.rst
+    title: What is RCCL?
+
+- caption: Install
+  entries:
+  - file: install/installation
+    title: Installation guide
+  - file: install/docker-install
+    title: Running RCCL using Docker
+  - file: install/building-installing
+    title: Building and installing from source
+
+- caption: How to
+  entries:
+  - file: how-to/using-rccl-tuner-plugin-api
+    title: Using the RCCL Tuner plugin
+  - file: how-to/using-nccl
+    title: Using the NCCL Net plugin
+  - file: how-to/troubleshooting-rccl
+    title: Troubleshoot RCCL
+  - file: how-to/rccl-usage-tips
+
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rccl/tree/develop/ext-tuner/example
+    title: RCCL Tuner plugin examples
+  - url: https://github.com/ROCm/rccl/tree/develop/ext-net/example
+    title: NCCL Net plugin examples
+
+- caption: API reference
+  entries:
+  - file: api-reference/library-specification
+    title: Library specification
+  - file: api-reference/api-library
+  - file: api-reference/env-variables
+    title: Environment variables
+
+- caption: About
+  entries:
+  - file: license
+  - file: attributions

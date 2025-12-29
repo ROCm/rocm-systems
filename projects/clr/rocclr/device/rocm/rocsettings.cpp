@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -127,10 +127,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   enableExtension(ClAmdMediaOps);
   enableExtension(ClAmdMediaOps2);
   enableExtension(ClKhrImage2dFromBuffer);
-
-  if (MesaInterop::Supported()) {
-    enableExtension(ClKhrGlSharing);
-  }
+  enableExtension(ClKhrGlSharing);
 
   // Enable platform extension
   enableExtension(ClAmdDeviceAttributeQuery);
