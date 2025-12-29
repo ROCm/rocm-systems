@@ -152,7 +152,7 @@ void TestFrequenciesRead::Run(void) {
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
         err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
         DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+        ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
       } else {
         CHK_ERR_ASRT(err)
