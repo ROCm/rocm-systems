@@ -139,7 +139,7 @@ class TreeCanvas(Static):
         self._draw_node(canvas, self.root, x_offset)
 
         # to Rich Text
-        out = Text()
+        out = Text(no_wrap=True)
         for row in canvas:
             for ch, style in row:
                 out.append(ch, style or None)
@@ -431,16 +431,9 @@ class DecisionTreeApp(App):
     ]
 
     CSS = """
-    Screen {
-        background: $surface;
-    }
-
     #tree-scroll {
         width: 1fr;
-        height: 1fr;
         overflow-x: auto;
-        overflow-y: auto;
-        border: solid $primary;
     }
 
     #tree-scroll > * {

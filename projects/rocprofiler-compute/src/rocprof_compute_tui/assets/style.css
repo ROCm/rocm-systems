@@ -357,3 +357,35 @@ Terminal {
     overflow-x: auto;
     overflow-y: auto;
 }
+
+#center-left,
+#center-panel,
+#center-tabbed,
+#tab-mem-tree,
+#tab-kernel-view {
+    min-width: 0;
+}
+
+#right-panel {
+    min-width: 0;
+}
+
+#mem-bw-tree-scroll {
+    width: 1fr;
+    height: 1fr;
+    overflow-x: scroll;
+    overflow-y: auto;
+}
+
+#mem-bw-tree-scroll TreeCanvas {
+    width: auto;
+}
+
+#center-left,
+#center-panel,
+#center-tabbed,
+#top-container,
+#bottom-container,
+#tab-mem-tree {
+    min-width: 0;
+}

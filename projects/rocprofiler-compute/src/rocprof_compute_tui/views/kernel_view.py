@@ -35,7 +35,11 @@ from typing import Any, Optional
 
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import (
+    Container,
+    Horizontal,
+    ScrollableContainer,
+)
 from textual.message import Message
 from textual.widgets import Label, RadioButton, RadioSet
 
@@ -63,29 +67,32 @@ class KernelView(Container):
 
     #top-container {
         height: 1fr;
+        border: none;
         margin-top: 1;
-        overflow-x: auto;
-        overflow-y: auto;
     }
 
     #bottom-container {
         height: 4fr;
+        border: none;
         margin-top: 2;
-        overflow-x: auto;
-        overflow-y: auto;
     }
 
     .kernel-table-header {
         background: $primary;
         color: $text;
-        padding: 0 1;
         text-style: bold;
-        margin-bottom: 1;
+        padding: 0 1;
+        offset: 5 0;
+        margin-top: 1;
+    }
+
+    .kernel-row {
+        padding: 0 1;
+        border-bottom: solid $border;
     }
 
     RadioSet {
         border: solid $border;
-        margin-top: 1;
     }
     """
 
@@ -120,8 +127,8 @@ class KernelView(Container):
     # Compose: ONLY static layout
     # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(id="top-container")
-        yield VerticalScroll(id="bottom-container")
+        yield ScrollableContainer(id="top-container")
+        yield ScrollableContainer(id="bottom-container")
 
     # ------------------------------------------------------------------
     # Status message (short-lived)
@@ -145,7 +152,7 @@ class KernelView(Container):
         self.kernel_to_df_dict = kernel_to_df_dict
         self.top_kernel_to_df_list = top_kernel_to_df_list
 
-        top_container = self.query_one("#top-container", VerticalScroll)
+        top_container = self.query_one("#top-container", ScrollableContainer)
         top_container.remove_children()
 
         if not self.top_kernel_to_df_list:
@@ -231,7 +238,7 @@ class KernelView(Container):
     # Bottom collapsible view
     # ------------------------------------------------------------------
     def update_bottom_content(self) -> None:
-        bottom = self.query_one("#bottom-container", VerticalScroll)
+        bottom = self.query_one("#bottom-container", ScrollableContainer)
         bottom.remove_children()
 
         bottom.mount(Label("Toggle kernel selection to view analysis."))
