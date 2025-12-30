@@ -98,24 +98,6 @@ target_link_libraries(mpi-send-recv PRIVATE mpi-c-interface-library)
 add_executable(mpi-allreduce allreduce.c)
 target_link_libraries(mpi-allreduce PRIVATE mpi-c-interface-library m)
 
-if(ENABLE_FORTRAN_MPI_CTESTS)
-    if(NOT MPI_Fortran_FOUND)
-        rocprofiler_systems_message(FATAL_ERROR "MPI Fortran support not found. Ensure MPI was configured with Fortran support.")
-    endif()
-    add_library(mpi-fortran-interface-library INTERFACE)
-    target_link_libraries(
-        mpi-fortran-interface-library
-        INTERFACE
-            Threads::Threads
-            MPI::MPI_Fortran
-            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-    )
-
-    # Also tests the case where Fortran Main has FuncReturnStatus == NORETURN
-    add_executable(mpi-fortran-intervals intervals_mpi.f90)
-    target_link_libraries(mpi-fortran-intervals PRIVATE mpi-fortran-interface-library)
-endif()
-
 set(CMAKE_BUILD_TYPE "Release")
 
 add_library(mpi-cxx-interface-library INTERFACE)
