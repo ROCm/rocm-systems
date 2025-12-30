@@ -24,12 +24,6 @@
  *  @{
  */
 
-#ifndef copysign
-#ifdef _MSC_VER
-#define copysign(X, Y) (_copysign(X, Y))
-#endif  //_MSC_VER
-#endif  // copysign
-
 //! GPU Device Implementation
 namespace amd::roc {
 
