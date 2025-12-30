@@ -1329,6 +1329,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    set(_EXIST_FILES_TESTS "")
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
@@ -1337,6 +1338,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         )
+        list(APPEND _EXIST_FILES_TESTS "validate-${TEST_NAME}-${_FILE}-exists")
     endforeach()
 
     if(TEST_TIMEMORY_FILE)
@@ -1430,6 +1432,18 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 REQUIRED_FILES "${TEST_FILE}"
                 FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
                 ${TEST_PROPERTIES}
+        )
+    endforeach()
+
+    # Set properties for file existence validation tests
+    foreach(_TEST ${_EXIST_FILES_TESTS})
+        set_tests_properties(
+            ${_TEST}
+            PROPERTIES
+                TIMEOUT ${TEST_TIMEOUT}
+                LABELS "${TEST_LABELS}"
+                DEPENDS "${TEST_DEPENDS};${TEST_NAME}"
+                FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
         )
     endforeach()
 endfunction()

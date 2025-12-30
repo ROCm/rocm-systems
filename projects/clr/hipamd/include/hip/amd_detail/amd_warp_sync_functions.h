@@ -357,7 +357,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
 #endif
 
   firstLane = __builtin_ctzll(mask);
-  laneId = __ockl_lane_u32();
+  laneId = __lane_id();
   nextBit = laneId;
   // the number of iterations needs to be at least log2(number of bits on)
   numIterations = sizeof(int) * 8 - __clz(maskNumBits);

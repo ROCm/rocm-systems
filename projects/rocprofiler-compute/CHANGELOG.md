@@ -45,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Fix the check to prevent showing table where a column is full of N/A
   * Improve detection of empty values when metric evalulation fails due to counter data missing
 
+* Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
