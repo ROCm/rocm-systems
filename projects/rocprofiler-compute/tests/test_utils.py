@@ -2497,7 +2497,14 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
         "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
     )
 
-    mock_df = pd.DataFrame({"Dispatch_ID": [0], "GPU_ID": [0], "Kernel_Name": ["test"]})
+    mock_df = pd.DataFrame({
+        "Dispatch_ID": [0],
+        "GPU_ID": [0],
+        "Kernel_Name": ["test"],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "LDS_Per_Workgroup": [1024],
+    })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -2729,6 +2736,10 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
         "Dispatch_ID": [0],
         "Start_Timestamp": [100],
         "End_Timestamp": [200],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "Kernel_Name": ["test_kernel"],
+        "LDS_Per_Workgroup": [1024],
     })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
@@ -2800,9 +2811,9 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     csv_content = (
         "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
         "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
-        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
+        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,LDS_Per_Workgroup,Start_Timestamp,"
         "End_Timestamp,Counter_Name,Counter_Value\n"
-        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,1024,0,1,SQ_WAVES,100"
     )
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
@@ -3094,7 +3105,14 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
-    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
+    dummy_df = pd.DataFrame({
+        "Dispatch_ID": [0],
+        "A": [1],
+        "Kernel_Name": ["test"],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "LDS_Per_Workgroup": [1024],
+    })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
