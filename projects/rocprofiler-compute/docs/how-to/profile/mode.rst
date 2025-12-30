@@ -786,7 +786,3 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 * **Non-deterministic workloads**
 
   Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
-
-* **Cannot use with dispatch filtering**
-
-  It is not possible to use dispatch filtering mentioned in :ref:`Filtering <filtering>` with iteration multiplexing, because iteration multiplexing merges counters across dispatches, making it impossible to isolate specific dispatches for profiling and analysis, so attempting to combine them will result in an error.
