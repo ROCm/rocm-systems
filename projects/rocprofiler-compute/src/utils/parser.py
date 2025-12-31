@@ -859,6 +859,16 @@ def build_metric_value_string(
                     )
 
 
+# Mapping between columns emitted by roofline.csv and the metric placeholders
+# referenced inside the YAML configs. The MFMA F6/F4 peak is the only one whose
+# YAML placeholder does not match the CSV column name, so we alias it here to
+# avoid propagating NaN/N/A values (SWDEV-568112).
+EMPIRICAL_PEAK_ALIASES = {
+    "mfmaf6f4flops": "MFMA_FLOPs_F6F4",
+    "mfmaf4f6flops": "MFMA_FLOPs_F6F4",
+}
+
+
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
     """Create empirical peaks dictionary"""
     empirical_peaks = {}
@@ -867,6 +877,11 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
         peak_data_row = empirical_peaks_df.iloc[0]
         for col in empirical_peaks_df.columns:
             empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
+
+            normalized_col = col.replace("_", "").lower()
+            alias = EMPIRICAL_PEAK_ALIASES.get(normalized_col)
+            if alias:
+                empirical_peaks[f"ammolite__{alias}_empirical_peak"] = peak_data_row[col]
     else:
         peak_names = [
             "FP16Flops",

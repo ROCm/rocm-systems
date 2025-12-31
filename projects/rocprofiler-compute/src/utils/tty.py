@@ -596,7 +596,6 @@ def show_all(
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
     print(f"\n{'-' * 80}")
-    print("4. Roofline")
     print("4.3 Roofline Plot")
 
     if roof_plot:

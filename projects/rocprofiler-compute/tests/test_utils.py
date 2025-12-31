@@ -7818,3 +7818,36 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
         assert is_valid is False
         assert "Inconsistent row length" in error_msg
         assert "row 2" in error_msg
+
+
+# =============================================================================
+# create_empirical_peaks_dict TESTS
+# =============================================================================
+
+
+def test_create_empirical_peaks_dict_maps_f6f4_alias():
+    """
+    Ensure MFMA F6/F4 peak columns are aliased to the YAML placeholder name.
+    """
+    from utils.parser import create_empirical_peaks_dict
+
+    df = pd.DataFrame([{"MFMAF6F4Flops": 123.45}])
+
+    peaks = create_empirical_peaks_dict(df)
+
+    assert peaks["ammolite__MFMAF6F4Flops_empirical_peak"] == pytest.approx(123.45)
+    assert peaks["ammolite__MFMA_FLOPs_F6F4_empirical_peak"] == pytest.approx(123.45)
+
+
+def test_create_empirical_peaks_dict_maps_f4f6_variant():
+    """
+    Variant column ordering (F4F6) should also populate the expected alias.
+    """
+    from utils.parser import create_empirical_peaks_dict
+
+    df = pd.DataFrame([{"MFMAF4F6Flops": 987.65}])
+
+    peaks = create_empirical_peaks_dict(df)
+
+    assert peaks["ammolite__MFMAF4F6Flops_empirical_peak"] == pytest.approx(987.65)
+    assert peaks["ammolite__MFMA_FLOPs_F6F4_empirical_peak"] == pytest.approx(987.65)
