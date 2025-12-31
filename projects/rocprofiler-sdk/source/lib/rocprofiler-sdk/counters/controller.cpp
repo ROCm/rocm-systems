@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
@@ -98,18 +99,6 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if(counters::counter_collection_has_device_lock())
-    {
-        /**
-         * Note: This should retrun if the lock fails to aquire in the future. However, this
-         * is a change in the required permissions for rocprofiler and needs to be communicated
-         * with partners before strict enforcement. If the required permissions are not obtained,
-         * those profilers will function as they currently do (without any of the benefits of the
-         * IOCTL).
-         */
-        counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
-    }
-
     ctx.device_counter_collection->agent_data.emplace_back();
     ctx.device_counter_collection->agent_data.back().callback_data =
         rocprofiler_user_data_t{.ptr = user_data};
@@ -145,6 +134,19 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
     if(!ctx.counter_collection)
     {
+        // Disable PTL for all GPUs for dispatch counter collection
+        for(const auto& agent : agent::get_agents())
+        {
+            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                if(counters::ptl_control_supported())
+                {
+                    counters::counter_collection_ptl_disable(
+                        rocprofiler::agent::get_agent(agent->id));
+                }
+            }
+        }
+
         ctx.counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }

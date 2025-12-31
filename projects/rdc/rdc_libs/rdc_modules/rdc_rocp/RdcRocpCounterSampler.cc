@@ -34,6 +34,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -52,6 +53,12 @@ void RocprofilerCall(Callable&& callable, const std::string& msg, const char* fi
     errmsg << "[CALL][" << file << ":" << line << "] " << msg << " failure (" << status_msg << ")";
     throw std::runtime_error(errmsg.str());
   }
+}
+
+// File-level static map for counter ID to name lookup (shared between functions)
+namespace {
+  std::map<uint64_t, std::string> g_counter_names;
+  std::mutex g_counter_names_mutex;
 }
 
 namespace amd {
@@ -86,22 +93,18 @@ CounterSampler::~CounterSampler() { ctx_ = {}; }
 
 const std::string& CounterSampler::decode_record_name(
     const rocprofiler_record_counter_t& rec) const {
-  static auto roc_counters = [this]() {
-    auto name_to_id = CounterSampler::get_supported_counters(agent_);
-    std::map<uint64_t, std::string> id_to_name;
-    for (const auto& [name, id] : name_to_id) {
-      id_to_name.emplace(id.handle, name);
-    }
-    return id_to_name;
-  }();
   rocprofiler_counter_id_t counter_id = {.handle = 0};
   rocprofiler_query_record_counter_id(rec.id, &counter_id);
 
-  auto it = roc_counters.find(counter_id.handle);
-  if (it == roc_counters.end()) {
-    RDC_LOG(RDC_ERROR, "Error: Counter handle " << counter_id.handle
-                                                << " not found in roc_counters." << std::endl);
-    throw std::runtime_error("Counter handle not found in roc_counters");
+  // Extract base metric ID (lower 16 bits)
+  uint64_t base_id = counter_id.handle & 0xFFFF;
+
+  std::lock_guard<std::mutex> lock(g_counter_names_mutex);
+  auto it = g_counter_names.find(base_id);
+  if (it == g_counter_names.end()) {
+    RDC_LOG(RDC_ERROR, "Error: Counter base_id " << base_id
+                                                << " not found in global counter map." << std::endl);
+    throw std::runtime_error("Counter base_id not found in global counter map");
   }
 
   return it->second;
@@ -228,6 +231,8 @@ std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_su
             static_cast<void*>(&gpu_counters));
       },
       "Could not fetch supported counters", __FILE__, __LINE__);
+
+  std::lock_guard<std::mutex> lock(g_counter_names_mutex);
   for (auto& counter : gpu_counters) {
     rocprofiler_counter_info_v0_t version;
     RocprofilerCall(
@@ -236,6 +241,11 @@ std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_su
                                                 static_cast<void*>(&version));
         },
         "Could not query info for counter", __FILE__, __LINE__);
+
+    // Extract base metric ID (lower 16 bits) and populate global map
+    uint64_t base_id = counter.handle & 0xFFFF;
+    g_counter_names[base_id] = version.name;
+
     out.emplace(version.name, counter);
   }
   return out;
