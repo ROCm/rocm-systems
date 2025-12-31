@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -132,7 +132,7 @@ class MenuButton(Button):
     def __init__(self, label: str, menu_id: str, *args: Any, **kwargs: Any) -> None:
         super().__init__(label, *args, **kwargs)
         self.menu_id = menu_id
-        self._dropdown: DropdownMenu | None = None
+        self._dropdown: Optional[DropdownMenu] = None
 
     def on_mount(self) -> None:
         # IMPORTANT: delay lookup until after the full DOM is built

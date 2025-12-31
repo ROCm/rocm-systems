@@ -31,7 +31,9 @@ from textual.containers import Container
 from textual.widgets import TabbedContent, TabPane
 
 from rocprof_compute_tui.views.kernel_view import KernelView
-from rocprof_compute_tui.widgets.center_panel.mem_bw_tree_panel import MemBwTreePanel
+from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.mem_bw_tree_panel import (
+    MemBwTreePanel,
+)
 
 
 class CenterTabs(Container):
@@ -74,7 +76,7 @@ class CenterTabs(Container):
     def show_mem_tree_for_kernel(
         self,
         kernel_name: str,
-        kernel_data: dict[str, Any] | None,
+        kernel_data: Optional[dict[str, Any]],
     ) -> None:
         """Activate Mem BW Tree tab and update contents."""
         if self._mem_tree:

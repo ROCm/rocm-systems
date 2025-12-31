@@ -276,6 +276,8 @@ class MainView(Horizontal):
             kernel_view.update_results(
                 self.kernel_to_df_dict, self.top_kernel_to_df_list
             )
+            self.logger.info(f"kernel_to_df_dict: {self.kernel_to_df_dict}")
+            self.logger.info(f"top_kernel_to_df_list: {self.top_kernel_to_df_list}")
             self.logger.success("Results displayed successfully.")
         else:
             self.logger.error("Kernel view not found or no data available")

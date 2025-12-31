@@ -23,6 +23,8 @@
 
 ##############################################################################
 
+from typing import Optional
+
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
@@ -70,7 +72,9 @@ class ClickableListItem(ListItem):
 class RecentDirectoriesScreen(ModalScreen):
     """Modal screen to display recent directories as clickable list items."""
 
-    def __init__(self, recent_dirs: list[str], current_dir: str | None = None) -> None:
+    def __init__(
+        self, recent_dirs: list[str], current_dir: Optional[str] = None
+    ) -> None:
         super().__init__()
         self.recent_dirs = recent_dirs
         self.current_dir = current_dir
