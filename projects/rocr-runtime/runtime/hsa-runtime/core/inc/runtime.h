@@ -69,7 +69,6 @@
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/memory_region.h"
 #include "core/inc/signal.h"
-#include "core/util/lazy_ptr.h"
 #include "core/inc/svm_profiler.h"
 #include "core/inc/thunk_loader.h"
 #include "core/util/flag.h"
@@ -566,13 +565,13 @@ class Runtime {
     amdgpu_bo_handle ldrm_bo;
   };
 
-  struct AsyncEventsInfo;
   struct AsyncEventsControl {
-    AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    AsyncEventsControl() : async_events_thread_(NULL) {}
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread thread_;
+    os::Thread async_events_thread_;
+    HybridMutex lock;
     bool exit;
   };
 
@@ -679,16 +678,6 @@ class Runtime {
     //AsyncEventItem Queue
     ::rocr::MPSCQueue<AsyncEventItem*> event_queue_;
     AsyncEventsPool asyncEventPool_;
-  };
-
-  struct AsyncEventsInfo {
-    AsyncEventsControl control;
-    AsyncEvents events;
-    ConcurrentAsyncEvents new_events;
-    bool monitor_exceptions;
-
-    AsyncEventsInfo(bool exceptions);
-    ~AsyncEventsInfo();
   };
 
   struct PrefetchRange;
@@ -840,8 +829,17 @@ class Runtime {
   // Deprecated HSA Region API GPU (for legacy APU support only)
   Agent* region_gpu_;
 
-  lazy_ptr<AsyncEventsInfo> asyncSignals_;
-  lazy_ptr<AsyncEventsInfo> asyncExceptions_;
+  struct AsyncEventsInfo {
+    bool monitor_exceptions;
+    AsyncEventsControl control;
+    AsyncEvents events;
+    ConcurrentAsyncEvents new_events;
+
+    AsyncEventsInfo() : control(), events(), new_events(), monitor_exceptions(false) {}
+  };
+
+  struct AsyncEventsInfo asyncSignals_;
+  struct AsyncEventsInfo asyncExceptions_;
 
   // System clock frequency.
   uint64_t sys_clock_freq_;
