@@ -29,8 +29,6 @@ import pytest
 from rocprofsys import (
     GPUInfo,
     RocprofsysConfig,
-    SamplingRunner,
-    SysRunRunner,
 )
 
 from pathlib import Path

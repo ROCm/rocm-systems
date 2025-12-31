@@ -43,15 +43,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
-from rocprofsys import (
-    RocprofsysConfig,
-    BaselineRunner,
-    BinaryRewriteRunner,
-    SamplingRunner,
-    RuntimeInstrumentRunner,
-    SysRunRunner,
-)
-
 
 # ============================================================================
 # OpenMP Fixtures

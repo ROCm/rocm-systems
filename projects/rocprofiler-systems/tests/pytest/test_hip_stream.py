@@ -25,7 +25,6 @@ Tests for HIP stream API
 """
 
 import pytest
-from pathlib import Path
 
 # =============================================================================
 # HIP stream tests
