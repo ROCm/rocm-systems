@@ -160,6 +160,11 @@ class RocprofsysConfig:
             if exe.exists() and exe.is_file():
                 return exe
 
+            # rccl tests lie in their own directory
+            exe = self.rocprofsys_examples_dir / "examples" / "rccl" / name
+            if exe.exists() and exe.is_file():
+                return exe
+
             # binary directory
             exe = self.rocprofsys_bin_dir / name
             if exe.exists() and exe.is_file():
@@ -268,7 +273,6 @@ def _check_rocm_version_geq(min_version: str) -> bool:
     if current is None:
         return False
 
-    # Parse min_version
     parts = min_version.split(".")
     min_tuple = tuple(int(p) for p in parts)
     # Pad with zeros if needed (e.g., "7.0" -> (7, 0, 0))

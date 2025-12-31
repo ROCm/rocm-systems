@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 
 """
-Tests for GPU connectivity tests
+Tests for GPU connectivity
 """
 
 import pytest
