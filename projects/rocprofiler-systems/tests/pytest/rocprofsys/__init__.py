@@ -46,7 +46,6 @@ from .runners import (
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
-    SysBinaryRunner,
 )
 from .validators import (
     ValidationResult,
@@ -55,15 +54,14 @@ from .validators import (
     validate_timemory_json,
     validate_causal_json,
     validate_file_exists,
+    validate_regex,
 )
 
 from .gpu import (
     GPUInfo,
     detect_gpu,
-    is_navi_architecture,
     lookup_gpu_category,
     get_target_gpu_arch,
-    is_mi300_architecture,
 )
 
 __all__ = [
@@ -80,7 +78,6 @@ __all__ = [
     "BinaryRewriteRunner",
     "RuntimeInstrumentRunner",
     "SysRunRunner",
-    "SysBinaryRunner",
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
@@ -88,11 +85,10 @@ __all__ = [
     "validate_timemory_json",
     "validate_causal_json",
     "validate_file_exists",
+    "validate_regex",
     # GPU
     "GPUInfo",
     "detect_gpu",
     "lookup_gpu_category",
     "get_target_gpu_arch",
-    "is_navi_architecture",
-    "is_mi300_architecture",
 ]

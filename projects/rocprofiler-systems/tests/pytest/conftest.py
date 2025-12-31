@@ -31,8 +31,10 @@ from __future__ import annotations
 import os
 import sys
 import shutil
+import re
 from pathlib import Path
-from typing import Generator, Callable
+from functools import lru_cache
+from typing import Callable, Generator, Optional
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -48,6 +50,18 @@ from rocprofsys import (
     lookup_gpu_category,
     _get_rocm_version,
     _check_rocm_version_geq,
+    TestResult,
+    validate_regex,
+    validate_perfetto_trace,
+    validate_rocpd_database,
+    validate_timemory_json,
+    validate_causal_json,
+    validate_file_exists,
+    BaselineRunner,
+    SamplingRunner,
+    BinaryRewriteRunner,
+    RuntimeInstrumentRunner,
+    SysRunRunner,
 )
 
 # Key for storing test results on pytest items
@@ -100,6 +114,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocm_min_version(version): mark test as requiring minimum ROCm version",
     )
+    config.addinivalue_line("markers", "rocpd: mark test as using ROCpd")
     # Register plugin to handle --no-output flag
     config.pluginmanager.register(NoOutputPlugin(config), "no_output_plugin")
 
@@ -171,13 +186,8 @@ def pytest_collection_modifyitems(
                 )
 
 
-# ============================================================================
-# Session-scoped Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def use_rocpd(gpu_info: GPUInfo) -> bool:
+@lru_cache(maxsize=1)
+def check_use_rocpd() -> bool:
     """Whether ROCpd is available for tests.
 
     ROCpd requires:
@@ -185,16 +195,16 @@ def use_rocpd(gpu_info: GPUInfo) -> bool:
     - A valid GPU
     - ROCm >= 7.0
     """
-
     if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
         return False
+    gpu_info = detect_gpu()
     if not gpu_info.available:
         return False
     return _check_rocm_version_geq("7.0")
 
 
-@pytest.fixture(scope="session")
-def use_perfetto() -> bool:
+@lru_cache(maxsize=1)
+def check_use_perfetto() -> bool:
     """Whether Perfetto is available for tests.
 
     Perfetto requires:
@@ -209,6 +219,11 @@ def use_perfetto() -> bool:
         return True
     except ImportError:
         return False
+
+
+# ============================================================================
+# Session-scoped Fixtures
+# ============================================================================
 
 
 @pytest.fixture(scope="session")
@@ -461,6 +476,32 @@ def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
     }
 
 
+@pytest.fixture(scope="function", autouse=True)
+def apply_rocpd_marker(request):
+    """Automatically add ROCpd env vars based on marker.
+
+    Usage:
+        @pytest.mark.rocpd("<env name>")
+    """
+    if not check_use_rocpd():
+        return
+
+    marker = request.node.get_closest_marker("rocpd")
+    if not marker or not marker.args:
+        return
+
+    # First arg is fixture name
+    env_fixture_name = marker.args[0]
+
+    try:
+        env = request.getfixturevalue(env_fixture_name)
+    except pytest.FixtureLookupError:
+        return
+
+    # Add ROCpd base env
+    env["ROCPROFSYS_USE_ROCPD"] = "ON"
+
+
 # ============================================================================
 # Cleanup Fixtures
 # ============================================================================
@@ -683,8 +724,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Available:      {gpuInfo.available}",
         f"  Architectures:  {gpuInfo.architectures}",
         f"  Device count:   {gpuInfo.device_count}",
-        f"  Is Navi:        {gpuInfo.is_navi}",
-        f"  Is Mi300:       {gpuInfo.is_mi300}",
+        f"  Categories:     {gpuInfo.categories}",
         "-" * 70,
         "Directories:",
         f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
@@ -707,3 +747,405 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         "",
     ]
     return lines
+
+
+# ============================================================================
+# Test run and assertion fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def run_test(collect_result, rocprof_config, test_output_dir):
+    """Unified fixture to run any test runner type and handle pytest logic.
+
+    Args:
+        runner_type: One of "baseline", "sampling", "binary_rewrite",
+                     "runtime_instrument", "sys_run"
+        target: Target executable name
+        run_args: Arguments passed to the target executable
+        env: Environment variables dict
+        timeout: Test timeout in seconds
+        mpi_ranks: Number of MPI ranks (0 = disabled)
+        working_directory: Custom working directory
+        skip_on_error: If True, pytest.skip on non-zero return code (default: False = fail)
+        fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
+        fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
+        **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
+
+    Returns:
+        TestResult for further assertions
+    """
+    RUNNERS = {
+        "baseline": BaselineRunner,
+        "sampling": SamplingRunner,
+        "binary_rewrite": BinaryRewriteRunner,
+        "runtime_instrument": RuntimeInstrumentRunner,
+        "sys_run": SysRunRunner,
+    }
+
+    def _run_test(
+        runner_type: str,
+        target: str,
+        run_args: Optional[list[str]] = None,
+        env: Optional[dict[str, str]] = None,
+        timeout: int = 300,
+        mpi_ranks: int = 0,
+        working_directory: Optional[Path] = None,
+        skip_on_error: bool = False,
+        fail_on_not_found: bool = False,
+        fail_message: Optional[str] = None,
+        **kwargs,
+    ) -> TestResult:
+        runner_class = RUNNERS.get(runner_type)
+        if not runner_class:
+            pytest.fail(
+                f"Invalid runner type: {runner_type}. Use: {list(RUNNERS.keys())}"
+            )
+
+        try:
+            runner = runner_class(
+                config=rocprof_config,
+                target=target,
+                output_dir=test_output_dir,
+                run_args=run_args,
+                env=env,
+                timeout=timeout,
+                mpi_ranks=mpi_ranks,
+                working_directory=working_directory,
+                **kwargs,
+            )
+        except FileNotFoundError:
+            if fail_on_not_found:
+                pytest.fail(f"{target} binary not found")
+            else:
+                pytest.skip(f"{target} binary not found")
+
+        result = runner.run()
+        collect_result(result)
+
+        if not result.success:
+            if fail_message:
+                msg = f"{fail_message}: {result.test_output}"
+            else:
+                msg = f"{runner_type} test failed: {result.test_output}"
+            if skip_on_error:
+                pytest.skip(msg)
+            else:
+                pytest.fail(msg)
+
+        return result
+
+    return _run_test
+
+
+@pytest.fixture
+def assert_regex(subtests):
+    """Fixture that returns an assert_regex function.
+
+    Args not from validate_regex:
+        subtest_name: Name shown in subtest output (defaults to "Regex validation")
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_regex(
+        result: TestResult,
+        subtest_name: str = "Regex validation",
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            validation = validate_regex(result, pass_regex, fail_regex)
+            if not validation.is_valid:
+                msg = fail_message or f"Regex validation failed: {validation.message}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg)
+
+    return _assert_regex
+
+
+@pytest.fixture
+def assert_perfetto(subtests, tests_dir):
+    """Fixture that returns an assert_perfetto function.
+
+    Args not from validate_perfetto_trace:
+        subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
+        pass_regex: (Optional) Regex patterns that must be found in validation.stdout
+        fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_perfetto(
+        result: TestResult,
+        subtest_name: str = "Perfetto validation",
+        categories: Optional[list[str]] = None,
+        labels: Optional[list[str]] = None,
+        counts: Optional[list[int]] = None,
+        depths: Optional[list[int]] = None,
+        label_substrings: Optional[list[str]] = None,
+        counter_names: Optional[list[str]] = None,
+        key_names: Optional[list[str]] = None,
+        key_counts: Optional[list[int]] = None,
+        trace_processor_path: Optional[Path] = None,
+        print_output: bool = False,
+        timeout: int = 120,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            if not check_use_perfetto():
+                pytest.skip("Perfetto is disabled")
+            perfetto = result.perfetto_file
+            if perfetto is None:
+                pytest.fail("Perfetto trace not created")
+            validation = validate_perfetto_trace(
+                perfetto,
+                tests_dir=tests_dir,
+                categories=categories,
+                labels=labels,
+                counts=counts,
+                depths=depths,
+                label_substrings=label_substrings,
+                counter_names=counter_names,
+                key_names=key_names,
+                key_counts=key_counts,
+                trace_processor_path=trace_processor_path,
+                print_output=print_output,
+                timeout=timeout,
+            )
+            if not validation.is_valid:
+                msg = fail_message or f"Perfetto validation failed: {validation.message}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg)
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        pytest.fail(f"Pass regex not found: {pattern}")
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        pytest.fail(f"Fail regex found: {pattern}")
+
+    return _assert_perfetto
+
+
+@pytest.fixture
+def assert_rocpd(subtests, tests_dir):
+    """Fixture that returns an assert_rocpd function.
+
+    Must be used with @pytest.mark.rocpd("<env fixture name>")
+
+    Args not from validate_rocpd_database:
+        subtest_name: Name shown in subtest output (defaults to "ROCpd validation")
+        pass_regex: (Optional) Regex patterns that must be found in validation.stdout
+        fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_rocpd(
+        result: TestResult,
+        subtest_name: str = "ROCpd validation",
+        rules_files: Optional[list[Path]] = None,
+        timeout: int = 60,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            if not check_use_rocpd():
+                pytest.skip("ROCpd is disabled")
+            rocpd_file = result.rocpd_file
+            if rocpd_file is None:
+                pytest.fail("ROCpd database not created")
+
+            existing_rules = None
+            if rules_files is not None:
+                existing_rules = [r for r in rules_files if r.exists()]
+                if not existing_rules:
+                    pytest.fail("No validation rules found")
+
+            validation = validate_rocpd_database(
+                rocpd_file,
+                tests_dir=tests_dir,
+                rules_files=existing_rules,
+                timeout=timeout,
+            )
+            if not validation.is_valid:
+                msg = fail_message or f"ROCpd validation failed: {validation.message}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg)
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        pytest.fail(f"Pass regex not found: {pattern}")
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        pytest.fail(f"Fail regex found: {pattern}")
+
+    return _assert_rocpd
+
+
+@pytest.fixture
+def assert_timemory(subtests, tests_dir):
+    """Fixture that returns an assert_timemory function.
+
+    Args not from validate_timemory_json:
+        subtest_name: Name shown in subtest output (defaults to "Timemory validation")
+        pass_regex: (Optional) Regex patterns that must be found in validation.stdout
+        fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_timemory(
+        result: TestResult,
+        file_name: str,
+        metric: str,
+        subtest_name: str = "Timemory validation",
+        labels: Optional[list[str]] = None,
+        counts: Optional[list[int]] = None,
+        depths: Optional[list[int]] = None,
+        print_output: bool = False,
+        timeout: int = 60,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            timemory_file = result.output_dir / file_name
+            if not timemory_file.exists():
+                pytest.fail(f"Timemory file not found: {timemory_file}")
+            validation = validate_timemory_json(
+                json_path=timemory_file,
+                tests_dir=tests_dir,
+                metric=metric,
+                labels=labels,
+                counts=counts,
+                depths=depths,
+                print_output=print_output,
+                timeout=timeout,
+            )
+            if not validation.is_valid:
+                msg = fail_message or f"Timemory validation failed: {validation.message}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg)
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        pytest.fail(f"Pass regex not found: {pattern}")
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        pytest.fail(f"Fail regex found: {pattern}")
+
+    return _assert_timemory
+
+
+@pytest.fixture
+def assert_file_exists(subtests):
+    """Fixture that returns an assert_file_exists function.
+
+    Args not from validate_file_exists:
+        subtest_name: Name shown in subtest output (defaults to "File existence validation")
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_file_exists(
+        path: Path | list[Path],
+        description: str = "File",
+        subtest_name: str = "File existence validation",
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        paths = [path] if isinstance(path, Path) else path
+        with subtests.test(subtest_name):
+            for p in paths:
+                validation = validate_file_exists(p, description)
+                if not validation.is_valid:
+                    msg = (
+                        fail_message
+                        or f"File existence validation failed: {validation.message}"
+                    )
+                    if skip_on_fail:
+                        pytest.skip(msg)
+                    else:
+                        pytest.fail(msg)
+
+    return _assert_file_exists
+
+
+@pytest.fixture
+def assert_causal_json(subtests, tests_dir):
+    """Fixture that returns an assert_causal_json function.
+
+    Args not from validate_causal_json:
+        pass_regex: (Optional) Regex patterns that must be found in validation.stdout
+        fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
+        skip_on_fail: If True, skip instead of fail when validation fails
+        fail_message: Custom message for failure (defaults to validation message)
+    """
+
+    def _assert_causal_json(
+        result: TestResult,
+        file_name: str,
+        subtest_name: str = "Causal JSON validation",
+        ci_mode: bool = False,
+        additional_args: Optional[list[str]] = None,
+        timeout: int = 60,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            causal_file = result.output_dir / file_name
+            if not causal_file.exists():
+                pytest.fail(f"Causal JSON file not found: {causal_file}")
+
+            validation = validate_causal_json(
+                json_path=causal_file,
+                tests_dir=tests_dir,
+                ci_mode=ci_mode,
+                additional_args=additional_args,
+                timeout=timeout,
+            )
+
+            if not validation.is_valid:
+                if fail_message:
+                    msg = f"{fail_message}: {validation.message}"
+                else:
+                    msg = f"Causal JSON validation failed: {validation.message}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg)
+
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        pytest.fail(f"Pass regex not found: {pattern}")
+
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        pytest.fail(f"Fail regex found: {pattern}")
+
+    return _assert_causal_json

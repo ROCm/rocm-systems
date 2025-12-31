@@ -36,7 +36,6 @@ import pytest
 
 from rocprofsys import (
     RocprofsysConfig,
-    SysBinaryRunner,
 )
 
 # ============================================================================
@@ -67,9 +66,8 @@ class TestInstrumentBinary:
 
     def test_help(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"\[rocprof-sys-instrument\] Usage:[\s\S]*"
@@ -82,28 +80,21 @@ class TestInstrumentBinary:
             r"\[DYNINST OPTIONS\]"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--help"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--help"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Instrument help failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_simulate_ls(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
+        assert_file_exists,
     ):
         ls_name, ls_args = get_ls_command()
 
@@ -136,31 +127,25 @@ class TestInstrumentBinary:
             "overlapping.xml",
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=test_args,
-                timeout=240,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=test_args,
+            timeout=240,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Instrument simulate ls failed: {result.test_output}")
-        for file in expected_files:
-            file_path = result.output_dir / "instrumentation" / file
-            if not file_path.exists():
-                pytest.fail(f"Expected output file not found: {file_path}")
+        assert_regex(result)
+        expected_files_paths = [
+            result.output_dir / "instrumentation" / f for f in expected_files
+        ]
+        assert_file_exists(expected_files_paths)
 
     def test_simulate_lib(
         self,
         rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         user_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-user.so"
         if not user_lib.exists():
@@ -171,28 +156,22 @@ class TestInstrumentBinary:
             r"\[rocprof-sys\]\[exe\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
-                timeout=120,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
+            timeout=120,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Instrument simulate lib failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_simulate_lib_basename(
         self,
         rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         """Test instrument with library basename (run from lib directory)."""
         lib_basename = "librocprof-sys-user.so"
@@ -202,73 +181,58 @@ class TestInstrumentBinary:
 
         output_lib = test_output_dir / lib_basename
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "--print-available",
-                    "functions",
-                    "-v",
-                    "2",
-                    "-o",
-                    str(output_lib),
-                    "--",
-                    lib_basename,
-                ],
-                timeout=120,
-                # Run from lib directory so basename can be found
-                working_directory=rocprof_config.rocprofsys_lib_dir,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--print-available",
+                "functions",
+                "-v",
+                "2",
+                "-o",
+                str(output_lib),
+                "--",
+                lib_basename,
+            ],
+            timeout=120,
+            # Run from lib directory so basename can be found
+            working_directory=rocprof_config.rocprofsys_lib_dir,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Instrument simulate lib basename failed: {result.test_output}")
+        assert_regex(result)
 
     def test_write_log(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
+        assert_file_exists,
     ):
         """Test instrument writing to log file."""
         ls_name, ls_args = get_ls_command()
 
         pass_regex = [r"Opening .*/instrumentation/user\.log"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "--print-instrumented",
-                    "functions",
-                    "-v",
-                    "1",
-                    "--log-file",
-                    "user.log",
-                    "--",
-                    ls_name,
-                    *ls_args,
-                ],
-                timeout=120,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--print-instrumented",
+                "functions",
+                "-v",
+                "1",
+                "--log-file",
+                "user.log",
+                "--",
+                ls_name,
+                *ls_args,
+            ],
+            timeout=120,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Instrument write log failed: {result.test_output}")
-        file_path = result.output_dir / "instrumentation" / "user.log"
-        if not file_path.exists():
-            pytest.fail(f"Expected output file not found: {file_path}")
+        assert_regex(result, pass_regex=pass_regex)
+        assert_file_exists(result.output_dir / "instrumentation" / "user.log")
 
 
 # ============================================================================
@@ -283,9 +247,8 @@ class TestAvailBinary:
 
     def test_help(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"\[rocprof-sys-avail\] Usage:[\s\S]*"
@@ -297,111 +260,81 @@ class TestAvailBinary:
             r"\[OUTPUT OPTIONS\][\s\S]*"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--help"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--help"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail help failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_all(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--all"],
-                timeout=45,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--all"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail all failed: {result.test_output}")
+        assert_regex(result)
 
     def test_all_expand_keys(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
-        fail_regex = [r"%[a-zA-Z_]%|ROCPROFSYS_ABORT_FAIL_REGEX"]
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--all", "--expand-keys"],
-                timeout=45,
-                fail_regex=fail_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        fail_regex = [r"%[a-zA-Z_]%"]
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail all expand keys failed: {result.test_output}")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--all", "--expand-keys"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+
+        assert_regex(result, fail_regex=fail_regex)
 
     def test_all_only_available_alphabetical(
         self,
-        rocprof_config: RocprofsysConfig,
+        run_test,
         test_output_dir: Path,
-        collect_result,
+        assert_regex,
+        assert_file_exists,
     ):
         log_file = (
             test_output_dir / "rocprof-sys-avail-all-only-available-alphabetical.log"
         )
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "--all",
-                    "--available",
-                    "--alphabetical",
-                    "--debug",
-                    "--output",
-                    str(log_file),
-                ],
-                timeout=45,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "--all",
+                "--available",
+                "--alphabetical",
+                "--debug",
+                "--output",
+                str(log_file),
+            ],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"Avail all only available alphabetical failed: {result.test_output}"
-            )
-        if not log_file.exists():
-            pytest.fail(f"Log file not created: {log_file}")
+        assert_regex(result)
+        assert_file_exists(log_file)
 
     def test_all_csv(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#[\s\S]*"
@@ -409,28 +342,20 @@ class TestAvailBinary:
             r"HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--all", "--csv", "--csv-separator", "#"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--all", "--csv", "--csv-separator", "#"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail all csv failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_filter_wall_clock_available(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"\|[-]+\|[\s\S]*"
@@ -440,92 +365,60 @@ class TestAvailBinary:
             r"\|[-]+\|"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["-r", "wall_clock", "-C", "--available"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-r", "wall_clock", "-C", "--available"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail filter wall_clock available failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_category_filter_rocprofiler_systems(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [r"ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"]
         fail_regex = [
             r"ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)",
-            "|ROCPROFSYS_ABORT_FAIL_REGEX",
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--categories", "settings::rocprofsys", "--brief"],
-                timeout=45,
-                pass_regex=pass_regex,
-                fail_regex=fail_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--categories", "settings::rocprofsys", "--brief"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"Avail category filter rocprofiler-systems failed: {result.test_output}"
-            )
+        assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
     def test_category_filter_timemory(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
         ]
-        fail_regex = [
-            r"ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE)",
-            "|ROCPROFSYS_ABORT_FAIL_REGEX",
-        ]
+        fail_regex = [r"ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE)"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--categories", "settings::timemory", "--brief", "--advanced"],
-                timeout=45,
-                pass_regex=pass_regex,
-                fail_regex=fail_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--categories", "settings::timemory", "--brief", "--advanced"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail category filter timemory failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
     def test_regex_negation(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"ENVIRONMENT VARIABLE,[\s\S]*"
@@ -533,48 +426,37 @@ class TestAvailBinary:
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]
-        fail_regex = [
-            r"ROCPROFSYS_TRACE_LEGACY|ROCPROFSYS_TRACE_CACHED",
-            "|ROCPROFSYS_ABORT_FAIL_REGEX",
-        ]
+        fail_regex = [r"ROCPROFSYS_TRACE_LEGACY|ROCPROFSYS_TRACE_CACHED"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "-R",
-                    "rocprofsys",
-                    "~timemory",
-                    "-r",
-                    "_P",
-                    "~PERFETTO",
-                    "~PROCESS_SAMPLING",
-                    "~KOKKOSP",
-                    "~PAGE",
-                    "--csv",
-                    "--brief",
-                    "--advanced",
-                ],
-                timeout=45,
-                pass_regex=pass_regex,
-                fail_regex=fail_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "-R",
+                "rocprofsys",
+                "~timemory",
+                "-r",
+                "_P",
+                "~PERFETTO",
+                "~PROCESS_SAMPLING",
+                "~KOKKOSP",
+                "~PAGE",
+                "--csv",
+                "--brief",
+                "--advanced",
+            ],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail regex negation failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex, fail_regex=fail_regex)
 
     def test_write_config(
         self,
-        rocprof_config: RocprofsysConfig,
+        run_test,
         test_output_dir: Path,
-        collect_result,
-        subtests,
+        assert_regex,
+        assert_file_exists,
     ):
         config_base = test_output_dir / "rocprof-sys-test"
 
@@ -589,46 +471,38 @@ class TestAvailBinary:
             rf"Outputting text configuration file '{avail_cfg_path}test\.cfg'"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "-G",
-                    str(config_base) + ".cfg",
-                    "-F",
-                    "txt",
-                    "json",
-                    "xml",
-                    "--force",
-                    "--all",
-                    "-c",
-                    "rocprofsys",
-                ],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "-G",
+                str(config_base) + ".cfg",
+                "-F",
+                "txt",
+                "json",
+                "xml",
+                "--force",
+                "--all",
+                "-c",
+                "rocprofsys",
+            ],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail write config failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
-        with subtests.test("Validate config files were created"):
-            for ext in ["cfg", "json", "xml"]:
-                config_file = test_output_dir / f"rocprof-sys-test.{ext}"
-                if not config_file.exists():
-                    pytest.fail(f"Config file not created: {config_file}")
+        config_files = [
+            test_output_dir / f"rocprof-sys-test.{ext}" for ext in ["cfg", "json", "xml"]
+        ]
+        assert_file_exists(config_files, subtest_name="Config file existence validation")
 
     def test_write_config_tweak(
         self,
-        rocprof_config: RocprofsysConfig,
+        run_test,
         test_output_dir: Path,
-        collect_result,
-        subtests,
+        assert_regex,
+        assert_file_exists,
     ):
         config_base = test_output_dir / "rocprof-sys-tweak"
 
@@ -636,6 +510,8 @@ class TestAvailBinary:
             "ROCPROFSYS_TRACE_LEGACY": "OFF",
             "ROCPROFSYS_TRACE_CACHED": "OFF",
             "ROCPROFSYS_PROFILE": "ON",
+            "ROCPROFSYS_USE_SAMPLING": "OFF",
+            "ROCPROFSYS_TIME_OUTPUT": "OFF",
         }
 
         avail_cfg_path = test_output_dir / "rocprof-sys-"
@@ -649,140 +525,99 @@ class TestAvailBinary:
             rf"Outputting text configuration file '{avail_cfg_path}tweak\.cfg'"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=[
-                    "-G",
-                    str(config_base) + ".cfg",
-                    "-F",
-                    "txt",
-                    "json",
-                    "xml",
-                    "--force",
-                ],
-                env=env_overrides,
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=[
+                "-G",
+                str(config_base) + ".cfg",
+                "-F",
+                "txt",
+                "json",
+                "xml",
+                "--force",
+            ],
+            timeout=45,
+            fail_on_not_found=True,
+            env=env_overrides,
+        )
+        assert_regex(result, pass_regex=pass_regex)
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail write config tweak failed: {result.test_output}")
-
-        with subtests.test("Validate config files were created"):
-            for ext in ["cfg", "json", "xml"]:
-                config_file = test_output_dir / f"rocprof-sys-tweak.{ext}"
-                if not config_file.exists():
-                    pytest.fail(f"Config file not created: {config_file}")
+        config_files = [
+            test_output_dir / f"rocprof-sys-tweak.{ext}" for ext in ["cfg", "json", "xml"]
+        ]
+        assert_file_exists(config_files, subtest_name="Config file existence validation")
 
     def test_list_keys(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [r"Output Keys:[\s\S]*%argv%[\s\S]*%argv_hash%"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--list-keys", "--expand-keys"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--list-keys", "--expand-keys"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail list keys failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_list_keys_markdown(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [r"`%argv%`[\s\S]*`%argv_hash%`"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--list-keys", "--expand-keys", "--markdown"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--list-keys", "--expand-keys", "--markdown"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail list keys markdown failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_list_categories(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [r" component::[\s\S]* hw_counters::[\s\S]* settings::"]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--list-categories"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--list-categories"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail list categories failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
     def test_core_categories(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         pass_regex = [
             r"ROCPROFSYS_CONFIG_FILE[\s\S]*ROCPROFSYS_ENABLED[\s\S]*"
             r"ROCPROFSYS_SUPPRESS_CONFIG[\s\S]*ROCPROFSYS_SUPPRESS_PARSING[\s\S]*ROCPROFSYS_VERBOSE"
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["-c", "core"],
-                timeout=45,
-                pass_regex=pass_regex,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-c", "core"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Avail core categories failed: {result.test_output}")
+        assert_regex(result, pass_regex=pass_regex)
 
 
 # ============================================================================
@@ -797,32 +632,25 @@ class TestRunBinary:
 
     def test_help(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         """Test rocprof-sys-run --help output."""
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=["--help"],
-                timeout=45,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--help"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Run help failed: {result.test_output}")
+        assert_regex(result)
 
     def test_args(
         self,
-        rocprof_config: RocprofsysConfig,
         test_output_dir: Path,
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         """Test rocprof-sys-run with comprehensive arguments."""
         import shutil
@@ -830,7 +658,7 @@ class TestRunBinary:
         # Check if sleep command exists
         sleep_cmd = shutil.which("sleep")
         if not sleep_cmd:
-            pytest.fail("sleep command not found")
+            pytest.skip("sleep command not found")
 
         # Create empty config file
         config_dir = test_output_dir / "config"
@@ -934,18 +762,12 @@ class TestRunBinary:
             "5",
         ]
 
-        try:
-            runner = SysBinaryRunner(
-                config=rocprof_config,
-                target=self.target,
-                output_dir=test_output_dir,
-                args=args,
-                timeout=45,
-            )
-        except FileNotFoundError:
-            pytest.fail(f"{self.target} binary not found")
+        result = run_test(
+            "baseline",
+            target=self.target,
+            run_args=args,
+            timeout=45,
+            fail_on_not_found=True,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Run args failed: {result.test_output}")
+        assert_regex(result)

@@ -50,8 +50,6 @@ from rocprofsys import (
     SamplingRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
-    validate_perfetto_trace,
-    validate_rocpd_database,
 )
 
 
@@ -150,58 +148,41 @@ class TestOpenMPCG:
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
         ompt_env: dict[str, str],
-        collect_result,
+        run_test,
+        assert_regex,
     ):
         env = ompt_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-cg",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-cg binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"CG sampling failed: {result.test_output}")
+        result = run_test(
+            "sampling",
+            target="openmp-cg",
+            env=env,
+            timeout=180,
+        )
+        assert_regex(result)
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = ompt_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="openmp-cg",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                env=env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-cg binary not found")
+        result = run_test(
+            "binary_rewrite",
+            target="openmp-cg",
+            rewrite_args=self.REWRITE_ARGS,
+            env=env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"CG binary rewrite test failed: {result.test_output}")
+        assert_regex(result)
 
 
 # ============================================================================
@@ -217,32 +198,23 @@ class TestOpenMPLU:
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = ompt_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "ON"
         env["ROCPROFSYS_SAMPLING_FREQ"] = "50"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="openmp-lu",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                env=env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-lu binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"LU binary rewrite test failed: {result.test_output}")
+        result = run_test(
+            "binary_rewrite",
+            target="openmp-lu",
+            rewrite_args=self.REWRITE_ARGS,
+            env=env,
+            timeout=180,
+        )
+        assert_regex(result)
 
 
 # ============================================================================
@@ -254,86 +226,35 @@ class TestOpenMPLU:
 class TestOpenMPTarget:
     """Tests for OpenMP target offload (GPU) example."""
 
+    @pytest.mark.rocpd("openmp_target_env")
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         openmp_target_env: dict[str, str],
         openmp_target_rules: list[Path],
-        use_rocpd: bool,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_regex,
+        assert_perfetto,
+        assert_rocpd,
     ):
-        env = openmp_target_env.copy()
-        if use_rocpd:
-            env["ROCPROFSYS_USE_ROCPD"] = "ON"
+        result = run_test(
+            "sampling",
+            target="openmp-target",
+            env=openmp_target_env,
+            timeout=300,
+        )
 
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-target",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-target binary not found")
+        assert_regex(result)
+        assert_perfetto(result, categories=["rocm_kernel_dispatch"])
+        assert_rocpd(result, rules_files=openmp_target_rules)
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"OpenMP target sampling failed: {result.test_output}")
-
-        # Verify perfetto trace has kernel dispatch events
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto_file = result.perfetto_file
-            if not perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-                categories=["rocm_kernel_dispatch"],
-            )
-            # Kernel dispatch may or may not be present based on GPU
-            if not validation.is_valid:
-                pytest.skip("No kernel dispatch events")
-
-        with subtests.test("Perfetto Kernel Dispatch Validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto_file = result.perfetto_file
-            if not perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
-            # Validate trace has expected kernel patterns
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-                label_substrings=["vmul"],  # Vector multiply kernels
-            )
-            # This validation is informational - kernels may have different names
-            if not validation.is_valid:
-                pytest.skip("Kernel names differ from expected")
-
-        # ROCpd validation
-        with subtests.test("ROCpd validation"):
-            if not use_rocpd:
-                pytest.skip("ROCpd is not enabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
-                pytest.fail(f"ROCpd database not created")
-            existing_rules = [r for r in openmp_target_rules if r.exists()]
-            if not existing_rules:
-                pytest.skip("No validation rules found")
-            validation = validate_rocpd_database(
-                rocpd_file,
-                rocprof_config.rocprofsys_tests_dir,
-                rules_files=existing_rules,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"ROCpd validation failed: {validation.message}")
+        # Informational validation - kernels may have different names
+        assert_perfetto(
+            result,
+            subtest_name="Perfetto Kernel Dispatch Validation",
+            label_substrings=["vmul"],
+            skip_on_fail=True,
+            fail_message="Kernel names differ from expected",
+        )
 
 
 # ============================================================================
@@ -355,166 +276,96 @@ class TestOpenMPVVHost:
 
     def test_baseline(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = BaselineRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                env=ompt_env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "baseline",
+            target=target_name,
+            env=ompt_env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"OMPVV host baseline {target_name} failed: {result.test_output}")
+        assert_regex(result)
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
         target_name: str,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_regex,
+        assert_perfetto,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                env=ompt_env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "sampling",
+            target=target_name,
+            env=ompt_env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"OMPVV host test {target_name} failed: {result.test_output}")
-
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto_file = result.perfetto_file
-            if not perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(result)
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
         env = ompt_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                rewrite_args=["-e", "-v", "2", "--instrument-loops"],
-                env=env,
-                timeout=180,
-                pass_regex=[r"omp_parallel"],
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} not built")
+        result = run_test(
+            "binary_rewrite",
+            target=target_name,
+            rewrite_args=["-e", "-v", "2", "--instrument-loops"],
+            env=env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Binary rewrite test failed: {result.test_output}")
+        assert_regex(result, pass_regex=[r"omp_parallel"])
 
     def test_runtime_instrument(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
         env = ompt_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
         env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
 
-        try:
-            runner = RuntimeInstrumentRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                instrument_args=["-e", "-v", "1", "--label", "return", "args"],
-                env=env,
-                timeout=180,
-                pass_regex=[r"omp_parallel"],
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "runtime_instrument",
+            target=target_name,
+            instrument_args=["-e", "-v", "1", "--label", "return", "args"],
+            env=env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"Runtime instrumentation failed for {target_name}: {result.test_output}"
-            )
+        assert_regex(result, pass_regex=[r"omp_parallel"])
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_env: dict[str, str],
         target_name: str,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_regex,
+        assert_perfetto,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                env=ompt_env,
-                timeout=180,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} not built")
+        result = run_test(
+            "sys_run",
+            target=target_name,
+            env=ompt_env,
+            timeout=180,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"OMPVV host run {target_name} failed: {result.test_output}")
-
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto_file = result.perfetto_file
-            if not perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(result)
 
 
 # ============================================================================
@@ -536,124 +387,74 @@ class TestOpenMPVVOffload:
 
     def test_baseline(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         openmp_target_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = BaselineRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                env=openmp_target_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "baseline",
+            target=target_name,
+            env=openmp_target_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"OMPVV offload baseline {target_name} failed: {result.test_output}"
-            )
+        assert_regex(result)
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         openmp_target_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                env=openmp_target_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "sampling",
+            target=target_name,
+            env=openmp_target_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"OMPVV offload sampling {target_name} failed: {result.test_output}"
-            )
+        assert_regex(result)
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         openmp_target_env: dict[str, str],
         target_name: str,
-        collect_result,
+        assert_regex,
     ):
         env = openmp_target_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                rewrite_args=["-e", "-v", "2"],
-                env=env,
-                timeout=300,
-                pass_regex=[r"omp_offloading"],
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "binary_rewrite",
+            target=target_name,
+            rewrite_args=["-e", "-v", "2"],
+            env=env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Binary rewrite test failed: {result.test_output}")
+        assert_regex(result, pass_regex=[r"omp_offloading"])
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         openmp_target_env: dict[str, str],
         target_name: str,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_regex,
+        assert_perfetto,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target=target_name,
-                output_dir=test_output_dir,
-                run_args=["-e", "-v", "1", "--label", "return", "args"],
-                env=openmp_target_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip(f"{target_name} binary not found")
+        result = run_test(
+            "sys_run",
+            target=target_name,
+            run_args=["-e", "-v", "1", "--label", "return", "args"],
+            env=openmp_target_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"OMPVV offload run {target_name} failed: {result.test_output}")
-
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto_file = result.perfetto_file
-            if not perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
-            validation = validate_perfetto_trace(
-                perfetto_file,
-                rocprof_config.rocprofsys_tests_dir,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(result)
 
 
 # ============================================================================
@@ -678,52 +479,34 @@ class TestSamplingDuration:
 
     def test_cg_sampling_duration(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
         ompt_sampling_env: dict[str, str],
-        collect_result,
+        run_test,
+        assert_regex,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-cg",
-                output_dir=test_output_dir,
-                env=ompt_sampling_env,
-                timeout=300,
-                pass_regex=self.SAMPLING_PASS_REGEX,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-cg binary not found")
+        result = run_test(
+            "sampling",
+            target="openmp-cg",
+            env=ompt_sampling_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sampling duration test failed: {result.test_output}")
+        assert_regex(result, pass_regex=self.SAMPLING_PASS_REGEX)
 
     def test_lu_sampling_duration(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_sampling_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         """Test OpenMP LU with sampling duration limits."""
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-lu",
-                output_dir=test_output_dir,
-                env=ompt_sampling_env,
-                timeout=300,
-                pass_regex=self.SAMPLING_PASS_REGEX,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-lu binary not found")
+        result = run_test(
+            "sampling",
+            target="openmp-lu",
+            env=ompt_sampling_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"LU sampling duration test failed: {result.test_output}")
+        assert_regex(result, pass_regex=self.SAMPLING_PASS_REGEX)
 
 
 # ============================================================================
@@ -743,35 +526,24 @@ class TestNoTmpFiles:
 
     def test_cg_no_tmp_files(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         ompt_no_tmp_env: dict[str, str],
-        collect_result,
-        subtests,
+        assert_regex,
+        assert_perfetto,
+        assert_file_exists,
     ):
         """Test OpenMP CG without temporary files."""
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="openmp-cg",
-                output_dir=test_output_dir,
-                env=ompt_no_tmp_env,
-                pass_regex=self.NOTMP_SAMPLING_FILE_REGEX,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("openmp-cg binary not found")
+        result = run_test(
+            "sampling",
+            target="openmp-cg",
+            env=ompt_no_tmp_env,
+            timeout=300,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"No tmp files test failed: {result.test_output}")
+        assert_regex(result, pass_regex=self.NOTMP_SAMPLING_FILE_REGEX)
+        assert_perfetto(result)
 
-        with subtests.test("Sampling output files validation"):
-            sampling_files = list(result.output_dir.glob("sampling_*.json")) + list(
-                result.output_dir.glob("sampling_*.txt")
-            )
-            if not sampling_files:
-                pytest.fail(f"No sampling output files created")
-            if not result.perfetto_file:
-                pytest.fail(f"Perfetto trace not created")
+        sampling_files = list(result.output_dir.glob("sampling_*.json")) + list(
+            result.output_dir.glob("sampling_*.txt")
+        )
+        assert_file_exists(sampling_files)

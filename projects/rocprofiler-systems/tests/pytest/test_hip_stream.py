@@ -27,12 +27,6 @@ Tests for HIP stream API
 import pytest
 from pathlib import Path
 
-from rocprofsys import (
-    RocprofsysConfig,
-    SamplingRunner,
-    SysRunRunner,
-)
-
 # =============================================================================
 # HIP stream tests
 # =============================================================================
@@ -45,53 +39,38 @@ class TestTransposeGroupByQueue:
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         base_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "YES"
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
+        result = run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            timeout=120,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sampling failed: {result.test_output}")
+        assert_regex(result)
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         base_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "YES"
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sys run failed: {result.test_output}")
+        result = run_test(
+            "sys_run",
+            target="transpose",
+            env=env,
+            timeout=120,
+        )
+
+        assert_regex(result)
 
 
 @pytest.mark.gpu
@@ -99,50 +78,36 @@ class TestTransposeGroupByQueue:
 class TestTransposeGroupByStream:
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         base_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "NO"
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sampling failed: {result.test_output}")
+        result = run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            timeout=120,
+        )
+
+        assert_regex(result)
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         base_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
         env = base_env.copy()
         env["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] = "NO"
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sys run failed: {result.test_output}")
+        result = run_test(
+            "sys_run",
+            target="transpose",
+            env=env,
+            timeout=120,
+        )
+
+        assert_regex(result)

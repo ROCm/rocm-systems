@@ -38,6 +38,7 @@ This ensures consistency between pytest and CMake/CTest validation.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -62,6 +63,96 @@ class ValidationResult:
     details: Optional[dict[str, Any]] = None
     stdout: str = ""
     stderr: str = ""
+
+
+ROCPROFSYS_ABORT_FAIL_REGEX = [
+    r"### ERROR ###",
+    r"unknown-hash=",
+    r"address of faulting memory reference",
+    r"exiting with non-zero exit code",
+    r"terminate called after throwing an instance",
+    r"calling abort\.\. in ",
+    r"Exit code: [1-9]",
+]
+
+from rocprofsys.runners import TestResult
+
+
+def validate_regex(
+    test_result: TestResult,
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+    abort_fail_regex: bool = True,
+) -> ValidationResult:
+    """Validate the regex patterns in the test result.
+
+    Args:
+        test_result: TestResult object (after test execution)
+        pass_regex: Optional list of regex patterns that must be found for success
+        fail_regex: Optional list of regex patterns that must NOT be found
+        abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
+
+    Returns:
+        ValidationResult with is_valid=True if all patterns pass, False otherwise
+    """
+    if test_result.returncode != 0:
+        return ValidationResult(
+            is_valid=False,
+            message=f"Non-zero return code: {test_result.returncode}",
+        )
+
+    # Build fail regex list
+    fail_patterns: list[str] = []
+    if fail_regex:
+        fail_patterns.extend(fail_regex)
+    if abort_fail_regex:
+        fail_patterns.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
+
+    # Build combined regex with named groups
+    all_patterns: list[str] = []
+    fail_indices: set[str] = set()
+    pass_indices: set[str] = set()
+
+    for i, pattern in enumerate(fail_patterns):
+        all_patterns.append(f"(?P<f{i}>{pattern})")
+        fail_indices.add(f"f{i}")
+
+    if pass_regex:
+        for i, pattern in enumerate(pass_regex):
+            all_patterns.append(f"(?P<p{i}>{pattern})")
+            pass_indices.add(f"p{i}")
+
+    if not all_patterns:
+        return ValidationResult(is_valid=True, message="No patterns to validate")
+
+    # Single scan with combined regex
+    combined_regex = re.compile("|".join(all_patterns))
+    found_pass: set[str] = set()
+
+    for match in combined_regex.finditer(test_result.test_output):
+        matched_group = match.lastgroup
+
+        if matched_group in fail_indices:
+            original_idx = int(matched_group[1:])
+            return ValidationResult(
+                is_valid=False,
+                message=f"Fail pattern matched: {fail_patterns[original_idx]}",
+            )
+
+        if matched_group in pass_indices:
+            found_pass.add(matched_group)
+
+    # Check if all pass patterns were found
+    if pass_regex:
+        missing = pass_indices - found_pass
+        if missing:
+            missing_idx = int(next(iter(missing))[1:])
+            return ValidationResult(
+                is_valid=False,
+                message=f"Pass pattern not found: {pass_regex[missing_idx]}",
+            )
+
+    return ValidationResult(is_valid=True, message="All patterns validated successfully")
 
 
 def validate_file_exists(path: Path, description: str = "File") -> ValidationResult:

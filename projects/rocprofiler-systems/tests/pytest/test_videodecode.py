@@ -29,10 +29,6 @@ import pytest
 from rocprofsys import (
     GPUInfo,
     RocprofsysConfig,
-    SamplingRunner,
-    SysRunRunner,
-    validate_perfetto_trace,
-    validate_rocpd_database,
 )
 
 from pathlib import Path
@@ -71,112 +67,65 @@ def video_decode_rules(validation_rules_dir: Path) -> list[Path]:
 class TestVideoDecode:
     """Tests for the videodecode example."""
 
+    @pytest.mark.rocpd("video_decode_env")
     def test_sampling(
         self,
+        run_test,
         rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
         video_decode_env: dict[str, str],
         gpu_info: GPUInfo,
         video_decode_rules: list[Path],
-        use_rocpd: bool,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_rocpd,
+        assert_perfetto,
+        assert_regex,
     ):
         env = video_decode_env.copy()
-        if use_rocpd:
-            env["ROCPROFSYS_USE_ROCPD"] = "ON"
-            if gpu_info.is_mi300:
-                rules_dir = (
-                    rocprof_config.rocprofsys_tests_dir
-                    / "rocpd-validation-rules"
-                    / "video-decode"
-                )
-                video_decode_rules.append(rules_dir / "amd-smi-rules.json")
+        if env.get("ROCPROFSYS_USE_ROCPD") == "ON" and "instinct" in gpu_info.categories:
+            rules_dir = rocprof_config.rocprofsys_validation_rules / "video-decode"
+            video_decode_rules.append(rules_dir / "amd-smi-rules.json")
 
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="videodecode",
-                output_dir=test_output_dir,
-                env=env,
-                run_args=[
-                    "-i",
-                    str(rocprof_config.rocprofsys_examples_dir / "videos"),
-                    "-t",
-                    "1",
-                ],
-            )
-        except FileNotFoundError:
-            pytest.skip("videodecode binary not found")
+        result = run_test(
+            "sampling",
+            target="videodecode",
+            env=env,
+            timeout=120,
+            run_args=[
+                "-i",
+                str(rocprof_config.rocprofsys_examples_dir / "videos"),
+                "-t",
+                "1",
+            ],
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Video decode sampling failed: {result.test_output}")
-
-        # Validate perfetto trace
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            if result.perfetto_file is None:
-                pytest.fail(f"Perfetto trace not created")
-            counter_names = ["VCN Activity"] if gpu_info.is_mi300 else None
-            validation = validate_perfetto_trace(
-                trace_path=result.perfetto_file,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-                categories=["rocm_rocdecode_api"],
-                labels=["rocDecCreateVideoParser"],
-                counts=[2],
-                depths=[1],
-                counter_names=counter_names,
-                print_output=True,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
-
-        # ROCpd validation
-        with subtests.test("ROCpd validation"):
-            if not use_rocpd:
-                pytest.skip("ROCpd is not enabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
-                pytest.fail(f"ROCpd database not created")
-            existing_rules = [r for r in video_decode_rules if r.exists()]
-            if not existing_rules:
-                pytest.skip("No validation rules found")
-            validation = validate_rocpd_database(
-                rocpd_file,
-                rocprof_config.rocprofsys_tests_dir,
-                rules_files=existing_rules,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"ROCpd validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(
+            result,
+            categories=["rocm_rocdecode_api"],
+            labels=["rocDecCreateVideoParser"],
+            counts=[2],
+            depths=[1],
+            counter_names=["VCN Activity"] if "instinct" in gpu_info.categories else None,
+        )
+        assert_rocpd(result, rules_files=video_decode_rules)
 
     def test_sys_run(
         self,
+        run_test,
         rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
         video_decode_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="videodecode",
-                output_dir=test_output_dir,
-                env=video_decode_env,
-                run_args=[
-                    "-i",
-                    str(rocprof_config.rocprofsys_examples_dir / "videos"),
-                    "-t",
-                    "1",
-                ],
-            )
-        except FileNotFoundError:
-            pytest.skip("videodecode binary not found")
+        result = run_test(
+            "sys_run",
+            target="videodecode",
+            env=video_decode_env,
+            timeout=120,
+            run_args=[
+                "-i",
+                str(rocprof_config.rocprofsys_examples_dir / "videos"),
+                "-t",
+                "1",
+            ],
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Video decode sys-run failed: {result.test_output}")
+        assert_regex(result)

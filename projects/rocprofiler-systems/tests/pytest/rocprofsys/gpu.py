@@ -36,29 +36,37 @@ class GPUInfo:
         available: Whether any GPU is available
         architectures: List of GPU architectures
         device_count: Number of GPUs detected
-        is_navi: Whether the GPU is a NAVI architecture
-        is_mi300: Whether the GPU is MI300 series
+        categories: Categories the GPU belongs to (instinct, radeon, apu)
     """
 
     available: bool
     architectures: list[str]
     device_count: int
-    is_navi: bool
-    is_mi300: bool
+    categories: set[str]
 
     @property
     def rocm_events_for_test(self) -> str:
         """Get appropriate ROCm events for testing based on architecture."""
-        if self.is_navi:
-            return "SQ_WAVES"
-        return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
+        mi300_or_later = False
+        for arch in self.architectures:
+            if re.match(r"gfx9[4-9][0-9A-Fa-f]", arch):
+                mi300_or_later = True
+                break
+        if mi300_or_later:
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
+        return "SQ_WAVES"
 
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
-        if self.is_navi:
-            return ["SQ_WAVES"]
-        return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
+        mi300_or_later = False
+        for arch in self.architectures:
+            if re.match(r"gfx9[4-9][0-9A-Fa-f]", arch):
+                mi300_or_later = True
+                break
+        if mi300_or_later:
+            return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
+        return ["SQ_WAVES"]
 
     @property
     def expected_counter_files(self) -> list[str]:
@@ -72,9 +80,11 @@ def detect_gpu() -> GPUInfo:
 
     Uses rocm_agent_enumerator to get the list of GPU architectures.
     """
+    categories: set[str] = set()
     architectures: list[str] = []
     device_count = 0
 
+    # Detect available GPUs
     rocm_agent_enumerator = shutil.which("rocm_agent_enumerator")
     if rocm_agent_enumerator:
         try:
@@ -96,18 +106,14 @@ def detect_gpu() -> GPUInfo:
         except (subprocess.TimeoutExpired, OSError):
             pass
 
-    navi = any(is_navi_architecture(arch) for arch in architectures)
-    if not navi:
-        mi300 = any(is_mi300_architecture(arch) for arch in architectures)
-    else:
-        mi300 = False
+    for arch in architectures:
+        categories.update(lookup_gpu_category(arch))
 
     return GPUInfo(
         available=device_count > 0,
         architectures=sorted(architectures),
         device_count=device_count,
-        is_navi=navi,
-        is_mi300=mi300,
+        categories=categories,
     )
 
 
@@ -174,7 +180,7 @@ def lookup_gpu_category(arch: str) -> list[str]:
 def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     """Get the list of gpu architectures (gfx) the target was compiled for.
 
-    Attempts to find ROCm LLVM's llvm-objdump and uses it if version >= 15.
+    Attempts to find ROCm's llvm-objdump
         - Attempts to find llvm-objdump in the ROCm install directory
         - Fallbacks to PATH lookup
 
@@ -217,31 +223,3 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
             pass
 
     return target_archs
-
-
-def is_navi_architecture(arch: str) -> bool:
-    """Check if an architecture string represents NAVI GPU.
-
-    NAVI includes gfx10xx, gfx11xx, and gfx12xx architectures.
-
-    Args:
-        arch: Architecture string (e.g., 'gfx940')
-
-    Returns:
-        True if NAVI architecture
-    """
-    navi_matches = re.match(r"gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]", arch)
-    return navi_matches is not None
-
-
-def is_mi300_architecture(arch: str) -> bool:
-    """Detect if the GPU architecture is MI300 series.
-
-    Args:
-        arch: Architecture string (e.g., 'gfx940')
-
-    Returns:
-        True if MI300 architecture
-    """
-    mi300_matches = re.match(r"gfx9[4-9][0-9A-Fa-f]", arch)
-    return mi300_matches is not None

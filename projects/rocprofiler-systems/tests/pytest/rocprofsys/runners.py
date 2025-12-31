@@ -35,21 +35,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
-
-ROCPROFSYS_ABORT_FAIL_REGEX = [
-    r"### ERROR ###",
-    r"unknown-hash=",
-    r"address of faulting memory reference",
-    r"exiting with non-zero exit code",
-    r"terminate called after throwing an instance",
-    r"calling abort\.\. in ",
-    r"Exit code: [1-9]",
-]
 
 
 def _safe_remove_file(filepath: Path) -> None:
@@ -82,8 +71,6 @@ class TestResult:
         command: The command that was executed
         env: Environment variables used
         duration: Execution time in seconds (if measured)
-        pass_regex: Optional regex pattern(s) that must be found for success
-        fail_regex: Regex pattern(s) that must NOT be found (defaults to ROCPROFSYS_ABORT_FAIL_REGEX)
         _instrumented_files: List of instrumented binary files created
     """
 
@@ -94,62 +81,7 @@ class TestResult:
     environment: dict[str, str]
     extra_output: Optional[str] = None
     duration: Optional[float] = None
-    pass_regex: Optional[list[str]] = None
-    fail_regex: list[str] = field(
-        default_factory=lambda: ROCPROFSYS_ABORT_FAIL_REGEX.copy()
-    )
     _instrumented_files: list[Path] = field(default_factory=list)
-
-    def _check_patterns(self) -> tuple[bool, Optional[str]]:
-        """Check all fail/pass patterns in a single scan.
-
-        Returns:
-            Tuple of (success, failure_reason)
-        """
-        if self.returncode != 0:
-            return False, f"Non-zero return code: {self.returncode}"
-
-        # Build combined regex for single-pass scanning
-        all_patterns = []
-        fail_indices = set()
-        pass_indices = set()
-
-        for i, pattern in enumerate(self.fail_regex):
-            all_patterns.append(f"(?P<f{i}>{pattern})")
-            fail_indices.add(f"f{i}")
-
-        if self.pass_regex:
-            for i, pattern in enumerate(self.pass_regex):
-                all_patterns.append(f"(?P<p{i}>{pattern})")
-                pass_indices.add(f"p{i}")
-
-        if not all_patterns:
-            return True, None
-
-        # Single scan with combined regex
-        combined_regex = re.compile("|".join(all_patterns))
-        found_pass = set()
-
-        for match in combined_regex.finditer(self.test_output):
-            matched_group = match.lastgroup
-
-            # Fail pattern found - immediate failure
-            if matched_group in fail_indices:
-                original_idx = int(matched_group[1:])
-                return False, f"Fail pattern matched: {self.fail_regex[original_idx]}"
-
-            # Track found pass patterns
-            if matched_group in pass_indices:
-                found_pass.add(matched_group)
-
-        # Check if all pass patterns were found
-        if self.pass_regex:
-            missing = pass_indices - found_pass
-            if missing:
-                missing_idx = int(next(iter(missing))[1:])
-                return False, f"Pass pattern not found: {self.pass_regex[missing_idx]}"
-
-        return True, None
 
     @property
     def success(self) -> bool:
@@ -157,19 +89,8 @@ class TestResult:
 
         Returns True only if:
         - Return code is 0
-        - No fail_regex patterns found in test_output
-        - All pass_regex patterns found (if specified)
-
-        Uses single-pass scanning for efficiency on large outputs.
         """
-        success, _ = self._check_patterns()
-        return success
-
-    @property
-    def failure_reason(self) -> Optional[str]:
-        """Get a description of why the test failed, or None if successful."""
-        _, reason = self._check_patterns()
-        return reason
+        return self.returncode == 0
 
     @property
     def perfetto_file(self) -> Optional[Path]:
@@ -255,8 +176,7 @@ class BaseRunner(ABC):
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
         mpi_ranks: int = 0,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        working_directory: Optional[Path] = None,
     ):
 
         self.config = config
@@ -266,11 +186,7 @@ class BaseRunner(ABC):
         self.run_args = run_args or []
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
-        self.pass_regex = pass_regex
-        self.fail_regex = (
-            fail_regex if fail_regex is not None else ROCPROFSYS_ABORT_FAIL_REGEX.copy()
-        )
-
+        self.working_directory = working_directory or config.rocprofsys_root_dir
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
@@ -342,7 +258,7 @@ class BaseRunner(ABC):
                 text=True,
                 timeout=self.timeout,
                 env=full_env,
-                cwd=self.config.rocprofsys_root_dir,
+                cwd=self.working_directory,
             )
 
             duration = time.time() - start_time
@@ -354,8 +270,6 @@ class BaseRunner(ABC):
                 command=command,
                 environment=self.env,
                 duration=duration,
-                pass_regex=self.pass_regex,
-                fail_regex=self.fail_regex,
             )
 
         except subprocess.TimeoutExpired as e:
@@ -368,17 +282,55 @@ class BaseRunner(ABC):
                 command=command,
                 environment=self.env,
                 duration=duration,
-                pass_regex=self.pass_regex,
-                fail_regex=self.fail_regex,
             )
 
         return test_result
 
 
 class BaselineRunner(BaseRunner):
-    """Run target without any instrumentation."""
+    """Run target without any instrumentation.
+
+    Can also be used to run arbitrary commands by providing the `command` parameter.
+    If a rocprof-sys binary is provided, uses "base_binary_environment" instead of "base_environment".
+
+    Args:
+        config: rocprofiler-systems configuration
+        target: Name of target executable (used if command is None)
+        output_dir: Directory for output files
+        command: Optional full command to run instead of target executable
+        **kwargs: Additional arguments passed to BaseRunner
+    """
+
+    # rocprof-sys binaries that should use get_base_binary_environment()
+    ROCPROFSYS_BINARIES = {
+        "rocprof-sys-instrument",
+        "rocprof-sys-sample",
+        "rocprof-sys-run",
+        "rocprof-sys-avail",
+    }
+
+    def __init__(
+        self,
+        config: RocprofsysConfig,
+        target: str,
+        output_dir: Path,
+        command: Optional[list[str]] = None,
+        **kwargs,
+    ):
+        super().__init__(config, target, output_dir, **kwargs)
+        self.command = command
+
+        # If target is a rocprof-sys binary, use binary environment instead
+        if target in self.ROCPROFSYS_BINARIES:
+            self.env = config.get_base_binary_environment()
+            self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
+            # Re-apply any custom env passed via kwargs
+            if "env" in kwargs and kwargs["env"]:
+                self.env.update(kwargs["env"])
 
     def build_command(self) -> list[str]:
+        if self.command:
+            return self.command + self.run_args
         return [str(self.target_exe)] + self.run_args
 
 
@@ -521,8 +473,7 @@ class BinaryRewriteRunner(BaseRunner):
         # Default is False - let test_output_dir fixture handle all cleanup
         # after validation completes
         if self.cleanup_on_success and run_result.success:
-            if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") != "1":
-                run_result.cleanup_instrumented_binaries()
+            run_result.cleanup_instrumented_binaries()
 
         # Combine rewrite and run output
         run_result.test_output = (
@@ -595,162 +546,3 @@ class SysRunRunner(BaseRunner):
             "--",
             str(self.target_exe),
         ] + self.run_args
-
-
-class SysBinaryRunner(BaseRunner):
-    """Run a rocprof-sys binary
-
-    A rocprof-sys binary is one of the following:
-        - rocprof-sys-instrument
-        - rocprof-sys-sample
-        - rocprof-sys-run
-        - rocprof-sys-avail
-
-    Args:
-        config: rocprofiler-systems configuration
-        target: Name of target binary (e.g., 'rocprof-sys-instrument')
-        output_dir: Directory for output files
-        args: Arguments to pass to the target binary
-        env: Custom environment variables. If None, uses default test environment
-        timeout: Test timeout in seconds
-        pass_regex: Patterns that must be found for success
-        fail_regex: Patterns that must NOT be found. If pass_regex is set,
-                    this must contain ABORT_FAIL_REGEX_MARKER placeholder
-        command: Optional full command to run instead of target
-        **kwargs: Additional arguments passed to BaseRunner
-    """
-
-    # Marker for abort fail regex replacement
-    ABORT_FAIL_REGEX_MARKER = "|ROCPROFSYS_ABORT_FAIL_REGEX"
-
-    def __init__(
-        self,
-        config: RocprofsysConfig,
-        target: str,
-        output_dir: Path,
-        args: Optional[list[str]] = None,
-        env: Optional[dict[str, str]] = None,
-        timeout: int = 300,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
-        command: Optional[list[str]] = None,
-        working_directory: Optional[Path] = None,
-    ):
-        # Regex validation
-        if pass_regex and fail_regex:
-            fail_regex_str = (
-                "|".join(fail_regex) if isinstance(fail_regex, list) else str(fail_regex)
-            )
-            if self.ABORT_FAIL_REGEX_MARKER not in fail_regex_str:
-                raise ValueError(
-                    f"Test has set pass and fail regexes but fail regex does not include "
-                    f"'{self.ABORT_FAIL_REGEX_MARKER}'"
-                )
-
-        # Replace marker with actual regex
-        processed_fail_regex = None
-        if fail_regex:
-            processed_fail_regex = []
-            for pattern in fail_regex:
-                if self.ABORT_FAIL_REGEX_MARKER in pattern:
-                    # Replace marker with actual abort fail patterns
-                    # Split on marker, add default patterns in between
-                    parts = pattern.split(self.ABORT_FAIL_REGEX_MARKER)
-                    for i, part in enumerate(parts):
-                        if part:
-                            processed_fail_regex.append(part)
-                        if i < len(parts) - 1:
-                            processed_fail_regex.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
-                else:
-                    processed_fail_regex.append(pattern)
-        else:
-            processed_fail_regex = ROCPROFSYS_ABORT_FAIL_REGEX.copy()
-
-        # Handle environment variables
-        base_env = config.get_base_binary_environment()
-        if env:
-            base_env.update(env)
-
-        # Initialize base runner
-        super().__init__(
-            config=config,
-            target=target,
-            output_dir=output_dir,
-            run_args=args or [],
-            env=base_env,
-            timeout=timeout,
-            pass_regex=pass_regex,
-            fail_regex=processed_fail_regex,
-        )
-
-        self.command = command
-        # This is only here for the basename-only library test
-        self.working_directory = working_directory or config.rocprofsys_root_dir
-
-    def build_command(self) -> list[str]:
-        """Build the command to execute.
-
-        If a custom command was provided, use it with args appended.
-        Otherwise, use target binary with args.
-
-        Returns:
-            List of command components
-        """
-
-        if self.command:
-            return self.command + self.run_args
-        return [str(self.target_exe)] + self.run_args
-
-    def run(self) -> TestResult:
-        """Execute the test.
-
-        Returns:
-            TestResult with execution results
-        """
-        import time
-
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        command = self.build_command()
-        full_env = os.environ.copy()
-        full_env.update(self.env)
-
-        start_time = time.time()
-        try:
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=self.timeout,
-                env=full_env,
-                cwd=self.working_directory,
-            )
-
-            duration = time.time() - start_time
-
-            test_result = TestResult(
-                returncode=result.returncode,
-                test_output=result.stdout,
-                output_dir=self.output_dir,
-                command=command,
-                environment=self.env,
-                duration=duration,
-                pass_regex=self.pass_regex,
-                fail_regex=self.fail_regex,
-            )
-
-        except subprocess.TimeoutExpired as e:
-            duration = time.time() - start_time
-            test_result = TestResult(
-                returncode=-1,
-                test_output=e.stdout or "",
-                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
-                output_dir=self.output_dir,
-                command=command,
-                environment=self.env,
-                duration=duration,
-                pass_regex=self.pass_regex,
-                fail_regex=self.fail_regex,
-            )
-
-        return test_result

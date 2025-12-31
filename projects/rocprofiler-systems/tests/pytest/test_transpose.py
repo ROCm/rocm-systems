@@ -49,15 +49,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pytest
 
 from rocprofsys import (
-    RocprofsysConfig,
     GPUInfo,
-    BaselineRunner,
-    SamplingRunner,
-    BinaryRewriteRunner,
-    RuntimeInstrumentRunner,
-    SysRunRunner,
-    validate_perfetto_trace,
-    validate_rocpd_database,
 )
 
 # =============================================================================
@@ -128,194 +120,83 @@ class TestTranspose:
 
     def test_baseline(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = BaselineRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
+        result = run_test("baseline", target="transpose", env=transpose_env, timeout=120)
+        assert_regex(result)
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Baseline failed: {result.test_output}")
-
+    @pytest.mark.rocpd("transpose_env")
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
         transpose_rules: list[Path],
-        use_rocpd: bool,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_rocpd,
+        assert_perfetto,
+        assert_regex,
     ):
-        env = transpose_env.copy()
-        if use_rocpd:
-            env["ROCPROFSYS_USE_ROCPD"] = "ON"
-
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sampling failed: {result.test_output}")
+        result = run_test("sampling", target="transpose", env=transpose_env, timeout=120)
         if not result.output_dir.exists():
             pytest.fail(f"Output directory not created")
 
-        # Verify perfetto trace was created
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
-            if perfetto.stat().st_size == 0:
-                pytest.fail(f"Perfetto trace is empty")
-
-        # Verify perfetto trace has HIP runtime API events
-        with subtests.test("Perfetto HIP API Call Validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
-            # Validate trace has HIP runtime API events
-            validation = validate_perfetto_trace(
-                perfetto,
-                categories=["hip_runtime_api"],
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
-
-        # ROCpd validation
-        with subtests.test("ROCpd validation"):
-            if not use_rocpd:
-                pytest.skip("ROCpd is not enabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
-                pytest.fail(f"ROCpd database not created")
-            existing_rules = [r for r in transpose_rules if r.exists()]
-            if not existing_rules:
-                pytest.skip("No validation rules found")
-            validation = validate_rocpd_database(
-                rocpd_file,
-                rocprof_config.rocprofsys_tests_dir,
-                rules_files=existing_rules,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"ROCpd validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API Call Validation",
+            categories=["hip_runtime_api"],
+        )
+        assert_rocpd(result, rules_files=transpose_rules)
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_perfetto,
+        assert_regex,
     ):
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
+        result = run_test(
+            "binary_rewrite",
+            target="transpose",
+            rewrite_args=self.REWRITE_ARGS,
+            env=transpose_env,
+            timeout=120,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Binary rewrite failed: {result.test_output}")
-
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
+        assert_regex(result)
+        assert_perfetto(result)
 
     def test_runtime_instrument(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_perfetto,
+        assert_regex,
     ):
-        try:
-            runner = RuntimeInstrumentRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                instrument_args=self.RUNTIME_ARGS,
-                env=transpose_env,
-                timeout=480,  # Runtime instrumentation is slower
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Runtime instrument failed: {result.test_output}")
-
-        with subtests.test("Perfetto validation"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
+        result = run_test(
+            "runtime_instrument",
+            target="transpose",
+            instrument_args=self.RUNTIME_ARGS,
+            env=transpose_env,
+            timeout=480,
+        )
+        assert_regex(result)
+        assert_perfetto(result)
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=transpose_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"sys-run failed: {result.test_output}")
-        if not result.output_dir.exists():
-            pytest.fail(f"Output directory not created")
+        result = run_test(
+            "sys_run",
+            target="transpose",
+            env=transpose_env,
+            timeout=300,
+        )
+        assert_regex(result)
 
 
 # ============================================================================
@@ -331,51 +212,33 @@ class TestTransposeTwoKernels:
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                run_args=self.RUN_ARGS,
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Two kernels test failed: {result.test_output}")
+        result = run_test(
+            "sampling",
+            target="transpose",
+            run_args=self.RUN_ARGS,
+            env=transpose_env,
+            timeout=120,
+        )
+        assert_regex(result)
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                run_args=self.RUN_ARGS,
-                env=transpose_env,
-                timeout=300,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"sys-run two kernels failed: {result.test_output}")
+        result = run_test(
+            "sys_run",
+            target="transpose",
+            run_args=self.RUN_ARGS,
+            env=transpose_env,
+            timeout=300,
+        )
+        assert_regex(result)
 
 
 # ============================================================================
@@ -406,56 +269,34 @@ class TestTransposeLoops:
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                run_args=self.RUN_ARGS,
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Sampling loops failed: {result.test_output}")
+        result = run_test(
+            "sampling",
+            target="transpose",
+            run_args=self.RUN_ARGS,
+            env=transpose_env,
+            timeout=120,
+        )
+        assert_regex(result)
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                run_args=self.RUN_ARGS,
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Binary rewrite failed: {result.test_output}")
-
-        # Verify loops were instrumented (not 0)
-        if "0 instrumented loops in procedure transpose" in result.test_output:
-            pytest.fail(f"No loops were instrumented in transpose function")
+        result = run_test(
+            "binary_rewrite",
+            target="transpose",
+            rewrite_args=self.REWRITE_ARGS,
+            run_args=self.RUN_ARGS,
+            env=transpose_env,
+            timeout=120,
+        )
+        assert_regex(result, fail_regex=["0 instrumented loops in procedure transpose"])
 
 
 # ============================================================================
@@ -478,78 +319,52 @@ class TestTransposeROCProfiler:
 
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         rocprofiler_env: dict[str, str],
         gpu_info: GPUInfo,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_perfetto,
+        assert_regex,
+        assert_file_exists,
     ):
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=rocprofiler_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
+        result = run_test(
+            "sampling",
+            target="transpose",
+            env=rocprofiler_env,
+            timeout=120,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"ROCProfiler sampling failed: {result.test_output}")
-
-        for expected_file in gpu_info.expected_counter_files:
-            file_path = result.output_dir / expected_file
-            if not file_path.exists():
-                pytest.fail(f"Counter file not found: {expected_file}")
-
-        with subtests.test("Validate Perfetto Counters"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
-            validation = validate_perfetto_trace(
-                perfetto,
-                counter_names=gpu_info.counter_names,
-                tests_dir=rocprof_config.rocprofsys_tests_dir,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
+        assert_regex(result)
+        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
+        assert_file_exists(
+            counter_files, subtest_name="ROCProfiler counter files existence validation"
+        )
+        assert_perfetto(
+            result,
+            subtest_name="Perfetto counter validation",
+            counter_names=gpu_info.counter_names,
+        )
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         rocprofiler_env: dict[str, str],
         gpu_info: GPUInfo,
-        collect_result,
+        assert_file_exists,
+        assert_regex,
     ):
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                env=rocprofiler_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
+        result = run_test(
+            "binary_rewrite",
+            target="transpose",
+            rewrite_args=self.REWRITE_ARGS,
+            env=rocprofiler_env,
+            timeout=120,
+        )
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"Binary rewrite test failed: {result.test_output}")
-
-        for expected_file in gpu_info.expected_counter_files:
-            file_path = result.output_dir / expected_file
-            if not file_path.exists():
-                pytest.fail(f"Counter file not found: {expected_file}")
+        assert_regex(result)
+        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
+        assert_file_exists(
+            counter_files, subtest_name="ROCProfiler counter files existence validation"
+        )
 
 
 # ============================================================================
@@ -572,67 +387,49 @@ class TestTransposeParametrized:
     )
     def test_transpose_configurations(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
         iterations: int,
         tile_dim: int,
         block_rows: int,
-        collect_result,
+        assert_regex,
     ):
         """Test transpose with different iteration and tile configurations."""
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                run_args=[str(iterations), str(tile_dim), str(block_rows)],
-                env=transpose_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(
-                f"Config ({iterations}, {tile_dim}, {block_rows}) failed: {result.test_output}"
-            )
+        result = run_test(
+            "sampling",
+            target="transpose",
+            run_args=[str(iterations), str(tile_dim), str(block_rows)],
+            env=transpose_env,
+            timeout=120,
+            fail_message=f"Config ({iterations}, {tile_dim}, {block_rows}) failed",
+        )
+        assert_regex(result)
 
     @pytest.mark.parametrize(
-        "runner_class,runner_kwargs",
+        "runner_type,runner_kwargs",
         [
-            (SamplingRunner, {}),
-            (SysRunRunner, {}),
+            ("sampling", {}),
+            ("sys_run", {}),
         ],
         ids=["sampling", "sys-run"],
     )
     def test_instrumentation_modes(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         transpose_env: dict[str, str],
-        runner_class,
+        runner_type: str,
         runner_kwargs: dict,
-        collect_result,
+        assert_regex,
     ):
         """Test different instrumentation modes produce valid output."""
-        try:
-            runner = runner_class(
-                config=rocprof_config,
-                target="transpose",
-                output_dir=test_output_dir,
-                env=transpose_env,
-                timeout=120,
-                **runner_kwargs,
-            )
-        except FileNotFoundError:
-            pytest.skip("transpose binary not found")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"{runner_class.__name__} failed: {result.test_output}")
+        result = run_test(
+            runner_type,
+            target="transpose",
+            env=transpose_env,
+            timeout=120,
+            **runner_kwargs,
+        )
         if not result.output_dir.exists():
             pytest.fail(f"Output directory not created")
+
+        assert_regex(result)

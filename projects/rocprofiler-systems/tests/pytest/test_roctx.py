@@ -34,16 +34,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
-from rocprofsys import (
-    RocprofsysConfig,
-    BaselineRunner,
-    SamplingRunner,
-    BinaryRewriteRunner,
-    SysRunRunner,
-    validate_rocpd_database,
-    validate_perfetto_trace,
-)
-
 
 # =============================================================================
 # rocTX fixtures
@@ -124,145 +114,75 @@ class TestRoctx:
 
     def test_baseline(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
         roctx_env: dict[str, str],
-        collect_result,
+        run_test,
+        assert_regex,
     ):
-        try:
-            runner = BaselineRunner(
-                config=rocprof_config,
-                target="roctx",
-                output_dir=test_output_dir,
-                env=roctx_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("roctx target not built")
+        result = run_test("baseline", target="roctx", env=roctx_env, timeout=120)
+        assert_regex(result)
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"rocTX baseline failed: {result.test_output}")
-
+    @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         roctx_env: dict[str, str],
         roctx_rules: list[Path],
-        use_rocpd: bool,
-        use_perfetto: bool,
-        subtests,
-        collect_result,
+        assert_regex,
+        assert_perfetto,
+        assert_rocpd,
     ):
         env = roctx_env.copy()
-        if use_rocpd:
-            env["ROCPROFSYS_USE_ROCPD"] = "ON"
-        try:
-            runner = SamplingRunner(
-                config=rocprof_config,
-                target="roctx",
-                output_dir=test_output_dir,
-                env=env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("roctx target not built")
+        categories = ["rocm_marker_api"]
+        if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
+            labels = self.roctx_legacy_labels()
+            counts = self.roctx_legacy_count()
+            depths = self.roctx_legacy_depth()
+        else:
+            labels = self.roctx_cached_labels()
+            counts = self.roctx_cached_count()
+            depths = self.roctx_cached_depth()
 
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"rocTX sampling failed: {result.test_output}")
+        result = run_test("sampling", target="roctx", env=env, timeout=120)
 
-        with subtests.test("Validate Perfetto Counters"):
-            if not use_perfetto:
-                pytest.skip("Perfetto is not enabled")
-            perfetto = result.perfetto_file
-            if perfetto is None:
-                pytest.fail(f"Perfetto trace not created")
-            if env["ROCPROFSYS_TRACE_LEGACY"] == "ON":
-                validation = validate_perfetto_trace(
-                    perfetto,
-                    tests_dir=rocprof_config.rocprofsys_tests_dir,
-                    categories=["rocm_marker_api"],
-                    labels=self.roctx_legacy_labels(),
-                    counts=self.roctx_legacy_count(),
-                    depths=self.roctx_legacy_depth(),
-                )
-            else:
-                validation = validate_perfetto_trace(
-                    perfetto,
-                    tests_dir=rocprof_config.rocprofsys_tests_dir,
-                    categories=["rocm_marker_api"],
-                    labels=self.roctx_cached_labels(),
-                    counts=self.roctx_cached_count(),
-                    depths=self.roctx_cached_depth(),
-                )
-            if not validation.is_valid:
-                pytest.fail(f"Perfetto validation failed: {validation.message}")
-
-        # ROCpd validation
-        with subtests.test("ROCpd validation"):
-            if not use_rocpd:
-                pytest.skip("ROCpd is not enabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
-                pytest.fail(f"ROCpd database not created")
-            existing_rules = [r for r in roctx_rules if r.exists()]
-            if not existing_rules:
-                pytest.skip("No validation rules found")
-            validation = validate_rocpd_database(
-                rocpd_file,
-                rocprof_config.rocprofsys_tests_dir,
-                rules_files=existing_rules,
-            )
-            if not validation.is_valid:
-                pytest.fail(f"ROCpd validation failed: {validation.message}")
+        assert_regex(result)
+        assert_perfetto(
+            result,
+            subtest_name="Perfetto counter validation",
+            categories=categories,
+            labels=labels,
+            counts=counts,
+            depths=depths,
+        )
+        assert_rocpd(
+            result,
+            rules_files=roctx_rules,
+        )
 
     def test_binary_rewrite(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         roctx_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = BinaryRewriteRunner(
-                config=rocprof_config,
-                target="roctx",
-                output_dir=test_output_dir,
-                rewrite_args=self.REWRITE_ARGS,
-                env=roctx_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("roctx target not built")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"rocTX binary rewrite test failed: {result.test_output}")
+        result = run_test(
+            "binary_rewrite",
+            target="roctx",
+            rewrite_args=self.REWRITE_ARGS,
+            env=roctx_env,
+            timeout=120,
+        )
+        assert_regex(result)
 
     def test_sys_run(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        run_test,
         roctx_env: dict[str, str],
-        collect_result,
+        assert_regex,
     ):
-        try:
-            runner = SysRunRunner(
-                config=rocprof_config,
-                target="roctx",
-                output_dir=test_output_dir,
-                env=roctx_env,
-                timeout=120,
-            )
-        except FileNotFoundError:
-            pytest.skip("roctx target not built")
-
-        result = runner.run()
-        collect_result(result)
-        if not result.success:
-            pytest.fail(f"rocTX sys run failed: {result.test_output}")
+        result = run_test(
+            "sys_run",
+            target="roctx",
+            env=roctx_env,
+            timeout=120,
+        )
+        assert_regex(result)
