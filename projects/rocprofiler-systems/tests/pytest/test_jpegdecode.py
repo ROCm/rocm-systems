@@ -84,7 +84,7 @@ class TestJPEGDecode:
     ):
         env = jpeg_decode_env.copy()
         if env.get("ROCPROFSYS_USE_ROCPD") == "ON" and "instinct" in gpu_info.categories:
-            rules_dir = rocprof_config.rocprofsys_validation_rules / "jpeg-decode"
+            rules_dir = rocprof_config.rocpd_validation_rules / "jpeg-decode"
             jpeg_decode_rules.append(rules_dir / "amd-smi-rules.json")
 
         result = run_test(
@@ -107,9 +107,9 @@ class TestJPEGDecode:
             labels=["rocJpegCreate"],
             counts=[1],
             depths=[1],
-            counter_names=["JPEG Activity"]
-            if "instinct" in gpu_info.categories
-            else None,
+            counter_names=(
+                ["JPEG Activity"] if "instinct" in gpu_info.categories else None
+            ),
         )
         assert_rocpd(result, rules_files=jpeg_decode_rules)
 

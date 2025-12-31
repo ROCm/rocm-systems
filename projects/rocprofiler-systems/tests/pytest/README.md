@@ -156,6 +156,7 @@ Testing occurs in two distinct phases:
 #### The `run_test` Fixture
 
 The `run_test` fixture is a unified interface for all runner types. It handles:
+
 - Runner creation and execution
 - Result collection for output display
 - Automatic failure/skip on errors
@@ -237,6 +238,7 @@ Assert fixtures wrap validators and handle pytest logic (fail/skip, subtests, me
 | `assert_rocpd` | Validate ROCpd database | `rules_files` |
 | `assert_timemory` | Validate timemory JSON output | `file_name`, `metric`, `labels` |
 | `assert_file_exists` | Check file(s) exist | `path` (single or list) |
+| `assert_causal_json` | Validate Causal JSON output | `file_name` |
 
 See the respective definition for full details.
 
