@@ -22,6 +22,7 @@
 
 #include "mocked_types.hpp"
 
+#include "common/filesystem.hpp"
 #include "core/trace_cache/buffer_storage.hpp"
 #include "core/trace_cache/storage_parser.hpp"
 
@@ -35,6 +36,8 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+namespace fs = rocprofsys::common::fs;
 
 namespace
 {
@@ -264,10 +267,15 @@ protected:
     {
         test_file_path =
             "integration_test_cache_" + std::to_string(test_counter++) + ".bin";
-        std::remove(test_file_path.c_str());
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
     }
 
-    void TearDown() override { std::remove(test_file_path.c_str()); }
+    void TearDown() override
+    {
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
+    }
 
     std::string             test_file_path;
     static std::atomic<int> test_counter;

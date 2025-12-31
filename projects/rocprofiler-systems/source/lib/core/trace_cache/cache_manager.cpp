@@ -214,24 +214,21 @@ namespace filesystem_utils
 void
 remove_if_exists(const std::string& fname)
 {
+    namespace fs = rocprofsys::common::fs;
+
     if(fname.empty()) return;
-    std::ifstream file(fname);
-    if(file.is_open())
+
+    std::error_code ec;
+    if(fs::exists(fname, ec))
     {
-        file.close();
-        auto result = std::remove(fname.c_str());
-        if(result == 0)
+        if(fs::remove(fname, ec))
         {
             ROCPROFSYS_DEBUG("Removed file: %s\n", fname.c_str());
         }
-        else if(errno == ENOENT)
+        else if(ec)
         {
-            ROCPROFSYS_DEBUG("File does not exist: %s\n", fname.c_str());
-        }
-        else
-        {
-            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (errno: %d - %s)\n",
-                               fname.c_str(), errno, std::strerror(errno));
+            ROCPROFSYS_WARNING(0, "Failed to remove file: %s (%s)\n", fname.c_str(),
+                               ec.message().c_str());
         }
     }
 }
@@ -246,8 +243,14 @@ list_dir_files(const std::string& _path)
         return {};
     }
 
+    std::error_code exists_ec;
+    if(!fs::exists(_path, exists_ec) || exists_ec)
+    {
+        ROCPROFSYS_THROW("Error opening directory: %s", _path.c_str());
+    }
+
     std::error_code ec;
-    if(!fs::exists(_path, ec) || !fs::is_directory(_path, ec))
+    if(!fs::is_directory(_path, ec) || ec)
     {
         ROCPROFSYS_THROW("Error opening directory: %s", _path.c_str());
     }

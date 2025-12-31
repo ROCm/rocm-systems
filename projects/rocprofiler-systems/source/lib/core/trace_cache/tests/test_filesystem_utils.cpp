@@ -39,10 +39,21 @@ protected:
 
     std::string create_temp_dir()
     {
-        auto        temp_path = fs::temp_directory_path() / "rocprofsys_fs_test_XXXXXX";
+        std::error_code ec;
+        auto            temp_base = fs::temp_directory_path(ec);
+        if(ec)
+        {
+            throw std::runtime_error("Failed to get temp directory path: " +
+                                     ec.message());
+        }
+
+        auto        temp_path = temp_base / "rocprofsys_fs_test_XXXXXX";
         std::string path_str  = temp_path.string();
 
-        char* dir = mkdtemp(path_str.data());
+        std::vector<char> path_buf(path_str.begin(), path_str.end());
+        path_buf.push_back('\0');
+
+        char* dir = mkdtemp(path_buf.data());
         if(!dir)
         {
             throw std::runtime_error("Failed to create temp directory");

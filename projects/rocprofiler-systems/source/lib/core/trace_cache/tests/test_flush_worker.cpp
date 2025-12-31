@@ -22,11 +22,15 @@
 
 #include "core/trace_cache/buffer_storage.hpp"
 
+#include "common/filesystem.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <thread>
+
+namespace fs = rocprofsys::common::fs;
 
 class flush_worker_test : public ::testing::Test
 {
@@ -35,12 +39,17 @@ protected:
     {
         test_file_path =
             "flush_test_" + std::to_string(test_counter.fetch_add(1)) + ".bin";
-        std::remove(test_file_path.c_str());
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
         worker_sync =
             std::make_shared<rocprofsys::trace_cache::worker_synchronization_t>();
     }
 
-    void TearDown() override { std::remove(test_file_path.c_str()); }
+    void TearDown() override
+    {
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
+    }
 
     rocprofsys::trace_cache::worker_synchronization_ptr_t worker_sync;
     std::string                                           test_file_path;

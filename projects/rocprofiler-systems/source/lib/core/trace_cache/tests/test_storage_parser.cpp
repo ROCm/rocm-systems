@@ -23,6 +23,8 @@
 #include "core/trace_cache/storage_parser.hpp"
 #include "mocked_types.hpp"
 
+#include "common/filesystem.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <fstream>
@@ -30,6 +32,8 @@
 #include <memory>
 #include <numeric>
 #include <vector>
+
+namespace fs = rocprofsys::common::fs;
 
 class sample_processor_t
 {
@@ -169,7 +173,11 @@ protected:
 
     void TearDown() override { cleanup_test_file(); }
 
-    void cleanup_test_file() { std::remove(test_file_path.c_str()); }
+    void cleanup_test_file()
+    {
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
+    }
 
     template <typename T>
     void write_vector(std::ofstream& ofs, const std::vector<T>& vec,
@@ -230,7 +238,7 @@ TEST_F(storage_parser_test, load_empty_file)
     EXPECT_EQ(processor->get_sample_2_count(), 0);
     EXPECT_EQ(processor->get_sample_3_count(), 0);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_single_sample_type_1)
@@ -253,7 +261,7 @@ TEST_F(storage_parser_test, load_single_sample_type_1)
     EXPECT_EQ(processor->get_sample_2_count(), 0);
     EXPECT_EQ(processor->get_sample_3_count(), 0);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_multiple_sample_types)
@@ -280,7 +288,7 @@ TEST_F(storage_parser_test, load_multiple_sample_types)
     EXPECT_EQ(processor->get_sample_2_count(), 2);
     EXPECT_EQ(processor->get_sample_3_count(), 1);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_unsupported_sample_type)
@@ -306,7 +314,7 @@ TEST_F(storage_parser_test, load_unsupported_sample_type)
     EXPECT_EQ(processor->get_sample_2_count(), 2);
     EXPECT_EQ(processor->get_sample_3_count(), 0);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
@@ -345,7 +353,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
     EXPECT_NO_THROW(parser.load(processor));
     EXPECT_EQ(processor->get_sample_1_count(), 1);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_nonexisting_file)
@@ -379,7 +387,7 @@ TEST_F(storage_parser_test, load_large_sample_data)
 
     EXPECT_EQ(processor->get_sample_3_count(), 1);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, load_many_small_samples)
@@ -410,7 +418,7 @@ TEST_F(storage_parser_test, load_many_small_samples)
     EXPECT_NO_THROW(parser.load(processor));
 
     EXPECT_EQ(processor->get_sample_1_count(), num_of_elements);
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, write_less_than_expected)
@@ -440,7 +448,7 @@ TEST_F(storage_parser_test, write_less_than_expected)
     EXPECT_EQ(processor->get_sample_2_count(), 0);
     EXPECT_EQ(processor->get_sample_3_count(), 0);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }
 
 TEST_F(storage_parser_test, read_fragmented_space)
@@ -487,5 +495,5 @@ TEST_F(storage_parser_test, read_fragmented_space)
     EXPECT_EQ(processor->get_sample_2_count(), 2);
     EXPECT_EQ(processor->get_sample_3_count(), 1);
 
-    EXPECT_EQ(std::remove(test_file_path.c_str()), 0);
+    EXPECT_TRUE(fs::remove(test_file_path));
 }

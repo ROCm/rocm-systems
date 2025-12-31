@@ -23,6 +23,8 @@
 #include "core/trace_cache/buffer_storage.hpp"
 #include "mocked_types.hpp"
 
+#include "common/filesystem.hpp"
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -33,6 +35,8 @@
 #include <stdexcept>
 #include <thread>
 #include <vector>
+
+namespace fs = rocprofsys::common::fs;
 
 namespace
 {
@@ -113,12 +117,14 @@ protected:
     void SetUp() override
     {
         test_file_path = "test_cache_" + std::to_string(test_counter++) + ".bin";
-        std::remove(test_file_path.c_str());  // Be sure that file is created by test case
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
     }
 
     void TearDown() override
     {
-        std::remove(test_file_path.c_str());
+        std::error_code ec;
+        fs::remove(test_file_path, ec);
         g_mock_worker.reset();
     }
 

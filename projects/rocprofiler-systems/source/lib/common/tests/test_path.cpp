@@ -26,7 +26,6 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
-#include <sys/stat.h>
 #include <unistd.h>
 
 using namespace rocprofsys::common::path;
@@ -73,8 +72,9 @@ protected:
 
     std::string create_subdir(const std::string& name)
     {
-        std::string path = m_test_dir + "/" + name;
-        mkdir(path.c_str(), 0755);
+        std::string     path = m_test_dir + "/" + name;
+        std::error_code ec;
+        test_common::fs::create_directory(path, ec);
         return path;
     }
 
@@ -378,11 +378,12 @@ TEST_F(PathTest, Dirname_RocprofsysTypicalPath)
 
 TEST_F(PathTest, NestedDirectories)
 {
-    std::string subdir1 = create_subdir("level1");
-    std::string subdir2 = subdir1 + "/level2";
-    mkdir(subdir2.c_str(), 0755);
+    std::string     subdir1 = create_subdir("level1");
+    std::string     subdir2 = subdir1 + "/level2";
+    std::error_code ec;
+    test_common::fs::create_directory(subdir2, ec);
     std::string subdir3 = subdir2 + "/level3";
-    mkdir(subdir3.c_str(), 0755);
+    test_common::fs::create_directory(subdir3, ec);
 
     EXPECT_TRUE(exists(subdir1));
     EXPECT_TRUE(exists(subdir2));
