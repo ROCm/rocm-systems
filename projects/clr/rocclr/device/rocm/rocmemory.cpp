@@ -231,6 +231,19 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 #if IS_WINDOWS
+  hsa_agent_t agent = dev().getBackendDevice();
+  uint32_t id;
+  Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+
+  static constexpr int MaxMetadataSizeDwords = 64;
+  amdImageDesc_ =
+      reinterpret_cast<hsa_amd_image_descriptor_t*>(new int[MaxMetadataSizeDwords + 2]());
+  if (amdImageDesc_ == nullptr) {
+    return false;
+  }
+  amdImageDesc_->version = 1;
+  amdImageDesc_->deviceID = (AmdVendor << 16) | id;
+
   hsa_handle_t handle;
   int offset;
 
