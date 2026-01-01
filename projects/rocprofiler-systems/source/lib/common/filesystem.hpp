@@ -60,6 +60,12 @@
 #    include <experimental/filesystem>
 #endif
 
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unistd.h>
+
 namespace rocprofsys
 {
 namespace common
@@ -71,5 +77,88 @@ namespace fs = std::filesystem;  // NOLINT(misc-unused-alias-decls)
 #else
 namespace fs = std::experimental::filesystem;  // NOLINT(misc-unused-alias-decls)
 #endif
+
+// Utility functions to replace tim::filepath functionality
+namespace filepath
+{
+// Get directory name (equivalent to dirname)
+inline std::string
+dirname(std::string_view path)
+{
+    return fs::path(path).parent_path().string();
+}
+
+// Get base filename (equivalent to basename)
+inline const char*
+basename(std::string_view path)
+{
+    static thread_local std::string _result;
+    _result = fs::path(path).filename().string();
+    return _result.c_str();
+}
+
+// Check if path exists
+inline bool
+exists(const std::string& path)
+{
+    std::error_code ec;
+    return fs::exists(path, ec);
+}
+
+// Check if directory exists
+inline bool
+direxists(const std::string& path)
+{
+    std::error_code ec;
+    return fs::is_directory(path, ec);
+}
+
+// Create directory (and parent directories if needed)
+inline bool
+makedir(const std::string& path)
+{
+    std::error_code ec;
+    return fs::create_directories(path, ec);
+}
+
+// Get canonical path (equivalent to realpath)
+inline std::string
+realpath(const std::string& path, std::nullptr_t = nullptr, bool weak = false)
+{
+    std::error_code ec;
+    auto            result = weak ? fs::weakly_canonical(path, ec) : fs::canonical(path, ec);
+    if(ec) return path;  // Return original path on error
+    return result.string();
+}
+
+// Read symbolic link
+inline std::string
+readlink(const std::string& path)
+{
+    std::error_code ec;
+    auto            result = fs::read_symlink(path, ec);
+    if(ec) return path;  // Return original path on error
+    return result.string();
+}
+
+// Open file stream with directory creation
+template <typename StreamT>
+inline bool
+open(StreamT& stream, const std::string& path)
+{
+    // Create parent directory if needed
+    auto parent = fs::path(path).parent_path();
+    if(!parent.empty())
+    {
+        std::error_code ec;
+        fs::create_directories(parent, ec);
+    }
+
+    // Open the stream
+    stream.open(path);
+    return stream.is_open();
+}
+
+}  // namespace filepath
 }  // namespace common
 }  // namespace rocprofsys

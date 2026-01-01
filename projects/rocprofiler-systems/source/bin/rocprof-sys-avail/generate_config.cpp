@@ -43,7 +43,7 @@
 #include <string>
 
 namespace cereal   = ::tim::cereal;
-namespace filepath = ::tim::filepath;
+namespace filepath = ::rocprofsys::common::filepath;
 using settings     = ::tim::settings;
 using ::tim::tsettings;
 using ::tim::type_list;

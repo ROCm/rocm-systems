@@ -25,6 +25,8 @@
 #include "log.hpp"
 #include "rocprof-sys-instrument.hpp"
 
+#include "common/filesystem.hpp"
+
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/utility/join.hpp>
@@ -611,7 +613,7 @@ rocprofsys_get_exe_realpath()
             ROCPROFSYS_ADD_DETAILED_LOG_ENTRY(array_config_t{ " ", "[ ", " ]" },
                                               "cmdline:: ", _cmd_line);
             return _cmd_line.front();
-            // return tim::filepath::realpath(_cmd_line.front(), nullptr, false);
+            // return rocprofsys::common::filepath::realpath(_cmd_line.front(), nullptr, false);
         }
         return std::string{};
     }();

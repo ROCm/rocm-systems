@@ -50,7 +50,7 @@
 
 namespace
 {
-namespace filepath = ::tim::filepath;
+namespace filepath = ::rocprofsys::common::filepath;
 using ::tim::delimit;
 using ::tim::get_env;
 using ::timemory::join::join;

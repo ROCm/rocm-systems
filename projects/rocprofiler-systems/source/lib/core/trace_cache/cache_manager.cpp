@@ -596,11 +596,11 @@ cache_manager::post_process_bulk()
                 std::to_string(config->_pid));
 
             if(static_cast<pid_t>(config->_pid) == getpid() &&
-               tim::filepath::exists(filename_default))
+               rocprofsys::common::filepath::exists(filename_default))
             {
                 perfetto_files.push_back(filename_default);
             }
-            else if(tim::filepath::exists(filename_suffix))
+            else if(rocprofsys::common::filepath::exists(filename_suffix))
             {
                 perfetto_files.push_back(filename_suffix);
             }

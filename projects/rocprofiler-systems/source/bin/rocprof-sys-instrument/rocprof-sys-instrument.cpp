@@ -159,7 +159,7 @@ namespace
 {
 namespace process  = tim::process;  // NOLINT
 namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
+namespace filepath = rocprofsys::common::filepath;
 namespace path     = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;

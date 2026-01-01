@@ -38,7 +38,7 @@ namespace argparse
 {
 namespace
 {
-namespace filepath   = ::tim::filepath;
+namespace filepath   = ::rocprofsys::common::filepath;
 namespace path       = rocprofsys::common::path;
 using array_config_t = ::timemory::join::array_config;
 using rocprofsys::common::remove_env;

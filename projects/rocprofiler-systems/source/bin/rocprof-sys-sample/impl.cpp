@@ -23,6 +23,7 @@
 #include "rocprof-sys-sample.hpp"
 
 #include "common/environment.hpp"
+#include "common/filesystem.hpp"
 #include "common/path.hpp"
 
 #include <timemory/environment.hpp>
@@ -124,7 +125,7 @@ get_initial_environment()
     rocprofsys::common::update_env(_env, "LD_PRELOAD", _dl_libpath, update_mode::APPEND,
                                    ":", updated_envs, original_envs);
     rocprofsys::common::update_env(_env, "LD_LIBRARY_PATH",
-                                   tim::filepath::dirname(_dl_libpath),
+                                   rocprofsys::common::filepath::dirname(_dl_libpath),
                                    update_mode::APPEND, ":", updated_envs, original_envs);
     rocprofsys::common::update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath,
                                    update_mode::REPLACE, ":", updated_envs,

@@ -53,7 +53,7 @@
 #include <vector>
 
 namespace color    = ::tim::log::color;
-namespace filepath = ::tim::filepath;
+namespace filepath = ::rocprofsys::common::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;

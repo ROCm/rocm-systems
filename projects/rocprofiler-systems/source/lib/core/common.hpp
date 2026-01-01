@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "common/filesystem.hpp"
 #include "common/join.hpp"
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
@@ -106,7 +107,7 @@ namespace rocprofsys
 {
 namespace api       = ::tim::api;        // NOLINT
 namespace category  = ::tim::category;   // NOLINT
-namespace filepath  = ::tim::filepath;   // NOLINT
+namespace filepath  = ::rocprofsys::common::filepath;   // NOLINT
 namespace project   = ::tim::project;    // NOLINT
 namespace process   = ::tim::process;    // NOLINT
 namespace threading = ::tim::threading;  // NOLINT

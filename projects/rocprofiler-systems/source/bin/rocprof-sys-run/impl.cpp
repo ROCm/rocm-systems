@@ -54,7 +54,7 @@
 #include <vector>
 
 namespace color    = ::tim::log::color;
-namespace filepath = ::tim::filepath;  // NOLINT
+namespace filepath = ::rocprofsys::common::filepath;  // NOLINT
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;

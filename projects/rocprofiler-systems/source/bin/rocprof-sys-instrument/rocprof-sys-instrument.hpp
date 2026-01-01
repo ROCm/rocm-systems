@@ -539,3 +539,5 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
 
     return false;
 }
+lse;
+}
