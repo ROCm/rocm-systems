@@ -179,6 +179,14 @@ if(DISABLE_DIRECT_DISPATCH)
   target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
 endif()
 
+# Optional rocm-kpack support for kpack split artifacts
+option(ROCM_KPACK_ENABLED "Enable kpack runtime loading for split device code" OFF)
+if(ROCM_KPACK_ENABLED)
+  find_package(rocm-kpack REQUIRED)
+  target_compile_definitions(amdhip64 PRIVATE ROCM_KPACK_ENABLED=1)
+  target_link_libraries(amdhip64 PRIVATE rocm::rocm_kpack)
+endif()
+
 # Short-Term solution for pre-compiled headers for online compilation
 # Enable pre compiled header
 if(__HIP_ENABLE_PCH)

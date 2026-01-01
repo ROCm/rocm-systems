@@ -37,9 +37,18 @@ namespace hip {
 class FatBinaryInfo {
  public:
   FatBinaryInfo(const char* fname, const void* image);
+#if ROCM_KPACK_ENABLED
+  // Constructor for kpack'd binaries
+  // bundle_index: For multi-TU binaries, identifies which bundle this wrapper corresponds to
+  FatBinaryInfo(const std::string& binary_path, const void* hipk_metadata,
+                uint64_t bundle_index = 0);
+#endif
   ~FatBinaryInfo();
 
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
+#if ROCM_KPACK_ENABLED
+  hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
+#endif
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
                            size_t binary_offset);
   hipError_t BuildProgram(const int device_id);
@@ -83,6 +92,12 @@ class FatBinaryInfo {
 
   // Only used for FBs where image is directly passed
   std::string uri_;  //!< Uniform resource indicator
+
+#if ROCM_KPACK_ENABLED
+  const void* hipk_metadata_ = nullptr;  //!< Msgpack metadata for kpack'd binaries
+  bool is_kpack_ = false;                //!< True if this is a kpack'd binary
+  uint64_t bundle_index_ = 0;            //!< Bundle index for multi-TU binaries
+#endif
 
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 

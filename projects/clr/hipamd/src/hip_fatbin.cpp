@@ -30,6 +30,10 @@ THE SOFTWARE.
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
 
+#if ROCM_KPACK_ENABLED
+#include <rocm_kpack/kpack.h>
+#endif
+
 namespace hip {
 // Use ComgrUniqueHandle and type aliases from hip_comgr_helper.hpp
 using comgr_helper::ComgrDataSetUniqueHandle;
@@ -47,6 +51,21 @@ FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
   dev_programs_.resize(g_devices.size(), nullptr);
 }
 
+#if ROCM_KPACK_ENABLED
+FatBinaryInfo::FatBinaryInfo(const std::string& binary_path, const void* hipk_metadata,
+                             uint64_t bundle_index)
+    : fname_(binary_path),
+      foffset_(0),
+      image_(nullptr),
+      image_mapped_(false),
+      uri_(std::string()),
+      hipk_metadata_(hipk_metadata),
+      is_kpack_(true),
+      bundle_index_(bundle_index) {
+  dev_programs_.resize(g_devices.size(), nullptr);
+}
+#endif
+
 FatBinaryInfo::~FatBinaryInfo() {
   // Release per device fat bin info.
   for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
@@ -57,7 +76,15 @@ FatBinaryInfo::~FatBinaryInfo() {
   }
   // Release Code object allocations
   for (const auto& i : code_obj_allocations_) {
+#if ROCM_KPACK_ENABLED
+    if (is_kpack_) {
+      kpack_free_code_object(const_cast<void*>(i));
+    } else {
+      delete[] reinterpret_cast<const char*>(i);
+    }
+#else
     delete[] reinterpret_cast<const char*>(i);
+#endif
   }
   ReleaseImageAndFile();
 }
@@ -639,6 +666,65 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   return hip_status;
 }
+
+#if ROCM_KPACK_ENABLED
+hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& devices) {
+  if (hipk_metadata_ == nullptr) {
+    LogError("HIPK metadata is null");
+    return hipErrorInvalidValue;
+  }
+
+  // Build architecture priority list from devices
+  // For each device, add native ISA first, then generic fallback
+  std::vector<std::string> arch_list;
+  for (auto device : devices) {
+    std::string device_name = device->devices()[0]->isa().isaName();
+    arch_list.push_back(device_name);
+
+    // Add generic fallback
+    auto generic_name = TargetToGeneric(device_name);
+    if (!generic_name.empty()) {
+      arch_list.push_back(generic_name);
+    }
+  }
+
+  // Convert to C-style array for kpack API
+  std::vector<const char*> arch_ptrs;
+  for (const auto& arch : arch_list) {
+    arch_ptrs.push_back(arch.c_str());
+  }
+
+  // Load code object from kpack archive
+  void* code_object = nullptr;
+  size_t code_object_size = 0;
+
+  // Always use indexed key format: "path/to/lib.so#0", "#1", etc.
+  // The bundle_index_ comes from wrapper->reserved1, set during ELF surgery
+  std::string indexed_name = fname_ + "#" + std::to_string(bundle_index_);
+  kpack_error_t err =
+      kpack_load_code_object(PlatformState::kpackGetCache(), hipk_metadata_, indexed_name.c_str(),
+                             arch_ptrs.data(), arch_ptrs.size(), &code_object, &code_object_size);
+
+  if (err != KPACK_SUCCESS) {
+    LogPrintfError("kpack_load_code_object failed with error: %d", err);
+    return hipErrorInvalidImage;
+  }
+
+  // Add code object to all devices
+  for (auto device : devices) {
+    hipError_t hip_err = AddDevProgram(device, code_object, code_object_size, 0);
+    if (hip_err != hipSuccess) {
+      kpack_free_code_object(code_object);
+      return hip_err;
+    }
+  }
+
+  // Track allocation for cleanup in destructor
+  code_obj_allocations_.insert(code_object);
+
+  return hipSuccess;
+}
+#endif
 
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,
                                         size_t binary_size, size_t binary_offset) {

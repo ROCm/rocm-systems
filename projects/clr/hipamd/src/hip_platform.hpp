@@ -23,6 +23,9 @@
 #include "hip_fatbin.hpp"
 #include "device/device.hpp"
 #include "hip_code_object.hpp"
+#if ROCM_KPACK_ENABLED
+#include <rocm_kpack/kpack_types.h>
+#endif
 
 namespace hip_impl {
 
@@ -84,6 +87,12 @@ class PlatformState {
 
   // Static Code Objects functions
   hip::FatBinaryInfo** addFatBinary(const void* data, bool& success);
+#if ROCM_KPACK_ENABLED
+  hip::FatBinaryInfo** addKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                      bool& success);
+  // Get the global kpack cache for loading code objects
+  static kpack_cache_t kpackGetCache();
+#endif
   hipError_t removeFatBinary(hip::FatBinaryInfo** module);
   hipError_t digestFatBinary(const void* data, hip::FatBinaryInfo*& programs);
 

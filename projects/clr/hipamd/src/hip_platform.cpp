@@ -29,7 +29,26 @@
 #include <unordered_map>
 #include <mutex>
 
+#if ROCM_KPACK_ENABLED
+#include <rocm_kpack/kpack.h>
+#endif
+
 namespace hip {
+
+#if ROCM_KPACK_ENABLED
+namespace {
+std::once_flag g_kpack_init_flag;
+kpack_cache_t g_kpack_cache = nullptr;
+
+void kpack_init_cache() { kpack_cache_create(&g_kpack_cache); }
+
+kpack_cache_t kpack_get_cache() {
+  std::call_once(g_kpack_init_flag, kpack_init_cache);
+  return g_kpack_cache;
+}
+}  // namespace
+#endif
+
 constexpr unsigned __hipFatMAGIC2 = 0x48495046;  // "HIPF"
 
 PlatformState* PlatformState::platform_;  // Initiaized as nullptr by default
@@ -73,6 +92,18 @@ static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const c
 
 void** __hipRegisterFatBinary(const void* data) {
   const __CudaFatBinaryWrapper* fbwrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
+
+#if ROCM_KPACK_ENABLED
+  // Check for HIPK magic (kpack'd binary with external device code)
+  if (fbwrapper->magic == symbols::kHipkMagic && fbwrapper->version == 1) {
+    // For HIPK binaries, fbwrapper->binary points to msgpack metadata
+    bool success{};
+    auto fat_binary_info = PlatformState::instance().addKpackBinary(fbwrapper->binary, data, success);
+    return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
+  }
+#endif
+
+  // Normal HIPF path
   if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
     LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
                    fbwrapper->version);
@@ -996,6 +1027,15 @@ hipError_t PlatformState::digestFatBinary(const void* data, hip::FatBinaryInfo*&
 hip::FatBinaryInfo** PlatformState::addFatBinary(const void* data, bool& success) {
   return statCO_.addFatBinary(data, initialized_, success);
 }
+
+#if ROCM_KPACK_ENABLED
+hip::FatBinaryInfo** PlatformState::addKpackBinary(const void* hipk_metadata,
+                                                    const void* wrapper_addr, bool& success) {
+  return statCO_.addKpackBinary(hipk_metadata, wrapper_addr, initialized_, success);
+}
+
+kpack_cache_t PlatformState::kpackGetCache() { return kpack_get_cache(); }
+#endif
 
 hipError_t PlatformState::removeFatBinary(hip::FatBinaryInfo** module) {
   return statCO_.removeFatBinary(module);
