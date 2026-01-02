@@ -1332,6 +1332,7 @@ class VirtualDevice : public amd::HeapObject {
   virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
+  virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
 
