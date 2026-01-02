@@ -8,14 +8,14 @@
 Using rocprofv3 with OpenMP
 +++++++++++++++++++++++++++++
 
-`rocprofv3` does not provide native support for profiling CPU-side OpenMP code. However, when OpenMP is used to offload computations to AMD GPUs (for example, via OpenMP target offload), `rocprofv3` can capture and profile GPU activities initiated by these offloaded regions. Note that profiling of CPU-side OpenMP parallel regions is not supported.
+For computations offloaded to AMD GPUs using OpenMP (for example, via OpenMP target offload), ``rocprofv3`` can be used to capture and profile GPU activities initiated by these offloaded regions. Note that ``rocprofv3`` doesn't provide native support for profiling CPU-side OpenMP code or parallel regions.
 
-Example: Vector Addition Using OpenMP Offload on AMD GPUs
----------------------------------------------------------
+Example: Vector addition using OpenMP offload on AMD GPUs
+----------------------------------------------------------
 
-The following example demonstrates how to perform vector addition using OpenMP target offload, enabling execution of the workload on AMD GPUs.
+The following example demonstrates how to perform vector addition using OpenMP target offload, enabling workload execution on AMD GPUs.
 
-**Key Steps:**
+**Key steps:**
 
 - Initialize input arrays on the host.
 - Offload the vector addition computation to the GPU using OpenMP directives.
@@ -60,9 +60,8 @@ The following example demonstrates how to perform vector addition using OpenMP t
         return 0;
     }
 
-
-Building the OpenMP Offload Application
----------------------------------------
+Building the OpenMP offload application
+----------------------------------------
 
 To compile the application for AMD GPU offload, use the following command:
 
@@ -70,21 +69,21 @@ To compile the application for AMD GPU offload, use the following command:
 
     amdclang++ -fopenmp -fopenmp-targets=amdgcn-amd-amdhsa -L/opt/rocm/lib --offload-arch=gfx9xx -o vector_add <application>
 
-Profiling the Application with rocprofv3
-----------------------------------------
+Profiling the application with rocprofv3
+-----------------------------------------
 
-To profile the GPU activity during execution, run the application with `rocprofv3`:
+To profile the GPU activity during execution, run the application with ``rocprofv3``:
 
 .. code-block:: bash
 
     rocprofv3 -s --output-format csv -- ./vector_add
 
-Upon execution, `rocprofv3` will generate several CSV trace files, such as:
+Upon execution, ``rocprofv3`` generates several CSV trace files, such as:
 
-- `<pid>_kernel_trace.csv`
-- `<pid>_hsa_api_trace.csv`
-- `<pid>_memory_copy_trace.csv`
-- `<pid>_memory_allocation_trace.csv`
-- `<pid>_scratch_memory_trace.csv`
+- <pid>_kernel_trace.csv
+- <pid>_hsa_api_trace.csv
+- <pid>_memory_copy_trace.csv
+- <pid>_memory_allocation_trace.csv
+- <pid>_scratch_memory_trace.csv
 
-These files contain detailed profiling information about GPU kernel execution, HSA API calls, memory operations, and more, enabling comprehensive analysis of the offloaded workload.
+The preceding files contain detailed profiling information about GPU kernel execution, HSA API calls, memory operations, and more, enabling comprehensive analysis of the offloaded workload.
