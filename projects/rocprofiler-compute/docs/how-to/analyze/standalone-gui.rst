@@ -28,7 +28,15 @@ Launch the standalone GUI analyzer
 ----------------------------------
 
 To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
-desired analysis command. For example:
+desired analysis command.
+
+.. note::
+
+   Do not use the ``-k/--kernel`` or ``-d/--dispatch`` command-line filtering
+   options when launching the standalone GUI. Instead, use the dropdown menus in
+   the web interface to filter by kernel or dispatch.
+
+For example:
 
 .. code-block:: shell-session
 

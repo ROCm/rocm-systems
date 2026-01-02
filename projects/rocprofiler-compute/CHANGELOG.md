@@ -49,6 +49,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
 
+* Disallow using kernel/dispatch (--kernel or --dispatch options) filtering with --gui analyze mode since filtering is supported via dropdown meny in GUI frontend.
+
 ### Removed
 
 * Removed "VL1 Lat" metric for AMD Instinct MI300 series GPUs, due to MI300 series not supporting TCP_TCP_LATENCY_sum counter.
