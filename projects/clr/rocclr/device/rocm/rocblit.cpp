@@ -35,7 +35,6 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
       StagingXferSize(dev().settings().stagedXferSize_),
       completeOperation_(false),
       context_(nullptr) {
-  dev().getSdmaRWMasks(&sdmaEngineReadMask_, &sdmaEngineWriteMask_);
 }
 
 inline void DmaBlitManager::synchronize() const {
@@ -470,31 +469,13 @@ bool DmaBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dstMem
   return result;
 }
 
-// Select an SDMA engine using priority-based scheduling
-// Prefers engines in preferredMask (high-bandwidth engines), otherwise any free engine
-static inline uint32_t selectSdmaEngine(uint32_t freeMask, uint32_t preferredMask) {
-  if (freeMask == 0) return 0;
-
-  // Try preferred engines first (high-bandwidth engines)
-  uint32_t preferredFree = freeMask & preferredMask;
-  if (preferredFree != 0) {
-    return preferredFree & (~preferredFree + 1);  // Extract lowest preferred engine
-  }
-
-  // Fall back to non-preferred engines (slower engines)
-  return freeMask & (~freeMask + 1);  // Extract lowest available engine
-}
-
 // ================================================================================================
 inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
                                            hsa_agent_t& srcAgent, size_t size,
                                            amd::CopyMetadata& copyMetadata) const {
   hsa_status_t status = HSA_STATUS_SUCCESS;
-
   uint32_t copyMask = 0;
-  uint32_t freeEngineMask = 0;
-  uint32_t recIdMask = 0;
-  bool kUseRegularCopyApi = 0;
+  bool kUseRegularCopyApi = false;
   constexpr size_t kRetainCountThreshold = 8;
   bool forceSDMA =
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
@@ -523,33 +504,34 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   hsa_signal_t active = gpu().Barriers().ActiveSignal(kInitSignalValueOne, gpu().timestamp());
 
   if (!kUseRegularCopyApi && engine != HwQueueEngine::Unknown) {
-    // Get the mask of valid engines for this operation (read or write)
-    uint32_t validEngineMask =
-        (engine == HwQueueEngine::SdmaRead ? sdmaEngineReadMask_ : sdmaEngineWriteMask_);
+    // Check if this VirtualGPU already has an assigned engine with affinity
+    uint32_t assignedEngineMask = gpu().AssignedSdmaEngine();
 
-    // Check SDMA engine status to get currently free engines
-    status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
-
-    if (status == HSA_STATUS_SUCCESS) {
-      status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &recIdMask);
-    }
-
-    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-            "Query copy engine status %x, srcAgent %p, "
-            "dstAgent %p, free_engine_mask 0x%x, rec_engine_mask 0x%x",
-            status, srcAgent.handle, dstAgent.handle, freeEngineMask, recIdMask);
-
-    // Constrain to valid engines for this operation
-    freeEngineMask &= validEngineMask;
-    recIdMask &= validEngineMask;
-
-    if (freeEngineMask != 0) {
-      // Use priority-based scheduling: prefer high-bandwidth engines (recIdMask)
-      copyMask = selectSdmaEngine(freeEngineMask, recIdMask);
+    if (assignedEngineMask != 0) {
+      // This VirtualGPU/stream already has an assigned engine - just use it
+      // Stream ordering handles any busy conditions naturally
+      copyMask = assignedEngineMask;
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-              "Selected SDMA engine: free_mask=0x%x, preferred_mask=0x%x, selected_mask=0x%x",
-              freeEngineMask, recIdMask, copyMask);
+              "Using assigned SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
+              &gpu(), copyMask, engine);
+    } else {
+      // No assigned engine yet - allocate one using device-level allocator
+      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, dstAgent, srcAgent);
+
+      if (copyMask != 0) {
+        // Store the assigned engine in the VirtualGPU for future use
+        gpu().SetAssignedSdmaEngine(copyMask);
+
+        ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+                "Allocated new SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
+                &gpu(), copyMask, engine);
+      } else {
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+                "Failed to allocate SDMA engine for VirtualGPU %p, falling back to regular copy",
+                &gpu());
+        kUseRegularCopyApi = true;
+      }
     }
 
     if (copyMask != 0 && status == HSA_STATUS_SUCCESS) {
