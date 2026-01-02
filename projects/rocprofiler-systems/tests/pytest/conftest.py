@@ -709,7 +709,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     try:
         llvm_objdump = get_llvm_objdump(rocprof_config.rocm_path)
     except FileNotFoundError:
-        llvm_objdump = "Not found - Set ROCPROFSYS_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
+        llvm_objdump = "Not found - Set ROCM_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
 
     rocm_ver = _get_rocm_version()
     rocm_ver_str = (
@@ -748,7 +748,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Avail:          {rocprof_config.rocprofsys_avail}",
         f"  Causal:         {rocprof_config.rocprofsys_causal}",
         f"  MPI exec:       {rocprof_config.mpiexec}",
-        f"  LLVM objdump:   {llvm_objdump}",
+        f"  llvm-objdump:   {llvm_objdump}",
         "=" * 70,
         "",
     ]
@@ -773,6 +773,8 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
         timeout: Test timeout in seconds
         mpi_ranks: Number of MPI ranks (0 = disabled)
         working_directory: Custom working directory
+        no_check_target_arch: If True, bypasses checking if the target supports the current
+                              system architectures when @pytest.mark.gpu is present (default: False)
         skip_on_error: If True, pytest.skip on non-zero return code (default: False = fail)
         fail_on_pass: If True, pytest.fail on success and pytest.pass on failure (default: False)
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
@@ -798,6 +800,7 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
         timeout: int = 300,
         mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
+        no_check_target_arch: bool = False,
         skip_on_error: bool = False,
         fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
@@ -811,7 +814,7 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
             )
 
         # For GPU tests, ensure that the target supports at least one of the current system architectures
-        if request.node.get_closest_marker("gpu"):
+        if request.node.get_closest_marker("gpu") and not no_check_target_arch:
             try:
                 target_path = rocprof_config.get_target_executable(target)
                 target_archs = get_target_gpu_arch(rocprof_config.rocm_path, target_path)

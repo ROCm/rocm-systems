@@ -152,6 +152,7 @@ class TestOpenMPCG:
             target="openmp-cg",
             env=env,
             timeout=180,
+            no_check_target_arch=True,
         )
         assert_regex(result)
 
@@ -171,6 +172,7 @@ class TestOpenMPCG:
             rewrite_args=self.REWRITE_ARGS,
             env=env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -204,6 +206,7 @@ class TestOpenMPLU:
             rewrite_args=self.REWRITE_ARGS,
             env=env,
             timeout=180,
+            no_check_target_arch=True,
         )
         assert_regex(result)
 
@@ -232,6 +235,7 @@ class TestOpenMPTarget:
             target="openmp-target",
             env=openmp_target_env,
             timeout=300,
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -277,6 +281,7 @@ class TestOpenMPVVHost:
             target=target_name,
             env=ompt_env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -294,6 +299,7 @@ class TestOpenMPVVHost:
             target=target_name,
             env=ompt_env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -315,6 +321,7 @@ class TestOpenMPVVHost:
             rewrite_args=["-e", "-v", "2", "--instrument-loops"],
             env=env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result, pass_regex=[r"omp_parallel"])
@@ -336,6 +343,7 @@ class TestOpenMPVVHost:
             instrument_args=["-e", "-v", "1", "--label", "return", "args"],
             env=env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result, pass_regex=[r"omp_parallel"])
@@ -353,6 +361,7 @@ class TestOpenMPVVHost:
             target=target_name,
             env=ompt_env,
             timeout=180,
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -479,6 +488,7 @@ class TestSamplingDuration:
             target="openmp-cg",
             env=ompt_sampling_env,
             timeout=300,
+            no_check_target_arch=True,
         )
 
         assert_regex(result, pass_regex=self.SAMPLING_PASS_REGEX)
@@ -495,6 +505,7 @@ class TestSamplingDuration:
             target="openmp-lu",
             env=ompt_sampling_env,
             timeout=300,
+            no_check_target_arch=True,
         )
 
         assert_regex(result, pass_regex=self.SAMPLING_PASS_REGEX)
@@ -529,6 +540,7 @@ class TestNoTmpFiles:
             target="openmp-cg",
             env=ompt_no_tmp_env,
             timeout=300,
+            no_check_target_arch=True,
         )
 
         assert_regex(result, pass_regex=self.NOTMP_SAMPLING_FILE_REGEX)

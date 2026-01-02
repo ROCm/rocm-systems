@@ -96,6 +96,7 @@ class TestJPEGDecode:
                 "-b",
                 "32",
             ],
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -129,6 +130,7 @@ class TestJPEGDecode:
                 "-b",
                 "32",
             ],
+            no_check_target_arch=True,
         )
 
         assert_regex(result)

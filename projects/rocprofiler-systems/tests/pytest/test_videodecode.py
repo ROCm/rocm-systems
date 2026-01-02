@@ -95,6 +95,7 @@ class TestVideoDecode:
                 "-t",
                 "1",
             ],
+            no_check_target_arch=True,
         )
 
         assert_regex(result)
@@ -126,6 +127,7 @@ class TestVideoDecode:
                 "-t",
                 "1",
             ],
+            no_check_target_arch=True,
         )
 
         assert_regex(result)

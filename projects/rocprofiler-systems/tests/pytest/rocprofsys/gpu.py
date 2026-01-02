@@ -200,15 +200,21 @@ def get_llvm_objdump(rocm_path: Path) -> Path:
             if candidate.exists():
                 return candidate
 
-    # Check env var
-    llvm_objdump = os.environ.get("ROCPROFSYS_LLVM_OBJDUMP")
-    if llvm_objdump:
-        return Path(llvm_objdump)
+    # Check env var - accepts either path to binary or directory containing it
+    llvm_objdump_env = os.environ.get("ROCM_LLVM_OBJDUMP")
+    if llvm_objdump_env:
+        llvm_objdump_path = Path(llvm_objdump_env)
+        if llvm_objdump_path.is_file():
+            return llvm_objdump_path
+        elif llvm_objdump_path.is_dir():
+            candidate = llvm_objdump_path / "llvm-objdump"
+            if candidate.exists():
+                return candidate
 
     # We explicitly avoid checking PATH here as we require the llvm-objdump
     # from the ROCm installation directory.
     searched_paths = [f"  - {p}" for p in llvm_objdump_candidates]
-    searched_paths.append("  - ROCPROFSYS_LLVM_OBJDUMP environment variable")
+    searched_paths.append("  - ROCM_LLVM_OBJDUMP environment variable")
 
     raise FileNotFoundError(
         f"ROCm's llvm-objdump not found. Searched in:\n" + "\n".join(searched_paths)
@@ -228,44 +234,55 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     Raises:
         FileNotFoundError: If llvm-objdump is not found
     """
+    import tempfile
+
     target_archs: set[str] = set()
-    extracted_files: list[Path] = []
 
     # Find llvm-objdump
     llvm_objdump = get_llvm_objdump(rocm_path)
 
     if llvm_objdump:
-        # Use absolute path so extracted file paths in output are also absolute
         abs_target_path = Path(target_path).resolve()
 
-        try:
-            result = subprocess.run(
-                [str(llvm_objdump), "--offloading", str(abs_target_path)],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().split("\n"):
-                    # Match any gfxXXXX pattern in the line
-                    match = re.search(r"(gfx[0-9a-fA-F]+)", line)
-                    if match:
-                        target_archs.add(match.group(1))
+        # llvm-objdump extracts files in same dir as input path
+        # Create symlink in temp directory to avoid permission issues
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_symlink = Path(tmpdir) / abs_target_path.name
+            try:
+                tmp_symlink.symlink_to(abs_target_path)
+            except OSError:
+                return list(target_archs)
 
-                    # Capture extracted bundle paths for cleanup
-                    # Format: "Extracting offload bundle: /path/to/file"
-                    bundle_match = re.search(r"Extracting offload bundle:\s*(.+)$", line)
-                    if bundle_match:
-                        extracted_files.append(Path(bundle_match.group(1)))
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+            extracted_files: list[Path] = []
+            try:
+                result = subprocess.run(
+                    [str(llvm_objdump), "--offloading", str(tmp_symlink)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split("\n"):
+                        # Match any gfxXXXX pattern in the line
+                        match = re.search(r"(gfx[0-9a-fA-F]+)", line)
+                        if match:
+                            target_archs.add(match.group(1))
 
-    # Clean up extracted files
-    for extracted_file in extracted_files:
-        try:
-            if extracted_file.exists():
-                extracted_file.unlink()
-        except OSError:
-            pass
+                        # Capture extracted bundle paths for cleanup
+                        bundle_match = re.search(
+                            r"Extracting offload bundle:\s*(.+)$", line
+                        )
+                        if bundle_match:
+                            extracted_files.append(Path(bundle_match.group(1)))
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+            # Immediately clean up extracted files to free disk space
+            for extracted_file in extracted_files:
+                try:
+                    if extracted_file.exists():
+                        extracted_file.unlink()
+                except OSError:
+                    pass
 
     return list(target_archs)

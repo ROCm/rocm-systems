@@ -29,32 +29,25 @@ include_guard(GLOBAL)
 # Pytest specific
 # ------------------------------------------------------------------------------#
 
-install(
-    FILES
-        ${CMAKE_CURRENT_LIST_DIR}/test_binaries.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_hip_stream.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_jpegdecode.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_openmp.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_roctx.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_time_window.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_transpose.py
-        ${CMAKE_CURRENT_LIST_DIR}/test_videodecode.py
-    DESTINATION share/rocprofiler-systems/tests/pytest
+# Under install mode, run build_standalone.sh to build the standalone binary
+
+execute_process(
+    COMMAND
+        ${CMAKE_CURRENT_LIST_DIR}/build_standalone.sh --output-dir
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    RESULT_VARIABLE BUILD_STANDALONE_RESULT
+    OUTPUT_VARIABLE BUILD_STANDALONE_OUTPUT
+    ERROR_VARIABLE BUILD_STANDALONE_ERROR
 )
 
-# Pytest configuration files
-install(
-    FILES ${CMAKE_CURRENT_LIST_DIR}/conftest.py ${CMAKE_CURRENT_LIST_DIR}/requirements.txt
-    DESTINATION share/rocprofiler-systems/tests/pytest
-)
+if(NOT BUILD_STANDALONE_RESULT EQUAL 0)
+    rocprofiler_systems_message(FATAL_ERROR "Build standalone binary failed (${BUILD_STANDALONE_RESULT}):\n${BUILD_STANDALONE_OUTPUT}\n${BUILD_STANDALONE_ERROR}")
+endif()
 
-# Rocprofsys pytest module
-install(
-    FILES
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/__init__.py
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/config.py
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/gpu.py
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/runners.py
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofsys/validators.py
-    DESTINATION share/rocprofiler-systems/tests/pytest/rocprofsys
-)
+if(BUILD_STANDALONE_RESULT EQUAL 0)
+    install(
+        FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/rocprofsys-tests.pyz
+        DESTINATION share/rocprofiler-systems
+    )
+endif()
