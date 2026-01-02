@@ -24,6 +24,7 @@
 
 #include "core/config.hpp"
 #include "core/defines.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -118,6 +119,31 @@ cache_stop(const char* name)
         cache_region(thread_id, name, timestamp, end_ts,
                      rocprofsys::trait::name<CategoryT>::value);
     }
+}
+
+/// Flush all pending cached entries for this thread.
+/// Called during finalization to ensure entries that were started but not stopped
+/// (e.g., main entry point) are written to the trace cache.
+inline void
+flush_pending_cached_entries()
+{
+    const auto end_ts = static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
+    uint64_t   thread_id = 0;
+
+    const auto& extended_info = rocprofsys::thread_info::get(std::this_thread::get_id());
+    if(extended_info.has_value() && extended_info->index_data.has_value())
+    {
+        constexpr size_t UNKNOWN_TIME = 0;
+        thread_id                     = extended_info->index_data->system_value;
+        rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
+            { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+    }
+
+    for(const auto& [key, start_ts] : map_name_to_args)
+    {
+        cache_region(thread_id, key.name, start_ts, end_ts, key.category);
+    }
+    map_name_to_args.clear();
 }
 }  // namespace
 
@@ -403,7 +429,8 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }
@@ -431,7 +458,8 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
         {
             int64_t _n = 0;
             ROCPROFSYS_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+                ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
+                _args, _n++));
         }
     });
 }

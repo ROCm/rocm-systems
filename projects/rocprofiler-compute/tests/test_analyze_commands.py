@@ -993,7 +993,7 @@ def test_parser_utility_functions():
     assert result == 9, "to_max should return maximum value"
 
     result = to_median(None)
-    assert result is None, "to_median should return None for None input"
+    assert np.isnan(result), "to_median should return np.nan for None input"
 
     try:
         to_median("invalid_string")
@@ -1008,7 +1008,7 @@ def test_parser_utility_functions():
         assert "unsupported type" in str(e)
 
     result = to_int(None)
-    assert result is None, "to_int should return None for None input"
+    assert np.isnan(result), "to_int should return np.nan for None input"
 
     try:
         to_int(["list", "not", "supported"])
@@ -1017,7 +1017,7 @@ def test_parser_utility_functions():
         assert "unsupported type" in str(e)
 
     result = to_quantile(None, 0.5)
-    assert result is None, "to_quantile should return None for None input"
+    assert np.isnan(result), "to_quantile should return np.nan for None input"
 
     try:
         to_quantile("invalid_string", 0.5)

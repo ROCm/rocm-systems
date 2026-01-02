@@ -95,3 +95,6 @@
 [submodule "projects/rocprofiler-systems/external/googletest"]
 	path = projects/rocprofiler-systems/external/googletest
 	url = https://github.com/google/googletest.git
+[submodule "projects/rocprofiler-systems/external/filesystem"]
+	path = projects/rocprofiler-systems/external/filesystem
+	url = https://github.com/gulrak/filesystem.git
