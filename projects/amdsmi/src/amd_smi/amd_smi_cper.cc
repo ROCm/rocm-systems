@@ -520,13 +520,13 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding non-standard error\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
+             afid = cper_dump_nonstd_err(crashdump, section);
         }
         else if (cper_is_proc_err(sec_guid)) {
             struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding proc error section type\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
+            afid = cper_dump_nonstd_err(crashdump, section);
         }
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Unknown error type!!\n";
