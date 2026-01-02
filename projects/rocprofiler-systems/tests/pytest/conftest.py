@@ -48,6 +48,8 @@ from rocprofsys import (
     GPUInfo,
     detect_gpu,
     lookup_gpu_category,
+    get_llvm_objdump,
+    get_target_gpu_arch,
     _get_rocm_version,
     _check_rocm_version_geq,
     TestResult,
@@ -704,6 +706,11 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     except Exception as e:
         return [f"rocprofiler-systems: GPU detection error - {e}"]
 
+    try:
+        llvm_objdump = get_llvm_objdump(rocprof_config.rocm_path)
+    except FileNotFoundError:
+        llvm_objdump = "Not found - Set ROCPROFSYS_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
+
     rocm_ver = _get_rocm_version()
     rocm_ver_str = (
         f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
@@ -741,6 +748,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Avail:          {rocprof_config.rocprofsys_avail}",
         f"  Causal:         {rocprof_config.rocprofsys_causal}",
         f"  MPI exec:       {rocprof_config.mpiexec}",
+        f"  LLVM objdump:   {llvm_objdump}",
         "=" * 70,
         "",
     ]
@@ -753,7 +761,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 
 
 @pytest.fixture
-def run_test(collect_result, rocprof_config, test_output_dir):
+def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir):
     """Unified fixture to run any test runner type and handle pytest logic.
 
     Args:
@@ -801,6 +809,20 @@ def run_test(collect_result, rocprof_config, test_output_dir):
             pytest.fail(
                 f"Invalid runner type: {runner_type}. Use: {list(RUNNERS.keys())}"
             )
+
+        # For GPU tests, ensure that the target supports at least one of the current system architectures
+        if request.node.get_closest_marker("gpu"):
+            try:
+                target_path = rocprof_config.get_target_executable(target)
+                target_archs = get_target_gpu_arch(rocprof_config.rocm_path, target_path)
+                system_archs = gpu_info.architectures
+                if not any(arch in target_archs for arch in system_archs):
+                    pytest.skip(
+                        f"{target} does not support any of the current system architectures. "
+                        f"{target} architectures: {target_archs}, system architectures: {system_archs}"
+                    )
+            except FileNotFoundError:
+                pass
 
         try:
             runner = runner_class(

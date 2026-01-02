@@ -23,6 +23,7 @@
 import re
 import shutil
 import subprocess
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -177,23 +178,19 @@ def lookup_gpu_category(arch: str) -> list[str]:
     return categories
 
 
-def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
-    """Get the list of gpu architectures (gfx) the target was compiled for.
-
-    Attempts to find ROCm's llvm-objdump
-        - Attempts to find llvm-objdump in the ROCm install directory
-        - Fallbacks to PATH lookup
+def get_llvm_objdump(rocm_path: Path) -> Path:
+    """Get the path to llvm-objdump.
 
     Args:
         rocm_path: Path to the ROCm installation directory
-        target_path: Path to the binary to check
 
     Returns:
-        List of GPU architectures the target was compiled for
-    """
-    target_archs: list[str] = []
+        Path to llvm-objdump
 
-    # Find llvm-objdump
+    Raises:
+        FileNotFoundError: If llvm-objdump is not found
+    """
+    llvm_objdump_candidates = []
     if rocm_path:
         llvm_objdump_candidates = [
             rocm_path / "llvm" / "bin" / "llvm-objdump",
@@ -201,25 +198,74 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
         ]
         for candidate in llvm_objdump_candidates:
             if candidate.exists():
-                llvm_objdump = candidate
-                break
-    if not llvm_objdump:
-        llvm_objdump = shutil.which("llvm-objdump")
+                return candidate
+
+    # Check env var
+    llvm_objdump = os.environ.get("ROCPROFSYS_LLVM_OBJDUMP")
+    if llvm_objdump:
+        return Path(llvm_objdump)
+
+    # We explicitly avoid checking PATH here as we require the llvm-objdump
+    # from the ROCm installation directory.
+    searched_paths = [f"  - {p}" for p in llvm_objdump_candidates]
+    searched_paths.append("  - ROCPROFSYS_LLVM_OBJDUMP environment variable")
+
+    raise FileNotFoundError(
+        f"ROCm's llvm-objdump not found. Searched in:\n" + "\n".join(searched_paths)
+    )
+
+
+def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
+    """Get the list of gpu architectures (gfx) the target was compiled for.
+
+    Args:
+        rocm_path: Path to the ROCm installation directory
+        target_path: Path to the binary to check
+
+    Returns:
+        List of GPU architectures the target was compiled for
+
+    Raises:
+        FileNotFoundError: If llvm-objdump is not found
+    """
+    target_archs: set[str] = set()
+    extracted_files: list[Path] = []
+
+    # Find llvm-objdump
+    llvm_objdump = get_llvm_objdump(rocm_path)
 
     if llvm_objdump:
+        # Use absolute path so extracted file paths in output are also absolute
+        abs_target_path = Path(target_path).resolve()
+
         try:
             result = subprocess.run(
-                [llvm_objdump, "--offloading", target_path],
+                [str(llvm_objdump), "--offloading", str(abs_target_path)],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
             if result.returncode == 0:
                 for line in result.stdout.strip().split("\n"):
-                    match = re.search(r"processor:\s*(gfx[0-9a-fA-F]+)", line)
+                    # Match any gfxXXXX pattern in the line
+                    match = re.search(r"(gfx[0-9a-fA-F]+)", line)
                     if match:
-                        target_archs.append(match.group(1))
+                        target_archs.add(match.group(1))
+
+                    # Capture extracted bundle paths for cleanup
+                    # Format: "Extracting offload bundle: /path/to/file"
+                    bundle_match = re.search(r"Extracting offload bundle:\s*(.+)$", line)
+                    if bundle_match:
+                        extracted_files.append(Path(bundle_match.group(1)))
         except (subprocess.TimeoutExpired, OSError):
             pass
 
-    return target_archs
+    # Clean up extracted files
+    for extracted_file in extracted_files:
+        try:
+            if extracted_file.exists():
+                extracted_file.unlink()
+        except OSError:
+            pass
+
+    return list(target_archs)
