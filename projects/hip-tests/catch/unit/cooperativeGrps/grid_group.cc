@@ -39,6 +39,10 @@ static __global__ void grid_group_thread_rank_getter(unsigned int* thread_ranks)
   thread_ranks[thread_rank_in_grid()] = cg::this_grid().thread_rank();
 }
 
+static __global__ void grid_group_block_rank_getter(unsigned int* block_ranks) {
+  block_ranks[thread_rank_in_grid()] = cg::this_grid().block_rank();
+}
+
 static __global__ void grid_group_is_valid_getter(unsigned int* is_valid_flags) {
   is_valid_flags[thread_rank_in_grid()] = cg::this_grid().is_valid();
 }
@@ -160,9 +164,18 @@ TEST_CASE("Unit_Grid_Group_Getters_Positive_Basic") {
   HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                       grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchCooperativeKernel(grid_group_block_rank_getter, blocks, threads, params, 0, 0));
 
   // Verify grid_group.is_valid() values
   ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [](uint32_t) { return 1; });
+
+  HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
+                      grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify grid_group.block_rank() values
+  ArrayAllOf(uint_arr.ptr(), grid.thread_count_, [threads](uint32_t i) {
+    return i/(threads.x * threads.y * threads.z); });
 }
 
 /**

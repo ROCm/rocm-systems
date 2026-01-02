@@ -203,7 +203,7 @@ if __name__ == "__main__":
             # Preserve case for short options
             processed_argv.append(arg)
     sys.argv = processed_argv
-    
+
     if len(sys.argv) == 1:
         args = amd_smi_parser.parse_args(args=['default'])
     elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
