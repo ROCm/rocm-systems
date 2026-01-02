@@ -27,6 +27,7 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
@@ -491,7 +492,7 @@ get_internal_libs_data_impl()
             for(const auto& fitr : _funcs)
             {
                 auto _fname = fitr->getName();
-                auto _dname = tim::demangle(_fname);
+                auto _dname = rocprofsys::utility::demangle(_fname);
 
                 _data[itr.first][_mpath].emplace(_fname);
                 _data[itr.first][_mpath].emplace(_dname);

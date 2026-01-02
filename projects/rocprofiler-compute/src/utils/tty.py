@@ -382,7 +382,7 @@ def format_table_output(
 
     # Check if any column in df is empty
     is_empty_columns_exist = any(
-        df.replace("", None).iloc[:, col_idx].isnull().all()
+        df.replace(["", "N/A"], None).iloc[:, col_idx].isnull().all()
         for col_idx in range(len(df.columns))
     )
 
@@ -426,7 +426,8 @@ def format_table_output(
         and "Value" in df.columns
     ):
         mem_data = (
-            pd.DataFrame([df["Metric"], df["Value"]])
+            pd
+            .DataFrame([df["Metric"], df["Value"]])
             .transpose()
             .set_index("Metric")
             .to_dict()["Value"]

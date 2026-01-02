@@ -9,6 +9,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - `hipKernelGetParamInfo`   returns the offset and size of a kernel parameter
 
+* New HIP supports
+    - `grid_group::block_rank()` returns the rank of the block in the calling thread
+
 ## HIP 7.2 for ROCm 7.2
 
 ### Added
