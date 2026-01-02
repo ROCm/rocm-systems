@@ -82,30 +82,27 @@ def validate_regex(
     test_result: TestResult,
     pass_regex: Optional[list[str]] = None,
     fail_regex: Optional[list[str]] = None,
-    abort_fail_regex: bool = True,
+    use_abort_fail_regex: bool = True,
 ) -> ValidationResult:
     """Validate the regex patterns in the test result.
+    Does not check for result return code.
 
     Args:
         test_result: TestResult object (after test execution)
         pass_regex: Optional list of regex patterns that must be found for success
         fail_regex: Optional list of regex patterns that must NOT be found
-        abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
+        use_abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
 
     Returns:
         ValidationResult with is_valid=True if all patterns pass, False otherwise
     """
-    if test_result.returncode != 0:
-        return ValidationResult(
-            is_valid=False,
-            message=f"Non-zero return code: {test_result.returncode}",
-        )
+    # Do not check for result return code
 
     # Build fail regex list
     fail_patterns: list[str] = []
     if fail_regex:
         fail_patterns.extend(fail_regex)
-    if abort_fail_regex:
+    if use_abort_fail_regex:
         fail_patterns.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
 
     # Build combined regex with named groups

@@ -80,7 +80,7 @@ class TestVideoDecode:
         assert_regex,
     ):
         env = video_decode_env.copy()
-        if env.get("ROCPROFSYS_USE_ROCPD") == "ON" and "instinct" in gpu_info.categories:
+        if "instinct" in gpu_info.categories:
             rules_dir = rocprof_config.rocpd_validation_rules / "video-decode"
             video_decode_rules.append(rules_dir / "amd-smi-rules.json")
 

@@ -295,9 +295,9 @@ def _result_output(request):
     """Auto-use fixture to handle result collection and --show-output display.
 
     Output display logic:
-    - Default (no flags): Test fails → pytest shows test_output. No extra printing.
-    - --show-output-on-subtest-fail: Print test_output only when subtests fail
-    - --show-output: Implies --show-output-on-subtest-fail, plus prints on test pass
+    - Default (no flags): Test fails → pytest shows test_output. No extra printing
+    - --show-output-on-subtest-fail: Print test_output when subtests fail
+    - --show-output: Print test_output when tests pass or fail
     - --no-output: Suppresses all output
 
     Main test body failures are always handled by pytest's captured output.
@@ -335,12 +335,9 @@ def _result_output(request):
 
     should_show = False
     if has_subtest_failures and show_on_subtest_fail:
-        # Actual subtest failed
         should_show = True
     elif not test_failed and show_output:
-        # Test passed and --show-output is set
         should_show = True
-    # Main test body failure (no subtests): pytest handles it
     if not should_show:
         return
 
@@ -357,17 +354,18 @@ def _result_output(request):
         if test_output:
             print(f"--- TEST OUTPUT ---\n{test_output}")
         if extra_output:
-            print(f"--- EXTRA OUTPUT ---\n{extra_output}")
+            print(f"\n--- EXTRA OUTPUT ---\n{extra_output}")
 
 
 @pytest.fixture
 def collect_result(request) -> Callable:
     """Fixture to collect test results for --show-output display.
 
-    Usage in tests:
+    Handled by the `run_test` fixture
+
+    Manual usage in tests:
         result = runner.run()
         collect_result(result)
-        assert result.success, f"Failed: {result.failure_reason}"
     """
 
     def _collect(result):
@@ -768,6 +766,7 @@ def run_test(collect_result, rocprof_config, test_output_dir):
         mpi_ranks: Number of MPI ranks (0 = disabled)
         working_directory: Custom working directory
         skip_on_error: If True, pytest.skip on non-zero return code (default: False = fail)
+        fail_on_pass: If True, pytest.fail on success and pytest.pass on failure (default: False)
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
         **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
@@ -792,6 +791,7 @@ def run_test(collect_result, rocprof_config, test_output_dir):
         mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
         skip_on_error: bool = False,
+        fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
         fail_message: Optional[str] = None,
         **kwargs,
@@ -823,7 +823,7 @@ def run_test(collect_result, rocprof_config, test_output_dir):
         result = runner.run()
         collect_result(result)
 
-        if not result.success:
+        if not result.success and not fail_on_pass:
             if fail_message:
                 msg = f"{fail_message}: {result.test_output}"
             else:
@@ -832,6 +832,12 @@ def run_test(collect_result, rocprof_config, test_output_dir):
                 pytest.skip(msg)
             else:
                 pytest.fail(msg)
+
+        if fail_on_pass:
+            if result.success:
+                pytest.fail(
+                    f"{runner_type} test passed unexpectedly: {result.test_output}"
+                )
 
         return result
 
@@ -853,11 +859,14 @@ def assert_regex(subtests):
         subtest_name: str = "Regex validation",
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
+        use_abort_fail_regex: bool = True,
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
         with subtests.test(subtest_name):
-            validation = validate_regex(result, pass_regex, fail_regex)
+            validation = validate_regex(
+                result, pass_regex, fail_regex, use_abort_fail_regex
+            )
             if not validation.is_valid:
                 msg = fail_message or f"Regex validation failed: {validation.message}"
                 if skip_on_fail:
