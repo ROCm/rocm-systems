@@ -1428,11 +1428,18 @@ def impute_counters_iteration_multiplex(
                 cols_frozenset = frozenset(
                     row[counter_columns][row[counter_columns].notna()].index
                 )
+                # If no counters found for this dispatch, continue
+                if not cols_frozenset:
+                    continue
                 # Since counter buckets are repeated in round robin fashion,
                 # we can stop once we see a repeated bucket
                 if cols_frozenset in counter_groups:
                     break
                 counter_groups.add(cols_frozenset)
+
+            # If no counters found for this group, continue
+            if not counter_groups:
+                continue
 
             # Iterate over subgroups of dispatches containing
             # all counters and impute missing values
@@ -1461,12 +1468,14 @@ def impute_counters_iteration_multiplex(
 
             # Concatenate all subgroups for this group
             if subgroup_dfs:
-                imputed_group = pd.concat(subgroup_dfs, ignore_index=True)
-                group_dfs.append(imputed_group)
+                # Add the imputed group dataframe
+                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
-            pd.concat(group_dfs, ignore_index=True) if group_dfs else pd.DataFrame()
+            pd.concat(group_dfs, ignore_index=True)
+            if group_dfs
+            else pd.DataFrame(df.columns)
         )
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)

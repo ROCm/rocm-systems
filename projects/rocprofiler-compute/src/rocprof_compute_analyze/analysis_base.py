@@ -86,9 +86,6 @@ class OmniAnalyze_Base:
         self.__args = args
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
         self._arch_configs: dict[str, schema.ArchConfig] = {}
-        self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
-            args.path[0][0]
-        )
         self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
@@ -327,7 +324,6 @@ class OmniAnalyze_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
-        profiling_config = self.get_profiling_config()
 
         if args.tui:
             return
@@ -357,6 +353,12 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
+        self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
+            args.path[0][0]
+        )
+        profiling_config = self.get_profiling_config()
+
+        for dir_info in args.path:
             if not any([
                 args.nodes,
                 args.list_nodes,
