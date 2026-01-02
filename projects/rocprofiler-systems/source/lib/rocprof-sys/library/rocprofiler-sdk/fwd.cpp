@@ -131,9 +131,15 @@ client_data::initialize()
 void
 client_data::initialize_event_info()
 {
-    if(get_agent_manager_instance().get_agents().empty())
+    auto& agent_mngr = get_agent_manager_instance();
+
+    if(agent_mngr.get_agents().empty())
     {
         initialize();
+    }
+    else if(gpu_agents.empty() && cpu_agents.empty())
+    {
+        set_agents();
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
