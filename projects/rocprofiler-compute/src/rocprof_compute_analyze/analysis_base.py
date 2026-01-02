@@ -427,9 +427,8 @@ class OmniAnalyze_Base:
             console_log(
                 "analysis",
                 (
-                    "Profiling data was collected using iteration multiplexing. "
-                    "Some metrics may represent aggregated values "
-                    "across multiple iterations."
+                    "Profiling data was collected using iteration multiplexing.\n\t"
+                    "Metrics are calculated based on partially available counter data."
                 ),
             )
 
