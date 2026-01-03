@@ -24,13 +24,77 @@
 
 #include "data_storage/database.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 namespace rocm {
 
+// ==================== storage_config implementation ====================
+
+namespace {
+
+bool is_directory_writable(const std::string &path) {
+  if (!std::filesystem::exists(path)) {
+    return false;
+  }
+  if (!std::filesystem::is_directory(path)) {
+    return false;
+  }
+  // Try to create a temp file to verify write access
+  auto test_path = std::filesystem::path(path) / ".rocstorage_write_test";
+  std::ofstream test_file(test_path);
+  if (!test_file.good()) {
+    return false;
+  }
+  test_file.close();
+  std::filesystem::remove(test_path);
+  return true;
+}
+
+} // namespace
+
+storage_config storage_config::write_only() {
+  storage_config config;
+  config.storage_mode = mode::write;
+  return config;
+}
+
+storage_config storage_config::read_write() {
+  storage_config config;
+  config.storage_mode = mode::read_write;
+  config.wal_directory = default_wal_directory();
+  return config;
+}
+
+storage_config storage_config::read_only() {
+  storage_config config;
+  config.storage_mode = mode::read;
+  return config;
+}
+
+storage_config storage_config::detect_defaults() {
+  // Default to write-only mode (current behavior, max performance)
+  return write_only();
+}
+
+std::string storage_config::default_wal_directory() {
+#ifdef __linux__
+  // On Linux, prefer /dev/shm (RAM disk) for better performance
+  if (is_directory_writable("/dev/shm")) {
+    return "/dev/shm/rocstorage";
+  }
+#endif
+  // Fall back to system temp directory on all platforms
+  return (std::filesystem::temp_directory_path() / "rocstorage").string();
+}
+
+// ==================== storage implementation ====================
+
 struct storage::Impl {
   std::string path;
   std::string uuid;
+  storage_config config;
   std::shared_ptr<rocstorage::data_storage::database> database;
   std::shared_ptr<rocstorage::writer> writer;
   mutable std::shared_ptr<rocstorage::reader> reader;
@@ -56,10 +120,59 @@ storage::storage(std::string database_path, std::string uuid)
 std::unique_ptr<storage> storage::open(const std::string &path) {
   auto s = std::unique_ptr<storage>(new storage());
   s->impl_->path = path;
+  s->impl_->config = storage_config::read_only();
   s->impl_->reader = rocstorage::reader::open(path);
   if (!s->impl_->reader) {
     return nullptr;
   }
+  return s;
+}
+
+std::unique_ptr<storage> storage::create(const std::string &path,
+                                         const std::string &uuid,
+                                         const storage_config &config) {
+  auto s = std::unique_ptr<storage>(new storage());
+  s->impl_->path = path;
+  s->impl_->uuid = uuid;
+  s->impl_->config = config;
+
+  switch (config.storage_mode) {
+  case storage_config::mode::read:
+    // Read-only mode: just open for reading
+    s->impl_->reader = rocstorage::reader::open(path);
+    if (!s->impl_->reader) {
+      return nullptr;
+    }
+    break;
+
+  case storage_config::mode::write:
+    // Write-only mode: in-memory database, flush at end
+    s->impl_->database = std::make_shared<rocstorage::data_storage::database>(
+        path, uuid, rocstorage::data_storage::database_mode::in_memory);
+    if (!s->impl_->database) {
+      return nullptr;
+    }
+    s->impl_->writer = std::shared_ptr<rocstorage::writer>(
+        new rocstorage::writer(s->impl_->database, uuid));
+    break;
+
+  case storage_config::mode::read_write:
+    // Read-write mode: file-based WAL for concurrent access
+    s->impl_->database = std::make_shared<rocstorage::data_storage::database>(
+        path, uuid, rocstorage::data_storage::database_mode::wal);
+    if (!s->impl_->database) {
+      return nullptr;
+    }
+    s->impl_->writer = std::shared_ptr<rocstorage::writer>(
+        new rocstorage::writer(s->impl_->database, uuid));
+    break;
+
+  case storage_config::mode::unknown:
+  default:
+    throw std::invalid_argument(
+        "Invalid storage mode. Use write_only(), read_write(), or read_only().");
+  }
+
   return s;
 }
 

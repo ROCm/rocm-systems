@@ -33,9 +33,17 @@
 
 namespace rocstorage {
 namespace data_storage {
+
+/// Database storage mode
+enum class database_mode {
+  in_memory, ///< Write to in-memory SQLite, flush to disk at end (default)
+  wal        ///< Write directly to file using WAL mode (concurrent access)
+};
+
 class database {
 public:
-  explicit database(std::string abs_db_path, std::string uuid);
+  explicit database(std::string abs_db_path, std::string uuid,
+                    database_mode mode = database_mode::in_memory);
   database() = delete;
   database(database &) = delete;
   database &operator=(database &) = delete;
@@ -57,7 +65,7 @@ public:
   template <typename... Values>
   auto create_statement_executor(const std::string &query) {
     sqlite3_stmt *p_stmt;
-    validate_sqlite3_result(sqlite3_prepare_v2(m_sqlite3_inmemory,
+    validate_sqlite3_result(sqlite3_prepare_v2(m_sqlite3_db,
                                                query.c_str(), -1, &p_stmt,
                                                nullptr),
                             query.c_str(), "Failed to create statement!");
@@ -96,12 +104,12 @@ private:
 
       ss << "Constraint violation(s): " << "\n";
 
-      sqlite3_exec(m_sqlite3_inmemory, "PRAGMA foreign_keys = OFF;", nullptr,
+      sqlite3_exec(m_sqlite3_db, "PRAGMA foreign_keys = OFF;", nullptr,
                    nullptr, nullptr);
-      sqlite3_exec(m_sqlite3_inmemory, query, nullptr, nullptr, nullptr);
-      sqlite3_exec(m_sqlite3_inmemory, "PRAGMA foreign_keys = ON;", nullptr,
+      sqlite3_exec(m_sqlite3_db, query, nullptr, nullptr, nullptr);
+      sqlite3_exec(m_sqlite3_db, "PRAGMA foreign_keys = ON;", nullptr,
                    nullptr, nullptr);
-      sqlite3_prepare_v2(m_sqlite3_inmemory, "PRAGMA foreign_key_check", -1,
+      sqlite3_prepare_v2(m_sqlite3_db, "PRAGMA foreign_key_check", -1,
                          &stmt, nullptr);
       int rc = 0;
       while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
@@ -121,7 +129,7 @@ private:
     } break;
     }
     ss << " [Sqlite3 error: " << error_message;
-    ss << " (Extended error message: " << sqlite3_errmsg(m_sqlite3_inmemory)
+    ss << " (Extended error message: " << sqlite3_errmsg(m_sqlite3_db)
        << ")]";
     throw std::runtime_error(ss.str());
   }
@@ -184,9 +192,10 @@ private:
   }
 
 private:
-  sqlite3 *m_sqlite3_inmemory{nullptr};
+  sqlite3 *m_sqlite3_db{nullptr};
   std::string m_db_path{};
   std::string m_uuid{};
+  database_mode m_mode{database_mode::in_memory};
   bool m_initialized{false};
   bool m_flushed{false};
 };

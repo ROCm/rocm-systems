@@ -146,8 +146,8 @@ std::string get_schema_query(rocpd_sql_schema_kind_t schema_kind,
 
 namespace rocstorage {
 namespace data_storage {
-database::database(std::string db_path, std::string uuid)
-    : m_db_path{std::move(db_path)}, m_uuid{std::move(uuid)} {
+database::database(std::string db_path, std::string uuid, database_mode mode)
+    : m_db_path{std::move(db_path)}, m_uuid{std::move(uuid)}, m_mode{mode} {
   // Validate UUID to ensure compatibility with rocstorage-reader's GUID extraction
   if (!validation::is_valid_uuid(m_uuid)) {
     throw std::invalid_argument(
@@ -157,14 +157,31 @@ database::database(std::string db_path, std::string uuid)
   }
 
   create_directory_for_database_file(m_db_path);
-  spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
-               m_db_path);
 
-  validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_inmemory), "",
-                          "database open failed!");
+  if (m_mode == database_mode::wal) {
+    // WAL mode: open file directly for concurrent read/write access
+    spdlog::info("rocstorage database initialized in WAL mode (uuid: {}, path: {})",
+                 m_uuid, m_db_path);
+    validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &m_sqlite3_db), "",
+                            "database open failed!");
+    // Enable WAL mode for concurrent access
+    validate_sqlite3_result(
+        sqlite3_exec(m_sqlite3_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr),
+        "PRAGMA journal_mode=WAL", "Failed to enable WAL mode!");
+    // Use NORMAL synchronous mode for better performance with reasonable safety
+    validate_sqlite3_result(
+        sqlite3_exec(m_sqlite3_db, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr),
+        "PRAGMA synchronous=NORMAL", "Failed to set synchronous mode!");
+  } else {
+    // In-memory mode: write to memory, flush to disk at end (current behavior)
+    spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
+                 m_db_path);
+    validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_db), "",
+                            "database open failed!");
+  }
 }
 
-database::~database() { sqlite3_close(m_sqlite3_inmemory); }
+database::~database() { sqlite3_close(m_sqlite3_db); }
 
 std::string database::get_uuid() const { return m_uuid; }
 
@@ -188,7 +205,7 @@ void database::initialize_schema() {
     }
 
     validate_sqlite3_result(
-        sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0), query.c_str(),
+        sqlite3_exec(m_sqlite3_db, query.c_str(), 0, 0, 0), query.c_str(),
         std::string("Invalid schema, init database failed!"));
   }
 
@@ -197,12 +214,12 @@ void database::initialize_schema() {
 
 void database::execute_query(const std::string &query) {
   validate_sqlite3_result(
-      sqlite3_exec(m_sqlite3_inmemory, query.c_str(), 0, 0, 0),
+      sqlite3_exec(m_sqlite3_db, query.c_str(), 0, 0, 0),
       "Failed to execute query - ", query);
 }
 
 size_t database::get_last_insert_id() const {
-  return sqlite3_last_insert_rowid(m_sqlite3_inmemory);
+  return sqlite3_last_insert_rowid(m_sqlite3_db);
 }
 
 void database::flush() {
@@ -210,16 +227,22 @@ void database::flush() {
     throw std::runtime_error("Database already flushed!");
   }
 
-  sqlite3 *out_db;
-  validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &out_db), "",
-                          "database open failed!");
-  auto *backup =
-      sqlite3_backup_init(out_db, "main", m_sqlite3_inmemory, "main");
-  if (backup) {
-    sqlite3_backup_step(backup, -1);
-    sqlite3_backup_finish(backup);
+  if (m_mode == database_mode::wal) {
+    // WAL mode: data is already on disk, just checkpoint to ensure durability
+    sqlite3_wal_checkpoint_v2(m_sqlite3_db, nullptr, SQLITE_CHECKPOINT_FULL,
+                              nullptr, nullptr);
+  } else {
+    // In-memory mode: backup to file
+    sqlite3 *out_db;
+    validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &out_db), "",
+                            "database open failed!");
+    auto *backup = sqlite3_backup_init(out_db, "main", m_sqlite3_db, "main");
+    if (backup) {
+      sqlite3_backup_step(backup, -1);
+      sqlite3_backup_finish(backup);
+    }
+    sqlite3_close(out_db);
   }
-  sqlite3_close(out_db);
   m_flushed = true;
 }
 

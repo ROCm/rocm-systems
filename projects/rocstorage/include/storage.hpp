@@ -34,6 +34,45 @@
 
 namespace rocm {
 
+/// Configuration for storage mode and behavior
+struct storage_config {
+  /// Storage access modes
+  enum class mode {
+    unknown,    ///< Unknown/unset mode (will use detect_defaults)
+    write,      ///< Write-only: in-memory SQLite, flush to disk at end (max write perf)
+    read_write, ///< Read-write: file-based SQLite with WAL mode (concurrent access)
+    read        ///< Read-only: open existing database for analysis
+  };
+
+  mode storage_mode = mode::unknown;
+
+  // Read-write mode options
+  std::string wal_directory;  ///< Directory for WAL files (empty = platform default)
+  bool use_ram_disk = true;   ///< Prefer RAM disk (/dev/shm) if available
+
+  // Read-only mode options
+  bool cache_in_memory = false;    ///< Load entire DB into memory for repeated queries
+  size_t connection_pool_size = 0; ///< Connection pool size (0 = auto/hardware_concurrency)
+
+  // Shared options
+  bool sync_on_close = true; ///< Ensure data persisted before destructor returns
+
+  /// Create write-only configuration (default, max performance)
+  static storage_config write_only();
+
+  /// Create read-write configuration (concurrent access via WAL)
+  static storage_config read_write();
+
+  /// Create read-only configuration (for analysis)
+  static storage_config read_only();
+
+  /// Detect platform-appropriate defaults
+  static storage_config detect_defaults();
+
+  /// Get platform-specific default WAL directory
+  static std::string default_wal_directory();
+};
+
 /// Track data (value type, internally managed by storage)
 class track_view {
 public:
@@ -64,8 +103,13 @@ private:
 /// Unified storage facade for reading and writing profiling data
 class storage {
 public:
-  /// Create storage for writing (existing constructor)
+  /// Create storage for writing (existing constructor, uses write-only mode)
   explicit storage(std::string database_path, std::string uuid);
+
+  /// Create storage with explicit configuration
+  static std::unique_ptr<storage> create(const std::string &path,
+                                         const std::string &uuid,
+                                         const storage_config &config);
 
   /// Open existing database for reading
   static std::unique_ptr<storage> open(const std::string &path);

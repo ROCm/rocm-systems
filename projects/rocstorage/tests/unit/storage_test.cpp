@@ -78,4 +78,65 @@ TEST_F(storage_test, multiple_get_reader_returns_same_instance) {
   EXPECT_EQ(reader1.get(), reader2.get());
 }
 
+// ==================== storage_config tests ====================
+
+TEST(storage_config_test, write_only_returns_write_mode) {
+  auto config = rocm::storage_config::write_only();
+  EXPECT_EQ(config.storage_mode, rocm::storage_config::mode::write);
+}
+
+TEST(storage_config_test, read_write_returns_read_write_mode) {
+  auto config = rocm::storage_config::read_write();
+  EXPECT_EQ(config.storage_mode, rocm::storage_config::mode::read_write);
+  EXPECT_FALSE(config.wal_directory.empty());
+}
+
+TEST(storage_config_test, read_only_returns_read_mode) {
+  auto config = rocm::storage_config::read_only();
+  EXPECT_EQ(config.storage_mode, rocm::storage_config::mode::read);
+}
+
+TEST(storage_config_test, detect_defaults_returns_write_mode) {
+  auto config = rocm::storage_config::detect_defaults();
+  EXPECT_EQ(config.storage_mode, rocm::storage_config::mode::write);
+}
+
+TEST(storage_config_test, default_wal_directory_is_not_empty) {
+  auto dir = rocm::storage_config::default_wal_directory();
+  EXPECT_FALSE(dir.empty());
+  EXPECT_TRUE(dir.find("rocstorage") != std::string::npos);
+}
+
+// ==================== storage::create tests ====================
+
+TEST_F(storage_test, create_with_write_only_mode) {
+  auto storage =
+      rocm::storage::create(m_database_path, m_uuid,
+                            rocm::storage_config::write_only());
+  ASSERT_NE(storage, nullptr);
+  EXPECT_NE(storage->get_writer(), nullptr);
+}
+
+TEST_F(storage_test, create_with_read_write_mode) {
+  auto storage =
+      rocm::storage::create(m_database_path, m_uuid,
+                            rocm::storage_config::read_write());
+  ASSERT_NE(storage, nullptr);
+  EXPECT_NE(storage->get_writer(), nullptr);
+}
+
+TEST_F(storage_test, create_with_unknown_mode_throws) {
+  rocm::storage_config config;  // default is unknown
+  EXPECT_THROW(
+      rocm::storage::create(m_database_path, m_uuid, config),
+      std::invalid_argument);
+}
+
+TEST_F(storage_test, create_with_read_mode_on_nonexistent_file_returns_nullptr) {
+  auto storage =
+      rocm::storage::create("nonexistent_file.db", m_uuid,
+                            rocm::storage_config::read_only());
+  EXPECT_EQ(storage, nullptr);
+}
+
 } // namespace
