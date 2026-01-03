@@ -71,6 +71,13 @@ struct storage_config {
 
   /// Get platform-specific default WAL directory
   static std::string default_wal_directory();
+
+  /// Check if RAM disk is available on this platform
+  static bool is_ram_disk_available();
+
+  /// Get the effective WAL directory for this config
+  /// Uses wal_directory if set, otherwise computes based on use_ram_disk setting
+  std::string effective_wal_directory() const;
 };
 
 /// Track data (value type, internally managed by storage)

@@ -79,13 +79,33 @@ storage_config storage_config::detect_defaults() {
 }
 
 std::string storage_config::default_wal_directory() {
-#ifdef __linux__
-  // On Linux, prefer /dev/shm (RAM disk) for better performance
-  if (is_directory_writable("/dev/shm")) {
+  // Use RAM disk if available, otherwise temp directory
+  if (is_ram_disk_available()) {
     return "/dev/shm/rocstorage";
   }
+  return (std::filesystem::temp_directory_path() / "rocstorage").string();
+}
+
+bool storage_config::is_ram_disk_available() {
+#ifdef __linux__
+  return is_directory_writable("/dev/shm");
+#else
+  // RAM disk not available on other platforms by default
+  return false;
 #endif
-  // Fall back to system temp directory on all platforms
+}
+
+std::string storage_config::effective_wal_directory() const {
+  // If explicitly set, use it
+  if (!wal_directory.empty()) {
+    return wal_directory;
+  }
+
+  // Otherwise, compute based on use_ram_disk preference
+  if (use_ram_disk && is_ram_disk_available()) {
+    return "/dev/shm/rocstorage";
+  }
+
   return (std::filesystem::temp_directory_path() / "rocstorage").string();
 }
 
