@@ -554,6 +554,16 @@ hsaKmtRegisterGraphicsHandleToNodesCtx(
 
 HSAKMT_STATUS
 HSAKMTAPI
+hsaKmtRegisterMemoryRangesWithFlagsCtx(
+    HsaKFDContext *ctx,
+    void *MemoryAddress,
+    HsaMemoryRange *MemoryRanges,
+    HSAuint64 RangesCount,
+    HsaMemFlags MemFlags
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
 hsaKmtRegisterGraphicsHandleToNodesExtCtx(
     HsaKFDContext           *ctx,                         //IN
     HSAuint64               GraphicsResourceHandle,       //IN

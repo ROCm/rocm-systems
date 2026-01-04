@@ -1061,6 +1061,38 @@ struct kfd_ioctl_alloc_memory_of_gpu_args {
 	__u32 flags;
 };
 
+/* Userptr range for batch allocation
+ *
+ * @start: start address of user virtual memory range
+ * @size:  size of this user virtual memory range in bytes
+ */
+struct kfd_ioctl_userptr_range {
+	__u64 start;		/* to KFD */
+	__u64 size;		/* to KFD */
+};
+
+/* Allocate memory for batch of non-contiguous userptr ranges
+ * that map to a contiguous GPU virtual address
+ *
+ * @va_addr:     contiguous GPU virtual address where all ranges will be mapped
+ * @total_size:  total size in bytes (sum of all range sizes)
+ * @handle:      buffer handle returned to user mode
+ * @ranges_ptr:  pointer to array of kfd_ioctl_userptr_range structures
+ * @num_ranges:  number of ranges in the array
+ * @gpu_id:      device identifier
+ * @flags:       memory type and attributes (must include KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+ */
+struct kfd_ioctl_alloc_memory_of_gpu_batch_args {
+	__u64 va_addr;		/* to KFD */
+	__u64 total_size;	/* to KFD */
+	__u64 handle;		/* from KFD */
+	__u64 ranges_ptr;	/* to KFD */
+	__u32 num_ranges;	/* to KFD */
+	__u32 gpu_id;		/* to KFD */
+	__u32 flags;		/* to KFD */
+	__u32 pad;
+};
+
 /* Free memory allocated with kfd_ioctl_alloc_memory_of_gpu
  *
  * @handle: memory handle returned by alloc
@@ -1824,8 +1856,11 @@ struct kfd_ioctl_create_process_args {
 #define AMDKFD_IOC_CREATE_PROCESS		\
 		AMDKFD_IOWR(0x27, struct kfd_ioctl_create_process_args)
 
+#define AMDKFD_IOC_ALLOC_MEMORY_OF_GPU_BATCH	\
+		AMDKFD_IOWR(0x28, struct kfd_ioctl_alloc_memory_of_gpu_batch_args)
+
 #define AMDKFD_COMMAND_START		0x01
-#define AMDKFD_COMMAND_END		0x28
+#define AMDKFD_COMMAND_END		0x29
 
 /* non-upstream ioctls */
 #define AMDKFD_IOC_IPC_IMPORT_HANDLE                                    \

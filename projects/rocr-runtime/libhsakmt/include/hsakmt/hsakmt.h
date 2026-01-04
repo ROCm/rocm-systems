@@ -499,6 +499,15 @@ hsaKmtRegisterMemoryWithFlags(
     HsaMemFlags MemFlags            // IN
     );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRegisterMemoryRangesWithFlags(
+    void *MemoryAddress,
+    HsaMemoryRange *MemoryRanges,
+    HSAuint64 RangesCount,
+    HsaMemFlags MemFlags
+    );
+
 /**
   Registers with KFD a graphics buffer and returns graphics metadata
 */

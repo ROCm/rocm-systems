@@ -395,6 +395,34 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExtCtx(HsaKFDContext 
 	return ret;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryRangesWithFlagsCtx(HsaKFDContext *ctx,
+						    void *MemoryAddress,
+						    HsaMemoryRange *MemoryRanges,
+						    HSAuint64 RangesCount,
+						    HsaMemFlags MemFlags)
+{
+	CHECK_KFD_OPEN();
+	HSAKMT_STATUS ret;
+
+	pr_debug("[%s] address %p, ranges count %lu\n", __func__, MemoryAddress, RangesCount);
+
+	if (!hsakmt_is_dgpu)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	if (!MemoryRanges || RangesCount == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (MemFlags.ui32.CoarseGrain && MemFlags.ui32.ExtendedCoherent)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	ret = hsakmt_fmm_register_user_memory_ranges(ctx, MemoryAddress, MemoryRanges, RangesCount, NULL, MemFlags);
+
+	return ret;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandleCtx(HsaKFDContext *ctx,
 						 void *MemoryAddress,
 						 HSAuint64 MemorySizeInBytes,
@@ -928,4 +956,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 	CHECK_KFD_OPEN();
 
 	return hsaKmtGetAMDGPUDeviceHandleCtx(&hsakmt_primary_kfd_ctx, NodeId, DeviceHandle);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryRangesWithFlags(void* MemoryAddress,
+                                                   HsaMemoryRange* MemoryRanges,
+                                                   HSAuint64 RangesCount, HsaMemFlags MemFlags) {
+  CHECK_KFD_OPEN();
+
+  return hsaKmtRegisterMemoryRangesWithFlagsCtx(&hsakmt_primary_kfd_ctx, MemoryAddress, MemoryRanges,
+                                       RangesCount, MemFlags);
 }

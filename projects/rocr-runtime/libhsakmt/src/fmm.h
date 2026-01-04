@@ -103,6 +103,13 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 						uint32_t gpu_id_array_size,
 						HsaMemFlags flags);
 
+HSAKMT_STATUS hsakmt_fmm_register_user_memory_ranges(HsaKFDContext *ctx,
+							void *address,
+							HsaMemoryRange *ranges,
+							uint64_t nranges,
+							void **obj_ret,
+							HsaMemFlags flags);
+
 HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 						HSAuint64 GraphicsResourceHandle,
 						HsaGraphicsResourceInfo *GraphicsResourceInfo,
