@@ -4,7 +4,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 7.2.0
+## amd_smi_lib for ROCm 7.11.0
 
 ### Added
 
@@ -42,6 +42,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       RESET_PROFILE:
           POWER_PROFILE: Successfully reset Power Profile to default (bootup default)
   ```
+  
+## amd_smi_lib for ROCm 7.2.0
+
+### Added
 
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
