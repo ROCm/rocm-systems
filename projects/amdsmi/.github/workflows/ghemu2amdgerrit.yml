@@ -21,7 +21,7 @@ on:
 
 env:
   GERRIT_SERVER: "gerrit-git.amd.com"
-  GERRIT_PROJECT: "SYS-MGMT/ec/amd-smi" 
+  GERRIT_PROJECT: "SYS-MGMT/ec/amd-smi"
   GERRIT_USER: "z1_runner"
   GERRIT_PORT: "29418"
 

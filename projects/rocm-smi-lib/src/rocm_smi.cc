@@ -6309,7 +6309,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -6335,7 +6335,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size

@@ -415,9 +415,10 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::GetShareableHandle(void* mem, size_t size, core::ShareableHandle* handle) {
+hsa_status_t KfdDriver::GetShareableHandle(void* va, void* mem, size_t size,
+                                           core::ShareableHandle* handle) {
   uint64_t mem_handle;
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetMemoryHandle(mem, size, &mem_handle));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetMemoryHandle(va, mem, size, &mem_handle));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }

@@ -30,6 +30,7 @@
 #include "library/causal/components/causal_gotcha.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
+#include "library/components/kill_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
@@ -49,7 +50,7 @@ namespace rocprofsys
 {
 // started during preinit phase
 using preinit_bundle_t =
-    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
+    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t, kill_gotcha_t>;
 
 // started during init phase
 using init_bundle_t = tim::lightweight_tuple<causal::component::causal_gotcha,

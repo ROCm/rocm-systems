@@ -250,7 +250,7 @@ class AMDSMICommands():
             bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
             bdf = "N/A"
-        
+
         try:
             uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException:
@@ -3476,7 +3476,7 @@ class AMDSMICommands():
             process_info['mem_usage'] = self.helpers.unit_format(self.logger,
                                                                  process_info['mem_usage'],
                                                                  memory_usage_unit)
-            
+
             process_info['evicted_time'] = self.helpers.unit_format(self.logger,
                                                                  process_info['evicted_time'],
                                                                  evicted_time_unit)

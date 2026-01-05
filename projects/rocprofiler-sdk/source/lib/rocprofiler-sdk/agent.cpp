@@ -137,7 +137,7 @@ parse_cpu_info()
         for(const auto& itr : bitr)
         {
             auto match = sdk::parse::tokenize(itr, std::vector<std::string_view>{": "});
-            if(match.size() == 2)
+            if(match.size() >= 2)
             {
                 auto get_stol = [_label = std::string_view{itr}](const auto& _value) -> long {
                     try
@@ -153,24 +153,33 @@ parse_cpu_info()
                     return 0;
                 };
 
-                const auto& value = match.back();
+                // For cases with multiple colons, join all tokens after the first one
+                // e.g. "model name : AMD EPYC : 100-000000248" split into
+                // ["model name", "AMD EPYC", "100-000000248"] with the last two tokens joined
+                // back together with ": "
+                std::string value;
+                if(match.size() == 2)
+                {
+                    value = match.back();
+                }
+                else
+                {
+                    // Join all tokens after the first one with ": " separator
+                    for(size_t i = 1; i < match.size(); ++i)
+                    {
+                        if(i > 1) value += ": ";
+                        value += match[i];
+                    }
+                }
 
                 if(itr.find("vendor_id") == 0)
                     info_v.vendor_id = value;
                 else if(itr.find("model name") == 0)
                 {
-                    info_v.model_name      = value;
-                    size_t first_colon_pos = value.find(':');
-                    // This handles the case where the model name has multiple colons
-                    // Example "model name : AMD EPYC : 100-000000248"
-                    if(first_colon_pos != std::string::npos)
-                    {
-                        // Extract the model name after the first colon
-                        info_v.model_name = value.substr(first_colon_pos + 1);
-                        // Remove leading and trailing whitespaces
-                        info_v.model_name =
-                            sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
-                    }
+                    info_v.model_name = value;
+                    // Remove leading and trailing whitespaces
+                    info_v.model_name =
+                        sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
                 }
                 else if(itr.find("processor") == 0)
                     info_v.processor = get_stol(value);
