@@ -77,9 +77,8 @@ amd::Monitor GraphNode::WorkerThreadLock_{};
 
 hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind) {
-  hipError_t status = ihipMemcpy_validate(dst, src, count, kind);
-  if (status != hipSuccess) {
-    return status;
+  if (dst == nullptr || src == nullptr) {
+      return hipErrorInvalidValue;
   }
   size_t sOffset = 0;
   amd::Memory* srcMemory = getMemoryObject(src, sOffset);
@@ -93,6 +92,19 @@ hipError_t GraphMemcpyNode1D::ValidateParams(void* dst, const void* src, size_t 
   } else if ((srcMemory != nullptr) && (dstMemory == nullptr)) {  // device to host
     if ((kind != hipMemcpyDeviceToHost) && (kind != hipMemcpyDefault)) {
       return hipErrorInvalidValue;
+    }
+  }
+
+  if (srcMemory != nullptr) {
+    hipError_t status = ihipMemcpy_validate_memory(srcMemory, count, sOffset, /*read_write*/ false);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
+  if (dstMemory != nullptr) {
+    hipError_t status = ihipMemcpy_validate_memory(dstMemory, count, dOffset, /*read_write*/ true);
+    if (status != hipSuccess) {
+      return status;
     }
   }
 
