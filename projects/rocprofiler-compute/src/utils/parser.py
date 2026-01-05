@@ -258,14 +258,20 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
-# Threshold for noise clamping: 0.1% relative error
-NOISE_CLAMP_THRESHOLD = 0.001
+# =============================================================================
+# NOISE_CLAMP: Hybrid Threshold for Multi-Pass Profiling Variance
+# See documentation for detailed mathematical analysis.
+# =============================================================================
 
-# TODO: TEMPORARY DEBUG FLAG - REMOVE BEFORE COMMIT
-NOISE_CLAMP_DEBUG = True
-NOISE_CLAMP_CALL_COUNT = 0  # Track which call we're on
-NOISE_CLAMP_CURRENT_METRIC = "unknown"  # Track current metric being evaluated
-NOISE_CLAMP_CURRENT_AGG = "unknown"  # Track current aggregation (avg/min/max)
+NOISE_CLAMP_REL_THRESHOLD = 0.005  # 0.5% relative threshold
+NOISE_CLAMP_ABS_THRESHOLD = 10000  # 10,000 counts absolute threshold
+NOISE_CLAMP_WARN_REL_THRESHOLD = 0.02  # 2% - warn only above this
+NOISE_CLAMP_WARN_ABS_THRESHOLD = 50000  # 50,000 - warn only above this
+
+NOISE_CLAMP_DEBUG = False
+NOISE_CLAMP_CALL_COUNT = 0
+NOISE_CLAMP_CURRENT_METRIC = "unknown"
+NOISE_CLAMP_CURRENT_AGG = "unknown"
 
 
 def to_noise_clamp(
@@ -273,188 +279,258 @@ def to_noise_clamp(
     reference: Union[pd.Series, float, np.ndarray],
 ) -> Union[pd.Series, float, np.ndarray]:
     """
-    Threshold-based variance clamping for multi-pass profiling noise.
+    Clamp negative values from multi-pass counter subtraction.
 
-    Hardware counters collected across different profiling passes may have
-    slight timing differences, causing Counter_A - Counter_B to occasionally
-    go negative. This function distinguishes measurement noise from real issues:
-
-    - If difference >= 0: return as-is
-    - If difference < 0 and |difference|/reference < 0.1%: clamp to 0 (silent)
-    - If difference < 0 and |difference|/reference >= 0.1%: preserve negative + warn
+    When counters are collected in different profiling passes, derived metrics
+    (A - B) may go negative due to run-to-run variance. This function:
+    1. ALWAYS clamps negative values to 0 (physically impossible)
+    2. Warns only when BOTH relative (2%) AND absolute (50K) thresholds exceeded
 
     Args:
-        difference: The result of counter subtraction (may be negative)
-        reference: The reference counter for calculating relative error
-                   (typically the first/larger counter in the subtraction)
+        difference: Result of counter subtraction (may be negative)
+        reference: Reference counter for calculating relative error
 
     Returns:
-        Clamped or original value depending on threshold
+        Non-negative value (negatives clamped to 0)
     """
-    # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
     global NOISE_CLAMP_CALL_COUNT
     NOISE_CLAMP_CALL_COUNT += 1
-    
+
     if NOISE_CLAMP_DEBUG:
-        print(f"\n[NOISE_CLAMP #{NOISE_CLAMP_CALL_COUNT}] Metric: '{NOISE_CLAMP_CURRENT_METRIC}' ({NOISE_CLAMP_CURRENT_AGG})")
-        print(f"  difference type: {type(difference).__name__}")
-        print(f"  reference type: {type(reference).__name__}")
-        if isinstance(difference, pd.Series):
-            print(f"  difference shape: {difference.shape}, min: {difference.min():.4f}, max: {difference.max():.4f}")
-            print(f"  negative count: {(difference < 0).sum()}")
-        elif isinstance(difference, np.ndarray):
-            print(f"  difference shape: {difference.shape}, min: {difference.min():.4f}, max: {difference.max():.4f}")
-            print(f"  negative count: {(difference < 0).sum()}")
-        else:
-            print(f"  difference value: {difference}")
+        _debug_print_input(difference, reference)
 
     if isinstance(difference, pd.Series):
-        result = difference.copy()
-        # Avoid division by zero
-        safe_ref = reference.replace(0, np.nan) if isinstance(reference, pd.Series) else reference
-        if safe_ref == 0 if isinstance(safe_ref, (int, float)) else False:
-            safe_ref = np.nan
-
-        # Calculate relative error for negative values
-        negative_mask = result < 0
-        if negative_mask.any():
-            rel_error = np.abs(result[negative_mask]) / np.abs(safe_ref[negative_mask] if isinstance(safe_ref, pd.Series) else safe_ref)
-
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [Series] Found {negative_mask.sum()} negative values")
-                print(f"  [Series] Relative errors: min={rel_error.min()*100:.4f}%, max={rel_error.max()*100:.4f}%")
-                # Show distribution of relative errors
-                rel_err_pct = rel_error * 100
-                bins = [0, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
-                bin_labels = ["<0.001%", "0.001-0.01%", "0.01-0.1%", "0.1-1%", "1-10%", ">10%"]
-                hist_counts = []
-                for i in range(len(bins) - 1):
-                    count = ((rel_err_pct >= bins[i]) & (rel_err_pct < bins[i+1])).sum()
-                    hist_counts.append(count)
-                print(f"  [Series] Relative error distribution:")
-                for label, count in zip(bin_labels, hist_counts):
-                    if count > 0:
-                        bar = "█" * min(count, 50)
-                        print(f"    {label:>12}: {count:5d} {bar}")
-
-            # Small errors (< threshold): clamp silently
-            small_error_mask = rel_error < NOISE_CLAMP_THRESHOLD
-            clamped_count = small_error_mask.sum()
-            result.loc[negative_mask & small_error_mask.reindex(result.index, fill_value=False)] = 0
-
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [Series] Clamped {clamped_count} values (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
-
-            # Large errors (>= threshold): preserve negative and warn
-            large_error_indices = negative_mask & ~small_error_mask.reindex(result.index, fill_value=False)
-            if large_error_indices.any():
-                large_count = large_error_indices.sum()
-                max_neg = result[large_error_indices].min()
-                max_rel_err = rel_error[~small_error_mask].max() * 100 if (~small_error_mask).any() else 0
-
-                # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-                if NOISE_CLAMP_DEBUG:
-                    print(f"  [Series] PRESERVED {large_count} negative values (threshold exceeded!)")
-                    print(f"  [Series] Most negative value: {max_neg:.4f}, max rel_error: {max_rel_err:.4f}%")
-                    # Show details for problematic dispatches
-                    print(f"  [Series] === PROBLEMATIC DISPATCH DETAILS ===")
-                    problematic_indices = result.index[large_error_indices]
-                    for idx in problematic_indices[:10]:  # Show first 10
-                        diff_val = difference.loc[idx]
-                        ref_val = reference.loc[idx] if isinstance(reference, pd.Series) else reference
-                        rel_err_val = abs(diff_val) / abs(ref_val) * 100 if ref_val != 0 else 0
-                        print(f"    Dispatch {idx}: diff={diff_val:.2f}, ref={ref_val:.2f}, rel_err={rel_err_val:.4f}%")
-                    if len(problematic_indices) > 10:
-                        print(f"    ... and {len(problematic_indices) - 10} more")
-                    print(f"  [Series] ===================================")
-
-                console_warning(
-                    f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: {large_count} dispatch(es) "
-                    f"with relative error >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
-                    f"(min value: {max_neg:.2f}, max relative error: {max_rel_err:.3f}%)"
-                )
-        elif NOISE_CLAMP_DEBUG:
-            print(f"  [Series] No negative values found - returning as-is")
-
-        return result
-
+        return _clamp_series(difference, reference)
     elif isinstance(difference, np.ndarray):
-        result = difference.copy()
-        safe_ref = np.where(reference == 0, np.nan, reference)
+        return _clamp_ndarray(difference, reference)
+    else:
+        return _clamp_scalar(difference, reference)
 
-        negative_mask = result < 0
-        if negative_mask.any():
-            rel_error = np.abs(result[negative_mask]) / np.abs(safe_ref[negative_mask] if isinstance(safe_ref, np.ndarray) else safe_ref)
 
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [ndarray] Found {negative_mask.sum()} negative values")
-                print(f"  [ndarray] Relative errors: min={rel_error.min()*100:.4f}%, max={rel_error.max()*100:.4f}%")
+def _should_warn(abs_error: float, rel_error: float) -> bool:
+    """Return True if error exceeds BOTH warning thresholds."""
+    return (
+        rel_error >= NOISE_CLAMP_WARN_REL_THRESHOLD
+        and abs_error >= NOISE_CLAMP_WARN_ABS_THRESHOLD
+    )
 
-            small_error_mask = rel_error < NOISE_CLAMP_THRESHOLD
-            neg_indices = np.where(negative_mask)[0]
-            clamped_count = small_error_mask.sum()
-            result[neg_indices[small_error_mask]] = 0
 
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [ndarray] Clamped {clamped_count} values (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
+def _clamp_series(
+    difference: pd.Series, reference: Union[pd.Series, float]
+) -> pd.Series:
+    """Clamp negative values in a pandas Series."""
+    result = difference.copy()
 
-            large_error_mask = ~small_error_mask
-            if large_error_mask.any():
-                large_count = large_error_mask.sum()
-                max_neg = result[neg_indices[large_error_mask]].min()
-                max_rel_err = rel_error[large_error_mask].max() * 100
+    # Handle division by zero
+    if isinstance(reference, pd.Series):
+        safe_ref = reference.replace(0, np.nan)
+    else:
+        safe_ref = reference if reference != 0 else np.nan
 
-                # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-                if NOISE_CLAMP_DEBUG:
-                    print(f"  [ndarray] PRESERVED {large_count} negative values (threshold exceeded!)")
-                    print(f"  [ndarray] Most negative value: {max_neg:.4f}, max rel_error: {max_rel_err:.4f}%")
-
-                console_warning(
-                    f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: {large_count} value(s) "
-                    f"with relative error >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
-                    f"(min value: {max_neg:.2f}, max relative error: {max_rel_err:.3f}%)"
-                )
-        elif NOISE_CLAMP_DEBUG:
-            print(f"  [ndarray] No negative values found - returning as-is")
-
+    negative_mask = result < 0
+    if not negative_mask.any():
+        if NOISE_CLAMP_DEBUG:
+            print("  [Series] No negative values - returning as-is")
         return result
 
+    neg_count = negative_mask.sum()
+    neg_values = result[negative_mask]
+
+    # Calculate error metrics for negative values
+    if isinstance(safe_ref, pd.Series):
+        ref_values = safe_ref[negative_mask]
     else:
-        # Scalar case
-        if difference >= 0:
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [scalar] Value >= 0, returning as-is: {difference}")
-            return difference
+        ref_values = safe_ref
 
-        safe_ref = reference if reference != 0 else np.nan
-        rel_error = abs(difference) / abs(safe_ref) if not np.isnan(safe_ref) else 0
+    abs_errors = np.abs(neg_values)
+    rel_errors = abs_errors / np.abs(ref_values)
 
-        # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
+    # ALWAYS clamp negatives to zero (physically impossible values)
+    result.loc[negative_mask] = 0
+
+    if NOISE_CLAMP_DEBUG:
+        _debug_print_clamping_stats(neg_count, abs_errors, rel_errors, "Series")
+
+    # Check if any values warrant a warning
+    # Warning criteria: BOTH relative AND absolute thresholds exceeded
+    warn_mask = (rel_errors >= NOISE_CLAMP_WARN_REL_THRESHOLD) & (
+        abs_errors >= NOISE_CLAMP_WARN_ABS_THRESHOLD
+    )
+
+    if isinstance(warn_mask, pd.Series) and warn_mask.any():
+        warn_count = warn_mask.sum()
+        max_abs_err = abs_errors[warn_mask].max()
+        max_rel_err = rel_errors[warn_mask].max() * 100
+
         if NOISE_CLAMP_DEBUG:
-            print(f"  [scalar] Negative value: {difference}, reference: {reference}")
-            print(f"  [scalar] Relative error: {rel_error*100:.4f}%")
-
-        if rel_error < NOISE_CLAMP_THRESHOLD:
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [scalar] CLAMPED to 0 (rel_error < {NOISE_CLAMP_THRESHOLD*100:.1f}%)")
-            return 0
-        else:
-            # TODO: TEMPORARY DEBUG OUTPUT - REMOVE BEFORE COMMIT
-            if NOISE_CLAMP_DEBUG:
-                print(f"  [scalar] PRESERVED negative (threshold exceeded!)")
-
-            console_warning(
-                f"[{NOISE_CLAMP_CURRENT_METRIC}] Counter variance threshold exceeded: "
-                f"relative error {rel_error*100:.3f}% >= {NOISE_CLAMP_THRESHOLD*100:.1f}% "
-                f"(value: {difference:.2f})"
+            print(f"  [Series] {warn_count} values exceed BOTH warning thresholds")
+            print(
+                f"  [Series] Max absolute error: {max_abs_err:.0f}, "
+                f"Max relative error: {max_rel_err:.2f}%"
             )
-            return difference
+
+        rel_thresh = NOISE_CLAMP_WARN_REL_THRESHOLD * 100
+        console_warning(
+            f"[{NOISE_CLAMP_CURRENT_METRIC}] Significant counter variance detected: "
+            f"{warn_count} dispatch(es) with rel_error >= {rel_thresh:.0f}% "
+            f"AND abs_error >= {NOISE_CLAMP_WARN_ABS_THRESHOLD:,}. "
+            f"Max deviation: {max_abs_err:,.0f} counts ({max_rel_err:.2f}%). "
+            f"This may indicate profiling issues beyond normal multi-pass variance."
+        )
+    elif NOISE_CLAMP_DEBUG:
+        print(
+            f"  [Series] All {neg_count} negative values clamped "
+            f"silently (within noise bounds)"
+        )
+
+    return result
+
+
+def _clamp_ndarray(
+    difference: np.ndarray, reference: Union[np.ndarray, float]
+) -> np.ndarray:
+    """Clamp negative values in a numpy array."""
+    result = difference.copy()
+
+    # Handle division by zero
+    if isinstance(reference, np.ndarray):
+        safe_ref = np.where(reference == 0, np.nan, reference)
+    else:
+        safe_ref = reference if reference != 0 else np.nan
+
+    negative_mask = result < 0
+    if not negative_mask.any():
+        if NOISE_CLAMP_DEBUG:
+            print("  [ndarray] No negative values - returning as-is")
+        return result
+
+    neg_count = negative_mask.sum()
+    neg_values = result[negative_mask]
+
+    # Calculate error metrics
+    if isinstance(safe_ref, np.ndarray):
+        ref_values = safe_ref[negative_mask]
+    else:
+        ref_values = safe_ref
+
+    abs_errors = np.abs(neg_values)
+    rel_errors = abs_errors / np.abs(ref_values)
+
+    # ALWAYS clamp negatives to zero
+    result[negative_mask] = 0
+
+    if NOISE_CLAMP_DEBUG:
+        _debug_print_clamping_stats(neg_count, abs_errors, rel_errors, "ndarray")
+
+    # Check warning criteria
+    warn_mask = (rel_errors >= NOISE_CLAMP_WARN_REL_THRESHOLD) & (
+        abs_errors >= NOISE_CLAMP_WARN_ABS_THRESHOLD
+    )
+
+    if warn_mask.any():
+        warn_count = warn_mask.sum()
+        max_abs_err = abs_errors[warn_mask].max()
+        max_rel_err = rel_errors[warn_mask].max() * 100
+
+        rel_thresh = NOISE_CLAMP_WARN_REL_THRESHOLD * 100
+        console_warning(
+            f"[{NOISE_CLAMP_CURRENT_METRIC}] Significant counter variance detected: "
+            f"{warn_count} value(s) with rel_error >= {rel_thresh:.0f}% "
+            f"AND abs_error >= {NOISE_CLAMP_WARN_ABS_THRESHOLD:,}. "
+            f"Max deviation: {max_abs_err:,.0f} counts ({max_rel_err:.2f}%)."
+        )
+
+    return result
+
+
+def _clamp_scalar(difference: float, reference: float) -> float:
+    """Clamp a negative scalar value."""
+    if difference >= 0:
+        if NOISE_CLAMP_DEBUG:
+            print(f"  [scalar] Value >= 0, returning as-is: {difference}")
+        return difference
+
+    # Calculate error metrics
+    safe_ref = reference if reference != 0 else np.nan
+    abs_error = abs(difference)
+    rel_error = abs_error / abs(safe_ref) if not np.isnan(safe_ref) else 0
+
+    if NOISE_CLAMP_DEBUG:
+        print(f"  [scalar] Clamping {difference:.2f} to 0")
+        print(
+            f"  [scalar] Absolute error: {abs_error:.0f}, "
+            f"Relative error: {rel_error * 100:.4f}%"
+        )
+
+    # Check warning criteria
+    if _should_warn(abs_error, rel_error):
+        console_warning(
+            f"[{NOISE_CLAMP_CURRENT_METRIC}] Significant counter variance: "
+            f"deviation of {abs_error:,.0f} counts ({rel_error * 100:.2f}%) "
+            f"exceeds both warning thresholds."
+        )
+
+    # ALWAYS return 0 for negative values
+    return 0
+
+
+def _debug_print_input(
+    difference: Union[pd.Series, np.ndarray, float],
+    reference: Union[pd.Series, np.ndarray, float],
+) -> None:
+    """Print debug information about input values."""
+    metric = NOISE_CLAMP_CURRENT_METRIC
+    agg = NOISE_CLAMP_CURRENT_AGG
+    print(f"\n[NOISE_CLAMP #{NOISE_CLAMP_CALL_COUNT}] Metric: '{metric}' ({agg})")
+    print(f"  difference type: {type(difference).__name__}")
+    print(f"  reference type: {type(reference).__name__}")
+
+    if isinstance(difference, (pd.Series, np.ndarray)):
+        neg_count = (difference < 0).sum()
+        print(
+            f"  difference shape: {difference.shape}, "
+            f"min: {difference.min():.4f}, max: {difference.max():.4f}"
+        )
+        print(f"  negative count: {neg_count}")
+    else:
+        print(f"  value: {difference}")
+
+
+def _debug_print_clamping_stats(
+    neg_count: int,
+    abs_errors: Union[pd.Series, np.ndarray],
+    rel_errors: Union[pd.Series, np.ndarray],
+    dtype: str,
+) -> None:
+    """Print debug statistics about clamped values."""
+    print(f"  [{dtype}] Clamped {neg_count} negative values to 0")
+    abs_min, abs_max = abs_errors.min(), abs_errors.max()
+    rel_min, rel_max = rel_errors.min() * 100, rel_errors.max() * 100
+    print(f"  [{dtype}] Absolute error range: {abs_min:.0f} to {abs_max:.0f}")
+    print(f"  [{dtype}] Relative error range: {rel_min:.4f}% to {rel_max:.4f}%")
+
+    # Distribution of relative errors
+    rel_err_pct = (
+        rel_errors * 100
+        if isinstance(rel_errors, (pd.Series, np.ndarray))
+        else [rel_errors * 100]
+    )
+    bins = [
+        (0, 0.1, "<0.1%"),
+        (0.1, 0.5, "0.1-0.5%"),
+        (0.5, 2.0, "0.5-2%"),
+        (2.0, 100.0, ">2%"),
+    ]
+
+    print(f"  [{dtype}] Relative error distribution:")
+    for low, high, label in bins:
+        if isinstance(rel_err_pct, (pd.Series, np.ndarray)):
+            count = ((rel_err_pct >= low) & (rel_err_pct < high)).sum()
+        else:
+            count = 1 if low <= rel_err_pct[0] < high else 0
+        if count > 0:
+            bar = "█" * min(count, 50)
+            print(f"    {label:>10}: {count:5d} {bar}")
 
 
 class CodeTransformer(ast.NodeTransformer):
@@ -1247,11 +1323,11 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
-        # TODO: TEMPORARY DEBUG - Set current metric/aggregation for NOISE_CLAMP debug output
+        # Set current metric/aggregation for NOISE_CLAMP debug output
         global NOISE_CLAMP_CURRENT_METRIC, NOISE_CLAMP_CURRENT_AGG
         NOISE_CLAMP_CURRENT_METRIC = row_id
         NOISE_CLAMP_CURRENT_AGG = col
-        
+
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
     # Check for metrics exceeding theoretical peak due to dual-issue

@@ -7818,3 +7818,122 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
         assert is_valid is False
         assert "Inconsistent row length" in error_msg
         assert "row 2" in error_msg
+
+
+# =============================================================================
+# TESTS FOR NOISE_CLAMP: Multi-Pass Profiling Variance Handling
+# =============================================================================
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_positive_unchanged():
+    """Positive values should pass through unchanged."""
+    from utils.parser import to_noise_clamp
+
+    assert to_noise_clamp(1000.0, 100000.0) == 1000.0
+    assert to_noise_clamp(0.0, 100000.0) == 0.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_negative_scalar_clamped():
+    """Negative scalar values should always be clamped to 0."""
+    from utils.parser import to_noise_clamp
+
+    # Small error
+    assert to_noise_clamp(-100.0, 1000000.0) == 0.0
+    # Large error - still clamped (physically impossible to have negative counts)
+    assert to_noise_clamp(-100000.0, 2000000.0) == 0.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_zero_reference():
+    """Zero reference should not cause division by zero."""
+    from utils.parser import to_noise_clamp
+
+    # Should not raise exception
+    result = to_noise_clamp(-100.0, 0.0)
+    assert result == 0.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_series():
+    """Series with mixed values: positives unchanged, negatives clamped."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([100.0, -50.0, 200.0, -100.0])
+    ref = pd.Series([1000000.0, 1000000.0, 1000000.0, 1000000.0])
+
+    result = to_noise_clamp(diff, ref)
+
+    expected = pd.Series([100.0, 0.0, 200.0, 0.0])
+    pd.testing.assert_series_equal(result, expected)
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_series_preserves_index():
+    """Result series should preserve the original index."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([-100.0, 200.0], index=["dispatch_0", "dispatch_1"])
+    ref = pd.Series([1000000.0, 1000000.0], index=["dispatch_0", "dispatch_1"])
+
+    result = to_noise_clamp(diff, ref)
+
+    assert list(result.index) == ["dispatch_0", "dispatch_1"]
+    assert result.loc["dispatch_0"] == 0.0
+    assert result.loc["dispatch_1"] == 200.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_ndarray():
+    """Numpy array: positives unchanged, negatives clamped."""
+    import numpy as np
+
+    from utils.parser import to_noise_clamp
+
+    diff = np.array([100.0, -50.0, 200.0, -100.0])
+    ref = np.array([1000000.0, 1000000.0, 1000000.0, 1000000.0])
+
+    result = to_noise_clamp(diff, ref)
+
+    expected = np.array([100.0, 0.0, 200.0, 0.0])
+    np.testing.assert_array_equal(result, expected)
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_remote_read_scenario():
+    """
+    Real-world scenario: Remote Read where C_true ≈ 0 but variance causes negatives.
+    Based on MI300X profiling data where Remote Read = RDREQ - DRAM ≈ 0.
+    """
+    from utils.parser import to_noise_clamp
+
+    rdreq_sum = pd.Series([2750000.0] * 5)
+    dram_sum = pd.Series([
+        2752000.0,  # -2000 (negative)
+        2748000.0,  # +2000 (positive)
+        2756000.0,  # -6000 (negative)
+        2749000.0,  # +1000 (positive)
+        2755000.0,  # -5000 (negative)
+    ])
+
+    remote_read = rdreq_sum - dram_sum
+    result = to_noise_clamp(remote_read, rdreq_sum)
+
+    # All results should be >= 0
+    assert (result >= 0).all()
+    # Positive values preserved
+    assert result.iloc[1] == 2000.0
+    assert result.iloc[3] == 1000.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_empty_series():
+    """Empty series should return empty series."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([], dtype=float)
+    ref = pd.Series([], dtype=float)
+
+    result = to_noise_clamp(diff, ref)
+    assert len(result) == 0
