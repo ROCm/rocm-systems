@@ -599,6 +599,7 @@ void usage()
     std::cout << "--fp16                Run FP16 (VALU) test" << std::endl;
     std::cout << "--fp32                Run FP32 (VALU) test" << std::endl;
     std::cout << "--fp64                Run FP64 (VALU) test" << std::endl;
+    std::cout << "--int32               Run INT32 (VALU) test" << std::endl;
     std::cout << "--matfp16             Run FP16 (MFMA) test" << std::endl;
     std::cout << "--matfp32             Run FP32 (MFMA) test" << std::endl;
     std::cout << "--smatfp16            Run FP16 (SMFMAC) test" << std::endl;
