@@ -346,6 +346,11 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
+.. note::
+
+   Any dispatch filters selected in GUI will override kernel filters, since each
+   dispatch id corresponds to a unique kernel.
+
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
 

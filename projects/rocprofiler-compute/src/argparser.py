@@ -595,7 +595,10 @@ Examples:
         dest="gpu_kernel",
         nargs="+",
         action="append",
-        help="\t\tSpecify kernel id(s) from --list-stats for filtering.",
+        help=(
+            "\t\tSpecify kernel id(s) from --list-stats for filtering.\n"
+            "\t\tIgnored if dispatch filtering is used."
+        ),
     )
     analyze_group.add_argument(
         "-d",
@@ -604,7 +607,10 @@ Examples:
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch id(s) for filtering.",
+        help=(
+            "\t\tSpecify dispatch id(s) for filtering.\n"
+            "\t\tOverrides kernel filtering if both are used."
+        ),
     )
     analyze_group.add_argument(
         "-b",
