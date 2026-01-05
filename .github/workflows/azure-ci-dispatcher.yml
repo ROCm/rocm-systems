@@ -30,6 +30,12 @@ on:
       - '**.txt'
       - '**.md'
       - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}

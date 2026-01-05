@@ -18,6 +18,12 @@ on:
       - '**.txt'
       - '**.md'
       - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
   workflow_dispatch:
     inputs:
       projects:
