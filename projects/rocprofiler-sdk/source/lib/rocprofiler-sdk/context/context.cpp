@@ -342,9 +342,12 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
+    if(cfg->pc_sampler && status == ROCPROFILER_STATUS_SUCCESS)
+        status = rocprofiler::pc_sampling::start_service(cfg);
 #endif
 
+    // If some service failed, do cleanup
+    if (status != ROCPROFILER_STATUS_SUCCESS) stop_context(context_id);
     return status;
 }
 

@@ -239,10 +239,12 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
         return ROCPROFILER_STATUS_ERROR;
     }
     profile_ = profile_cached->second;
-    rocprofiler_start_context(ctx_);
+    auto status = rocprofiler_start_context(ctx_);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     size_t out_size = out.size();
-    auto   status   = rocprofiler_sample_device_counting_service(
+    status          = rocprofiler_sample_device_counting_service(
         ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
     rocprofiler_stop_context(ctx_);
     out.resize(out_size);
