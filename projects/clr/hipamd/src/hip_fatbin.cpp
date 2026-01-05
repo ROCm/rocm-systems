@@ -526,6 +526,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           continue;
         }
 
+        LogPrintfInfo("Compiling device : %s code object from spirv", device_name.c_str());
         comgr_helper::ComgrDataSetUniqueHandle spirv_data_set;
         comgr_helper::ComgrDataSetUniqueHandle reloc_data;
         comgr_helper::ComgrDataUniqueHandle spirv_data;
