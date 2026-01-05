@@ -30,7 +30,6 @@ jobs:
     secrets: inherit
     with:
       external_source_checkout: true
-      matrix_module_path: ".github/scripts/therock_matrix.py"
       therock_ref: users/jayhawk-commits/deduplicate-ci
     permissions:
       contents: read
