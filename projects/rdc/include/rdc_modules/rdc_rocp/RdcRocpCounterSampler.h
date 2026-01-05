@@ -87,6 +87,7 @@ class CounterSampler {
   std::map<std::vector<std::string>, rocprofiler_counter_config_id_t> cached_counter_;
   std::map<uint64_t, uint64_t> counter_sizes_;
   std::map<std::vector<std::string>, ProfileSet> cached_profile_sets_;
+  mutable std::map<uint64_t, std::string> id_to_name_;  // Per-instance counter ID to name map
 
   // Internal function used to set the profile for the agent when start_context is called
   void set_profile(rocprofiler_context_id_t ctx, rocprofiler_device_counting_agent_cb_t cb) const;
