@@ -115,12 +115,10 @@ namespace policy    = ::tim::policy;     // NOLINT
 namespace trait     = ::tim::trait;      // NOLINT
 namespace cereal    = ::tim::cereal;     // NOLINT
 
-using ::tim::auto_lock_t;   // NOLINT
-using ::tim::demangle;      // NOLINT
-using ::tim::get_env;       // NOLINT
-using ::tim::set_env;       // NOLINT
-using ::tim::try_demangle;  // NOLINT
-using ::tim::type_mutex;    // NOLINT
+using ::tim::auto_lock_t;  // NOLINT
+using ::tim::get_env;      // NOLINT
+using ::tim::set_env;      // NOLINT
+using ::tim::type_mutex;   // NOLINT
 
 struct construct_on_thread
 {

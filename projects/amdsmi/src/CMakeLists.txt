@@ -67,7 +67,7 @@ else()
 endif()
 file(GLOB RAS_DECODE_INCLUDES "${RAS_DECODE_INC_DIR}/*.h")
 file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
-list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c") 
+list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
 
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
@@ -90,13 +90,13 @@ target_link_libraries(${AMD_SMI} PRIVATE
     ${CMAKE_DL_LIBS}
     ${FILESYSTEM_LIB}
 )
-target_include_directories(${AMD_SMI} PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR} 
+target_include_directories(${AMD_SMI} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/rocm_smi/include
-    ${PROJECT_SOURCE_DIR}/common/shared_mutex 
+    ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
     ${DRM_INCLUDE_DIRS}
-    ${DRM_AMDGPU_INCLUDE_DIRS}                                          
+    ${DRM_AMDGPU_INCLUDE_DIRS}
 )
 
 # use the target_include_directories() command to specify the include directories for the target

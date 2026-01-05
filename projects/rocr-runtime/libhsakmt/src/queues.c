@@ -342,8 +342,13 @@ static bool update_ctx_save_restore_size(HsaKFDContext *ctx, uint32_t nodeid, st
 		q->debug_memory_size =
 			ALIGN_UP(wave_num * DEBUGGER_BYTES_PER_WAVE, DEBUGGER_BYTES_ALIGN);
 
-		q->ctx_save_restore_size = q->ctl_stack_size
-					+ PAGE_ALIGN_UP(wg_data_size);
+		/* Keep calculating it in case we are using an older kernel, but if we have
+		 * the CtlStackSize and CwsrSize from KFD, use that as the definitive value
+		 */
+		q->ctx_save_restore_size = node.CwsrSize > 0 ? node.CwsrSize :
+					   q->ctl_stack_size + PAGE_ALIGN_UP(wg_data_size);
+		q->ctl_stack_size = node.CtlStackSize > 0 ? node.CtlStackSize : q->ctl_stack_size;
+
 		return true;
 	}
 	return false;

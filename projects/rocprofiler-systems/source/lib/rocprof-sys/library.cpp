@@ -899,11 +899,12 @@ rocprofsys_finalize_hidden(void)
 #endif
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
-    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    auto* _bundles = instrumentation_bundles::get();
+    for(size_t i = 0; _bundles && i < thread_info::get_peak_num_threads(); ++i)
     {
-        if(!instrumentation_bundles::get()) continue;
+        if(i >= _bundles->size()) continue;
         const auto& _info = thread_info::get(i, SequentTID);
-        auto&       itr   = instrumentation_bundles::get()->at(i);
+        auto&       itr   = _bundles->at(i);
         while(itr != nullptr && !itr->empty())
         {
             int _lvl = 1;
@@ -1025,6 +1026,11 @@ rocprofsys_finalize_hidden(void)
     }
 
     tracing::copy_timemory_hash_ids();
+
+    // Flush any pending region cache entries (e.g., main entry point that wasn't
+    // explicitly stopped before finalization)
+    ROCPROFSYS_DEBUG_F("Flushing pending region cache entries...\n");
+    rocprofsys_flush_pending_region_cache_hidden();
 
     bool _perfetto_output_error = false;
     if(get_use_perfetto())
