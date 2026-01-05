@@ -795,7 +795,7 @@ Device::~Device() {
 
 bool Device::ValidateComgr() {
   // Check if Lightning compiler was requested
-  constexpr bool kComgrVersioned = true;
+  constexpr bool kComgrVersioned = false;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
   return amd::Comgr::IsReady();
 }

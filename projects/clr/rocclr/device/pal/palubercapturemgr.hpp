@@ -67,6 +67,10 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
                         size_t elf_binary_size, Pal::IGpuMemory* pGpuMemory,
                         size_t offset) override;
 
+  VirtualGPU* GetCurrentGPU() {
+      return current_gpu_;
+  }
+
  private:
   UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device);
   bool Init(Pal::IPlatform* platform);
@@ -95,6 +99,9 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
   GpuUtil::RenderOpTraceController* trace_controller_;
   GpuUtil::CodeObjectTraceSource* code_object_trace_source_;
   GpuUtil::QueueTimingsTraceSource* queue_timings_trace_source_;
+
+  VirtualGPU*                       current_gpu_;
+  bool                              registered_trace_state_callback_;
 
   PAL_DISALLOW_DEFAULT_CTOR(UberTraceCaptureMgr);
   PAL_DISALLOW_COPY_AND_ASSIGN(UberTraceCaptureMgr);
