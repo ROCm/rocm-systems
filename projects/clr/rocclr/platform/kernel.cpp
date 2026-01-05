@@ -58,7 +58,8 @@ bool KernelParameters::check() {
 
   for (size_t i = 0; i < signature_.numParameters(); ++i) {
     if (!test(i)) {
-      DevLogPrintfError("Kernel Parameter test failed for idx: %d \n", i);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
+              "Kernel Parameter test failed for idx: %d \n", i);
       return false;
     }
   }
@@ -327,7 +328,8 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
 bool KernelParameters::boundToSvmPointer(const Device& device, const_address capturedParameter,
                                          size_t index) const {
   if (!device.info().svmCapabilities_) {
-    DevLogPrintfError("The device: 0x%x does not have SVM Capabilities \n", &device);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN, 
+            "The device: 0x%x does not have SVM Capabilities \n", &device);
     return false;
   }
   //! Information about which arguments are SVM pointers is stored after

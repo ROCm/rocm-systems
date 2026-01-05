@@ -39,7 +39,7 @@ Prerequisites
 
   * ROCm 7.x build, or
 
-  * Early release can be `built from source <https://github.com/rocm/aqlprofile>`_
+  * Early release can be `built from source <https://github.com/ROCm/rocm-systems/tree/develop/projects/aqlprofile>`_
 
   * Otherwise, ``rocprofv3`` throws error "INVALID_SHADER_DATA" or "Agent not supported".
 
@@ -48,13 +48,13 @@ Prerequisites
   * For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
 
   * Default install location is ``/opt/rocm/lib``
-   
+
   * For custom location, use:
 
       * Parameter ``--att-library-path``, or
 
       * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
-   
+
 
 .. _thread-trace-parameters:
 
@@ -163,7 +163,7 @@ If the subsequent kernels are targeted kernels, the profiler will then profile a
 new targeted kernel, so it is possible for a generated ATT file to have more than ``n`` kernels profiled.
 All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
-the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels. 
+the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels.
 
 .. _output-files:
 
@@ -175,17 +175,17 @@ After the application finishes executing, ROCprof Trace Decoder runs automatical
 - stats_*.csv files:
 
   * Contains a summary of instruction latency per kernel.
-  
+
 - ui_output_agent_{agent_id}_dispatch_{dispatch_id} directory:
-  
+
   * Contains detailed tracing information in the form of .json files.
-    
+
   * This directory can be opened using the `ROCprof Compute Viewer <https://rocm.docs.amd.com/projects/rocprof-compute-viewer/en/amd-mainline/>`_.
 
 - Raw files:
 
   * .att - Raw SQTT data. Can be used with the ROCprof Trace Decoder for further analysis.
-  
+
   * .out - Code object binaries (executable). Can be used with ISA analysis tools.
 
 .. _csv-content:
@@ -217,28 +217,28 @@ The columns of the stats_*.csv file are described here:
 
 * **Latency:** Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
 
-* **Stall:** The total number of cycles the hardware pipe couldn't issue an instruction. 
+* **Stall:** The total number of cycles the hardware pipe couldn't issue an instruction.
 
   * Usually caused when the hardware unit is busy, such as TCP or LDS backpressure.
-    
+
 * **Idle:** The total time gap between the completion of previous instruction and the beginning of the current instruction. The idle time can be caused by:
 
   * Arbiter loss
-    
+
   * Source or destination register dependency
-    
+
   * Instruction cache miss
-    
+
 * **Source:** The original source line of code assigned by the compiler.
 
   * Requires compiling with debug symbols.
-    
+
 
 Troubleshooting
 ===============
 
 For some applications, stats_*.csv file could be empty even for a valid kernel dispatch.
-Thread trace is limited to a single CU per SE (``att-target-cu``). If a kernel dispatch doesn't launch enough waves to populate the whole GPU, there's a possibility of no wave getting assigned to the ``target_cu``. In such cases, there's nothing to be traced. 
+Thread trace is limited to a single CU per SE (``att-target-cu``). If a kernel dispatch doesn't launch enough waves to populate the whole GPU, there's a possibility of no wave getting assigned to the ``target_cu``. In such cases, there's nothing to be traced.
 Here are some options to handle this:
 
 * Launch more waves.
@@ -248,10 +248,10 @@ Here are some options to handle this:
 * Set the ``--att-shader-engine-mask`` to 0x11111111, or possibly to 0xFFFFFFFF
 
   * A number too high can cause packet losses and/or lead to a full buffer.
-    
+
 * Set the ``HSA_CU_MASK`` to mask out all CUs but the target. For more details, see `setting CUs <https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html>`_.
 
   * If only the ``target_cu`` (or a few CUs) are not masked out, then all or most waves will be assigned to the ``target_cu``.
-    
+
   * This can potentially cause low performance in high-demanding kernels.
-    
+

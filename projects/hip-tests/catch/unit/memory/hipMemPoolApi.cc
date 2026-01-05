@@ -127,7 +127,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
 
   int blocks = 1024;
   hipMemPoolAttr attr;
-  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
 
@@ -215,7 +215,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
                                    mem_pool, stream));
 
   int blocks = 2;
-  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
@@ -303,7 +303,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
                                    mem_pool, stream));
 
   int blocks = 2;
-  notifiedKernel<<<32, blocks, 0, stream>>>(A, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(A, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -322,7 +322,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
 
   // Second kernel launch with new memory
   *notified = 0;
-  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   *notified = 1;  // Notify kernel loop to exit
@@ -396,7 +396,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
@@ -414,7 +414,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     REQUIRE(A != B);
 
     // Run kernel with the new memory in the second streamn
-    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2>>>(B, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notify kernel loop to exit
@@ -435,7 +435,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
@@ -453,7 +453,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     REQUIRE(A == B);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2>>>(B, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified2 = 1;  // Notify kernel loop to exit
@@ -475,7 +475,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
     // Run kernel in the first stream
-    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
+    notifiedKernel<<<blocks, 32, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
@@ -489,7 +489,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     REQUIRE(A != B);
 
     // Run kernel with the new memory in the second stream
-    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
+    notifiedKernel<<<blocks, 32, 0, stream2>>>(B, notified2);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     *notified1 = 1;  // Notify kernel loop to exit
@@ -532,7 +532,7 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), stream));
 
   int blocks = 2;
-  notifiedKernel<<<32, blocks, 0, stream>>>(A, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(A, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -550,7 +550,7 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
 
   // Second kernel launch with new memory
   *notified = 0;
-  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
+  notifiedKernel<<<blocks, 32, 0, stream>>>(B, notified);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
 

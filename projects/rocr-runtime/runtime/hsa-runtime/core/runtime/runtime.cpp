@@ -378,13 +378,15 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //clear the set metadata here if possible if theres an existing ldrm_bo
     if (it->second.ldrm_bo) {
 #if defined(__linux__)
-      struct amdgpu_bo_info info = {0};
-      auto err = amdgpu_bo_query_info(it->second.ldrm_bo, &info);
+      if (!thunkLoader()->IsDXG()) {
+        struct amdgpu_bo_info info = {0};
+        auto err = DRM_CALL(amdgpu_bo_query_info(it->second.ldrm_bo, &info));
 
-      //clear metadata
-      amdgpu_bo_metadata zero_metadata = {0};
-      memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
-      amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata);
+        //clear metadata
+        amdgpu_bo_metadata zero_metadata = {0};
+        memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
+        DRM_CALL(amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata));
+      }
 #else
       assert(!"Unimplemented!");
 #endif
@@ -1404,29 +1406,31 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (agent->device_type() == Agent::kAmdGpuDevice) {
 #if defined(__linux__)
-    AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
-    amdgpu_bo_import_result res;
+    if (!thunkLoader()->IsDXG()) {
+      AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
+      amdgpu_bo_import_result res;
 
-    srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-    handle->handle[7] = rand();
+      srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+      handle->handle[7] = rand();
 
-    //libdrm import for buffer object handle
-    if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
-      fprintf(stderr, "Error in amdgpu_bo_import\n");
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+      //libdrm import for buffer object handle
+      if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
+        fprintf(stderr, "Error in amdgpu_bo_import\n");
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
 
-    //query buffer object for pre existing metadata
-    struct amdgpu_bo_info info = {0};
-    if (!amdgpu_bo_query_info(res.buf_handle, &info) && !!info.metadata.size_metadata) {
-      handle->handle[7] = info.metadata.umd_metadata[0];
-    } else {
-      amdgpu_bo_metadata buf_info = {0};
-      buf_info.size_metadata = sizeof(uint32_t);
-      buf_info.umd_metadata[0] = handle->handle[7];
+      //query buffer object for pre existing metadata
+      struct amdgpu_bo_info info = {0};
+      if (!DRM_CALL(amdgpu_bo_query_info(res.buf_handle, &info)) && !!info.metadata.size_metadata) {
+        handle->handle[7] = info.metadata.umd_metadata[0];
+      } else {
+        amdgpu_bo_metadata buf_info = {0};
+        buf_info.size_metadata = sizeof(uint32_t);
+        buf_info.umd_metadata[0] = handle->handle[7];
 
-      amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
-      allocation_map_[ptr].ldrm_bo = res.buf_handle;
+        DRM_CALL(amdgpu_bo_set_metadata(res.buf_handle, &buf_info));
+        allocation_map_[ptr].ldrm_bo = res.buf_handle;
+      }
     }
 #else
     assert(!"Unimplemented!");
@@ -1593,15 +1597,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (ipc_dmabuf_supported_ && !isSysMem) {
 #if defined(__linux__)
-        // use the bo from the allocation map
-        // Only check metadata for GPU memory
-        struct amdgpu_bo_info info = {0};
-        int ret = amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info);
+        if (!thunkLoader()->IsDXG()) {
+          // use the bo from the allocation map
+          // Only check metadata for GPU memory
+          struct amdgpu_bo_info info = {0};
+          int ret = DRM_CALL(amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info));
 
-        // Validate metadata for IPC handle
-        if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
-            fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
-            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          // Validate metadata for IPC handle
+          if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
+              fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
+              return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          }
         }
 #else
         assert(!"Unimplemented!");
@@ -2236,10 +2242,11 @@ bool Runtime::VMFaultHandler(hsa_signal_value_t val, void* arg) {
       PrintMemoryMapNear(reinterpret_cast<void*>(fault.VirtualAddress));
 #endif
     }
-    // Fallback if KFD does not support GPU core dump. In this case, there core dump is
+    // Fallback if KFD does not support GPU core dump. In this case, the core dump is
     // generated by hsa-runtime.
     if (faulty_agent &&
-        faulty_agent->supported_isas()[0]->GetMajorVersion() != 11 &&
+        !(faulty_agent->supported_isas()[0]->GetMajorVersion() == 11
+	  && faulty_agent->supported_isas()[0]->GetMinorVersion() < 5) &&
                       !runtime_singleton_->KfdVersion().supports_core_dump) {
 
       if (pcs::PcsRuntime::instance()->SessionsActive())
@@ -2307,9 +2314,10 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
 }
 
 Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
-  : control(this), events(), new_events(), monitor_exceptions(exceptions_) {
+  : monitor_exceptions(exceptions_), events(), new_events(), control(this) {
 
   events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
+  control.Start();
 }
 
 Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
@@ -2317,19 +2325,20 @@ Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
 }
 
 Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : exit(false) {
-
-  int priority = asyncInfo->monitor_exceptions ? os::OS_THREAD_PRIORITY_DEFAULT :
-                  runtime_singleton_->flag().async_events_thread_priority();
+  : info_(asyncInfo), exit(false) {
 
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+}
 
-  asyncInfo->control.thread_ = os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
-  if (!asyncInfo->control.thread_)
+void Runtime::AsyncEventsControl::Start() {
+  int priority = info_->monitor_exceptions ? os::OS_THREAD_PRIORITY_DEFAULT :
+                  runtime_singleton_->flag().async_events_thread_priority();
+
+  thread_ = os::CreateThread(AsyncEventsLoop, info_, 0, priority);
+  if (!thread_)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to initialize async handler thread");
-
 }
 
 Runtime::Runtime()
@@ -2621,7 +2630,7 @@ void Runtime::CheckVirtualMemApiSupport() {
       virtual_mem_api_supported_ = true;
     }
   #else
-    virtual_mem_api_supported_ = false;
+    virtual_mem_api_supported_ = true;
   #endif
   }
 }
@@ -2839,7 +2848,7 @@ void Runtime::AsyncEventsControl::Shutdown() {
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
-  HSA::hsa_signal_destroy(wake);
+  core::Signal::Convert(wake)->DestroySignal();
 }
 
 void Runtime::AsyncEvents::PushBack(hsa_signal_t signal,
@@ -3665,11 +3674,21 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  close(dmabuf_fd);
+  if (dmabuf_fd != -1) {
+    close(dmabuf_fd);
+  }
 
   // Get address that memory is mapped to
-  ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
-  if (ret) return HSA_STATUS_ERROR;
+  if (shareable_handle.IsValid()) {
+    ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
+    if (ret) return HSA_STATUS_ERROR;
+  } else {
+    hsa_status_t status = agent_driver.GetShareableHandle(va, memoryHandleIt->first, size, &shareable_handle);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+    drm_cpu_addr = reinterpret_cast<uint64_t>(va);
+  }
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
@@ -3707,18 +3726,6 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   }
 
   for (auto mappedHandleIt : mappedHandles) {
-    /* Need to remove the default CPU mapping that was added in MappedHandle constructor.
-    * We remove it before calling RemoveAccess(). Otherwise we would unnecessarily call mmap(..,PROT_NONE,..)
-    * and then later call munmap.
-    */
-    auto cpu_agent = static_cast<AMD::GpuAgent*>(mappedHandleIt.second->agentOwner())->GetNearestCpuAgent();
-    auto cpu_agent_it = mappedHandleIt.second->allowed_agents.find(cpu_agent);
-    if (cpu_agent_it != mappedHandleIt.second->allowed_agents.end()) {
-      if (munmap(cpu_agent_it->second.va, cpu_agent_it->second.size) != 0) {
-        return HSA_STATUS_ERROR;
-      }
-    }
-
     // Remove access from all agents that were allowed access
     for (auto agentPermsIt = mappedHandleIt.second->allowed_agents.begin();
               agentPermsIt != mappedHandleIt.second->allowed_agents.end();) {
@@ -3800,20 +3807,17 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-  #if defined(__linux__)
-    void* mapped_ptr =
-        mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
-             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-    if (mapped_ptr != va)
-      return HSA_STATUS_ERROR;
+    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+        return HSA_STATUS_ERROR;
+      }
+    }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
         shareable_handle, va, mappedHandle->offset, size, perms);
     if (status != HSA_STATUS_SUCCESS)
       return status;
-#else
-    assert(!"Unimplemented!");
-#endif
   }
   permissions = perms;
   return HSA_STATUS_SUCCESS;
@@ -3822,21 +3826,15 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-#if defined(__linux__)
-      if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
-
-      /* We need to keep the CPU mapping. So change it to PROT_NONE */
-      void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
-                mappedHandle->drm_fd,
-                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-      if (mapped_ptr != va)
+      hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+      if (!rocr::os::UnmapMemory(va, size)) {
         return HSA_STATUS_ERROR;
-
-      permissions = HSA_ACCESS_PERMISSION_NONE;
-#else
-      assert(!"Unimplemented!");
-#endif
-
+      }
+      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+        return HSA_STATUS_ERROR;
+      }
+      permissions = perms;
     }
   } else {
     return targetAgent->driver().Unmap(
@@ -3853,6 +3851,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
     shareable_handle(shareable_handle)
 {
   /* Create a CPU mapping with PROT_NONE */
+  #if defined(__linux__)
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
                        std::forward_as_tuple(cpu_agent),
@@ -3863,6 +3862,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
   if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
+  #endif
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held

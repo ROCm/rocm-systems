@@ -34,18 +34,35 @@ from utils.logger import (
     console_warning,
 )
 
-sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+_amdsmi_module = None
 
-try:
-    import amdsmi
-except ImportError as e:
-    console_warning(f"Unhandled import error: {e}")
-    console_error("Failed to import the amdsmi Python library.")
+
+# Ignore undefined name amdsmi since it's dynamically imported
+def import_amdsmi_module() -> "amdsmi":  # noqa: F821
+    """
+    Dynamically import the amdsmi module because we only
+    want profile time dependency on amdsmi.
+    Uses global cache to avoid repeated imports.
+    """
+    global _amdsmi_module
+
+    if not _amdsmi_module:
+        sys.path.insert(0, os.getenv("ROCM_PATH", "/opt/rocm") + "/share/amd_smi")
+        try:
+            import amdsmi
+
+            _amdsmi_module = amdsmi
+        except ImportError as e:
+            console_warning(f"Unhandled import error: {e}")
+            console_error("Failed to import the amdsmi Python library.")
+
+    return _amdsmi_module
 
 
 @contextmanager
 def amdsmi_ctx() -> Iterator[None]:
     """Context manager to initialize and shutdown amdsmi."""
+    amdsmi = import_amdsmi_module()
     try:
         amdsmi.amdsmi_init()
         yield
@@ -58,79 +75,132 @@ def amdsmi_ctx() -> Iterator[None]:
             console_warning(f"amd-smi shutdown failed: {e}")
 
 
-def get_device_handle() -> "amdsmi.ProcessorHandle | None":
-    """Get the first AMD device handle."""
+# Ignore undefined name amdsmi since it's dynamically imported
+def get_device_handles() -> "list[amdsmi.ProcessorHandle]":  # noqa: F821
+    """
+    Get all AMD device handles.
+    We query all handles since some handles cannot be
+    used as they are hidden by ROCR or HIP environment variables.
+    """
+    amdsmi = import_amdsmi_module()
     try:
         devices = amdsmi.amdsmi_get_processor_handles()
-        if len(devices) == 0:
-            console_warning("No AMD GPU detected!")
-            return None
+        if not devices:
+            console_warning("No AMD device(s) detected!")
+            return []
         console_debug(f"Found {len(devices)} AMD device(s).")
-        return devices[0]
+        return devices
     except Exception as e:
-        console_warning(f"Error getting device handle: {e}")
-        return None
+        console_warning(f"Error getting device handles: {e}")
+        return []
 
 
 def get_mem_max_clock() -> float:
     """Get the maximum memory clock of the device."""
-    try:
-        return amdsmi.amdsmi_get_clock_info(
-            get_device_handle(), amdsmi.AmdSmiClkType.GFX
-        )["max_clk"]
-    except Exception as e:
-        console_warning(f"Error getting memory clocks: {e}")
-        return 0.0
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            return amdsmi.amdsmi_get_clock_info(device, amdsmi.AmdSmiClkType.MEM)[
+                "max_clk"
+            ]
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting max memory clock: {error}")
+    return 0.0
 
 
-def get_gpu_model() -> str:
-    """Get the GPU model name."""
-    try:
-        gpu_model_info = (
-            # board -> product_name
-            amdsmi.amdsmi_get_gpu_board_info(get_device_handle())["product_name"],
-            # asic -> market_name
-            amdsmi.amdsmi_get_gpu_asic_info(get_device_handle())["market_name"],
-            # vbios -> name
-            amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())["name"],
-        )
-        console_debug(f"gpu model info: {str(gpu_model_info)}")
-        return gpu_model_info
-    except Exception as e:
-        console_warning(f"Error getting gpu model info: {e}")
-        return "N/A"
+def get_gpu_model() -> tuple[str, str, str]:
+    """Get GPU model related names."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            gpu_model_info = (
+                amdsmi.amdsmi_get_gpu_board_info(device)["product_name"],
+                amdsmi.amdsmi_get_gpu_asic_info(device)["market_name"],
+                amdsmi.amdsmi_get_gpu_vbios_info(device)["name"],
+            )
+            console_debug(f"gpu model info: {str(gpu_model_info)}")
+            return gpu_model_info
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting gpu model info: {error}")
+    return ("N/A", "N/A", "N/A")
 
 
 def get_gpu_vbios_part_number() -> str:
     """Get the GPU VBIOS part number."""
-    try:
-        vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(get_device_handle())[
-            "part_number"
-        ]
-        console_debug(f"GPU VBIOS Part Number: {vbios_part_number}")
-        return vbios_part_number
-    except Exception as e:
-        console_warning(f"Error getting GPU VBIOS part number: {e}")
-        return "N/A"
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            vbios_part_number = amdsmi.amdsmi_get_gpu_vbios_info(device)["part_number"]
+            console_debug(f"GPU VBIOS Part Number: {vbios_part_number}")
+            return vbios_part_number
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU VBIOS part number: {error}")
+    return "N/A"
 
 
 def get_gpu_compute_partition() -> str:
     """Get the GPU compute partition."""
-    try:
-        compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(get_device_handle())
-        console_debug(f"GPU Compute Partition: {compute_partition}")
-        return compute_partition
-    except Exception as e:
-        console_warning(f"Error getting GPU compute partition: {e}")
-        return "N/A"
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            compute_partition = amdsmi.amdsmi_get_gpu_compute_partition(device)
+            console_debug(f"GPU Compute Partition: {compute_partition}")
+            return compute_partition
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU compute partition: {error}")
+    return "N/A"
 
 
 def get_gpu_memory_partition() -> str:
     """Get the GPU memory partition."""
-    try:
-        memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(get_device_handle())
-        console_debug(f"GPU Memory Partition: {memory_partition}")
-        return memory_partition
-    except Exception as e:
-        console_warning(f"Error getting GPU memory partition: {e}")
-        return "N/A"
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            memory_partition = amdsmi.amdsmi_get_gpu_memory_partition(device)
+            console_debug(f"GPU Memory Partition: {memory_partition}")
+            return memory_partition
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU memory partition: {error}")
+    return "N/A"
+
+
+def get_amdgpu_driver_version() -> str:
+    """Get the AMDGPU driver version."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            driver_info = amdsmi.amdsmi_get_gpu_driver_info(device)
+            driver_version = driver_info["driver_version"]
+            console_debug(f"AMDGPU Driver Version: {driver_version}")
+            return driver_version
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting AMDGPU driver version: {error}")
+    return "N/A"
+
+
+def get_gpu_vram_size() -> str:
+    """Get the GPU VRAM size in KB."""
+    amdsmi = import_amdsmi_module()
+    error = None
+    for device in get_device_handles():
+        try:
+            vram_info = amdsmi.amdsmi_get_gpu_vram_info(device)
+            vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
+            console_debug(f"GPU VRAM Size: {vram_size} KB")
+            return vram_size
+        except Exception as e:
+            error = e
+    console_warning(f"Error getting GPU VRAM size: {error}")
+    return "0"

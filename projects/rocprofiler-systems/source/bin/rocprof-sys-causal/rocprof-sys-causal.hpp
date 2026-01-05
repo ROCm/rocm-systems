@@ -32,11 +32,13 @@
 #include <string_view>
 #include <vector>
 
+template <typename Tp>
+void
+update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+           bool _append = false, std::string_view _join_delim = ":");
+
 int
 get_verbose();
-
-std::string
-get_realpath(const std::string&);
 
 void
 print_command(const std::vector<char*>& _argv, std::string_view);
@@ -51,27 +53,6 @@ prepare_command_for_run(char*, std::vector<char*>&);
 
 void
 prepare_environment_for_run(std::vector<char*>&);
-
-std::string
-get_rocprofsys_root(void);
-
-std::string
-get_internal_libpath(const std::string& _lib);
-
-std::string
-get_internal_script_path(void);
-
-template <typename Tp>
-void
-update_env(std::vector<char*>&, std::string_view, Tp&&, bool _append = false,
-           std::string_view _join_delim = ":");
-
-template <typename Tp>
-void
-add_default_env(std::vector<char*>&, std::string_view, Tp&&);
-
-void
-remove_env(std::vector<char*>&, std::string_view);
 
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>&,

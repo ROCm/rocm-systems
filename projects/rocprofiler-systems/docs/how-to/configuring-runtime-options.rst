@@ -35,6 +35,7 @@ and tweak the default sampling values.
 
    # ...
    ROCPROFSYS_TRACE                = true
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -181,6 +182,51 @@ PAPI components from different namespaces:
    installed with the prefix ``rocprof-sys-`` with
    underscores replaced with hyphens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
+There are two distinct approaches for collecting PAPI-based hardware counters, each with different characteristics and use cases:
+
+1. **Instrumentation-based collection:** Uses function instrumentation system to collect PAPI counters at function entry and exit points. This works with profiling mode via ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
+
+**Example 1: Using ``papi_array`` for a fixed list of events**
+
+.. code-block:: shell
+
+   # Enable profiling mode (required)
+   export ROCPROFSYS_PROFILE=ON
+
+   # Specify papi_array in the timemory component list
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_array"
+
+   # Specify which PAPI events to collect
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+
+**Example 2: Using ``papi_vector`` for dynamically allocated array of events**
+
+.. code-block:: shell
+
+   # Include papi_vector for dynamic event lists
+   export ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock,papi_vector"
+
+   # Alternative: Use perf event names
+   export ROCPROFSYS_PAPI_EVENTS="perf::INSTRUCTIONS,perf::CACHE-REFERENCES,perf::CACHE-MISSES"
+
+
+2. **Sampling-based collection:** Periodically interrupts program execution to capture hardware counters along with call stack information. This works with the sampling mode.
+
+.. code-block:: shell
+
+   # Enable sampling mode (required)
+   export ROCPROFSYS_USE_SAMPLING=ON
+
+   # Specify PAPI events for sampling
+   export ROCPROFSYS_PAPI_EVENTS="PAPI_TOT_CYC,PAPI_TOT_INS"
+
+You can also enable overflow sampling for PAPI events with ``ROCPROFSYS_SAMPLING_OVERFLOW_EVENT``:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_SAMPLING_OVERFLOW_EVENT="perf::PERF_COUNT_HW_CACHE_REFERENCES"
+
 ROCPROFSYS_ROCM_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -264,8 +310,8 @@ Use the following command to view the available domains:
 
 .. note::
 
-   Some settings can enable tracing for multiple domains, such as: 
-   
+   Some settings can enable tracing for multiple domains, such as:
+
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
    * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
@@ -295,6 +341,7 @@ Generating a default configuration file
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
    ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
@@ -452,7 +499,8 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
+   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
@@ -1301,6 +1349,7 @@ but do not override an existing value for the environment variable.
 
    # use fields
    ROCPROFSYS_TRACE                 = $ENABLE
+   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

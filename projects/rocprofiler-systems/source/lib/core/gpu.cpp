@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "agent.hpp"
+#include "agent_info.hpp"
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
     {                                                                                    \
@@ -29,8 +30,6 @@
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_END                                             \
     }                                                                                    \
     }  // namespace ::tim::cereal
-
-#include "common/defines.h"
 
 #if !defined(ROCPROFSYS_USE_ROCM)
 #    define ROCPROFSYS_USE_ROCM 0
@@ -42,6 +41,7 @@
 
 #include <timemory/manager.hpp>
 
+#include <dlfcn.h>
 #include <string>
 
 #include "core/agent_manager.hpp"
@@ -89,6 +89,17 @@ _amdsmi_is_initialized()
     return initialized;
 }
 
+void
+prevent_amdsmi_library_unload()
+{
+    static bool _initialized = false;
+    if(_initialized) return;
+    _initialized = true;
+
+    dlopen("libamd_smi.so", RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+    dlopen("librocm_smi64.so", RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+}
+
 bool
 amdsmi_init()
 {
@@ -99,6 +110,8 @@ amdsmi_init()
             ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
             get_processor_handles();
             _amdsmi_is_initialized() = true;  // Mark as initialized
+
+            prevent_amdsmi_library_unload();
         } catch(std::exception& _e)
         {
             ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown initializing amd-smi: %s\n",
@@ -138,6 +151,9 @@ query_rocm_agents()
             cur_agent.model_name           = std::string(_agent->model_name);
             cur_agent.vendor_name          = std::string(_agent->vendor_name);
             cur_agent.product_name         = std::string(_agent->product_name);
+
+            cur_agent.agent_info = agent_info::to_json_string(*_agent);
+
             _agent_manager.insert_agent(cur_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;

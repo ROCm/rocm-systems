@@ -776,17 +776,6 @@ def run_prof(
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
     )
 
-    # set required env var for >= mi300
-    if mspec.gpu_model.lower() not in (
-        "mi50",
-        "mi60",
-        "mi100",
-        "mi210",
-        "mi250",
-        "mi250x",
-    ):
-        new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
-
     time_1 = time.time()
 
     output_path = Path(workload_dir + "/out/pmc_1")
@@ -885,24 +874,56 @@ def run_prof(
             rocprof_cmd == "rocprofiler-sdk"
             and options["ROCPROF_COUNTER_COLLECTION"] == "0"
         ):
-            # Update rocpd database with counter csv created by native tool
-            rocpd_data.update_rocpd_pmc_events(
-                pd.read_csv(glob.glob(workload_dir + "/out/pmc_1/*.csv")[0]),
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-            )
+            for db_name in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_name).stem.split("_")[0]
+                rocpd_data.update_rocpd_pmc_events(
+                    pd.read_csv(
+                        f"{workload_dir}/out/pmc_1/{pid}_native_counter_collection.csv"
+                    ),
+                    db_name,
+                )
+                console_debug(f"Updated rocpd db {db_name} with native tool counters.")
         # Write results_fbase.csv
-        rocpd_data.convert_db_to_csv(
-            glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+        rocpd_data.convert_dbs_to_csv(
+            glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
             workload_dir + f"/results_{fbase}.csv",
         )
+        combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
+        # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
+        combined_df["Dispatch_ID"] = combined_df.groupby(
+            [
+                "PID",
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+                "Start_Timestamp",
+                "End_Timestamp",
+            ],
+            sort=False,
+        ).ngroup()
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_df["Kernel_ID"] = combined_df.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
+        # Drop PID since its not required
+        combined_df = combined_df.drop(columns=["PID"])
+        combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
+
         if retain_rocpd_output:
-            shutil.copyfile(
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                workload_dir + "/" + fbase + ".db",
-            )
-            console_warning(
-                f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
-            )
+            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_path).stem.split("_")[0]
+                shutil.copyfile(
+                    db_path,
+                    workload_dir + f"/{fbase}_{pid}.db",
+                )
+                console_warning(
+                    f"Retaining large raw rocpd database: "
+                    f"{workload_dir}/{fbase}_{pid}.db"
+                )
         # Remove temp directory
         shutil.rmtree(workload_dir + "/" + "out")
         return
@@ -945,6 +966,13 @@ def run_prof(
 
         # Overwrite column to ensure unique IDs.
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_results["Kernel_ID"] = combined_results.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
 
         combined_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
@@ -1009,8 +1037,7 @@ def pc_sampling_prof(
         options.update({
             # no counter collection for pc sampling
             "ROCPROF_COUNTER_COLLECTION": "0",
-            # no kernel tracing for pc sampling
-            "ROCPROF_KERNEL_TRACE": "0",
+            "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "csv,json",
             "ROCPROF_OUTPUT_PATH": workload_dir,
             "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
@@ -1065,81 +1092,66 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
     trace to write counter collection csv in rocprofiler-sdk format
     for further processing to pmc_perf.csv file
     """
-    counter_data = pd.read_csv(
-        glob.glob(f"{workload_dir}/out/pmc_1/*.csv")[0], index_col=False
-    )
-    # Group by on counter_data based on dispatch_id and
-    # counter_id and sum the counter_value
-    counter_data = counter_data.groupby(
-        ["dispatch_id", "counter_name"], as_index=False
-    ).agg({"counter_value": "sum"})
-    kernel_data_filename = glob.glob(f"{workload_dir}/out/pmc_1/*/*_kernel_trace.csv")[
-        0
-    ]
-    kernel_data = pd.read_csv(kernel_data_filename)
-    rocprofv3_counter_data = pd.DataFrame({
-        "Correlation_Id": counter_data["dispatch_id"],
-        "Dispatch_Id": counter_data["dispatch_id"],
-        "Agent_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Agent_Id"
-        ].values,
-        "Queue_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Queue_Id"
-        ].values,
-        "Process_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Thread_Id"
-        ].values,
-        "Thread_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Thread_Id"
-        ].values,
-        "Grid_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                ["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]
-            ]
-            .prod(axis=1)
-            .values
-        ),
-        "Kernel_Id": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Kernel_Id"
-        ].values,
-        "Kernel_Name": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Kernel_Name"
-        ].values,
-        "Workgroup_Size": (
-            kernel_data.iloc[counter_data["dispatch_id"] - 1][
-                ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
-            ]
-            .prod(axis=1)
-            .values
-        ),
-        "LDS_Block_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "LDS_Block_Size"
-        ].values,
-        "Scratch_Size": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Scratch_Size"
-        ].values,
-        "VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "VGPR_Count"
-        ].values,
-        "Accum_VGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Accum_VGPR_Count"
-        ].values,
-        "SGPR_Count": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "SGPR_Count"
-        ].values,
-        "Counter_Name": counter_data["counter_name"],
-        "Counter_Value": counter_data["counter_value"],
-        "Start_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "Start_Timestamp"
-        ].values,
-        "End_Timestamp": kernel_data.iloc[counter_data["dispatch_id"] - 1][
-            "End_Timestamp"
-        ].values,
-    })
-    rocprofv3_counter_data.to_csv(
-        kernel_data_filename.replace("kernel_trace", "counter_collection"),
-        index=False,
-    )
+    for native_filename in glob.glob(
+        f"{workload_dir}/out/pmc_1/*_native_counter_collection.csv"
+    ):
+        counter_data = pd.read_csv(native_filename, index_col=False)
+        # Group by on dispatch_id and counter_id and sum the counter_value,
+        # Other rows in group have the same value, so take the first one
+        groupby_cols = ["dispatch_id", "counter_name"]
+        agg_dict = {
+            col: "first" for col in counter_data.columns if col not in groupby_cols
+        }
+        # Overwrite counter_value aggregation to sum
+        agg_dict["counter_value"] = "sum"
+        counter_data = counter_data.groupby(groupby_cols, as_index=False).agg(agg_dict)
+
+        pid = Path(native_filename).stem.split("_")[0]
+        kernel_data_filename = glob.glob(
+            f"{workload_dir}/out/pmc_1/*/{pid}_kernel_trace.csv"
+        )[0]
+        kernel_data = pd.read_csv(kernel_data_filename)
+
+        # Merge counter_data with kernel_data on dispatch_id
+        merged_data = pd.merge(
+            counter_data,
+            kernel_data,
+            left_on="dispatch_id",
+            right_on="Dispatch_Id",
+            how="inner",
+        )
+
+        rocprofv3_counter_data = pd.DataFrame({
+            "Correlation_Id": merged_data["dispatch_id"],
+            "Dispatch_Id": merged_data["dispatch_id"],
+            "Agent_Id": merged_data["Agent_Id"],
+            "Queue_Id": merged_data["Queue_Id"],
+            "Process_Id": merged_data["Thread_Id"],
+            "Thread_Id": merged_data["Thread_Id"],
+            "Grid_Size": (
+                merged_data[["Grid_Size_X", "Grid_Size_Y", "Grid_Size_Z"]].prod(axis=1)
+            ),
+            "Kernel_Id": merged_data["Kernel_Id"],
+            "Kernel_Name": merged_data["Kernel_Name"],
+            "Workgroup_Size": (
+                merged_data[
+                    ["Workgroup_Size_X", "Workgroup_Size_Y", "Workgroup_Size_Z"]
+                ].prod(axis=1)
+            ),
+            "LDS_Block_Size": merged_data["LDS_Block_Size"],
+            "Scratch_Size": merged_data["Scratch_Size"],
+            "VGPR_Count": merged_data["VGPR_Count"],
+            "Accum_VGPR_Count": merged_data["Accum_VGPR_Count"],
+            "SGPR_Count": merged_data["SGPR_Count"],
+            "Counter_Name": merged_data["counter_name"],
+            "Counter_Value": merged_data["counter_value"],
+            "Start_Timestamp": merged_data["Start_Timestamp"],
+            "End_Timestamp": merged_data["End_Timestamp"],
+        })
+        rocprofv3_counter_data.to_csv(
+            kernel_data_filename.replace("kernel_trace", "counter_collection"),
+            index=False,
+        )
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
@@ -1268,120 +1280,6 @@ def gen_sysinfo(
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
 
 
-def detect_roofline(mspec: Any) -> dict[str, str]:  # noqa: ANN401
-    from utils import specs
-
-    rocm_ver = int(mspec.rocm_version[:1])
-
-    target_binary: dict[str, Any] = {
-        "rocm_ver": rocm_ver,
-        "distro": "override",
-        "path": None,
-    }
-
-    # Create distro ID list based off of ID (a string, containing a single distro)
-    # and ID_LIKE (a string, listing at least one distro, separated by a single space)
-    # from the system /etc/os-release file
-    os_release = Path("/etc/os-release").read_text()
-    id_list = specs.search(r'^ID_LIKE="?(.*?)"?$', os_release) or ""
-    id = specs.search(r'^ID="?(.*?)"?$', os_release) or ""
-    id_list = id_list.split() + [id]
-
-    if "ROOFLINE_BIN" in os.environ.keys():
-        rooflineBinary = os.environ["ROOFLINE_BIN"]
-        if Path(rooflineBinary).exists():
-            console_warning(
-                "roofline",
-                f"Detected user-supplied binary --> ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-            # distro stays marked as override and path value is substituted in
-            target_binary["path"] = rooflineBinary
-            return target_binary
-        else:
-            console_error(
-                "roofline",
-                "user-supplied path to binary not accessible --> "
-                f"ROOFLINE_BIN = {rooflineBinary}\n",
-            )
-
-    # check that the system OS is based off of one of the following distributions
-    elif "azurelinux" in id_list:
-        distro = "azurelinux"
-
-    elif "debian" in id_list:
-        distro = "22.04"
-
-    elif ("fedora" in id_list) or ("tencentos" in id_list):
-        distro = "platform:el8"
-
-    elif "suse" in id_list:
-        distro = "15.6"
-
-    else:
-        console_error(
-            "roofline", "Cannot find a valid binary for your operating system"
-        )
-
-    # distro gets assigned, to follow default roofline bin location and nomenclature
-    target_binary["distro"] = distro
-    return target_binary
-
-
-def mibench(args: argparse.Namespace, mspec: Any) -> None:  # noqa: ANN401
-    """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
-    console_log("roofline", "No roofline data found. Generating...")
-
-    distro_map = {
-        "platform:el8": "rhel8",
-        "15.6": "sles15sp6",
-        "22.04": "ubuntu22_04",
-        "azurelinux": "azurelinux3",
-    }
-
-    binary_paths: list[str] = []
-
-    target_binary = detect_roofline(mspec)
-    if target_binary["distro"] == "override":
-        binary_paths.append(target_binary["path"])
-    else:
-        # check two potential locations for roofline binaries due to differences in
-        # development usage vs formal install
-        potential_paths = [
-            config.rocprof_compute_home / "utils" / "rooflines" / "roofline",
-            config.rocprof_compute_home.parent.parent / "bin" / "roofline",
-        ]
-
-        for directory in potential_paths:
-            path_to_binary = (
-                f"{directory}-{distro_map[target_binary['distro']]}"
-                f"-rocm{target_binary['rocm_ver']}"
-            )
-            binary_paths.append(path_to_binary)
-
-    # Distro is valid but cant find rocm ver
-    found = False
-    for binary_path in binary_paths:
-        if Path(binary_path).exists():
-            found = True
-            path_to_binary = binary_path
-            break
-
-    if not found:
-        console_error("roofline", f"Unable to locate expected binary ({binary_paths}).")
-
-    my_args = [
-        path_to_binary,
-        "-o",
-        f"{args.path}/roofline.csv",
-        "-d",
-        str(args.device),
-    ]
-    if args.quiet:
-        my_args += "--quiet"
-
-    subprocess.run(my_args, check=True)
-
-
 def get_submodules(package_name: str) -> list[str]:
     """List all submodules for a target package"""
     import importlib
@@ -1499,10 +1397,6 @@ def merge_counters_iteration_multiplex(
         "Kernel_ID",
     ]
 
-    expired_column_index = [
-        "Dispatch_ID",
-    ]
-
     result_dfs: list[pd.DataFrame] = []
 
     # TODO: will need to optimize to avoid this conversion to single index format
@@ -1534,30 +1428,32 @@ def merge_counters_iteration_multiplex(
 
         pd.set_option("display.max_columns", None)
 
+        # Reset Dispatch_ID
+        dispatch_id_counter = 0
+
         for name, group in unique_occurences:
             # Create a dictionary to store the merged row for the current group
             merged_row: dict[str, Any] = {}
 
             # Process non-counter columns
-            for col in [
-                col
-                for col in non_counter_column_index
-                if col not in expired_column_index
-            ]:
+            for col in non_counter_column_index:
                 if col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
-                    merged_row["Median_Time"] = median_delta_time
-                    merged_row["Mean_Time"] = delta_time.mean()
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
+                if col == "Dispatch_ID":
+                    # Assign new Dispatch_ID
+                    merged_row[col] = dispatch_id_counter
+                    dispatch_id_counter += 1
                 elif pd.api.types.is_numeric_dtype(group[col]):
                     # For other non-counter numeric columns, take the median value
                     merged_row[col] = group[col].median()
                     if pd.api.types.is_integer_dtype(group[col]):
                         merged_row[col] = merged_row[col].astype(int)
                 else:
-                    # For other non-counter columns, take the first occurrence (0th row)
+                    # For other non-counter non-numeric columns,
+                    # take the first occurrence (0th row)
+                    # Only Kernel_Name should be non-numeric here
                     merged_row[col] = group.iloc[0][col]
 
             # Process counter columns (assumed to be all columns not in
@@ -1566,16 +1462,19 @@ def merge_counters_iteration_multiplex(
                 col for col in group.columns if col not in non_counter_column_index
             ]
             for counter_col in counter_columns:
-                # for counter columns, take the first non-none (or non-nan) value
-                current_valid_counter_group = group[group[counter_col].notna()]
-                first_valid_value = (
-                    current_valid_counter_group.iloc[0][counter_col]
-                    if len(current_valid_counter_group) > 0
-                    else None
-                )
-                merged_row[counter_col] = first_valid_value
-
-            merged_row["Count"] = group["Dispatch_ID"].nunique()
+                # For counter columns, calculate median only across non-NaN values
+                # Preserve original data type
+                valid_values = group[counter_col].dropna()
+                if not valid_values.empty:
+                    median_value = valid_values.median()
+                    # Preserve original data type - check if all
+                    # non-null values are integers
+                    if (valid_values == valid_values.astype(int)).all():
+                        merged_row[counter_col] = int(median_value)
+                    else:
+                        merged_row[counter_col] = median_value
+                else:
+                    merged_row[counter_col] = None
 
             # Append the merged row to the result list
             result_data.append(merged_row)
@@ -1658,9 +1557,8 @@ def merge_counters_spatial_multiplex(df_multi_index: pd.DataFrame) -> pd.DataFra
                     merged_row[col] = group["Start_Timestamp"].median()
                 elif col == "End_Timestamp":
                     # For End_Timestamp, calculate the median delta time
-                    delta_time = group["End_Timestamp"] - group["Start_Timestamp"]
-                    median_delta_time = delta_time.median()
-                    merged_row[col] = merged_row["Start_Timestamp"] + median_delta_time
+                    delta_time = group[col] - group["Start_Timestamp"]
+                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
                 else:
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]

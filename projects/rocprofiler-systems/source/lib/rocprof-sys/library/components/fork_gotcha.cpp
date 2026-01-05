@@ -97,6 +97,11 @@ postfork_parent()
 {
     if(postfork_parent_lock) return;
 
+    // Reinitialize AMD SMI in parent process to get fresh device handles before
+    // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
+    // after fork.
+    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
+
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
     if(config::get_use_sampling()) sampling::unblock_samples();
@@ -114,6 +119,11 @@ postfork_child()
     ROCPROFSYS_REQUIRE(is_child_process())
         << "Error! child process " << process::get_id()
         << " believes it is the root process " << get_root_process_id() << "\n";
+
+    set_state(State::Finalized);
+
+    // Clean up AMD SMI in child process before other shutdowns
+    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
 
     settings::enabled() = false;
     settings::verbose() = -127;

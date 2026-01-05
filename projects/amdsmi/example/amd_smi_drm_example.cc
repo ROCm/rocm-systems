@@ -1128,7 +1128,7 @@ int main() {
             printf("    Output of amdsmi_get_power_info:\n");
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
-                printf("\tCurrent GFX Voltage: %ld\n", power_measure.gfx_voltage);
+                printf("\tCurrent GFX Voltage: %" PRIu64 "\n", power_measure.gfx_voltage);
                 printf("\tAverage socket power: %d\n", power_measure.average_socket_power);
                 printf("\tGPU Power limit: %d\n\n", power_measure.power_limit);
             } else {
