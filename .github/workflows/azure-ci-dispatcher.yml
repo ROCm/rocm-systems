@@ -37,7 +37,7 @@ concurrency:
 jobs:
   dispatch-azure-ci:
     name: Trigger Azure CI
-    if: github.repository == 'ROCm/rocm-systems' && github.event.pull_request.draft == false
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     steps:
     - name: Generate a token
