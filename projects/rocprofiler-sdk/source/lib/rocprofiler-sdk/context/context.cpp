@@ -347,7 +347,7 @@ start_context(rocprofiler_context_id_t context_id)
 #endif
 
     // If some service failed, do cleanup
-    if (status != ROCPROFILER_STATUS_SUCCESS) stop_context(context_id);
+    if(status != ROCPROFILER_STATUS_SUCCESS) stop_context(context_id);
     return status;
 }
 

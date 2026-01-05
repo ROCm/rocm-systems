@@ -238,7 +238,7 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
         std::cerr << "Caught exception: " << e.what() << "\n";
         return ROCPROFILER_STATUS_ERROR;
     }
-    profile_ = profile_cached->second;
+    profile_    = profile_cached->second;
     auto status = rocprofiler_start_context(ctx_);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
