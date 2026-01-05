@@ -703,16 +703,18 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
       PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
 
   switch (hip_error) {
+  // invalid code object errors are propagated
   case hipErrorInvalidKernelFile:
   case hipErrorInvalidDeviceFunction:
   case hipErrorInvalidImage:
     return hip_error;
   case hipSuccess:
-    if (func)
+    if (func) {
       break;
+    }
+    // assume it is a hip function type if we did not get a valid output from static
+    // func lookup (i.e. if !func or hip_error != hipSuccess)
   default:
-      // assume its hip function type if we did not get a valid output from static
-      // func lookup
       func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
   }
 
