@@ -24,85 +24,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
+  ci:
     # TODO: Update to @main after TheRock PR merges
-    uses: ROCm/TheRock/.github/workflows/setup_external.yml@users/jayhawk-commits/deduplicate-ci
+    uses: ROCm/TheRock/.github/workflows/ci.yml@users/jayhawk-commits/deduplicate-ci
+    secrets: inherit
     with:
+      external_source_checkout: true
       matrix_module_path: ".github/scripts/therock_matrix.py"
       therock_ref: users/jayhawk-commits/deduplicate-ci
-
-  linux_build_and_test:
-    name: Linux (${{ matrix.variant.project_to_test }})
-    needs: setup
-    if: ${{ needs.setup.outputs.linux_variants != '[]' && needs.setup.outputs.enable_build_jobs == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ${{ fromJSON(needs.setup.outputs.linux_variants) }}
-    # TODO: Update to @main after TheRock PR merges
-    uses: ROCm/TheRock/.github/workflows/ci_linux.yml@users/jayhawk-commits/deduplicate-ci
-    secrets: inherit
-    with:
-      amdgpu_families: ${{ matrix.variant.amdgpu_family }}
-      artifact_group: ${{ matrix.variant.artifact_group }}
-      test_runs_on: ${{ matrix.variant.test_runs_on }}
-      build_variant_label: ${{ matrix.variant.build_variant_label }}
-      build_variant_suffix: ${{ matrix.variant.build_variant_suffix }}
-      build_variant_cmake_preset: ${{ matrix.variant.build_variant_cmake_preset }}
-      test_labels: ""
-      artifact_run_id: ""
-      use_prebuilt_artifacts: "false"
-      rocm_package_version: "ADHOCBUILD"
-      test_type: ${{ needs.setup.outputs.test_type }}
-      sanity_check_only_for_family: false
-      external_source_checkout: true
-      expect_failure: false
     permissions:
       contents: read
       id-token: write
-
-  windows_build_and_test:
-    name: Windows (${{ matrix.variant.project_to_test }})
-    needs: setup
-    if: ${{ needs.setup.outputs.windows_variants != '[]' && needs.setup.outputs.enable_build_jobs == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ${{ fromJSON(needs.setup.outputs.windows_variants) }}
-    # TODO: Update to @main after TheRock PR merges
-    uses: ROCm/TheRock/.github/workflows/ci_windows.yml@users/jayhawk-commits/deduplicate-ci
-    secrets: inherit
-    with:
-      amdgpu_families: ${{ matrix.variant.amdgpu_family }}
-      artifact_group: ${{ matrix.variant.artifact_group }}
-      test_runs_on: ${{ matrix.variant.test_runs_on }}
-      build_variant_label: ${{ matrix.variant.build_variant_label }}
-      build_variant_suffix: ${{ matrix.variant.build_variant_suffix }}
-      build_variant_cmake_preset: ${{ matrix.variant.build_variant_cmake_preset }}
-      test_labels: ""
-      artifact_run_id: ""
-      use_prebuilt_artifacts: "false"
-      rocm_package_version: "ADHOCBUILD"
-      test_type: ${{ needs.setup.outputs.test_type }}
-      sanity_check_only_for_family: false
-      external_source_checkout: true
-      expect_failure: false
-    permissions:
-      contents: read
-      id-token: write
-
-  ci_summary:
-    name: TheRock CI Summary
-    if: always()
-    needs: [setup, linux_build_and_test, windows_build_and_test]
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check results
-        run: |
-          echo '${{ toJson(needs) }}'
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' | jq --raw-output \
-            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' )"
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "Failed jobs: ${FAILED_JOBS}"
-            exit 1
-          fi
