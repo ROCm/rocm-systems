@@ -538,16 +538,22 @@ hsa_status_t hsa_ext_image_create_v2(hsa_agent_t agent,
   desc_v1.array_size = image_descriptor->array_size;
   desc_v1.format = image_descriptor->format;
 
+  // Create an instance of ImageRuntime
+  auto* rt = ImageRuntime::instance();
+  if (!rt) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   if (mipmap_levels > 1) {
     // Mipmapped array path
-    return ImageRuntime::instance()->CreateMipmapArrayHandle(
+    return rt->CreateMipmapArrayHandle(
         agent, desc_v1, image_data, access_permission, mipmap_levels,
         HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, *image);
   } else {
     // Regular image path (single level)
-    return ImageRuntime::instance()->CreateImageHandle(
-        agent, desc_v1, image_data, access_permission, HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0,
-        *image);
+    return rt->CreateImageHandle(
+        agent, desc_v1, image_data, access_permission,
+        HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE, 0, 0, *image);
   }
   CATCH;
 }
@@ -569,7 +575,7 @@ hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
                                                           const hsa_ext_image_t* mipmapped_array,
                                                           uint32_t mip_level,
                                                           hsa_ext_image_t* level_image_out) {
-  TRY
+  TRY;
   if (!mipmapped_array || !level_image_out) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
 
   auto* rt = rocr::image::ImageRuntime::instance();
@@ -577,7 +583,7 @@ hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
 
   return rt->GetMipmapArrayLevelHandle(agent, *mipmapped_array, mip_level, *level_image_out);
 
-  CATCH
+  CATCH;
 }
 
 void LoadImage(core::ImageExtTableInternal* image_api,

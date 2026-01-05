@@ -99,13 +99,14 @@ typedef struct ImageProperty {
 /// @brief Structure to represent an HSA image object.
 typedef struct Image {
 protected:
-  Image() {
+  Image()
+      : data(nullptr),
+        row_pitch(0),
+        slice_pitch(0) {
     component.handle = 0;
     permission = HSA_ACCESS_PERMISSION_RO;
-    data = NULL;
     std::memset(srd, 0, sizeof(srd));
     std::memset(&desc, 0, sizeof(desc));
-    row_pitch = slice_pitch = 0;
     tile_mode = LINEAR;
   }
 
@@ -215,12 +216,10 @@ private:
         num_levels(0),
         flags(0) {
     component.handle = 0;
-    data = nullptr;
     std::memset(srd, 0, sizeof(srd));
     std::memset(&desc, 0, sizeof(desc));
     permission = HSA_ACCESS_PERMISSION_RO;
     std::memset(&addr_output, 0, sizeof(addr_output));
-    row_pitch = slice_pitch = 0;
     tile_mode = LINEAR;
   }
 
