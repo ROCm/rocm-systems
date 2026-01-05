@@ -19,7 +19,7 @@ RUN yum groupinstall -y "Development Tools" && \
     yum install -y --allowerasing curl dpkg-devel python3-pip wget zlib-devel which git && \
     yum clean all && \
     python3 -m pip install --upgrade pip && \
-    python3 -m pip install 'cmake==3.28.4'
+    python3 -m pip install 'cmake==3.21'
 
 # The Rock Tarball
 ARG GPU_TYPE=""
