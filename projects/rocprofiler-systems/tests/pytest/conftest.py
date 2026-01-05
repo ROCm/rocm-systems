@@ -67,6 +67,8 @@ from rocprofsys import (
 
 # Key for storing test results on pytest items
 _results_key: StashKey[list] = StashKey()
+# Key for tracking subtest failures (for pytest-subtests plugin compatibility when pytest < 9.0.0)
+_subtest_failures_key: StashKey[list] = StashKey()
 
 
 # ============================================================================
@@ -314,7 +316,9 @@ def _result_output(request):
     Main test body failures are always handled by pytest's captured output.
     """
     results = []
+    subtest_failures = []
     request.node.stash[_results_key] = results
+    request.node.stash[_subtest_failures_key] = subtest_failures
     yield
     if not results:
         return
@@ -331,18 +335,18 @@ def _result_output(request):
     # Check test status
     test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
 
-    # Check if the test even uses subtests fixture
-    # If subtests fixture is not used, there can be no subtest failures
-    uses_subtests = False
-    if hasattr(request, "fixturenames"):
-        uses_subtests = "subtests" in request.fixturenames
+    # Detect subtest failures from our tracking list
+    # This requires that the subtest failure be tracked by the record_subtest_failure fixture
+    has_subtest_failures = len(subtest_failures) > 0
 
-    # Detect probable subtest failures (test uses subtests, runners passed, but test failed)
-    has_subtest_failures = False
-    if uses_subtests and test_failed:
-        all_results_succeeded = all(getattr(r, "success", True) for r in results)
-        if all_results_succeeded:
-            has_subtest_failures = True
+    # Fallback: check if test uses subtests but overall test failed
+    # This is a much cleaner way, but only works on pytest >= 9.0.0
+    if not has_subtest_failures and test_failed:
+        uses_subtests = "subtests" in getattr(request, "fixturenames", [])
+        if uses_subtests:
+            all_results_succeeded = all(getattr(r, "success", True) for r in results)
+            if all_results_succeeded:
+                has_subtest_failures = True
 
     should_show = False
     if has_subtest_failures and show_on_subtest_fail:
@@ -769,6 +773,22 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
 # ============================================================================
 
 
+# This is needed for pytest-subtests plugin compatibility when pytest < 9.0.0
+# (TheRock uses 8.3.5)
+@pytest.fixture
+def record_subtest_failure(request):
+    """Fixture to record subtest failures for --show-output-on-subtest-fail.
+
+    Used by assert fixtures to track failures with pytest-subtests plugin.
+    """
+
+    def _record(name: str):
+        if _subtest_failures_key in request.node.stash:
+            request.node.stash[_subtest_failures_key].append(name)
+
+    return _record
+
+
 @pytest.fixture
 def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir):
     """Unified fixture to run any test runner type and handle pytest logic.
@@ -879,7 +899,7 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
 
 
 @pytest.fixture
-def assert_regex(subtests):
+def assert_regex(subtests, record_subtest_failure):
     """Fixture that returns an assert_regex function.
 
     Args not from validate_regex:
@@ -906,13 +926,14 @@ def assert_regex(subtests):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
+                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
 
     return _assert_regex
 
 
 @pytest.fixture
-def assert_perfetto(subtests, tests_dir):
+def assert_perfetto(subtests, tests_dir, record_subtest_failure):
     """Fixture that returns an assert_perfetto function.
 
     Args not from validate_perfetto_trace:
@@ -947,6 +968,7 @@ def assert_perfetto(subtests, tests_dir):
                 pytest.skip("Perfetto is disabled")
             perfetto = result.perfetto_file
             if perfetto is None:
+                record_subtest_failure(subtest_name)
                 pytest.fail("Perfetto trace not created")
             validation = validate_perfetto_trace(
                 perfetto,
@@ -968,21 +990,24 @@ def assert_perfetto(subtests, tests_dir):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
+                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Pass regex not found: {pattern}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Fail regex found: {pattern}")
 
     return _assert_perfetto
 
 
 @pytest.fixture
-def assert_rocpd(subtests, tests_dir):
+def assert_rocpd(subtests, tests_dir, record_subtest_failure):
     """Fixture that returns an assert_rocpd function.
 
     Must be used with @pytest.mark.rocpd("<env fixture name>")
@@ -1010,12 +1035,14 @@ def assert_rocpd(subtests, tests_dir):
                 pytest.skip("ROCpd is disabled")
             rocpd_file = result.rocpd_file
             if rocpd_file is None:
+                record_subtest_failure(subtest_name)
                 pytest.fail("ROCpd database not created")
 
             existing_rules = None
             if rules_files is not None:
                 existing_rules = [r for r in rules_files if r.exists()]
                 if not existing_rules:
+                    record_subtest_failure(subtest_name)
                     pytest.fail("No validation rules found")
 
             validation = validate_rocpd_database(
@@ -1029,21 +1056,24 @@ def assert_rocpd(subtests, tests_dir):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
+                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Pass regex not found: {pattern}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Fail regex found: {pattern}")
 
     return _assert_rocpd
 
 
 @pytest.fixture
-def assert_timemory(subtests, tests_dir):
+def assert_timemory(subtests, tests_dir, record_subtest_failure):
     """Fixture that returns an assert_timemory function.
 
     Args not from validate_timemory_json:
@@ -1072,6 +1102,7 @@ def assert_timemory(subtests, tests_dir):
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
             if not timemory_file.exists():
+                record_subtest_failure(subtest_name)
                 pytest.fail(f"Timemory file not found: {timemory_file}")
             validation = validate_timemory_json(
                 json_path=timemory_file,
@@ -1088,21 +1119,24 @@ def assert_timemory(subtests, tests_dir):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
+                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Pass regex not found: {pattern}")
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Fail regex found: {pattern}")
 
     return _assert_timemory
 
 
 @pytest.fixture
-def assert_file_exists(subtests):
+def assert_file_exists(subtests, record_subtest_failure):
     """Fixture that returns an assert_file_exists function.
 
     Args not from validate_file_exists:
@@ -1130,13 +1164,14 @@ def assert_file_exists(subtests):
                     if skip_on_fail:
                         pytest.skip(msg)
                     else:
+                        record_subtest_failure(subtest_name)
                         pytest.fail(msg)
 
     return _assert_file_exists
 
 
 @pytest.fixture
-def assert_causal_json(subtests, tests_dir):
+def assert_causal_json(subtests, tests_dir, record_subtest_failure):
     """Fixture that returns an assert_causal_json function.
 
     Args not from validate_causal_json:
@@ -1161,6 +1196,7 @@ def assert_causal_json(subtests, tests_dir):
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name
             if not causal_file.exists():
+                record_subtest_failure(subtest_name)
                 pytest.fail(f"Causal JSON file not found: {causal_file}")
 
             validation = validate_causal_json(
@@ -1179,16 +1215,19 @@ def assert_causal_json(subtests, tests_dir):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
+                    record_subtest_failure(subtest_name)
                     pytest.fail(msg)
 
             if pass_regex:
                 for pattern in pass_regex:
                     if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Pass regex not found: {pattern}")
 
             if fail_regex:
                 for pattern in fail_regex:
                     if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
                         pytest.fail(f"Fail regex found: {pattern}")
 
     return _assert_causal_json
