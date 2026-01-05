@@ -5705,8 +5705,8 @@ typedef enum {
 /**
  * @brief Enumeration of interop map flags.
  */
-typedef enum hsa_interop_map_flag_e : uint32_t {
-    HSA_INTEROP_MAP_FLAG_KMT_HANDLE = (1u << 0),
+typedef enum : uint32_t {
+  HSA_INTEROP_MAP_FLAG_KMT_HANDLE = (1u << 0),
 } hsa_interop_map_flag_t;
 
 /**

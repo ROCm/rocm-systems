@@ -2307,7 +2307,8 @@ hsa_status_t HSA_API
  *
  * @param[in] agents List of accessing agents.
  *
- * @param[in] interop_buffer handle (FD on Linux and HANDLE on Windows)
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
  *
  * @param [in] flags Reserved, must be 0
  *

@@ -899,11 +899,11 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
   }
 
-  const HSA_REGISTER_MEM_FLAGS regFlags = {
+  const HSA_REGISTER_MEM_FLAGS reg_flags = {
       .ui32 = {.kmtHandle = (handle_type == HSA_HANDLE_TYPE_KMT)}};
 
   auto status =
-      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, regFlags);
+      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
