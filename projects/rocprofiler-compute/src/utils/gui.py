@@ -103,7 +103,9 @@ def create_multi_bar_charts(
 
 def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: float(x) if x != "N/A" else 0.0)
+    display_df["Avg"] = display_df["Avg"].apply(
+        lambda x: float(x) if x != "N/A" else 0.0
+    )
 
     charts = []
 

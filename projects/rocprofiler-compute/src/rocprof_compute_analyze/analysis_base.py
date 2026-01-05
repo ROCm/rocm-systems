@@ -412,7 +412,8 @@ class OmniAnalyze_Base:
                 "analysis",
                 "The --gui option cannot be used with "
                 "--dispatch (-d) or --kernel (-k) filters. "
-                "Use the dropdown menus in the GUI frontend to filter by dispatch or kernel.",
+                "Use the dropdown menus in the GUI frontend "
+                "to filter by dispatch or kernel.",
             )
 
         # Check if any kernel's counters are missing due to iteration multiplexing

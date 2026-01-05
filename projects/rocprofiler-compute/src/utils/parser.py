@@ -1215,17 +1215,18 @@ def apply_filters(
         if filtered_df.empty:
             console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
 
-    # Apply kernel filter
-    # NB:
-    # Kernel id is unique!
-    # We pick up kernel names from kerne ids first.
-    # Then filter valid entries with kernel names.
-    if workload.filter_kernel_ids:
-        filtered_df = apply_kernel_filter(filtered_df, workload, dir_path)
-
     # Apply dispatch filter
     if workload.filter_dispatch_ids:
         filtered_df = apply_dispatch_filter(filtered_df, workload)
+    elif workload.filter_kernel_ids:
+        # Do not apply kernel filter if dispatch filter is already specified,
+        # because each dispatch id has a unique kernel
+        # Apply kernel filter
+        # NB:
+        # Kernel id is unique!
+        # We pick up kernel names from kerne ids first.
+        # Then filter valid entries with kernel names.
+        filtered_df = apply_kernel_filter(filtered_df, workload, dir_path)
 
     if debug:
         print("~" * 40, "\nraw pmc df info:\n")
