@@ -51,7 +51,7 @@ template<typename T> __global__ void fma_throughput(vec4<T>* buffer, int count)
     ptr[tid] = value0 + value1 + value2 + value3;
 }
 
-// MFMA instructions are only available on gfx908 and later (excluding gfx906)
+// MFMA instructions are only available on gfx908 and later (not supported on gfx906)
 #if !defined(__gfx906__)
 __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outputs, int count)
 {
@@ -337,7 +337,7 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
     } else {
         assert(false);
     }
-    
+
     int ops_per_matmul = k * m * n * 2;
 
     void* buffer1 = nullptr;
@@ -452,10 +452,11 @@ Result run_tests(int device, int runs, uint32_t mask)
     }
 
 #if !defined(__gfx906__)
+    // MFMA available on gfx908+ (excludes gfx906 with rev=6)
+    bool has_mfma = arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8));
+    
     if(mask & MATRIX_FP16) {
-        // Exclude gfx906 (MI50) as it doesn't support MFMA instructions
-        bool is_gfx906 = (arch.major == 0x9 && arch.minor == 0x0 && arch.rev == 0x6);
-        if(!is_gfx906 && arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8))) {
+        if(has_mfma) {
             res.mfma_fp16 = matmul_throughput_test<float16, float>(device, 4096, runs);
         } else {
             res.mfma_fp16 = 0;
@@ -463,9 +464,7 @@ Result run_tests(int device, int runs, uint32_t mask)
     }
     
     if(mask & MATRIX_FP32) {
-        // Exclude gfx906 (MI50) as it doesn't support MFMA instructions
-        bool is_gfx906 = (arch.major == 0x9 && arch.minor == 0x0 && arch.rev == 0x6);
-        if(!is_gfx906 && arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8))) {
+        if(has_mfma) {
             res.mfma_fp32 = matmul_throughput_test<float, float>(device, 4096, runs);
         } else {
             res.mfma_fp32 = 0;
@@ -484,7 +483,7 @@ Result run_tests(int device, int runs, uint32_t mask)
 #if !defined(__gfx906__) && !defined(__gfx908__)
     if(mask & SMATRIX_FP16) {
         // SMFMAC only available on gfx90a (MI200) and later, not on gfx906 or gfx908
-        if(arch.major == 0x9 && (arch.minor > 0 || (arch.minor == 0 && arch.rev >= 0xa))) {
+        if(arch.major == 0x9 && (arch.minor > 0x4 || (arch.minor == 0 && arch.rev >= 0xa))) {
             res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);
         } else {
             res.smfmac_fp16 = 0;
