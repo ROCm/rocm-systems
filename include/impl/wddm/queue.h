@@ -178,6 +178,10 @@ public:
 private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
   hsa_status_t BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet, bool is_or = false);
+
+  uint64_t CalcDispatchGroups(hsa_kernel_dispatch_packet_t *packet);
+  uint64_t CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+
   struct amd_aql_pm4_ib {
       uint16_t header;
       uint16_t ven_hdr;
@@ -221,7 +225,7 @@ private:
     return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
-  bool UpdateScratch(uint32_t private_segment_size, bool wave32);
+  bool UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
@@ -247,10 +251,13 @@ private:
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
 
-  uint32_t scratch_waves_;
-  uint32_t scratch_size_per_wave_;
-  uint32_t scratch_size_;
+  uint64_t max_scratch_waves_;
+  uint64_t dispatch_waves_;
+  uint64_t scratch_size_per_wave_;
+  uint64_t scratch_size_;
+  uint64_t total_scratch_size_;
   void *scratch_base_;
+  uint32_t scratch_mem_alignment_size_;
   GpuMemoryHandle scratch_mem_;
 
   std::vector<int> scratch_base_offset_array_;

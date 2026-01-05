@@ -252,9 +252,11 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                platform_atomic_support_(false),
                signal_addr_(NULL),
                thread_stop_(false),
-               scratch_waves_(device->MaxScratchSlotsPerCu() * device->ComputeUnitCount()),
+               max_scratch_waves_(device->MaxScratchSlotsPerCu() * device->ComputeUnitCount()),
+               dispatch_waves_(0),
                scratch_size_per_wave_(0),
                scratch_size_(0),
+               total_scratch_size_(0),
                scratch_base_(nullptr) {
   bool ret = device->CreateQueue(this);
   assert(ret);
@@ -270,6 +272,11 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
   aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
+
+  if (device->Major() >= 11)
+    scratch_mem_alignment_size_ = 256;
+  else
+    scratch_mem_alignment_size_ = 1024;
 }
 
 ComputeQueue::~ComputeQueue() {
@@ -411,22 +418,29 @@ void ComputeQueue::InitScratchSRD() {
   // then the effective size for a 64 lane wave is halved.
   amd_queue_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
 
+  uint64_t num_waves;
   if (device->Major() < 11) {
     COMPUTE_TMPRING_SIZE tmpring_size;
-    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / 1024;
-    tmpring_size.bits.WAVES = scratch_waves_;
+    // Scratch Size per Wave is specified in terms of scratch_mem_alignment_size_
+    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / scratch_mem_alignment_size_;
+    num_waves = scratch_size_ / scratch_size_per_wave_;
+    tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves_);
 
     amd_queue_->compute_tmpring_size = tmpring_size.u32All;
   } else if (device->Major() == 11) {
     COMPUTE_TMPRING_SIZE_GFX11 tmpring_size;
-    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
-    tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
+    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / scratch_mem_alignment_size_;
+    // For GFX11 we specify number of waves per engine instead of total
+    num_waves = scratch_size_ / scratch_size_per_wave_ / device->NumShaderEngine();
+    tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves_);
 
     amd_queue_->compute_tmpring_size = tmpring_size.u32All;
   } else {
     COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
-    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
-    tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
+    tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / scratch_mem_alignment_size_;
+    // For GFX12 we specify number of waves per engine instead of total
+    num_waves = scratch_size_ / scratch_size_per_wave_ / device->NumShaderEngine();
+    tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves_);
 
     amd_queue_->compute_tmpring_size = tmpring_size.u32All;
   }
@@ -434,22 +448,77 @@ void ComputeQueue::InitScratchSRD() {
   return;
 }
 
-bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
-  const uint32_t wavefront = wave32 ? 32 : 64;
-  const uint32_t alignment = 1024 / wavefront;
-  private_segment_size = AlignUp(private_segment_size, alignment);
+uint64_t ComputeQueue::CalcDispatchGroups(hsa_kernel_dispatch_packet_t *packet)
+{
+  const uint64_t lanes_per_group =
+      (uint64_t(packet->workgroup_size_x) * packet->workgroup_size_y) * packet->workgroup_size_z;
 
-  uint32_t scratch_size_per_wave = private_segment_size * wavefront;
-  uint32_t scratch_size = scratch_size_per_wave * scratch_waves_;
+  uint64_t groups = ((uint64_t(packet->grid_size_x) + packet->workgroup_size_x - 1) /
+                      packet->workgroup_size_x) *
+                      ((uint64_t(packet->grid_size_y) + packet->workgroup_size_y - 1) /
+                      packet->workgroup_size_y) *
+                      ((uint64_t(packet->grid_size_z) + packet->workgroup_size_z - 1) /
+                      packet->workgroup_size_z);
+  const uint32_t cu_count = device->ComputeUnitCount();
+  const uint32_t engines = device->NumShaderEngine();
 
-  if (scratch_size_ >= scratch_size)
+  const uint32_t symmetric_cus = AlignDown(cu_count, engines);
+  const uint32_t asymmetryPerRound = cu_count - symmetric_cus;
+  const uint64_t rounds = groups / cu_count;
+  const uint64_t asymmetricGroups = rounds * asymmetryPerRound;
+  const uint64_t symmetricGroups = groups - asymmetricGroups;
+
+  uint64_t maxGroupsPerEngine =
+        ((symmetricGroups + engines - 1) / engines) + (asymmetryPerRound ? rounds : 0);
+
+  // For gfx10+ devices we must attempt to assign the smaller of 256 lanes or 16 groups to each
+  // engine.
+  if (device->Major() >= 10 &&
+      maxGroupsPerEngine < 16 &&
+      lanes_per_group * maxGroupsPerEngine < 256) {
+    uint64_t groups_per_interleave = (256 + lanes_per_group - 1) / lanes_per_group;
+    maxGroupsPerEngine = std::min(groups_per_interleave, uint64_t(16ul));
+  }
+
+  return maxGroupsPerEngine * engines;
+}
+
+uint64_t ComputeQueue::CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t *packet,
+                                                  bool wave32)
+{
+  const uint32_t lanes_per_wave = wave32 ? 32 : 64;
+
+  const uint64_t lanes_per_group =
+      (uint64_t(packet->workgroup_size_x) * packet->workgroup_size_y) * packet->workgroup_size_z;
+
+  return (lanes_per_group + lanes_per_wave - 1) / lanes_per_wave;
+}
+
+bool ComputeQueue::UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave32) {
+  const uint32_t lanes_per_wave = wave32 ? 32 : 64;
+  const uint64_t size_per_thread = AlignUp(packet->private_segment_size,
+                                  scratch_mem_alignment_size_ / lanes_per_wave);
+
+  scratch_size_per_wave_ = size_per_thread * lanes_per_wave;
+
+  uint64_t groups = CalcDispatchGroups(packet);
+  uint64_t waves_per_group = CalcDispatchWavesPerGroup(packet, wave32);
+
+  dispatch_waves_ = groups * waves_per_group;
+
+  const uint64_t max_scratch_size = scratch_size_per_wave_ * max_scratch_waves_;
+  const uint64_t dispatch_size = scratch_size_per_wave_ * dispatch_waves_;
+
+  scratch_size_ = std::min(dispatch_size, max_scratch_size);
+
+  if (total_scratch_size_ >= scratch_size_)
     return true;
 
   pr_debug("need realloc scratch buffer, size %x -> %x\n",
-           scratch_size_, scratch_size);
+           total_scratch_size_, scratch_size_);
 
   GpuMemoryCreateInfo create_info{};
-  create_info.size = scratch_size;
+  create_info.size = scratch_size_;
   create_info.domain = thunk_proxy::kLocal;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
@@ -461,8 +530,7 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
     delete scratch_gpu_mem;
   }
 
-  scratch_size_per_wave_ = scratch_size_per_wave;
-  scratch_size_ = scratch_size;
+  total_scratch_size_ = scratch_size_;
   scratch_base_ = reinterpret_cast<void *>(gpu_mem->GpuAddress());
   scratch_mem_ = gpu_mem->GetGpuMemoryHandle();
 
@@ -647,7 +715,9 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
 		     AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32);
 
   assert(packet->private_segment_size >= kernel_object->workitem_private_segment_byte_size);
-  UpdateScratch(packet->private_segment_size, wave32);
+
+  if (packet->private_segment_size != 0)
+    UpdateScratch(packet, wave32);
 
   amd_signal_t *signal = (amd_signal_t *)packet->completion_signal.handle;
 
