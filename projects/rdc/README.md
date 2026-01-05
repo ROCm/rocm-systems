@@ -222,6 +222,36 @@ If you prefer to build RDC from source, follow the steps below.
 
 ---
 
+## 🧪 Building RDC Tests Only (reuse installed RDC)
+
+Use this path when ROCm and the packaged RDC runtime/dev bits are already installed (so `librdc.so`/`librdc_bootstrap.so` and `rdc-config.cmake` live under `/opt/rocm`). This builds only the test binary without rebuilding the RDC libraries.
+
+1. Verify the installed RDC libraries are present:
+
+    ```bash
+    ls /opt/rocm/lib/librdc*.so
+    ```
+
+2. Configure and build the tests (`FetchContent` downloads gtest the first time, so network access is needed unless cached):
+
+    ```bash
+    cd projects/rdc/tests/rdc_tests
+    cmake -B build \
+      -DROCM_DIR=/opt/rocm \
+      -DAMD_SMI_INCLUDE_DIR=/opt/rocm/include \
+      -DAMD_SMI_LIB_DIR=/opt/rocm/lib \
+      -DCMAKE_PREFIX_PATH=/opt/rocm
+    cmake --build build -j $(nproc)
+    ```
+
+3. Run the tests:
+
+    ```bash
+    ./build/rdctst
+    ```
+
+---
+
 ## 📊 Features Overview
 
 ### 🔍 Discovery

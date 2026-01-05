@@ -1,3 +1,14 @@
+if(NOT DEFINED PROJECT_NAME)
+    cmake_minimum_required(VERSION 3.15)
+    project(rdc_tests LANGUAGES C CXX)
+endif()
+
+# When building out-of-tree we need the project root to locate headers
+if(NOT DEFINED RDC_SOURCE_DIR)
+    # tests/rdc_tests -> .. -> tests -> .. -> <rdc root>
+    get_filename_component(RDC_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+endif()
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                       Cmake RDC test                              ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -5,6 +16,19 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 if(WIN32)
     message("rdc library test suite is not supported on Windows platform")
     return()
+endif()
+
+if(NOT DEFINED ROCM_DIR)
+    set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm install directory.")
+endif()
+if(NOT DEFINED AMD_SMI_INCLUDE_DIR)
+    set(AMD_SMI_INCLUDE_DIR "${ROCM_DIR}/include" CACHE PATH "Path to AMD SMI headers.")
+endif()
+if(NOT DEFINED AMD_SMI_LIB_DIR)
+    set(AMD_SMI_LIB_DIR "${ROCM_DIR}/lib" CACHE PATH "Path to AMD SMI libs.")
+endif()
+if(NOT DEFINED ROCM_INSTALL_DIR)
+    set(ROCM_INSTALL_DIR "${ROCM_DIR}" CACHE PATH "Root used for ROCm runtime libraries.")
 endif()
 
 # Required Defines first:
@@ -18,11 +42,6 @@ set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_RPATH} ${RDCTST_RPATH})
 
 #
 # Print out the build configuration being used:
-#
-#   Build Src directory
-#   Build Binary directory
-#   Build Type: Debug Vs Release, 32 Vs 64
-#   Compiler Version, etc
 #
 message("")
 message("Build Configuration:")
@@ -42,14 +61,23 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(RDCTST "rdctst")
 
-# Download and compile googletest
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-)
-FetchContent_MakeAvailable(googletest)
+# Prefer system GTest when available (useful in offline envs); otherwise FetchContent.
+find_package(GTest QUIET)
+if(GTest_FOUND)
+    message(STATUS "Using system GTest")
+    set(GTEST_TARGET GTest::gtest_main)
+    set(GTEST_INSTALL_TARGETS)  # system package, do not install
+else()
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
+    set(GTEST_TARGET GTest::gtest_main)
+    set(GTEST_INSTALL_TARGETS gtest gtest_main)
+endif()
 
 # Source files
 set(rdctstSources
@@ -69,6 +97,12 @@ set(functionalSources
     ${SRC_DIR}/functional/rdci_cpu_support.cc
 )
 
+# When built out of tree, consume installed RDC libs instead of rebuilding them.
+if(NOT TARGET rdc_bootstrap OR NOT TARGET rdc)
+    find_package(rdc CONFIG REQUIRED)
+endif()
+set(RDC_TEST_DEPS rdc_bootstrap rdc)
+
 link_directories(${ROCM_INSTALL_DIR} ${AMD_SMI_LIB_DIR})
 
 # Build rules
@@ -77,23 +111,22 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 # Header file include path
 target_include_directories(
     ${RDCTST}
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC ${RDC_SOURCE_DIR}/include
     PUBLIC ${AMD_SMI_INCLUDE_DIR}
     PUBLIC ${SRC_DIR}/..
 )
 
 target_link_libraries(
     ${RDCTST}
-    PUBLIC rdc_bootstrap
-    PUBLIC rdc
-    PUBLIC GTest::gtest_main
+    PUBLIC ${RDC_TEST_DEPS}
+    PUBLIC ${GTEST_TARGET}
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread
 )
 
 install(
-    TARGETS ${RDCTST} gtest gtest_main
+    TARGETS ${RDCTST} ${GTEST_INSTALL_TARGETS}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
