@@ -177,7 +177,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional") {
   const int val1 = 10;
   const int val2 = 4;
   // Allocate buffers for pointer-ptr copy
-  int* hostDstPtr[count];
+  int *hostDstPtr[count];
   void *deviceSrcPtr[count];
   std::vector<std::vector<int>> hostPtr(count, std::vector<int>(arrSize, val1));
   std::array<int, arrSize> arr;
