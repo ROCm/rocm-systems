@@ -890,9 +890,17 @@ def run_prof(
         )
         combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
-        # Workgroup_Size, LDS_Per_Workgroup
+        # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
         combined_df["Dispatch_ID"] = combined_df.groupby(
-            ["PID", "Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            [
+                "PID",
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+                "Start_Timestamp",
+                "End_Timestamp",
+            ],
             sort=False,
         ).ngroup()
         # Reset Kernel_ID based on Kernel_Name, Grid_Size,
@@ -958,6 +966,13 @@ def run_prof(
 
         # Overwrite column to ensure unique IDs.
         combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+        # Reset Kernel_ID based on Kernel_Name, Grid_Size,
+        # Workgroup_Size, LDS_Per_Workgroup
+        combined_results["Kernel_ID"] = combined_results.groupby(
+            ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+            sort=False,
+        ).ngroup()
 
         combined_results.to_csv(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
@@ -1097,13 +1112,13 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )[0]
         kernel_data = pd.read_csv(kernel_data_filename)
 
-        # Merge counter_data with kernel_data on kernel_id
+        # Merge counter_data with kernel_data on dispatch_id
         merged_data = pd.merge(
             counter_data,
             kernel_data,
-            left_on="kernel_id",
-            right_on="Kernel_Id",
-            how="left",
+            left_on="dispatch_id",
+            right_on="Dispatch_Id",
+            how="inner",
         )
 
         rocprofv3_counter_data = pd.DataFrame({

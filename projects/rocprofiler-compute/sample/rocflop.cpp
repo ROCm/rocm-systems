@@ -80,42 +80,6 @@ __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outpu
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
 
-__global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
-{
-    int grid_size = gridDim.x * blockDim.x;
-    int tid = blockDim.x * blockIdx.x + threadIdx.x;
-
-    vec4<float16>* x_ptr = input0;
-    vec8<float16>* y_ptr = input1;
-
-    vec4<float16> x0 = x_ptr[0 * grid_size + tid];
-    vec4<float16> x1 = x_ptr[1 * grid_size + tid];
-    vec4<float16> x2 = x_ptr[2 * grid_size + tid];
-    vec4<float16> x3 = x_ptr[3 * grid_size + tid];
-    
-    vec8<float16> y0 = y_ptr[0 * grid_size + tid];
-    vec8<float16> y1 = y_ptr[1 * grid_size + tid];
-    vec8<float16> y2 = y_ptr[2 * grid_size + tid];
-    vec8<float16> y3 = y_ptr[3 * grid_size + tid];
-    
-    vec4<float> accum0;
-    vec4<float> accum1;
-    vec4<float> accum2;
-    vec4<float> accum3;
-   
-    for(int i = 0; i < count; i++) {
-        for(int j = 0; j < 64; j++) {
-            // 4 SMFMAC ops
-            accum0 = __builtin_amdgcn_smfmac_f32_16x16x32_f16(x0, y0, accum0, 0, 0, 0);
-            accum1 = __builtin_amdgcn_smfmac_f32_16x16x32_f16(x1, y1, accum1, 0, 0, 0);
-            accum2 = __builtin_amdgcn_smfmac_f32_16x16x32_f16(x2, y2, accum2, 0, 0, 0);
-            accum3 = __builtin_amdgcn_smfmac_f32_16x16x32_f16(x3, y3, accum3, 0, 0, 0);
-        }
-    }
-
-    outputs[tid] = accum0 + accum1 + accum2 + accum3;
-}
-
 __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -187,7 +151,6 @@ enum : uint32_t {
     VALU_FP64   = 1 << 2,
     MATRIX_FP16 = 1 << 3,
     MATRIX_FP32 = 1 << 4,
-    SMATRIX_FP16 = 1 << 5,
     VALU_INT32  = 1 << 6,
 
     ALL         = (uint32_t)-1
@@ -314,60 +277,6 @@ template<typename matT, typename accumT> double matmul_throughput_test(int devic
     return flops;
 }
 
-template<typename matT, typename accumT> double sparse_matmul_throughput_test(int device, int count, int runs = 1)
-{
-    const int wave_size = 64;
-    int k;
-    int m;
-    int n;
-
-    if(std::is_same<matT, float16>::value) {
-        m = 16;
-        n = 16;
-        k = 32;
-    } else {
-        assert(false);
-    }
-    
-    int ops_per_matmul = k * m * n * 2;
-
-    void* buffer1 = nullptr;
-    void* buffer2 = nullptr;
-    void* accum = nullptr;
-
-    hipDeviceProp_t props;
-    HIP_CALL(hipGetDeviceProperties(&props, device));
-
-    int blocks = props.multiProcessorCount * 512;
-    int threads_per_block = wave_size;
-    int total_threads = blocks * threads_per_block;
-
-    HIP_CALL(hipMalloc(&buffer1, 4 * sizeof(matT) * m * k * total_threads));
-    HIP_CALL(hipMalloc(&buffer2, 8 * sizeof(matT) * n * k * total_threads));
-    HIP_CALL(hipMalloc(&accum, sizeof(accumT) * m * n * total_threads));
-
-    HIPTimer t;
-    t.start();
-    for(int i = 0; i < runs; i++) {
-        if(std::is_same<matT, float16>::value && std::is_same<accumT, float>::value) {
-            sparse_matmul_fp16_throughput<<<blocks, threads_per_block>>>((vec4<float16>*)buffer1,
-            (vec8<float16>*)buffer2, (vec4<float>*)accum, count);
-        }
-    }
-    t.stop();
-    HIP_CALL(hipDeviceSynchronize());
-
-    double elapsed = t.elapsed();
-    double ops = (double)blocks * count * 64 * 4 * runs;
-    double flops = (double)ops * ops_per_matmul / elapsed;
-
-    HIP_CALL(hipFree(buffer1));
-    HIP_CALL(hipFree(buffer2));
-    HIP_CALL(hipFree(accum));
-
-    return flops;
-}
-
 struct Result {
     int device = -1;
     double valu_fp16 = 0;
@@ -376,7 +285,6 @@ struct Result {
     double valu_int32 = 0;
     double mfma_fp16 = 0;
     double mfma_fp32 = 0;
-    double smfmac_fp16 = 0;
 
     // Used for sorting
     bool operator<(const Result& other) {
@@ -403,10 +311,6 @@ void print_result(const Result& res, uint32_t mask)
     }
     if(mask & MATRIX_FP32) {
         printf("MFMA FP32: %8.2f TFLOPS\n", res.mfma_fp32 / 1e12);
-    }
-    if(mask & SMATRIX_FP16) {
-        printf("SMFMAC FP16: %8.2f TFLOPS\n", res.smfmac_fp16 / 1e12);
-
     }
 }
 
@@ -458,13 +362,6 @@ Result run_tests(int device, int runs, uint32_t mask)
         }
     }
 
-    if(mask & SMATRIX_FP16) {
-        if(arch.major == 9 && arch.minor >= 4) {
-            res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);
-        } else {
-            res.smfmac_fp16 = 0;
-        }
-    }
     return res;
 }
 
@@ -550,7 +447,6 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
         total.valu_int32 += r.valu_int32;
         total.mfma_fp16 += r.mfma_fp16;
         total.mfma_fp32 += r.mfma_fp32;
-        total.smfmac_fp16 += r.smfmac_fp16;
     }
     std::cout << std::endl << "System total" << std::endl;
     print_result(total, mask);
@@ -569,7 +465,6 @@ void usage()
     std::cout << "--fp64                Run FP64 (VALU) test" << std::endl;
     std::cout << "--matfp16             Run FP16 (MFMA) test" << std::endl;
     std::cout << "--matfp32             Run FP32 (MFMA) test" << std::endl;
-    std::cout << "--smatfp16            Run FP16 (SMFMAC) test" << std::endl;
 }
 
 int main(int argc, char** argv)
@@ -639,8 +534,6 @@ int main(int argc, char** argv)
             mask |= MATRIX_FP16;
         } else if(arg == "--matfp32") {
             mask |= MATRIX_FP32;
-        } else if(arg == "--smatfp16") {
-            mask |= SMATRIX_FP16;
         } else {
             std::cout << "Invalid argument '" << arg << "'" << std::endl;
             std::cout << std::endl;

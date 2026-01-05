@@ -43,6 +43,15 @@ struct CPUGrid {
     return thread_rank_in_grid % threads_in_block_count_;
   }
 
+  inline std::optional<unsigned int> block_rank_in_grid(
+      const unsigned int thread_rank_in_grid) const {
+    if (thread_rank_in_grid > thread_count_) {
+      return std::nullopt;
+    }
+
+    return thread_rank_in_grid / threads_in_block_count_;
+  }
+
   inline std::optional<dim3> block_idx(const unsigned int thread_rank_in_grid) const {
     if (thread_rank_in_grid > thread_count_) {
       return std::nullopt;

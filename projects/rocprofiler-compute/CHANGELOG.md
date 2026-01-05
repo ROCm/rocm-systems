@@ -45,8 +45,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Fix the check to prevent showing table where a column is full of N/A
   * Improve detection of empty values when metric evalulation fails due to counter data missing
 
-* Fix the wrong logic in native counter csv to rocprofv3 csv conversion
-  * Use kernel_id instead of dispatch_id to correlate native counter csv and kernel trace csv
+* Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
 
 ### Removed
 
