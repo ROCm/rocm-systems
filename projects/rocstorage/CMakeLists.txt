@@ -61,6 +61,8 @@ set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/error.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/result.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/enum_definitions.h
     ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_interface.h
     ${CMAKE_CURRENT_LIST_DIR}/include/rocprofvis_interface_types.h

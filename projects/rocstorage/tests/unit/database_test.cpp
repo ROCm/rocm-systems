@@ -258,4 +258,146 @@ TEST_F(database_test, alphanumeric_uuid_succeeds) {
       std::make_unique<database>(m_database_path, "abc123XYZ456"));
 }
 
+// ============================================================================
+// Read-only mode and query callback tests
+// ============================================================================
+
+TEST_F(database_test, open_readonly_fails_for_nonexistent_file) {
+  auto result = database::open_readonly("/nonexistent/path/db.sqlite");
+  EXPECT_FALSE(result);
+  EXPECT_EQ(result.get_error().code(), rocstorage::error_code::file_not_found);
+}
+
+TEST_F(database_test, open_readonly_succeeds_for_valid_database) {
+  // First create a database file
+  {
+    auto db = std::make_unique<database>(m_database_path, m_uuid);
+    db->execute_query("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY, name TEXT)");
+    db->execute_query("INSERT INTO test_tbl (name) VALUES ('hello')");
+    db->flush();
+  }
+
+  // Open in read-only mode
+  auto result = database::open_readonly(m_database_path);
+  ASSERT_TRUE(result);
+  auto& db = result.value();
+  EXPECT_EQ(db->get_mode(), database_mode::read_only);
+  EXPECT_EQ(db->get_path(), m_database_path);
+}
+
+TEST_F(database_test, execute_query_with_callback_reads_data) {
+  // Create database with data
+  {
+    auto db = std::make_unique<database>(m_database_path, m_uuid);
+    db->execute_query("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY, name TEXT, value REAL)");
+    db->execute_query("INSERT INTO test_tbl (name, value) VALUES ('first', 1.5)");
+    db->execute_query("INSERT INTO test_tbl (name, value) VALUES ('second', 2.5)");
+    db->execute_query("INSERT INTO test_tbl (name, value) VALUES ('third', 3.5)");
+    db->flush();
+  }
+
+  // Open and read
+  auto result = database::open_readonly(m_database_path);
+  ASSERT_TRUE(result);
+  auto& db = result.value();
+
+  int row_count = 0;
+  std::vector<std::string> names;
+  std::vector<double> values;
+
+  auto status = db->execute_query("SELECT name, value FROM test_tbl ORDER BY id",
+      [&](const query_row& row) {
+        row_count++;
+        names.push_back(std::string(row.get_text(0)));
+        values.push_back(row.get_double(1));
+        return true; // continue
+      });
+
+  ASSERT_TRUE(status);
+  EXPECT_EQ(row_count, 3);
+  EXPECT_EQ(names[0], "first");
+  EXPECT_EQ(names[1], "second");
+  EXPECT_EQ(names[2], "third");
+  EXPECT_DOUBLE_EQ(values[0], 1.5);
+  EXPECT_DOUBLE_EQ(values[1], 2.5);
+  EXPECT_DOUBLE_EQ(values[2], 3.5);
+}
+
+TEST_F(database_test, execute_query_callback_can_stop_early) {
+  // Create database with data
+  {
+    auto db = std::make_unique<database>(m_database_path, m_uuid);
+    db->execute_query("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY)");
+    for (int i = 0; i < 100; ++i) {
+      db->execute_query("INSERT INTO test_tbl DEFAULT VALUES");
+    }
+    db->flush();
+  }
+
+  auto result = database::open_readonly(m_database_path);
+  ASSERT_TRUE(result);
+  auto& db = result.value();
+
+  int row_count = 0;
+  auto status = db->execute_query("SELECT id FROM test_tbl",
+      [&](const query_row&) {
+        row_count++;
+        return row_count < 5; // stop after 5 rows
+      });
+
+  ASSERT_TRUE(status);
+  EXPECT_EQ(row_count, 5);
+}
+
+TEST_F(database_test, execute_query_with_callback_returns_error_for_invalid_sql) {
+  // Create a simple database
+  {
+    auto db = std::make_unique<database>(m_database_path, m_uuid);
+    db->execute_query("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY)");
+    db->flush();
+  }
+
+  auto result = database::open_readonly(m_database_path);
+  ASSERT_TRUE(result);
+  auto& db = result.value();
+
+  auto status = db->execute_query("INVALID SQL SYNTAX",
+      [](const query_row&) { return true; });
+
+  EXPECT_FALSE(status);
+  EXPECT_EQ(status.get_error().code(), rocstorage::error_code::query_error);
+}
+
+TEST_F(database_test, query_row_accessors_work_correctly) {
+  // Create database with various column types
+  {
+    auto db = std::make_unique<database>(m_database_path, m_uuid);
+    db->execute_query(
+        "CREATE TABLE types_tbl (int_val INTEGER, real_val REAL, text_val TEXT, null_val TEXT)");
+    db->execute_query(
+        "INSERT INTO types_tbl VALUES (42, 3.14, 'hello', NULL)");
+    db->flush();
+  }
+
+  auto result = database::open_readonly(m_database_path);
+  ASSERT_TRUE(result);
+  auto& db = result.value();
+
+  auto status = db->execute_query("SELECT * FROM types_tbl",
+      [](const query_row& row) {
+        EXPECT_EQ(row.column_count(), 4);
+        EXPECT_EQ(row.get_int(0), 42);
+        EXPECT_EQ(row.get_int64(0), 42);
+        EXPECT_DOUBLE_EQ(row.get_double(1), 3.14);
+        EXPECT_EQ(row.get_text(2), "hello");
+        EXPECT_FALSE(row.is_null(0));
+        EXPECT_FALSE(row.is_null(1));
+        EXPECT_FALSE(row.is_null(2));
+        EXPECT_TRUE(row.is_null(3));
+        return true;
+      });
+
+  ASSERT_TRUE(status);
+}
+
 } // namespace

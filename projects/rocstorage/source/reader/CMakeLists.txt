@@ -52,6 +52,7 @@ set(READER_DATABASE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/database/rocprofvis_db_future.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/database/rocprofvis_db_query_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/database/rocprofvis_db_query_builder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/database/unified_db_adapter.cpp
 )
 
 # ------------------------------------------------------------ #
@@ -72,6 +73,7 @@ target_include_directories(rocstorage PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/database
     ${CMAKE_CURRENT_SOURCE_DIR}/interop
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/source
 )
 
 # ------------------------------------------------------------ #

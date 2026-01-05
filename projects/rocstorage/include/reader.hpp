@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 #include <rocstorage/enum_definitions.h>
+#include <rocstorage/result.hpp>
 
 // Forward declarations for C API interop
 typedef void *rocprofvis_dm_trace_t;
@@ -324,6 +325,14 @@ public:
   open(const std::string &path,
        database_type type = kAutodetect);
 
+  /// Open a database file for reading with detailed error information
+  /// @param path Path to the database file
+  /// @param type Database type (autodetect by default)
+  /// @return Result containing reader instance or error with details
+  [[nodiscard]] static result<std::unique_ptr<reader>>
+  try_open(const std::string &path,
+           database_type type = kAutodetect);
+
   ~reader();
 
   reader(const reader &) = delete;
@@ -334,6 +343,10 @@ public:
   /// Read metadata (tracks, time bounds) synchronously
   /// @return true on success
   bool read_metadata();
+
+  /// Read metadata with detailed error information
+  /// @return status indicating success or error with details
+  [[nodiscard]] status try_read_metadata();
 
   /// Read metadata asynchronously
   /// @param callback Optional progress callback
@@ -362,6 +375,11 @@ public:
   /// @return Track object, or nullptr if index is invalid
   std::unique_ptr<track> get_track(uint64_t index) const;
 
+  /// Get track by index with error information
+  /// @param index Track index (0 to num_tracks() - 1)
+  /// @return Result with track object or error
+  [[nodiscard]] result<std::unique_ptr<track>> try_get_track(uint64_t index) const;
+
   /// Get all tracks
   std::vector<std::unique_ptr<track>> get_tracks() const;
 
@@ -372,6 +390,14 @@ public:
   /// @return true on success
   bool read_slice(uint64_t start, uint64_t end,
                   const std::vector<uint32_t> &track_ids);
+
+  /// Read a time slice with error information
+  /// @param start Start timestamp
+  /// @param end End timestamp
+  /// @param track_ids Vector of track IDs to read
+  /// @return status indicating success or error with details
+  [[nodiscard]] status try_read_slice(uint64_t start, uint64_t end,
+                                      const std::vector<uint32_t> &track_ids);
 
   /// Read a time slice asynchronously
   /// @param start Start timestamp

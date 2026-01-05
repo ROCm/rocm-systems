@@ -148,42 +148,110 @@ namespace rocstorage {
 namespace data_storage {
 database::database(std::string db_path, std::string uuid, database_mode mode)
     : m_db_path{std::move(db_path)}, m_uuid{std::move(uuid)}, m_mode{mode} {
-  // Validate UUID to ensure compatibility with rocstorage-reader's GUID extraction
-  if (!validation::is_valid_uuid(m_uuid)) {
-    throw std::invalid_argument(
-        "Invalid UUID: " + validation::get_uuid_validation_error(m_uuid) +
-        "\nUUIDs must contain only alphanumeric characters to ensure "
-        "compatibility with rocstorage-reader.");
-  }
 
-  create_directory_for_database_file(m_db_path);
-
-  if (m_mode == database_mode::wal) {
-    // WAL mode: open file directly for concurrent read/write access
-    spdlog::info("rocstorage database initialized in WAL mode (uuid: {}, path: {})",
-                 m_uuid, m_db_path);
-    validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &m_sqlite3_db), "",
-                            "database open failed!");
-    // Enable WAL mode for concurrent access
+  if (m_mode == database_mode::read_only) {
+    // Read-only mode: open existing database for reading
+    spdlog::info("rocstorage database opened in read-only mode (path: {})", m_db_path);
     validate_sqlite3_result(
-        sqlite3_exec(m_sqlite3_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr),
-        "PRAGMA journal_mode=WAL", "Failed to enable WAL mode!");
-    // Use NORMAL synchronous mode for better performance with reasonable safety
-    validate_sqlite3_result(
-        sqlite3_exec(m_sqlite3_db, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr),
-        "PRAGMA synchronous=NORMAL", "Failed to set synchronous mode!");
+        sqlite3_open_v2(m_db_path.c_str(), &m_sqlite3_db, SQLITE_OPEN_READONLY, nullptr),
+        "", "database open failed!");
+    // Mark as initialized to skip initialize_schema() - existing database has schema
+    m_initialized = true;
   } else {
-    // In-memory mode: write to memory, flush to disk at end (current behavior)
-    spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
-                 m_db_path);
-    validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_db), "",
-                            "database open failed!");
+    // Validate UUID to ensure compatibility with rocstorage-reader's GUID extraction
+    if (!validation::is_valid_uuid(m_uuid)) {
+      throw std::invalid_argument(
+          "Invalid UUID: " + validation::get_uuid_validation_error(m_uuid) +
+          "\nUUIDs must contain only alphanumeric characters to ensure "
+          "compatibility with rocstorage-reader.");
+    }
+
+    create_directory_for_database_file(m_db_path);
+
+    if (m_mode == database_mode::wal) {
+      // WAL mode: open file directly for concurrent read/write access
+      spdlog::info("rocstorage database initialized in WAL mode (uuid: {}, path: {})",
+                   m_uuid, m_db_path);
+      validate_sqlite3_result(sqlite3_open(m_db_path.c_str(), &m_sqlite3_db), "",
+                              "database open failed!");
+      // Enable WAL mode for concurrent access
+      validate_sqlite3_result(
+          sqlite3_exec(m_sqlite3_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr),
+          "PRAGMA journal_mode=WAL", "Failed to enable WAL mode!");
+      // Use NORMAL synchronous mode for better performance with reasonable safety
+      validate_sqlite3_result(
+          sqlite3_exec(m_sqlite3_db, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr),
+          "PRAGMA synchronous=NORMAL", "Failed to set synchronous mode!");
+    } else {
+      // In-memory mode: write to memory, flush to disk at end (current behavior)
+      spdlog::info("rocstorage database initialized (uuid: {}, path: {})", m_uuid,
+                   m_db_path);
+      validate_sqlite3_result(sqlite3_open(":memory:", &m_sqlite3_db), "",
+                              "database open failed!");
+    }
   }
 }
 
 database::~database() { sqlite3_close(m_sqlite3_db); }
 
 std::string database::get_uuid() const { return m_uuid; }
+
+std::string database::get_path() const { return m_db_path; }
+
+database_mode database::get_mode() const { return m_mode; }
+
+result<std::unique_ptr<database>> database::open_readonly(const std::string &path) {
+  // Check if file exists and is a valid SQLite database
+  sqlite3 *test_db;
+  int rc = sqlite3_open_v2(path.c_str(), &test_db,
+                           SQLITE_OPEN_READONLY, nullptr);
+  if (rc != SQLITE_OK) {
+    std::string err_msg = sqlite3_errmsg(test_db);
+    sqlite3_close(test_db);
+    return error(error_code::file_not_found,
+                 "Failed to open database: " + err_msg, path, rc);
+  }
+  sqlite3_close(test_db);
+
+  // Create database instance with read_only mode
+  // Use empty UUID since we're opening an existing database
+  try {
+    auto db = std::unique_ptr<database>(new database(path, "", database_mode::read_only));
+    return db;
+  } catch (const std::exception &e) {
+    return error(error_code::db_access_failed,
+                 std::string("Failed to open database: ") + e.what(), path);
+  }
+}
+
+status database::execute_query(const std::string &query, row_callback callback) {
+  sqlite3_stmt *stmt = nullptr;
+  int rc = sqlite3_prepare_v2(m_sqlite3_db, query.c_str(), -1, &stmt, nullptr);
+
+  if (rc != SQLITE_OK) {
+    return error(error_code::query_error,
+                 std::string("Failed to prepare query: ") + sqlite3_errmsg(m_sqlite3_db),
+                 query, rc);
+  }
+
+  auto cleanup = [](sqlite3_stmt *s) { sqlite3_finalize(s); };
+  std::unique_ptr<sqlite3_stmt, decltype(cleanup)> stmt_guard(stmt, cleanup);
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    query_row row(stmt);
+    if (!callback(row)) {
+      break; // Callback requested stop
+    }
+  }
+
+  if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
+    return error(error_code::query_error,
+                 std::string("Query execution failed: ") + sqlite3_errmsg(m_sqlite3_db),
+                 query, rc);
+  }
+
+  return ok();
+}
 
 void database::initialize_schema() {
   if (m_initialized) {

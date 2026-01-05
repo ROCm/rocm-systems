@@ -23,12 +23,14 @@
 include(gtest)
 
 set(UNIT_TEST_SOURCES
+    error_test.cpp
     storage_test.cpp
     writer_test.cpp
     reader_test.cpp
     insert_query_builders_test.cpp
     table_insert_query_test.cpp
     database_test.cpp
+    unified_db_adapter_test.cpp
     reader/trace_test.cpp
     reader/database_test.cpp
 )
@@ -55,6 +57,7 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/source/reader/datamodel
         ${CMAKE_SOURCE_DIR}/source/reader/database
         ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/shared
 )
 
 # Define path to test fixtures (pre-generated trace databases)

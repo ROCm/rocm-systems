@@ -69,6 +69,11 @@ struct storage_config {
   /// Detect platform-appropriate defaults
   static storage_config detect_defaults();
 
+  /// Load configuration from environment variables
+  /// Reads: ROCSTORAGE_MODE, ROCSTORAGE_WAL_DIR, ROCSTORAGE_USE_RAM_DISK,
+  ///        ROCSTORAGE_CACHE_IN_MEMORY
+  static storage_config from_environment();
+
   /// Get platform-specific default WAL directory
   static std::string default_wal_directory();
 

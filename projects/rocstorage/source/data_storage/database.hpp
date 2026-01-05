@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "query_row.hpp"
+#include <rocstorage/result.hpp>
 #include "traits.hpp"
 
 #include <spdlog/spdlog.h>
@@ -37,7 +39,8 @@ namespace data_storage {
 /// Database storage mode
 enum class database_mode {
   in_memory, ///< Write to in-memory SQLite, flush to disk at end (default)
-  wal        ///< Write directly to file using WAL mode (concurrent access)
+  wal,       ///< Write directly to file using WAL mode (concurrent access)
+  read_only  ///< Open existing database in read-only mode
 };
 
 class database {
@@ -55,7 +58,30 @@ public:
   void initialize_schema();
   void execute_query(const std::string &query);
   size_t get_last_insert_id() const;
+  /// Get the database UUID (empty for read-only databases)
   std::string get_uuid() const;
+
+  /// Get the database file path
+  std::string get_path() const;
+
+  /// Get the current database mode
+  database_mode get_mode() const;
+
+  // ==================== Read-Only Mode Support ====================
+
+  /// Open an existing database in read-only mode
+  /// @param path Path to the database file
+  /// @return result containing the database or an error
+  static result<std::unique_ptr<database>> open_readonly(const std::string &path);
+
+  /// Execute a SELECT query and iterate over results
+  /// @param query SQL query to execute
+  /// @param callback Function called for each row; return false to stop iteration
+  /// @return status indicating success or error
+  status execute_query(const std::string &query, row_callback callback);
+
+  /// Get the raw SQLite connection handle (for advanced usage)
+  sqlite3 *raw_connection() const noexcept { return m_sqlite3_db; }
 
   /**
    * This function prepares an SQLite statement based on the provided SQL query

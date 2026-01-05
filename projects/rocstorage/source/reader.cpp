@@ -22,6 +22,7 @@
 
 #include <rocstorage/reader.hpp>
 
+#include "error.hpp"
 #include "reader/datamodel/internal_types.h"
 #include "reader/datamodel/rocprofvis_dm_trace.h"
 #include "reader/database/rocprofvis_db.h"
@@ -31,6 +32,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 
@@ -209,6 +211,28 @@ std::unique_ptr<reader> reader::open(const std::string &path,
   }
 }
 
+result<std::unique_ptr<reader>> reader::try_open(const std::string &path,
+                                                  database_type type) {
+  if (path.empty()) {
+    return error(error_code::invalid_parameter, "Empty database path");
+  }
+
+  // SQLite creates the file if it doesn't exist, which we don't want
+  if (!is_valid_sqlite_file(path)) {
+    return error(error_code::file_not_found,
+                 "File does not exist or is not a valid SQLite database: " + path);
+  }
+
+  try {
+    auto r = std::unique_ptr<reader>(new reader());
+    r->impl_ = std::make_unique<Impl>(path, type);
+    return std::move(r);
+  } catch (const std::exception &e) {
+    return error(error_code::db_access_failed,
+                 std::string("Failed to open database: ") + e.what());
+  }
+}
+
 reader::~reader() = default;
 
 reader::reader(reader &&) noexcept = default;
@@ -228,6 +252,29 @@ bool reader::read_metadata() {
 
   result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
   return result == kRocProfVisDmResultSuccess;
+}
+
+status reader::try_read_metadata() {
+  if (!impl_) {
+    return error(error_code::invalid_parameter, "Reader not initialized");
+  }
+  if (!impl_->is_ready()) {
+    return error(error_code::not_loaded, "Reader not ready");
+  }
+
+  impl_->future_ = impl_->allocate_future(nullptr);
+  auto c_result =
+      impl_->database_->ReadTraceMetadataAsync(impl_->future_.get());
+  if (c_result != kRocProfVisDmResultSuccess) {
+    return from_c_result(c_result, "Failed to start metadata read");
+  }
+
+  c_result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
+  if (c_result != kRocProfVisDmResultSuccess) {
+    return from_c_result(c_result, "Metadata read failed or timed out");
+  }
+
+  return ok();
 }
 
 bool reader::read_metadata_async(progress_callback callback) {
@@ -295,6 +342,34 @@ std::unique_ptr<track> reader::get_track(uint64_t index) const {
   return std::unique_ptr<track>(new track(handle));
 }
 
+result<std::unique_ptr<track>> reader::try_get_track(uint64_t index) const {
+  if (!impl_) {
+    return error(error_code::invalid_parameter, "Reader not initialized");
+  }
+  if (!impl_->trace_) {
+    return error(error_code::not_loaded, "Trace not loaded");
+  }
+  if (index >= num_tracks()) {
+    return error(error_code::index_out_of_bounds,
+                 "Track index " + std::to_string(index) + " out of range (0-" +
+                 std::to_string(num_tracks() - 1) + ")");
+  }
+
+  rocprofvis_dm_track_t handle = nullptr;
+  auto c_result = impl_->trace_->GetPropertyAsHandle(kRPVDMTrackHandleIndexed,
+                                                      index, &handle);
+  if (c_result != kRocProfVisDmResultSuccess) {
+    return from_c_result(c_result, "Failed to get track at index " +
+                                   std::to_string(index));
+  }
+  if (!handle) {
+    return error(error_code::invalid_property,
+                 "Track handle is null for index " + std::to_string(index));
+  }
+
+  return std::unique_ptr<track>(new track(handle));
+}
+
 std::vector<std::unique_ptr<track>> reader::get_tracks() const {
   std::vector<std::unique_ptr<track>> tracks;
   auto count = num_tracks();
@@ -314,6 +389,9 @@ bool reader::read_slice(uint64_t start, uint64_t end,
   if (!impl_ || !impl_->is_ready() || track_ids.empty()) {
     return false;
   }
+  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
+    return false;
+  }
 
   impl_->future_ = impl_->allocate_future(nullptr);
   auto result = impl_->database_->ReadTraceSliceAsync(
@@ -328,10 +406,47 @@ bool reader::read_slice(uint64_t start, uint64_t end,
   return result == kRocProfVisDmResultSuccess;
 }
 
+status reader::try_read_slice(uint64_t start, uint64_t end,
+                               const std::vector<uint32_t> &track_ids) {
+  if (!impl_) {
+    return error(error_code::invalid_parameter, "Reader not initialized");
+  }
+  if (!impl_->is_ready()) {
+    return error(error_code::not_loaded, "Reader not ready");
+  }
+  if (track_ids.empty()) {
+    return error(error_code::invalid_parameter, "No track IDs specified");
+  }
+  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
+    return error(error_code::invalid_parameter,
+                 "Too many track IDs specified (max " +
+                 std::to_string(std::numeric_limits<uint16_t>::max()) + ")");
+  }
+
+  impl_->future_ = impl_->allocate_future(nullptr);
+  auto c_result = impl_->database_->ReadTraceSliceAsync(
+      start, end, static_cast<uint16_t>(track_ids.size()),
+      const_cast<uint32_t *>(track_ids.data()), impl_->future_.get());
+
+  if (c_result != kRocProfVisDmResultSuccess) {
+    return from_c_result(c_result, "Failed to start slice read");
+  }
+
+  c_result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
+  if (c_result != kRocProfVisDmResultSuccess) {
+    return from_c_result(c_result, "Slice read failed or timed out");
+  }
+
+  return ok();
+}
+
 bool reader::read_slice_async(uint64_t start, uint64_t end,
                               const std::vector<uint32_t> &track_ids,
                               progress_callback callback) {
   if (!impl_ || !impl_->is_ready() || track_ids.empty()) {
+    return false;
+  }
+  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
     return false;
   }
 

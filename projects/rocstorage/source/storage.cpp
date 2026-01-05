@@ -23,6 +23,9 @@
 #include <rocstorage/storage.hpp>
 
 #include "data_storage/database.hpp"
+#include "reader/database/unified_db_adapter.hpp"
+#include "reader/datamodel/rocprofvis_dm_trace.h"
+#include "reader/database/rocprofvis_db_future.h"
 
 #include <filesystem>
 #include <fstream>
@@ -275,28 +278,23 @@ std::shared_ptr<rocstorage::writer> storage::get_writer() const {
 
 std::shared_ptr<rocstorage::reader> storage::get_reader() const {
   if (!impl_->reader && !impl_->path.empty()) {
-    // WARNING: This is a workaround, not a proper solution.
-    //
-    // The writer uses an in-memory SQLite database (data_storage::database)
-    // that gets flushed to disk once via sqlite3_backup. The reader uses a
-    // completely separate database layer (RocProfVis::DataModel::Database)
-    // that opens the on-disk file with connection pooling.
-    //
-    // These two layers do not share a connection, so we must:
-    // 1. Flush the writer's in-memory DB to disk
-    // 2. Open a new reader connection to that file
-    //
-    // Limitations:
-    // - Caller cannot read data until after flush (writes not visible)
-    // - flush() can only be called once, so this only works once
-    // - Reader and writer are never truly connected
-    //
-    // A proper solution would allow the reader to use the writer's sqlite3*
-    // handle directly, enabling read-write mode without flushing.
-    if (impl_->writer) {
+    // Check if we have a database in WAL mode - if so, the reader can access
+    // data directly without flushing since WAL enables concurrent access.
+    if (impl_->database &&
+        impl_->database->get_mode() == rocstorage::data_storage::database_mode::wal) {
+      // WAL mode: The database is on disk with WAL journaling, so readers
+      // can access it concurrently with writers. No flush needed.
+      impl_->reader = rocstorage::reader::open(impl_->path);
+    } else if (impl_->writer) {
+      // In-memory mode: Must flush to disk before reading.
+      // Note: flush() can only be called once, so subsequent reads will
+      // see stale data if more writes occur after the flush.
       impl_->writer->flush();
+      impl_->reader = rocstorage::reader::open(impl_->path);
+    } else {
+      // Read-only mode or no writer: just open the database
+      impl_->reader = rocstorage::reader::open(impl_->path);
     }
-    impl_->reader = rocstorage::reader::open(impl_->path);
   }
   return impl_->reader;
 }

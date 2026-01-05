@@ -375,11 +375,13 @@ TEST_F(CApiTest, DeleteTraceSucceeds) {
 }
 
 TEST_F(CApiTest, BindToNullDatabaseFails) {
+  // The function asserts on null database parameter, which terminates the process.
+  // Use EXPECT_DEATH to verify this defensive behavior.
   rocprofvis_dm_trace_t trace = rocprofvis_dm_create_trace();
   ASSERT_NE(trace, nullptr);
 
-  auto result = rocprofvis_dm_bind_trace_to_database(trace, nullptr);
-  EXPECT_EQ(result, kRocProfVisDmResultInvalidParameter);
+  EXPECT_DEATH(rocprofvis_dm_bind_trace_to_database(trace, nullptr),
+               "DATABASE_CANNOT_BE_NULL");
 
   rocprofvis_dm_delete_trace(trace);
 }
