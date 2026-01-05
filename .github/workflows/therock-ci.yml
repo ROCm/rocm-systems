@@ -8,6 +8,12 @@ on:
       - '**.txt'
       - '**.md'
       - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
   pull_request:
     types:
       - opened
