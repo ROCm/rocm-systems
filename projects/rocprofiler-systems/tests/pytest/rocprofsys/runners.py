@@ -540,9 +540,30 @@ class RuntimeInstrumentRunner(BaseRunner):
 class SysRunRunner(BaseRunner):
     """Run target with rocprof-sys-run wrapper."""
 
+    def __init__(
+        self,
+        config: RocprofsysConfig,
+        target: str,
+        output_dir: Path,
+        sysrun_args: Optional[list[str]] = None,
+        **kwargs,
+    ):
+        """Initialize sys-run runner.
+
+        Args:
+            config: rocprofiler-systems configuration
+            target: Name of target executable
+            output_dir: Directory for output files
+            sysrun_args: Arguments for rocprof-sys-run (before --)
+            **kwargs: Additional arguments passed to BaseRunner
+        """
+        super().__init__(config, target, output_dir, **kwargs)
+        self.sysrun_args = sysrun_args or []
+
     def build_command(self) -> list[str]:
-        return [
-            str(self.config.rocprofsys_run),
-            "--",
-            str(self.target_exe),
-        ] + self.run_args
+        return (
+            [str(self.config.rocprofsys_run)]
+            + self.sysrun_args
+            + ["--", str(self.target_exe)]
+            + self.run_args
+        )

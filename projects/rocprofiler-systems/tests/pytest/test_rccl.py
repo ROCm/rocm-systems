@@ -169,7 +169,7 @@ class TestRCCL:
         )
         assert_regex(result)
 
-    @pytest.mark.long
+    @pytest.mark.slow
     def test_runtime_instrument(
         self,
         rccl_target: str,

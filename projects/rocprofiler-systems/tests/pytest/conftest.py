@@ -51,7 +51,6 @@ from rocprofsys import (
     get_llvm_objdump,
     get_target_gpu_arch,
     _get_rocm_version,
-    _check_rocm_version_geq,
     TestResult,
     validate_regex,
     validate_perfetto_trace,
@@ -158,13 +157,22 @@ def pytest_collection_modifyitems(
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
         if rocm_min_marker:
             min_version = rocm_min_marker.args[0] if rocm_min_marker.args else None
-            if min_version and not _check_rocm_version_geq(min_version):
+            if min_version:
                 rocm_version = _get_rocm_version()
                 if rocm_version is None:
-                    reason = "ROCm not found"
+                    item.add_marker(pytest.mark.skip(reason="ROCm not found"))
                 else:
-                    reason = f"ROCm {rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]} < required {min_version}"
-                item.add_marker(pytest.mark.skip(reason=reason))
+                    # Parse min_version and compare
+                    parts = min_version.split(".")
+                    min_tuple = tuple(int(p) for p in parts)
+                    while len(min_tuple) < 3:
+                        min_tuple = min_tuple + (0,)
+                    if rocm_version < min_tuple:
+                        item.add_marker(
+                            pytest.mark.skip(
+                                reason=f"ROCm {rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]} < required {min_version}"
+                            )
+                        )
 
         # Check gpu_category_exclude marker
         gpu_category_marker = item.get_closest_marker("gpu_category_exclude")
@@ -202,7 +210,8 @@ def check_use_rocpd() -> bool:
     gpu_info = detect_gpu()
     if not gpu_info.available:
         return False
-    return _check_rocm_version_geq("7.0")
+    rocm_version = _get_rocm_version()
+    return rocm_version is not None and rocm_version >= (7, 0, 0)
 
 
 @lru_cache(maxsize=1)

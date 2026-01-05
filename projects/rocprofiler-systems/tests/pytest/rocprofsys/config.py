@@ -260,28 +260,6 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
     return None
 
 
-def _check_rocm_version_geq(min_version: str) -> bool:
-    """Check if installed ROCm version meets minimum requirement.
-
-    Args:
-        min_version: Minimum version string like "7.0" or "6.2.1"
-
-    Returns:
-        True if ROCm version >= min_version, False otherwise.
-    """
-    current = _get_rocm_version()
-    if current is None:
-        return False
-
-    parts = min_version.split(".")
-    min_tuple = tuple(int(p) for p in parts)
-    # Pad with zeros if needed (e.g., "7.0" -> (7, 0, 0))
-    while len(min_tuple) < 3:
-        min_tuple = min_tuple + (0,)
-
-    return current >= min_tuple
-
-
 def _find_mpiexec() -> Optional[Path]:
     """Find MPI laucnher executable."""
     for candidate in ["mpiexec", "mpirun"]:
@@ -487,7 +465,7 @@ def discover_build_config(
             if source_dir is None:
                 # Walk up from build_dir
                 source_dir = build_dir
-                # If their source dir is higher, build_dir should be specified
+                # If source dir is higher, build_dir should be specified
                 for _ in range(2):
                     parent = source_dir.parent
                     if parent == source_dir:
@@ -551,7 +529,7 @@ def discover_build_config(
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
-        rocprofsys_examples_dir=build_dir,  # Example binaries are in root of build directory
+        rocprofsys_examples_dir=build_dir,  # Example binaries are (almost always) in root of build directory
         rocprofsys_tests_dir=source_dir / "tests",
         rocpd_validation_rules=source_dir / "tests" / "rocpd-validation-rules",
         test_output_dir=build_dir / "rocprof-sys-pytest-output",
