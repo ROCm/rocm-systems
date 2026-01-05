@@ -213,6 +213,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     auto        counters_v   = counter_vec_t{};
     const auto* tool_agent_v = data->get_gpu_tool_agent(agent_id);
 
+    // Check if agent info is available (may not be for unsupported architectures)
+    auto agent_info_it = data->agent_counter_info.find(agent_id);
+    if(agent_info_it == data->agent_counter_info.end())
+    {
+        ROCPROFSYS_WARNING_F(0,
+                             "Skipping GPU agent %lu (device %lu) due to unsupported "
+                             "architecture or missing counter info\n",
+                             agent_id.handle, tool_agent_v->device_id);
+        data->agent_counter_profiles.emplace(agent_id, profile);
+        return counter_vec_t{};
+    }
+
     constexpr auto device_qualifier = std::string_view{ ":device=" };
     for(const auto& itr : counters)
     {
@@ -263,7 +275,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         }
 
         // search the gpu agent counter info for a counter with a matching name
-        for(const auto& citr : data->agent_counter_info.at(agent_id))
+        for(const auto& citr : agent_info_it->second)
         {
             if(name_v == std::string_view{ citr.name })
             {
