@@ -51,7 +51,7 @@ target_link_libraries(${ROCM_SMI_TARGET} PRIVATE
     ${CMAKE_DL_LIBS}
     ${FILESYSTEM_LIB}
 )
-target_include_directories(${ROCM_SMI_TARGET} PRIVATE 
+target_include_directories(${ROCM_SMI_TARGET} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${DRM_INCLUDE_DIRS}

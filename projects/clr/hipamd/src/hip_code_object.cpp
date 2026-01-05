@@ -450,12 +450,18 @@ hipError_t StatCO::getStatFunc(hipFunction_t* hfunc, const void* hostFunction, i
 
   // Lazy load
   FatBinaryInfo** module = it->second->moduleInfo();
-  if (*(module) == nullptr) {
+  if (module != nullptr) {
     amd::ScopedLock lock(sclock_);
     if (*(module) == nullptr) {
       hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
       assert(err == hipSuccess);
+      if (err != hipSuccess) {
+        return err;
+      }
     }
+  } else {
+    // Module was nullptr
+    return hipErrorInvalidDeviceFunction;
   }
 
   return it->second->getStatFunc(hfunc, deviceId);

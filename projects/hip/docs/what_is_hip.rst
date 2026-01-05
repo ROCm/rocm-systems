@@ -80,7 +80,7 @@ HIP runtime API to the CUDA runtime API. The host-side contains mostly inlined
 wrappers or even just preprocessor defines, with no additional overhead.
 The device-side code is compiled with ``nvcc``, just like normal CUDA kernels,
 and therefore one can expect the same performance as if directly coding in CUDA.
-The CUDA specific headers can be found in the `hipother repository <https://github.com/ROCm/hipother>`_.
+The CUDA specific headers can be found in the `hipother repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipother>`_.
 
 For further details, check :ref:`HIP Runtime API Reference <runtime_api_reference>`.
 

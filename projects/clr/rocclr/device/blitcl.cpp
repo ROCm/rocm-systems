@@ -47,8 +47,6 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
-    extern void __ockl_gws_init(uint nwm1, uint rid);
-
     __kernel void __amd_rocclr_fillBufferAligned(__global void* buf, __constant uchar* pattern,
                                                  uint pattern_size, uint alignment, ulong end_ptr,
                                                  uint next_chunk, uint workgroup_size) {
@@ -182,7 +180,7 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
       __ockl_dm_init_v1(heap_to_initialize, initial_blocks, heap_size, number_of_initial_blocks);
     }
 
-    __kernel void __amd_rocclr_gwsInit(uint value) { __ockl_gws_init(value, 0); });
+    __kernel void __amd_rocclr_gwsInit(uint value) { __builtin_amdgcn_ds_gws_init(value, 0); });
 
 const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
     __kernel void __amd_rocclr_streamOpsWrite(__global uint* ptrInt, __global ulong* ptrUlong,

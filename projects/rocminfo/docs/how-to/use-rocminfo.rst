@@ -19,7 +19,7 @@ See the following example output of the ROCmInfo command on a system with MI300X
 
 .. code-block::
 
-        HSA System Attributes 
+        HSA System Attributes
         =====================
         Runtime Version:         1.1
         Runtime Ext Version:     1.6
@@ -175,7 +175,7 @@ See the following example output of the ROCmInfo command on a system with MI300X
               Default Rounding Mode:   NEAR
               Fast f16:                TRUE
               Workgroup Max Size:      1024(0x400
-        
+
               Workgroup Max Size per Dimension:
                 x                        1024(0x400)
                 y                        1024(0x400)
@@ -185,6 +185,6 @@ See the following example output of the ROCmInfo command on a system with MI300X
                 x                        4294967295(0xffffffff)
                 y                        4294967295(0xffffffff)
                 z                        4294967295(0xffffffff)
-        
+
         *** Done ***
 

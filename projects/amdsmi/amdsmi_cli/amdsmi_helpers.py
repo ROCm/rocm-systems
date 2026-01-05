@@ -762,6 +762,51 @@ class AMDSMIHelpers():
         return gpu_bdfs
 
 
+    def get_apu_memory_type_and_name(self, device_handle, gpu_id=None):
+        """Determine the appropriate memory type for APU devices
+
+        For APU devices, compare VRAM and GTT totals and return the larger one.
+        For discrete GPUs, return VRAM.
+
+        Args:
+            device_handle: GPU device handle
+            gpu_id: Optional GPU ID for logging purposes
+
+        Returns:
+            tuple: (memory_type, memory_type_name) where memory_type is AmdSmiMemoryType enum
+                   and memory_type_name is string ("VRAM" or "GTT")
+        """
+        # Default to VRAM
+        mem_type = amdsmi_interface.AmdSmiMemoryType.VRAM
+        mem_type_name = "VRAM"
+
+        if gpu_id is None:
+            try:
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            except:
+                gpu_id = "unknown"
+
+        try:
+            # Check ASIC info flags to see if it's an APU (AMDGPU_IDS_FLAGS_FUSION = 0x1)
+            asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
+            if 'flags' in asic_info and (asic_info['flags'] & 0x1):
+                # For APUs, compare VRAM and GTT totals and use the larger one
+                try:
+                    vram_total_check = amdsmi_interface.amdsmi_get_gpu_memory_total(device_handle, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                    gtt_total_check = amdsmi_interface.amdsmi_get_gpu_memory_total(device_handle, amdsmi_interface.AmdSmiMemoryType.GTT) // (1024*1024)
+
+                    if gtt_total_check > vram_total_check:
+                        mem_type = amdsmi_interface.AmdSmiMemoryType.GTT
+                        mem_type_name = "GTT"
+                    logging.debug("APU detected for gpu %s, using %s (VRAM: %d MB, GTT: %d MB)", gpu_id, mem_type_name, vram_total_check, gtt_total_check)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to compare memory types for APU gpu %s, defaulting to VRAM | %s", gpu_id, e.get_error_info())
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to get ASIC info for gpu %s, defaulting to VRAM | %s", gpu_id, e.get_error_info())
+
+        return mem_type, mem_type_name
+
+
     def is_amd_device(self, device_handle):
         """ Return whether the specified device is an AMD device or not
 
@@ -1215,17 +1260,17 @@ class AMDSMIHelpers():
 
     @lru_cache(maxsize=128)
     def _cached_group_name(self, gid: int) -> str:
-        try: 
+        try:
             return grp.getgrgid(gid).gr_name
-        except Exception: 
+        except Exception:
             # In containers, the UID may not resolve to a name
             return str(gid)
 
     @lru_cache(maxsize=128)
     def _cached_user_name(self, uid: int) -> str:
-        try: 
+        try:
             return pwd.getpwuid(uid).pw_name
-        except Exception: 
+        except Exception:
             # In containers, the GID may not resolve to a name
             return str(uid)
 
@@ -1286,11 +1331,11 @@ class AMDSMIHelpers():
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
-        
+
         Args:
             check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
             check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
-        
+
         Returns:
             bool: True if all checked devices are accessible, False if any permission errors found
         """
@@ -1300,7 +1345,7 @@ class AMDSMIHelpers():
             return True
 
         paths_to_check = []
-        
+
         # Only add paths for device types that are flagged for checking
         if check_render and os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
@@ -1319,7 +1364,7 @@ class AMDSMIHelpers():
             # Do not try to open all paths, may cause driver issues.
             # Read access is sufficient to check permissions.
             #
-            # Reason: GPUs which support partitioning (memory/compute), 
+            # Reason: GPUs which support partitioning (memory/compute),
             # logical devices will not be valid until configured.
             # See `sudo amd-smi set -h` or applicable APIs
             # to configure on supported hardware.
@@ -1565,14 +1610,14 @@ class AMDSMIHelpers():
                 error_severity = entry.get("error_severity", "").lower()
                 notify_type = entry.get("notify_type", "")
                 prefix = self._severity_as_string(error_severity, notify_type, True)
-            
+
                 # Generate filenames
                 count = self.get_cper_count() + 1
                 cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
-            
+
                 # Write CPER binary file
                 try:
                     self.write_binary(
@@ -1582,7 +1627,7 @@ class AMDSMIHelpers():
                     )
                 except Exception as e:
                     logging.debug(f"Failed to write CPER file {cper_path}: {e}")
-            
+
                 # Write JSON metadata file
                 try:
                     with json_path.open("w") as cper_json_file:
@@ -1594,7 +1639,7 @@ class AMDSMIHelpers():
                         )
                 except Exception as e:
                     logging.debug(f"Failed to write JSON file {json_path}: {e}")
-            
+
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
@@ -1980,13 +2025,13 @@ class AMDSMIHelpers():
         """
         Helper method to compute metric version, partition ID, and num_partition for dynamic metrics.
         Handles logging updates internally for reusability.
-        
+
         Args:
             gpu_metrics_info (dict): GPU metrics info from amdsmi_get_gpu_metrics_info.
             is_partition_metrics (bool): Whether this is for partition metrics.
             gpu_id (int): GPU ID for logging.
             gpu_handle: GPU device handle for KFD info retrieval.
-        
+
         Returns:
             dict: {
                 'metric_version': float or "N/A",
@@ -2004,7 +2049,7 @@ class AMDSMIHelpers():
                 metric_version = float(f"{format_rev}.{content_rev}")
             except ValueError:
                 metric_version = "N/A"  # Fallback if conversion fails
-        
+
         # Retrieve partition ID from KFD info
         partition_id = "N/A"
         try:
@@ -2012,7 +2057,7 @@ class AMDSMIHelpers():
             partition_id = kfd_info.get('current_partition_id', "N/A")
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get current partition ID for GPU %s | %s", gpu_id, e.get_error_info())
-        
+
         # Determine num_partition with fallback logic for dynamic metrics
         num_partition = gpu_metrics_info.get('num_partition', "N/A")
         if metric_version != "N/A" and num_partition == "N/A":
@@ -2026,22 +2071,22 @@ class AMDSMIHelpers():
                 # Fallback to partition_id if partitions exist but num_partition is unavailable
                 num_partition = partition_id
             # Else: Remains "N/A" if no conditions match
-        
+
         # Alias num_xcp for XCP metrics usage
         num_xcp = num_partition
-        
+
         # Debug logging
         logging.debug(
             "GPU %s | Metric version: %s, num_partition: %s, partition_id: %s, num_xcp: %s",
             gpu_id, metric_version, num_partition, partition_id, num_xcp
         )
-        
+
         return {
             'metric_version': metric_version,
             'partition_id': partition_id,
             'num_partition': num_partition,
             'num_xcp': num_xcp
-        }    
+        }
 
     def get_gpu_board_temperatures(self, device_handle, gpu_id, logger):
         """Get GPU board temperature readings

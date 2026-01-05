@@ -70,9 +70,6 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None )), 0)
-        VL1 Lat:
-          value: ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum
-            != 0) else None)), 0)
         VL1 Coalesce:
           value: ROUND(AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
             * 4)) if (TCP_TOTAL_ACCESSES_sum != None) else 0)), 0)
@@ -197,8 +194,6 @@ Panel Config:
       unit after coalescing per normalization unit
     VL1 Hit: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    VL1 Lat: Calculated as the average number of cycles that a vL1D cache line request
-      spent in the vL1D cache pipeline.
     VL1 Coalesce: Indicates how well memory instructions were coalesced by the address
       processing unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated
       as the average number of thread-requests generated per instruction divided by

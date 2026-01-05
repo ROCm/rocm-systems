@@ -24,6 +24,7 @@
 ##############################################################################
 
 import ctypes
+import os
 from ctypes import (
     POINTER,
     Structure,
@@ -37,7 +38,6 @@ from ctypes import (
     c_uint8,
     c_void_p,
 )
-import os
 
 _lib = ctypes.CDLL(f"{os.getenv('ROCM_PATH', '/opt/rocm')}/lib/libamdhip64.so")
 
