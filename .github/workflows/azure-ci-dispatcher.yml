@@ -26,6 +26,9 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
+      - users/dsclear/shorten_workflows_test*
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**.txt'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}

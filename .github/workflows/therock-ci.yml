@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - develop
+      - /users/dsclear/shorten_workflows_test*
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
       - ready_for_review
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**.txt'
   workflow_dispatch:
     inputs:
       projects:
