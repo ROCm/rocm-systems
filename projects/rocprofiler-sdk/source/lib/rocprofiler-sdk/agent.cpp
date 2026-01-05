@@ -1214,6 +1214,17 @@ construct_agent_cache(::HsaApiTable* table)
         auto        hsa_agent  = std::get<1>(itr.second);
         if(is_duplicate(rocp_agent)) continue;
 
+        if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            hsa_device_type_t device_type;
+            if(table->core_->hsa_agent_get_info_fn(hsa_agent, HSA_AGENT_INFO_DEVICE,
+                                                   &device_type) == HSA_STATUS_SUCCESS &&
+               device_type == HSA_DEVICE_TYPE_GPU)
+            {
+                const_cast<rocprofiler_agent_t*>(rocp_agent)->type = ROCPROFILER_AGENT_TYPE_GPU;
+            }
+        }
+
         // AgentCache is only for GPU agents
         if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
