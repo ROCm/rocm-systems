@@ -293,10 +293,9 @@ class OmniAnalyze_Base:
                             )
                             w.roofline_peaks = pd.DataFrame()
                     else:
-                        console_error(
+                        console_log(
                             "roofline",
                             f"Roofline analysis skipped: {error_msg}",
-                            exit=False,
                         )
                         w.roofline_peaks = pd.DataFrame()
                 else:
