@@ -50,4 +50,8 @@ if(BUILD_STANDALONE_RESULT EQUAL 0)
         FILES ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/rocprofsys-tests.pyz
         DESTINATION share/rocprofiler-systems
     )
+    install(
+        FILES ${CMAKE_CURRENT_LIST_DIR}/requirements.txt
+        DESTINATION share/rocprofiler-systems/tests
+    )
 endif()
