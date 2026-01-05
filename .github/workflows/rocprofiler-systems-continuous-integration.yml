@@ -5,6 +5,15 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode'
+        required: false
+        default: 'continuous'
+        type: choice
+        options:
+          - continuous
+          - nightly
   push:
     branches: [ develop ]
     paths:
@@ -50,7 +59,7 @@ jobs:
         id: generate_matrix
         working-directory: projects/rocprofiler-systems/.github
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-nightly' -I=0 -o=json)
           else
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ci' -I=0 -o=json)
@@ -90,7 +99,7 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
           else
             MODE=Continuous
