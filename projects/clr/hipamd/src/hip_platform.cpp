@@ -714,6 +714,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     }
     // assume it is a hip function type if we did not get a valid output from static
     // func lookup (i.e. if !func or hip_error != hipSuccess)
+    [[fallthrough]];
   default:
       func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
   }
