@@ -29,6 +29,14 @@ on:
       - users/dsclear/shorten_workflows_test*
     paths-ignore:  # Do not trigger full tests on documentation-only changes
       - '**.txt'
+      - '**.md'
+      - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}

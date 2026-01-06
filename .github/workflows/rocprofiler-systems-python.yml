@@ -9,11 +9,31 @@ on:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+    paths-ignore:  # Do not trigger tests on documentation-only changes
+      - '**.txt'
+      - '**.md'
+      - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
   pull_request:
     paths:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
+    paths-ignore:  # Do not trigger tests on documentation-only changes
+      - '**.txt'
+      - '**.md'
+      - '**.rtf'
+      - '**.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - 'docs/**'
+      - 'projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
