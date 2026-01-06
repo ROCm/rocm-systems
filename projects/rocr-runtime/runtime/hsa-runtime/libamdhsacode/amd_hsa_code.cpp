@@ -1752,8 +1752,8 @@ namespace code {
             static std::unique_ptr<AmdHsaCode> null_code;
             return null_code;
           }
-          codeMap[c.handle] = std::move(code);
-          return codeMap[c.handle];
+          auto res = codeMap.emplace(c.handle, std::move(code));
+          return res.first->second;
         }
         return i->second;
       }
