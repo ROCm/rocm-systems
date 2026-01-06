@@ -703,6 +703,10 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
 
+   * Do not use ``--attach-pid`` with ``--iteration-multiplexing``.
+     Iteration multiplexing is only supported when using ROCm Compute Profiler with
+     the native counter collection tool. Ensure that ``--attach-pid`` is not used in your profiling command.
+
    * Ensure that your workload runs for enough iterations to cover all counter subsets. 
      When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
      or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
