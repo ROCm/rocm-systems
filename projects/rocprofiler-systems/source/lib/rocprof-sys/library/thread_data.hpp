@@ -71,7 +71,8 @@ struct base_thread_data
         };
         grow_functors().emplace_back(_func);
 
-        // Don't call _func here - causes recursive static initialization deadlock.
+        // NOTE: Do not call _func() here - causes recursive static initialization
+        // deadlock. Container resizing is handled via grow_functors() in thread_info.cpp.
     }
 };
 
