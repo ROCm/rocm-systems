@@ -25,6 +25,7 @@
 #include "lib/common/dl.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -94,6 +95,10 @@ get_linked_path(std::string_view _name, open_modes_vec_t&& _open_modes)
     // constructor. This is kept here for debugging purposes only.
     if(common::get_env("ROCPROFILER_LINKED_PATH_USE_DLOPEN", false))
     {
+        ROCP_INFO << fmt::format("Attempting to resolve linked path for '{}' via dlopen ... "
+                                 "(ROCPROFILER_LINKED_PATH_USE_DLOPEN=1)",
+                                 _name);
+
         if(_name.empty()) return fs::current_path().string();
 
         if(_open_modes.empty()) _open_modes = default_link_open_modes;
@@ -154,6 +159,10 @@ get_symbol_path(const std::vector<std::string>& _lib_names,
     // constructor. This is kept here for debugging purposes only.
     if(common::get_env("ROCPROFILER_SYMBOL_PATH_USE_DLOPEN", false))
     {
+        ROCP_INFO << fmt::format("Attempting to resolve symbol path for '{}' via dlopen ... "
+                                 "(ROCPROFILER_SYMBOL_PATH_USE_DLOPEN=1)",
+                                 _sym_name);
+
         auto  _lib_name = std::string{};
         void* _handle   = nullptr;
 
@@ -161,7 +170,8 @@ get_symbol_path(const std::vector<std::string>& _lib_names,
         {
             if(!itr.empty())
             {
-                ROCP_INFO << "Attempting dlopen('" << itr << "', RTLD_NOLOAD | RTLD_LAZY) ...";
+                ROCP_INFO << fmt::format("Attempting dlopen('{}', RTLD_NOLOAD | RTLD_LAZY) ...",
+                                         itr);
                 void* _handle_v = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
                 if(_handle_v)
                 {
@@ -175,10 +185,9 @@ get_symbol_path(const std::vector<std::string>& _lib_names,
         if(!_handle) _handle = RTLD_DEFAULT;
 
         const void* _fn = dlsym(_handle, _sym_name.data());
-        ROCP_CI_LOG_IF(INFO, !_fn)
-            << fmt::format("rocprofiler-sdk could not locate '{}' symbol in {}",
-                           _sym_name,
-                           (_handle) ? _lib_name : "RTLD_DEFAULT");
+        ROCP_INFO_IF(!_fn) << fmt::format("rocprofiler-sdk could not locate '{}' symbol in {}",
+                                          _sym_name,
+                                          (_handle) ? _lib_name : "RTLD_DEFAULT");
     }
 
     return std::nullopt;
