@@ -26,10 +26,10 @@
 #include <stdint.h>
 
 // Define mappings of CU -> {SA, WGP} on gfx10 and above. The last bit of CU defines the SA.
-#define ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT 0x7
-#define ROCPROFILER_TRACE_DECODER_CU_SA_MASK 0x80
+#define ROCPROFILER_TRACE_DECODER_CU_SA_SHIFT  0x7
+#define ROCPROFILER_TRACE_DECODER_CU_SA_MASK   0x80
 #define ROCPROFILER_TRACE_DECODER_CU_WGP_SHIFT 0x0
-#define ROCPROFILER_TRACE_DECODER_CU_WGP_MASK 0x7F
+#define ROCPROFILER_TRACE_DECODER_CU_WGP_MASK  0x7F
 
 /**
  * @defgroup THREAD_TRACE Thread Trace Service

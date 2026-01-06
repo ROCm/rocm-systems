@@ -284,11 +284,8 @@ endif()
 set(OTHER_SIMD_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-other-simd")
 
 rocprofiler_add_integration_execute_test(
-    rocprofv3-test-att-other-simd-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
-            -d ${OTHER_SIMD_OUT_DIR}
-            --att --
+    rocprofv3-test-att-other-simd
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${OTHER_SIMD_OUT_DIR} --att --
             $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 45
@@ -299,7 +296,7 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-att-other-simd)
 
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-att-other-simd-validate
+    rocprofv3-test-att-other-simd
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
@@ -307,6 +304,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
     FIXTURES_REQUIRED rocprofv3-test-att-other-simd
-    ARGS -k test_other_simd_data
-         --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
+    ARGS -k test_other_simd_data --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
