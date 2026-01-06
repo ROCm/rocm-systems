@@ -3830,13 +3830,10 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
-      if (!rocr::os::UnmapMemory(va, size)) {
+      if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
         return HSA_STATUS_ERROR;
       }
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
-        return HSA_STATUS_ERROR;
-      }
+
       permissions = perms;
     }
   } else {
