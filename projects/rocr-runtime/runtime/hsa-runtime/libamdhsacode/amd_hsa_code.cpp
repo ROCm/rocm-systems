@@ -1749,7 +1749,8 @@ namespace code {
           std::unique_ptr<AmdHsaCode> code = std::make_unique<AmdHsaCode>();
           const void* buffer = reinterpret_cast<const void*>(c.handle);
           if (!code->InitAsBuffer(buffer, 0)) {
-            return nullptr;
+            static std::unique_ptr<AmdHsaCode> null_code;
+            return null_code;
           }
           codeMap[c.handle] = std::move(code);
           return codeMap[c.handle];
