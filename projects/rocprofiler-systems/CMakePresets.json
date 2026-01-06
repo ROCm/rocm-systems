@@ -15,7 +15,7 @@
                 "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
                 "ROCPROFSYS_BUILD_TBB": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
-                "ROCPROFSYS_MAX_THREADS": "128",
+                "ROCPROFSYS_MAX_THREADS": "64",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
                 "ROCPROFSYS_USE_PYTHON": "ON",
                 "ROCPROFSYS_USE_ROCM": "ON"

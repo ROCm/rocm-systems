@@ -4,6 +4,24 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+
+### Added
+
+
+### Changed
+
+
+### Removed
+
+
+### Deprecated
+
+
+### Resolved issues
+
+- Improved thread limit configuration and graceful handling when exceeding `ROCPROFSYS_MAX_THREADS` to prevent segfaults.
+
 ## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
 
 ### Added

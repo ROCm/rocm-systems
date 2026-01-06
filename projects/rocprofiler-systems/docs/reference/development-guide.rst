@@ -327,8 +327,7 @@ Thread-data class
 
 Currently, most thread data is effectively stored in a static
 ``std::array<std::unique_ptr<T>, ROCPROFSYS_MAX_THREADS>`` instance.
-``ROCPROFSYS_MAX_THREADS`` is a value defined at compile-time (default: ``max(128, pow2_ceil(16 * nproc))``)
-for release builds. During finalization,
+``ROCPROFSYS_MAX_THREADS`` is a value defined at compile-time for release builds. During finalization,
 ROCm Systems Profiler iterates through the thread-data and transforms that data
 into something that can be passed along to Perfetto and/or Timemory.
 In the current model, if the user exceeds ``ROCPROFSYS_MAX_THREADS`` at runtime,
@@ -343,7 +342,7 @@ Configuring thread limits
 
 ROCm Systems Profiler uses a single CMake configuration option to control thread-related memory allocation:
 
-* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default: ``max(128, pow2_ceil(16 * nproc))``; must be a power of 2, values < ``128`` are raised to ``128``)
+* ``ROCPROFSYS_MAX_THREADS``: Maximum number of threads supported (default if not explicitly set: ``128`` if nproc < 8, otherwise ``pow2_ceil(16 * nproc)``; must be a power of 2)
 
 This setting controls:
 
@@ -357,9 +356,8 @@ CMake enforces that ``ROCPROFSYS_MAX_THREADS`` must be a power of 2:
 
 .. code-block:: cmake
 
-   # Valid: 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ...
+   # Valid: 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, ... any power of 2
    # Invalid: 100, 3000, 5000, 10000, ... (FATAL_ERROR)
-   # Values < 128 will be automatically set to 128 with a warning
 **Example: Building with custom thread limit**
 
 .. code-block:: shell
