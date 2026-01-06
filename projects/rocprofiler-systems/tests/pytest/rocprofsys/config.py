@@ -71,6 +71,7 @@ class RocprofsysConfig:
     test_output_dir: Path
     mpiexec: Path
     is_installed: bool = False
+    rocm_version: Optional[tuple[int, int, int]] = None
 
     def get_llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
@@ -91,7 +92,11 @@ class RocprofsysConfig:
         return found_paths
 
     def get_library_path(self) -> str:
-        """Get LD_LIBRARY_PATH including rocprofiler-systems libraries."""
+        """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
+
+        Returns:
+            LD_LIBRARY_PATH string with rocprofiler-systems libraries
+        """
         paths = [str(self.rocprofsys_lib_dir)]
 
         existing = os.environ.get("LD_LIBRARY_PATH", "")
@@ -392,6 +397,7 @@ def discover_install_config(
         rocpd_validation_rules=rocpd_validation_rules,
         test_output_dir=output_dir,
         mpiexec=mpiexec,
+        rocm_version=_get_rocm_version(),
         is_installed=True,
     )
 
@@ -534,5 +540,6 @@ def discover_build_config(
         rocpd_validation_rules=source_dir / "tests" / "rocpd-validation-rules",
         test_output_dir=build_dir / "rocprof-sys-pytest-output",
         mpiexec=mpiexec,
+        rocm_version=_get_rocm_version(),
         is_installed=False,
     )

@@ -66,7 +66,8 @@ class TestResult:
     Attributes:
         returncode: Process exit code
         test_output: Standard output and error content
-        extra_output: Extra output set by the test itself (as of now, only used for timeout errors)
+        extra_output: Extra output set by the test itself
+                      (as of now, only used for timeout errors)
         output_dir: Directory containing output files
         command: The command that was executed
         env: Environment variables used
@@ -262,7 +263,6 @@ class BaseRunner(ABC):
             )
 
             duration = time.time() - start_time
-
             test_result = TestResult(
                 returncode=result.returncode,
                 test_output=result.stdout,
@@ -291,6 +291,7 @@ class BaselineRunner(BaseRunner):
     """Run target without any instrumentation.
 
     Can also be used to run arbitrary commands by providing the `command` parameter.
+     - command + run_args are executed as a single command
     If a rocprof-sys binary is provided, uses "base_binary_environment" instead of "base_environment".
 
     Args:
@@ -402,6 +403,8 @@ class BinaryRewriteRunner(BaseRunner):
         Returns:
             TestResult from rewrite operation
         """
+        import time
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         command = (
@@ -415,28 +418,48 @@ class BinaryRewriteRunner(BaseRunner):
         full_env = os.environ.copy()
         full_env.update(self.env)
 
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=self.timeout,
-            env=full_env,
-            cwd=self.config.rocprofsys_root_dir,
-        )
+        start_time = time.time()
+
+        try:
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=self.timeout,
+                env=full_env,
+                cwd=self.config.rocprofsys_root_dir,
+            )
+
+            duration = time.time() - start_time
+            test_result = TestResult(
+                returncode=result.returncode,
+                test_output=result.stdout,
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+                _instrumented_files=self._instrumented_files.copy(),
+            )
+
+        except subprocess.TimeoutExpired as e:
+            duration = time.time() - start_time
+            test_result = TestResult(
+                returncode=-1,
+                test_output=e.stdout or "",
+                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                output_dir=self.output_dir,
+                command=command,
+                environment=self.env,
+                duration=duration,
+                _instrumented_files=self._instrumented_files.copy(),
+            )
 
         # Track instrumented files for cleanup
         if self.instrumented_exe.exists():
             self._instrumented_files.append(self.instrumented_exe)
 
-        return TestResult(
-            returncode=result.returncode,
-            test_output=result.stdout,
-            output_dir=self.output_dir,
-            command=command,
-            environment=self.env,
-            _instrumented_files=self._instrumented_files.copy(),
-        )
+        return test_result
 
     def build_command(self) -> list[str]:
         """Build command to run the instrumented binary."""
@@ -450,7 +473,7 @@ class BinaryRewriteRunner(BaseRunner):
         """Execute full rewrite + run sequence.
 
         Returns:
-            TestResult from run phase (rewrite must succeed first)
+            TestResult from full rewrite + run sequence
 
         Note:
             By default, cleanup is handled by the test_output_dir fixture
@@ -480,6 +503,7 @@ class BinaryRewriteRunner(BaseRunner):
             f"=== REWRITE PHASE ===\n{rewrite_result.test_output}\n"
             f"=== RUN PHASE ===\n{run_result.test_output}"
         )
+        run_result.duration = rewrite_result.duration + run_result.duration
         extra_parts = []
         if rewrite_result.extra_output:
             extra_parts.append(f"=== REWRITE PHASE ===\n{rewrite_result.extra_output}")

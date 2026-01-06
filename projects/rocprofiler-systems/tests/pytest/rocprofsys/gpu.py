@@ -178,6 +178,7 @@ def lookup_gpu_category(arch: str) -> list[str]:
     return categories
 
 
+@lru_cache(maxsize=1)
 def get_llvm_objdump(rocm_path: Path) -> Path:
     """Get the path to llvm-objdump.
 

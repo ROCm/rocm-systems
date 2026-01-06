@@ -35,7 +35,6 @@ from .config import (
     RocprofsysConfig,
     discover_install_config,
     discover_build_config,
-    _get_rocm_version,
 )
 
 from .runners import (
@@ -69,7 +68,6 @@ __all__ = [
     "RocprofsysConfig",
     "discover_build_config",
     "discover_install_config",
-    "_get_rocm_version",
     # Runners
     "TestResult",
     "BaselineRunner",

@@ -110,9 +110,10 @@ def validate_regex(
     fail_indices: set[str] = set()
     pass_indices: set[str] = set()
 
-    for i, pattern in enumerate(fail_patterns):
-        all_patterns.append(f"(?P<f{i}>{pattern})")
-        fail_indices.add(f"f{i}")
+    if fail_patterns:
+        for i, pattern in enumerate(fail_patterns):
+            all_patterns.append(f"(?P<f{i}>{pattern})")
+            fail_indices.add(f"f{i}")
 
     if pass_regex:
         for i, pattern in enumerate(pass_regex):

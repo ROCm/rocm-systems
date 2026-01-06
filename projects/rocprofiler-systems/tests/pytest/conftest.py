@@ -50,7 +50,6 @@ from rocprofsys import (
     lookup_gpu_category,
     get_llvm_objdump,
     get_target_gpu_arch,
-    _get_rocm_version,
     TestResult,
     validate_regex,
     validate_perfetto_trace,
@@ -101,7 +100,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
-    config.addinivalue_line("markers", "gpu: mark test as requiring a GPU")
+    config.addinivalue_line(
+        "markers",
+        "gpu: mark test as requiring a GPU (default: any available GPU)",
+    )
     config.addinivalue_line(
         "markers",
         "gpu_category_exclude(categories): exclude tests that require a specific GPU category (instinct, radeon, apu)",
@@ -117,7 +119,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocm_min_version(version): mark test as requiring minimum ROCm version",
     )
-    config.addinivalue_line("markers", "rocpd: mark test as using ROCpd")
+    config.addinivalue_line(
+        "markers",
+        "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
+    )
     # Register plugin to handle --no-output flag
     config.pluginmanager.register(NoOutputPlugin(config), "no_output_plugin")
 
@@ -140,13 +145,12 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
+    rocprof_config = discover_build_config()
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
 
-    mpi_available = (
-        shutil.which("mpiexec") is not None or shutil.which("mpirun") is not None
-    )
+    mpi_available = rocprof_config.mpiexec is not None
 
     for item in items:
         if "gpu" in item.keywords and not gpu_info.available:
@@ -159,22 +163,19 @@ def pytest_collection_modifyitems(
         rocm_min_marker = item.get_closest_marker("rocm_min_version")
         if rocm_min_marker:
             min_version = rocm_min_marker.args[0] if rocm_min_marker.args else None
-            if min_version:
-                rocm_version = _get_rocm_version()
-                if rocm_version is None:
-                    item.add_marker(pytest.mark.skip(reason="ROCm not found"))
-                else:
-                    # Parse min_version and compare
-                    parts = min_version.split(".")
-                    min_tuple = tuple(int(p) for p in parts)
-                    while len(min_tuple) < 3:
-                        min_tuple = min_tuple + (0,)
-                    if rocm_version < min_tuple:
-                        item.add_marker(
-                            pytest.mark.skip(
-                                reason=f"ROCm {rocm_version[0]}.{rocm_version[1]}.{rocm_version[2]} < required {min_version}"
-                            )
+            rocm_version = rocprof_config.rocm_version
+            if rocm_version is None:
+                item.add_marker(pytest.mark.skip(reason="ROCm not found"))
+            else:
+                # Parse min_version and compare
+                min_parts = min_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
+                if rocm_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"ROCm {'.'.join(map(str, rocm_version))} < required {min_version}"
                         )
+                    )
 
         # Check gpu_category_exclude marker
         gpu_category_marker = item.get_closest_marker("gpu_category_exclude")
@@ -210,9 +211,10 @@ def check_use_rocpd() -> bool:
     if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
         return False
     gpu_info = detect_gpu()
+    rocprof_config = discover_build_config()
     if not gpu_info.available:
         return False
-    rocm_version = _get_rocm_version()
+    rocm_version = rocprof_config.rocm_version
     return rocm_version is not None and rocm_version >= (7, 0, 0)
 
 
@@ -724,9 +726,10 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     except FileNotFoundError:
         llvm_objdump = "Not found - Set ROCM_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
 
-    rocm_ver = _get_rocm_version()
-    rocm_ver_str = (
-        f"{rocm_ver[0]}.{rocm_ver[1]}.{rocm_ver[2]}" if rocm_ver else "Not found"
+    rocm_version = (
+        ".".join(map(str, rocprof_config.rocm_version))
+        if rocprof_config.rocm_version
+        else "Not found"
     )
 
     lines = [
@@ -734,7 +737,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         "=" * 70,
         "Test Configuration:",
         "=" * 70,
-        f"  ROCm version:   {rocm_ver_str}",
+        f"  ROCm version:   {rocm_version}",
         f"  ROCm path:      {rocprof_config.rocm_path}",
         f"  Is installed:   {rocprof_config.is_installed}",
         "-" * 70,
@@ -876,22 +879,24 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
 
         result = runner.run()
         collect_result(result)
+        output = (
+            f"{result.test_output}\n{result.extra_output}"
+            if result.extra_output
+            else result.test_output
+        )
 
         if not result.success and not fail_on_pass:
             if fail_message:
-                msg = f"{fail_message}: {result.test_output}"
+                msg = f"{fail_message}: {output}"
             else:
-                msg = f"{runner_type} test failed: {result.test_output}"
+                msg = f"{runner_type} test failed: {output}"
             if skip_on_error:
                 pytest.skip(msg)
             else:
                 pytest.fail(msg)
 
-        if fail_on_pass:
-            if result.success:
-                pytest.fail(
-                    f"{runner_type} test passed unexpectedly: {result.test_output}"
-                )
+        if fail_on_pass and result.success:
+            pytest.fail(f"{runner_type} test passed unexpectedly: {result.test_output}")
 
         return result
 
