@@ -177,13 +177,14 @@ client_data::initialize_event_info()
                                                    _device_qualifier_sym,
                                                    JOIN(" ", "Device", _dev_index) };
 
-            // Check if agent info is available (may not be for unsupported architectures)
+            // Check if agent info is available ( i.e., counters are supported)
             auto agent_info_it = agent_counter_info.find(_agent_id);
             if(agent_info_it == agent_counter_info.end())
             {
-                ROCPROFSYS_WARNING_F(
-                    0, "Skipping GPU device %lu due to unsupported architecture\n",
-                    _dev_index);
+                ROCPROFSYS_WARNING_F(0,
+                                     "Skipping GPU device %lu due to counter not found "
+                                     "for the specified architecture\n",
+                                     _dev_index);
                 continue;
             }
 
