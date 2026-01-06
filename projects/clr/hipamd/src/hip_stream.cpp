@@ -74,10 +74,9 @@ bool Stream::Create() { return create(); }
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
   stream->device().removeFromActiveQueues(stream);
-  stream->device_->RemoveStream(stream);
+  stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
   stream->release();
-  stream = nullptr;
 }
 
 // ================================================================================================
