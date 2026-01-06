@@ -931,7 +931,8 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
             ::rdc::PolicyCondition* cond = reply.mutable_condition();
             cond->set_type(static_cast<::rdc::PolicyCondition_Type>(ctx->response.condition.type));
             cond->set_value(ctx->response.condition.value);
-
+            reply.set_gpu_index(ctx->response.gpu_index);
+            reply.set_reset_triggered(ctx->response.reset_triggered != 0);
             writer->Write(reply);
           }
 

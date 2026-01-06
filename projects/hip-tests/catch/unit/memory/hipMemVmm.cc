@@ -58,9 +58,9 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
                                            hipMemAllocationGranularityRecommended));
 
-  size_t size = 4 * 1024;
+  size_t size = granularity * 4;
   void* reservedAddress{nullptr};
-  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, granularity, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0));
 
   hipMemGenericAllocationHandle_t gaHandle{nullptr};
   HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0));
@@ -118,7 +118,7 @@ TEST_CASE("Unit_hipMemVmm_Uncached") {
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
                                            hipMemAllocationGranularityRecommended));
 
-  size_t size = granularity * 4;
+  size_t size = granularity;
   void* reservedAddress{nullptr};
   HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, 0, nullptr, 0));
 
@@ -134,11 +134,11 @@ TEST_CASE("Unit_hipMemVmm_Uncached") {
   desc.location.id = device;
   desc.flags = hipMemAccessFlagsProtReadWrite;
   std::vector<char> values(size);
-  const char value = 1;
+  const int value = 1;
 
   HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1));
   HIP_CHECK(hipMemset(reservedAddress, value, size));
-  HIP_CHECK(hipMemcpy(&values[0], reservedAddress, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(values.data(), reservedAddress, size, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < size; ++i) {
     REQUIRE(values[i] == value);

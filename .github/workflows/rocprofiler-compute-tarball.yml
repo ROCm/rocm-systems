@@ -5,12 +5,16 @@ on:
     branches:
       - develop
     paths:
-      - 'projects/rocprofiler-compute/**'
-  pull_request:
-    paths:
+      - '.github/workflows/rocprofiler-compute-tarball.yml'
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'
-      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/docker/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-compute-tarball.yml'
+      - 'projects/rocprofiler-compute/**'
+      - '!projects/rocprofiler-compute/*.md'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
@@ -18,9 +22,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ROCM_VERSION: "7.1.0"
+
 jobs:
   distbuild:
     runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
     name: Create distribution tarball
     env:
       INSTALL_DIR: /tmp/foo1
@@ -38,6 +47,17 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
           ref: ${{ steps.sha-mode.sha }}
+      - name: Install ROCm Dependencies
+        shell: bash
+        run: |
+          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
+          apt install -y rocm-dev
+          echo "✅ ROCm Dependencies Installed!"
       - name: Install Python
         uses: actions/setup-python@v5
         with:
@@ -64,6 +84,8 @@ jobs:
           retention-days: 3
   disttest:
     runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
     needs: [distbuild]
     name: Tarball tests
     env:
@@ -75,6 +97,17 @@ jobs:
           name: tarball-testing
       - name: Expand
         run:  tar xfz rocprofiler-compute-*.tar.gz; rm rocprofiler-compute-*.tar.gz
+      - name: Install ROCm Dependencies
+        shell: bash
+        run: |
+          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
+          apt install -y rocm-dev
+          echo "✅ ROCm Dependencies Installed!"
       - name: Python dependency installs
         run: |
           cd rocprofiler-compute-*
