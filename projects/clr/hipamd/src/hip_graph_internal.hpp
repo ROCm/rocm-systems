@@ -1164,7 +1164,6 @@ class GraphKernelNode : public GraphNode {
     for (auto& command : commands_) {
       hipFunction_t func = getFunc(kernelParams_, dev_id_);
       hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-      amd::Kernel* kernel = function->kernel();
       amd::ScopedLock lock(function->dflock_);
       command->enqueue();
       command->release();
@@ -1419,7 +1418,6 @@ class GraphKernelNode : public GraphNode {
       return hipErrorInvalidDeviceFunction;
     }
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::Kernel* kernel = function->kernel();
     amd::ScopedLock lock(function->dflock_);
     status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {

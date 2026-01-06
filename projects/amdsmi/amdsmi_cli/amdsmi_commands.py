@@ -2771,7 +2771,8 @@ class AMDSMICommands():
                   cpu_pwr_svi_telemetry_rails=None, cpu_io_bandwidth=None, cpu_xgmi_bandwidth=None,
                    cpu_metrics_ver=None, cpu_metrics_table=None, cpu_socket_energy=None,
                    cpu_ddr_bandwidth=None, cpu_temp=None, cpu_dimm_temp_range_rate=None,
-                   cpu_dimm_pow_consumption=None, cpu_dimm_thermal_sensor=None):
+                   cpu_dimm_pow_consumption=None, cpu_dimm_thermal_sensor=None,
+                   cpu_dfcstate_ctrl=None, cpu_railisofreq_policy=None):
         """Get Metric information for target cpu
 
         Args:
@@ -2794,6 +2795,8 @@ class AMDSMICommands():
             cpu_dimm_temp_range_rate (list, optional): Dimm address. Value override for args.cpu_dimm_temp_range_rate. Defaults to None
             cpu_dimm_pow_consumption (list, optional): Dimm address. Value override for args.cpu_dimm_pow_consumption. Defaults to None
             cpu_dimm_thermal_sensor (list, optional): Dimm address. Value override for args.cpu_dimm_thermal_sensor. Defaults to None
+            cpu_dfcstate_ctrl (bool, optional): Value override for args.cpu_dfcstate_ctrl. Defaults to None
+            cpu_railisofreq_policy (bool, optional): Value override for args.cpu_railisofreq_policy. Defaults to None
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -2833,6 +2836,10 @@ class AMDSMICommands():
             args.cpu_dimm_pow_consumption = cpu_dimm_pow_consumption
         if cpu_dimm_thermal_sensor:
             args.cpu_dimm_thermal_sensor = cpu_dimm_thermal_sensor
+        if cpu_dfcstate_ctrl:
+            args.cpu_dfcstate_ctrl = cpu_dfcstate_ctrl
+        if cpu_railisofreq_policy:
+            args.cpu_railisofreq_policy = cpu_railisofreq_policy
 
         #store cpu args that are applicable to the current platform
         curr_platform_cpu_args = ["cpu_power_metrics", "cpu_prochot", "cpu_freq_metrics",
@@ -2840,13 +2847,13 @@ class AMDSMICommands():
                                   "cpu_io_bandwidth", "cpu_xgmi_bandwidth", "cpu_metrics_ver",
                                   "cpu_metrics_table", "cpu_socket_energy", "cpu_ddr_bandwidth",
                                   "cpu_temp", "cpu_dimm_temp_range_rate", "cpu_dimm_pow_consumption",
-                                  "cpu_dimm_thermal_sensor"]
+                                  "cpu_dimm_thermal_sensor", "cpu_dfcstate_ctrl", "cpu_railisofreq_policy"]
         curr_platform_cpu_values = [args.cpu_power_metrics, args.cpu_prochot, args.cpu_freq_metrics,
                                     args.cpu_c0_res, args.cpu_lclk_dpm_level, args.cpu_pwr_svi_telemetry_rails,
                                     args.cpu_io_bandwidth, args.cpu_xgmi_bandwidth, args.cpu_metrics_ver,
                                     args.cpu_metrics_table, args.cpu_socket_energy, args.cpu_ddr_bandwidth,
                                     args.cpu_temp, args.cpu_dimm_temp_range_rate, args.cpu_dimm_pow_consumption,
-                                    args.cpu_dimm_thermal_sensor]
+                                    args.cpu_dimm_thermal_sensor, args.cpu_dfcstate_ctrl, args.cpu_railisofreq_policy]
 
         # Handle No CPU passed (fall back as this should be defined in metric())
         if args.cpu == None:
@@ -3051,6 +3058,22 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["dimm_thermal_sensor"]["response"] = "N/A"
                 logging.debug("Failed to get dimm temperature range and refresh rate for cpu %s | %s", cpu_id, e.get_error_info())
+        if args.cpu_dfcstate_ctrl:
+            static_dict["dfcstate"] = {}
+            try:
+                dfcstatectrl_status = amdsmi_interface.amdsmi_get_dfc_ctrl(args.cpu)
+                static_dict["dfcstate"]["dfcstatectrl_status"] = dfcstatectrl_status
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["dfcstate"]["dfcstatectrl_status"] = "N/A"
+                logging.debug("Failed to get dfcstate control status for cpu %s | %s", cpu_id, e.get_error_info())
+        if args.cpu_railisofreq_policy:
+            static_dict["cpurailiso"] = {}
+            try:
+                cpurailisofreq_policy = amdsmi_interface.amdsmi_get_cpu_rail_isofreq_policy(args.cpu)
+                static_dict["cpurailiso"]["cpurailisofreq_policy"] = cpurailisofreq_policy
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["cpurailiso"]["cpurailisofreq_policy"] = "N/A"
+                logging.debug("Failed to get cpurailiso frequency policy for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
         if not self.logger.is_json_format():
@@ -3161,7 +3184,7 @@ class AMDSMICommands():
                 cpu_io_bandwidth=None, cpu_xgmi_bandwidth=None, cpu_metrics_ver=None,
                 cpu_metrics_table=None, cpu_socket_energy=None, cpu_ddr_bandwidth=None,
                 cpu_temp=None, cpu_dimm_temp_range_rate=None, cpu_dimm_pow_consumption=None,
-                cpu_dimm_thermal_sensor=None,
+                cpu_dimm_thermal_sensor=None, cpu_dfcstate_ctrl=None, cpu_railisofreq_policy=None,
                 core=None, core_boost_limit=None, core_curr_active_freq_core_limit=None,
                 core_energy=None, throttle=None, base_board=None, gpu_board=None):
         """Get Metric information for target gpu
@@ -3212,6 +3235,8 @@ class AMDSMICommands():
             cpu_dimm_temp_range_rate (list, optional): Dimm address. Value override for args.cpu_dimm_temp_range_rate. Defaults to None
             cpu_dimm_pow_consumption (list, optional): Dimm address. Value override for args.cpu_dimm_pow_consumption. Defaults to None
             cpu_dimm_thermal_sensor (list, optional): Dimm address. Value override for args.cpu_dimm_thermal_sensor. Defaults to None
+            cpu_dfcstate_ctrl (bool, optional): Value override for args.cpu_dfcstate_ctrl. Defaults to None
+            cpu_railisofreq_policy (bool, optional): Value override for args.cpu_railisofreq_policy. Defaults to None
 
             core (device_handle, optional): device_handle for target core. Defaults to None.
             core_boost_limit (bool, optional): Value override for args.core_boost_limit. Defaults to None
@@ -3251,7 +3276,8 @@ class AMDSMICommands():
                           "cpu_lclk_dpm_level", "cpu_pwr_svi_telemetry_rails", "cpu_io_bandwidth",
                           "cpu_xgmi_bandwidth", "cpu_metrics_ver", "cpu_metrics_table",
                           "cpu_socket_energy", "cpu_ddr_bandwidth", "cpu_temp", "cpu_dimm_temp_range_rate",
-                          "cpu_dimm_pow_consumption", "cpu_dimm_thermal_sensor"]
+                          "cpu_dimm_pow_consumption", "cpu_dimm_thermal_sensor",
+                          "cpu_dfcstate_ctrl", "cpu_railisofreq_policy"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -3297,7 +3323,8 @@ class AMDSMICommands():
                                 cpu_pwr_svi_telemetry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
                                 cpu_metrics_ver, cpu_metrics_table, cpu_socket_energy,
                                 cpu_ddr_bandwidth, cpu_temp, cpu_dimm_temp_range_rate,
-                                cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)
+                                cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor,
+                                cpu_dfcstate_ctrl, cpu_railisofreq_policy)
             if args.core:
                 self.logger.output = {}
                 self.logger.clear_multiple_devices_output()
@@ -3331,7 +3358,8 @@ class AMDSMICommands():
                                 cpu_pwr_svi_telemetry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
                                 cpu_metrics_ver, cpu_metrics_table, cpu_socket_energy,
                                 cpu_ddr_bandwidth, cpu_temp, cpu_dimm_temp_range_rate,
-                                cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)
+                                cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor,
+                                cpu_dfcstate_ctrl, cpu_railisofreq_policy)
             if args.core:
                 self.logger.output = {}
                 self.logger.clear_multiple_devices_output()
@@ -4358,7 +4386,8 @@ class AMDSMICommands():
     def set_cpu(self, args, multiple_devices=False, cpu=None, cpu_pwr_limit=None,
                 cpu_xgmi_link_width=None, cpu_lclk_dpm_level=None, cpu_pwr_eff_mode=None,
                 cpu_gmi3_link_width=None, cpu_pcie_link_rate=None, cpu_df_pstate_range=None,
-                cpu_enable_apb=None, cpu_disable_apb=None, soc_boost_limit=None):
+                cpu_enable_apb=None, cpu_disable_apb=None, soc_boost_limit=None,
+                cpu_dfcstate_ctrl=None, cpu_railisofreq_policy=None):
         """Issue set commands to target cpu(s)
 
         Args:
@@ -4375,6 +4404,8 @@ class AMDSMICommands():
             cpu_enable_apb (bool, optional): Value override for args.cpu_enable_apb. Defaults to None.
             cpu_disable_apb (int, optional): Value override for args.cpu_disable_apb. Defaults to None.
             soc_boost_limit (int, optional): Value override for args.soc_boost_limit. Defaults to None.
+            cpu_dfcstate_ctrl (int, optional): Value override for args.cpu_dfcstate_ctrl. Defaults to None.
+            cpu_railisofreq_policy (int, optional): Value override for args.cpu_railisofreq_policy. Defaults to None.
 
         Raises:
             ValueError: Value error if no cpu value is provided
@@ -4405,6 +4436,10 @@ class AMDSMICommands():
             args.cpu_disable_apb = cpu_disable_apb
         if soc_boost_limit:
             args.soc_boost_limit = soc_boost_limit
+        if cpu_dfcstate_ctrl:
+            args.cpu_dfcstate_ctrl = cpu_dfcstate_ctrl
+        if cpu_railisofreq_policy:
+            args.cpu_railisofreq_policy = cpu_railisofreq_policy
 
         if args.cpu == None:
             raise ValueError('No CPU provided, specific CPU targets(S) are needed')
@@ -4419,7 +4454,7 @@ class AMDSMICommands():
         if not any([args.cpu_pwr_limit, args.cpu_xgmi_link_width, args.cpu_lclk_dpm_level,
                     args.cpu_pwr_eff_mode, args.cpu_gmi3_link_width, args.cpu_pcie_link_rate,
                     args.cpu_df_pstate_range, args.cpu_enable_apb, args.cpu_disable_apb,
-                    args.soc_boost_limit]):
+                    args.soc_boost_limit, args.cpu_dfcstate_ctrl, args.cpu_railisofreq_policy]):
             command = " ".join(sys.argv[1:])
             raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -4532,6 +4567,23 @@ class AMDSMICommands():
                 #static_dict["set_soc_boost_limit"]["Response"] = "N/A"
                 static_dict["set_soc_boost_limit"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set socket boost limit for cpu %s | %s", cpu_id, e.get_error_info())
+        if args.cpu_dfcstate_ctrl:
+            static_dict["dfcstatectrl"] = {}
+            try:
+                amdsmi_interface.amdsmi_set_dfc_ctrl(args.cpu, args.cpu_dfcstate_ctrl[0][0])
+                static_dict["dfcstatectrl"]["state"] = "DFCState control operation successful"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["dfcstatectrl"]["state"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                logging.debug("Failed to set dfcstate control for cpu %s | %s", cpu_id, e.get_error_info())
+
+        if args.cpu_railisofreq_policy:
+            static_dict["cpurailiso"] = {}
+            try:
+                amdsmi_interface.amdsmi_set_cpu_rail_isofreq_policy(args.cpu, args.cpu_railisofreq_policy[0][0])
+                static_dict["cpurailiso"]["state"] = "Set CPU ISO frequency policy operation successful"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                static_dict["cpurailiso"]["state"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
+                logging.debug("Failed to set ISO frequency policy for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
         self.logger.store_cpu_output(args.cpu, 'values', static_dict)
@@ -5148,7 +5200,8 @@ class AMDSMICommands():
                   cpu_pwr_eff_mode=None, cpu_gmi3_link_width=None, cpu_pcie_link_rate=None,
                   cpu_df_pstate_range=None, cpu_enable_apb=None, cpu_disable_apb=None,
                   soc_boost_limit=None, core=None, core_boost_limit=None, soc_pstate=None, xgmi_plpd=None,
-                  process_isolation=None, clk_limit=None, clk_level=None, ptl_status=None, ptl_format=None):
+                  process_isolation=None, clk_limit=None, clk_level=None, cpu_dfcstate_ctrl=None,
+                  cpu_railisofreq_policy=None, ptl_status=None, ptl_format=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5174,6 +5227,8 @@ class AMDSMICommands():
             cpu_enable_apb (bool, optional): Value override for args.cpu_enable_apb. Defaults to None.
             cpu_disable_apb (int, optional): Value override for args.cpu_disable_apb. Defaults to None.
             soc_boost_limit (int, optional): Value override for args.soc_boost_limit. Defaults to None.
+            cpu_dfcstate_ctrl (int, optional): Value override for args.cpu_dfcstate_ctrl. Defaults to None.
+            cpu_railisofreq_policy (int, optional): Value override for args.cpu_railisofreq_policy. Defaults to None.
 
             core (device_handle, optional): device_handle for target core. Defaults to None.
             core_boost_limit (int, optional): Value override for args.core_boost_limit. Defaults to None
@@ -5210,7 +5265,8 @@ class AMDSMICommands():
         cpu_args_enabled = False
         cpu_attributes = ["cpu_pwr_limit", "cpu_xgmi_link_width", "cpu_lclk_dpm_level", "cpu_pwr_eff_mode",
                           "cpu_gmi3_link_width", "cpu_pcie_link_rate", "cpu_df_pstate_range",
-                          "cpu_enable_apb", "cpu_disable_apb", "soc_boost_limit"]
+                          "cpu_enable_apb", "cpu_disable_apb", "soc_boost_limit",
+                          "cpu_dfcstate_ctrl", "cpu_railisofreq_policy"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) not in [None, False]:
@@ -5265,7 +5321,9 @@ class AMDSMICommands():
                             args.cpu_df_pstate_range is not None,
                             args.cpu_enable_apb,
                             args.cpu_disable_apb is not None,
-                            args.soc_boost_limit is not None
+                            args.soc_boost_limit is not None,
+                            args.cpu_dfcstate_ctrl is not None,
+                            args.cpu_railisofreq_policy is not None
                             ])
             except AttributeError:
                 # If attribute error for cpu, then we could be another subcommand
@@ -5318,7 +5376,8 @@ class AMDSMICommands():
                 self.set_cpu(args, multiple_devices, cpu, cpu_pwr_limit,
                                 cpu_xgmi_link_width, cpu_lclk_dpm_level, cpu_pwr_eff_mode,
                                 cpu_gmi3_link_width, cpu_pcie_link_rate, cpu_df_pstate_range,
-                                cpu_enable_apb, cpu_disable_apb, soc_boost_limit)
+                                cpu_enable_apb, cpu_disable_apb, soc_boost_limit,
+                                cpu_dfcstate_ctrl, cpu_railisofreq_policy)
             if args.core:
                 self.logger.output = {}
                 self.logger.clear_multiple_devices_output()
@@ -5337,7 +5396,8 @@ class AMDSMICommands():
                 self.set_cpu(args, multiple_devices, cpu, cpu_pwr_limit,
                                 cpu_xgmi_link_width, cpu_lclk_dpm_level, cpu_pwr_eff_mode,
                                 cpu_gmi3_link_width, cpu_pcie_link_rate, cpu_df_pstate_range,
-                                cpu_enable_apb, cpu_disable_apb, soc_boost_limit)
+                                cpu_enable_apb, cpu_disable_apb, soc_boost_limit,
+                                cpu_dfcstate_ctrl, cpu_railisofreq_policy)
             if args.core:
                 self.logger.output = {}
                 self.logger.clear_multiple_devices_output()
