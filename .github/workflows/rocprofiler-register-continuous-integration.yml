@@ -6,13 +6,25 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-register/**'
-      - '!projects/rocprofiler-register/*.md'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
+      - '!**.txt'
+      - '!**.md'
+      - '!**.rtf'
+      - '!**.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
   pull_request:
     paths:
       - 'projects/rocprofiler-register/**'
-      - '!projects/rocprofiler-register/*.md'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
+      - '!**.txt'
+      - '!**.md'
+      - '!**.rtf'
+      - '!**.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,7 +61,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: linux-mi325-1gpu-ossci-rocm-frac
+    runs-on: linux-mi325-1gpu-ossci-rocm
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
