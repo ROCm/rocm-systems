@@ -366,7 +366,7 @@ namespace code {
       CodeMap codeMap;
 
     public:
-      const std::unique_ptr<AmdHsaCode>& FromHandle(hsa_code_object_t handle);
+      AmdHsaCode* FromHandle(hsa_code_object_t handle);
       bool Destroy(hsa_code_object_t handle);
     };
 
