@@ -90,7 +90,6 @@ def main(argv=None) -> None:
         "projects/rocminfo": 356,
         "projects/rocprofiler-compute": 344,
         "projects/rocprofiler-register": 327,
-        "projects/rocprofiler-sdk": 347,
         "projects/rocprofiler-systems": 345,
         "projects/rocprofiler": 329,
         "projects/rocr-runtime": 354,
