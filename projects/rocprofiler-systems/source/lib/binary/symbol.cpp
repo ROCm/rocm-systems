@@ -41,6 +41,7 @@
 #include <libcoff.h>
 
 #include "core/binary/fwd.hpp"
+#include "core/demangler.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "dwarf_entry.hpp"
@@ -116,7 +117,8 @@ symbol::operator()(const std::vector<scope_filter>& _filters) const
     using sf = scope_filter;
 
     // apply filters to the main symbol
-    return (sf::satisfies_filter(_filters, sf::FUNCTION_FILTER, demangle(func)) &&
+    return (sf::satisfies_filter(_filters, sf::FUNCTION_FILTER,
+                                 rocprofsys::utility::demangle(func)) &&
             (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, file) ||
              sf::satisfies_filter(_filters, sf::SOURCE_FILTER, join(':', file, line))));
 }
@@ -283,7 +285,8 @@ symbol::get_inline_symbols(const std::vector<scope_filter>& _filters) const
 
     for(const auto& itr : inlines)
     {
-        if(sf::satisfies_filter(_filters, sf::FUNCTION_FILTER, demangle(itr.func)) &&
+        if(sf::satisfies_filter(_filters, sf::FUNCTION_FILTER,
+                                rocprofsys::utility::demangle(itr.func)) &&
            (sf::satisfies_filter(_filters, sf::SOURCE_FILTER, itr.file) ||
             sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
                                  join(':', itr.file, itr.line))))
@@ -316,7 +319,8 @@ symbol::get_debug_line_info(const std::vector<scope_filter>& _filters) const
 
     auto _data = Tp{};
 
-    if(sf::satisfies_filter(_filters, sf::FUNCTION_FILTER, demangle(func)))
+    if(sf::satisfies_filter(_filters, sf::FUNCTION_FILTER,
+                            rocprofsys::utility::demangle(func)))
     {
         for(const auto& itr : dwarf_info)
         {
@@ -361,7 +365,7 @@ symbol::serialize(ArchiveT& ar, const unsigned int)
        make_nvp("line", line), make_nvp("func", func), make_nvp("file", file),
        make_nvp("inlines", inlines), make_nvp("dwarf_info", dwarf_info));
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
-        ar(cereal::make_nvp("dfunc", demangle(func)));
+        ar(cereal::make_nvp("dfunc", rocprofsys::utility::demangle(func)));
 }
 
 template void

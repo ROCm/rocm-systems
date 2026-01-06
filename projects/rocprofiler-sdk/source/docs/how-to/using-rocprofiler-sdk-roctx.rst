@@ -13,6 +13,10 @@ In certain situations, such as debugging performance issues in large-scale GPU p
 In such cases, it is helpful to define specific tasks to be traced. To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ROCTx library.
 This process is also known as instrumentation.
 
+To use ``rocprofv3`` for marker tracing, including and linking to old ``ROCTx`` works but it's recommended to switch to the new ``ROCTx`` to utilize new APIs.
+To use the new ``ROCTx``, include header ``"rocprofiler-sdk-roctx/roctx.h"`` and link your application with ``librocprofiler-sdk-roctx.so``.
+To see the complete list of ``ROCTx`` APIs, see public header file ``"rocprofiler-sdk-roctx/roctx.h"``.
+
 ROCTx annotations
 ++++++++++++++++++
 
@@ -290,4 +294,3 @@ The preceding command generates a ``marker_api_trace.csv`` file prefixed with th
    :file: /data/python_bindings.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
-

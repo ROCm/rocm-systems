@@ -157,7 +157,11 @@ endif()
 # For build-time checks, use ${Python3_EXECUTABLE} (absolute path from find_package)
 # For runtime tests (add_test), use portable command that resolves from PATH
 # This allows tests to work when build/install folders are moved to different machines
-set(PYTHON_TEST_COMMAND "python3" CACHE STRING "Python command for running tests (portable)")
+set(PYTHON_TEST_COMMAND
+    "python3"
+    CACHE STRING
+    "Python command for running tests (portable)"
+)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
@@ -361,10 +365,26 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_iteration_multiplexing
+    NAME test_profile_iteration_multiplexing_1
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing
-        --junitxml=tests/test_profile_iteration_multiplexing.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_1
+        --junitxml=tests/test_profile_iteration_multiplexing_1.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_iteration_multiplexing_2
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_2
+        --junitxml=tests/test_profile_iteration_multiplexing_2.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_iteration_multiplexing_stochastic
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_stochastic
+        --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
@@ -382,7 +402,9 @@ set_tests_properties(
     test_profile_pc_sampling
     test_profile_sets_func
     test_profile_live_attach_detach
-    test_profile_iteration_multiplexing
+    test_profile_iteration_multiplexing_1
+    test_profile_iteration_multiplexing_2
+    test_profile_iteration_multiplexing_stochastic
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -625,6 +647,7 @@ install(
         "execute_process(
     COMMAND bash -c \"set -e
     cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
+    mkdir -p ${CMAKE_INSTALL_BINDIR}
     ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
     \")"
     COMPONENT main
@@ -723,7 +746,9 @@ if(INSTALL_TESTS)
             tests/vsequential_access
             tests/occupancy
             tests/hip_dynamic_shared
+            tests/laplace_eqn
             tests/mat_mul_max
+            tests/rocflop
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )

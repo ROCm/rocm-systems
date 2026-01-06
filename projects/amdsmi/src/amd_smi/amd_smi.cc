@@ -492,7 +492,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
     if (r != AMDSMI_STATUS_SUCCESS) {
         return r;
     }
-    
+
     if (asic_info.oam_id != 0) {
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
@@ -514,7 +514,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
         // Navigate to the board directory from the DRM device path
         fs::path board_dir = drm_device_path / "board";
         fs::path npm_status = board_dir / "npm_status";
-        
+
         // Check if board directory and npm_status exist
         if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
             found_board = board_dir;
@@ -1610,7 +1610,7 @@ amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handl
         return AMDSMI_STATUS_NOT_SUPPORTED;
         }
     }
-                                    
+
     return rsmi_wrapper(rsmi_dev_fan_speed_set, processor_handle, 0,
                         sensor_ind, speed);
 }
@@ -1954,7 +1954,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     // ---- Store cache success ----
     if (status == AMDSMI_STATUS_SUCCESS &&
         kAsicInfoCacheDuration > std::chrono::milliseconds::zero()) {
-        
+
         auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lk(cache_ptr->mtx);
         cache_ptr->info  = *info;
@@ -2241,9 +2241,9 @@ amdsmi_get_gpu_event_notification(int timeout_ms,
         data[i].event = static_cast<amdsmi_evt_notification_type_t>(
                 rsmi_data.event);
         // Size is tied max event notification size
-        snprintf(data[i].message, 
+        snprintf(data[i].message,
                 AMDSMI_MAX_STRING_LENGTH,
-                "%s", 
+                "%s",
                 rsmi_data.message);
         amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
             .gpu_index_to_handle(rsmi_data.dv_ind, &(data[i].processor_handle));
@@ -3647,7 +3647,7 @@ amdsmi_status_t  amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_
         return AMDSMI_STATUS_NOT_SUPPORTED;
         }
     }
-                    
+
     return rsmi_wrapper(rsmi_dev_pci_bandwidth_set, processor_handle, 0,
                         bw_bitmask);
 }
@@ -3979,7 +3979,7 @@ amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handl
         return AMDSMI_STATUS_NOT_SUPPORTED;
         }
     }
-                                        
+
     return rsmi_wrapper(rsmi_dev_clk_range_set, processor_handle, 0,
                 minclkvalue, maxclkvalue,
                 static_cast<rsmi_clk_type_t>(clkType));
@@ -5329,7 +5329,7 @@ bool amdsmi_is_supported_format(
 
 amdsmi_status_t
 amdsmi_get_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool *enabled) {
-    return rsmi_wrapper(rsmi_get_gpu_ptl_state, processor_handle, 0, enabled);  
+    return rsmi_wrapper(rsmi_get_gpu_ptl_state, processor_handle, 0, enabled);
 }
 
 amdsmi_status_t
@@ -5456,7 +5456,7 @@ amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
     if (tokens.empty() || tokens.size() != 2) {
         return AMDSMI_STATUS_UNEXPECTED_SIZE;  // malformed sysfs content
     }
-    
+
     // Parse tokens
     amdsmi_ptl_data_format_t f1 = token_to_amdsmi_fmt(tokens[0]);
     if (f1 == AMDSMI_PTL_DATA_FORMAT_INVALID) {
@@ -5508,11 +5508,11 @@ amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
     }
 
     // Convert enums to string
-    std::string format = 
+    std::string format =
         std::string(amdsmi_fmt_to_token(data_format1)) + "," +
                     amdsmi_fmt_to_token(data_format2);
 
-    return rsmi_wrapper(rsmi_set_gpu_ptl_formats, processor_handle, 0, format.c_str());   
+    return rsmi_wrapper(rsmi_set_gpu_ptl_formats, processor_handle, 0, format.c_str());
 }
 
 amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,
