@@ -858,7 +858,7 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Memcpy", "[hipHostRegister]") {
+TEST_CASE("Unit_hipHostRegister_Memcpy") {
   // 1 refers to hipHostRegister
   // 0 refers to malloc
   auto mem_type = GENERATE(0, 1);
@@ -907,7 +907,7 @@ template <typename T> __global__ void fill_kernel(T* dataPtr, T value) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Flags", "[hipHostRegister]") {
+TEST_CASE("Unit_hipHostRegister_Flags") {
   size_t sizeBytes = 1 * sizeof(int);
   int* hostPtr = reinterpret_cast<int*>(malloc(sizeBytes));
 
@@ -957,7 +957,7 @@ TEST_CASE("Unit_hipHostRegister_Flags", "[hipHostRegister]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Negative", "[hipHostRegister]") {
+TEST_CASE("Unit_hipHostRegister_Negative") {
   int* hostPtr = nullptr;
 
   size_t sizeBytes = 1 * sizeof(int);
