@@ -304,5 +304,6 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED_OTHER_SIMD}
     FIXTURES_REQUIRED rocprofv3-test-att-other-simd
-    ARGS -k test_other_simd_data --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
+    DISCOVERY_ARGS -k test_other_simd_data
+    ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
