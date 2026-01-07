@@ -159,6 +159,9 @@ def write_otf2(importData, config):
                             tree_node = archive.definitions.system_tree_node(
                                 name=command, class_name=hostname, parent=None
                             )
+                            archive.definitions.system_tree_node_domain(
+                                tree_node, otf2.SystemTreeDomain.SHARED_MEMORY
+                            )
                             cpu_location_group = archive.definitions.location_group(
                                 name=command,
                                 location_group_type=LocationGroupType.PROCESS,
@@ -244,9 +247,8 @@ def write_otf2(importData, config):
                                     class_name=f"AMD {type}",
                                     parent=tree_node,
                                 )
-
-                                archive.definitions.SystemTreeNodeDomain(
-                                    device_node, otf2.SystemTreeNodeDomain.SHARED_MEMORY
+                                archive.definitions.system_tree_node_domain(
+                                    device_node, otf2.SystemTreeDomain.ACCELERATOR_DEVICE
                                 )
 
                                 agents[id] = (
@@ -259,6 +261,7 @@ def write_otf2(importData, config):
                                         name=name,
                                         location_group_type=LocationGroupType.ACCELERATOR,
                                         system_tree_parent=device_node,
+                                        creating_location_group=cpu_location_group,
                                     ),
                                 )
 
