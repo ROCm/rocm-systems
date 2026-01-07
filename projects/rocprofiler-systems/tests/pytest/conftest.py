@@ -68,6 +68,8 @@ from rocprofsys import (
 _results_key: StashKey[list] = StashKey()
 # Key for tracking subtest failures (for pytest-subtests plugin compatibility when pytest < 9.0.0)
 _subtest_failures_key: StashKey[list] = StashKey()
+# Key to prevent duplicate output printing
+_output_printed_key: StashKey[bool] = StashKey()
 
 
 # ============================================================================
@@ -82,7 +84,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Show runner output on test pass (requires -s flag)",
+        help="Show runner output on test pass (adds -s flag)",
     )
     group.addoption(
         "--no-output",
@@ -123,21 +125,16 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
-    # Register plugin to handle --no-output flag
-    config.pluginmanager.register(NoOutputPlugin(config), "no_output_plugin")
+    # Set flags for hooks that can't access config directly
+    pytest._no_output_flag = config.getoption("--no-output", default=False)
+    pytest._show_output_flag = config.getoption("--show-output", default=False)
+    pytest._show_output_on_subtest_fail_flag = config.getoption(
+        "--show-output-on-subtest-fail", default=False
+    )
 
-
-class NoOutputPlugin:
-    """Plugin to suppress failure details when --no-output is specified."""
-
-    def __init__(self, config: pytest.Config):
-        self.no_output = config.getoption("--no-output", default=False)
-
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        if self.no_output and report.failed:
-            # Must use empty string for compatibility with junitxml plugin
-            report.longrepr = ""
+    # Disable capture so print output shown
+    if pytest._show_output_flag:
+        config.option.capture = "no"
 
 
 # Debug helper
@@ -408,75 +405,6 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 # ============================================================================
 
 
-@pytest.fixture(scope="function", autouse=True)
-def _result_output(request):
-    """Auto-use fixture to handle result collection and --show-output display.
-
-    Output display logic:
-    - Default (no flags): Test fails → pytest shows test_output. No extra printing
-    - --show-output-on-subtest-fail: Print test_output when subtests fail
-    - --show-output: Print test_output when tests pass or fail
-    - --no-output: Suppresses all output
-
-    Main test body failures are always handled by pytest's captured output.
-    """
-    results = []
-    subtest_failures = []
-    request.node.stash[_results_key] = results
-    request.node.stash[_subtest_failures_key] = subtest_failures
-    yield
-    if not results:
-        return
-
-    show_output = request.config.getoption("--show-output", default=False)
-    show_on_subtest_fail = request.config.getoption(
-        "--show-output-on-subtest-fail", default=False
-    )
-    if show_output:
-        show_on_subtest_fail = True
-    if not show_output and not show_on_subtest_fail:
-        return
-
-    # Check test status
-    test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
-
-    # Detect subtest failures from our tracking list
-    # This requires that the subtest failure be tracked by the record_subtest_failure fixture
-    has_subtest_failures = len(subtest_failures) > 0
-
-    # Fallback: check if test uses subtests but overall test failed
-    # This is a much cleaner way, but only works on pytest >= 9.0.0
-    if not has_subtest_failures and test_failed:
-        uses_subtests = "subtests" in getattr(request, "fixturenames", [])
-        if uses_subtests:
-            all_results_succeeded = all(getattr(r, "success", True) for r in results)
-            if all_results_succeeded:
-                has_subtest_failures = True
-
-    should_show = False
-    if has_subtest_failures and show_on_subtest_fail:
-        should_show = True
-    elif not test_failed and show_output:
-        should_show = True
-    if not should_show:
-        return
-
-    for result in results:
-        cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
-        if cmd_str:
-            print(f"\n{'='*70}")
-            print(f"Command: {cmd_str}")
-            print(f"{'='*70}")
-
-        test_output = getattr(result, "test_output", "")
-        extra_output = getattr(result, "extra_output", "")
-
-        if test_output:
-            print(f"--- TEST OUTPUT ---\n{test_output}")
-        if extra_output:
-            print(f"\n--- EXTRA OUTPUT ---\n{extra_output}")
-
-
 @pytest.fixture
 def collect_result(request) -> Callable:
     """Fixture to collect test results for --show-output display.
@@ -489,7 +417,7 @@ def collect_result(request) -> Callable:
     """
 
     def _collect(result):
-        request.node.stash[_results_key].append(result)
+        request.node.stash.setdefault(_results_key, []).append(result)
 
     return _collect
 
@@ -814,12 +742,64 @@ def cleanup_instrumented_binary(
 # ============================================================================
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_logreport(report):
+    """Suppress failure details when --no-output is specified."""
+    # Access config via the workaround since report doesn't have direct config access
+    # This hook is called after pytest_runtest_makereport, report has no item reference
+    # We need to check the _no_output_flag set during pytest_configure
+    if getattr(pytest, "_no_output_flag", False):
+        report.longrepr = ""
+
+
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Track test results for cleanup decisions."""
+    """Track test results (cleanup decisions) and inject runner if needed."""
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+
+    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    show_on_fail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
+    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
+
+    should_show = show_output_flag or (
+        show_on_fail_flag and (rep.failed or has_subtest_failures)
+    )
+
+    # Only act on call phase
+    if not (should_show) or rep.when != "call":
+        return
+
+    # Prevent duplicate output (only print once per test function)
+    if item.stash.get(_output_printed_key, False):
+        return
+    item.stash[_output_printed_key] = True
+
+    results = item.stash.get(_results_key, [])
+    if not results:
+        return
+
+    output_parts = []
+    for result in results:
+        cmd = " ".join(str(c) for c in getattr(result, "command", []))
+        if cmd:
+            output_parts.append(f"{'='*70}")
+            output_parts.append(f"Command: {cmd}")
+            output_parts.append(f"{'='*70}")
+        test_out = getattr(result, "test_output", "")
+        if test_out:
+            output_parts.append(test_out)
+
+    if not output_parts:
+        return
+
+    output_text = "\n".join(output_parts)
+    if rep.failed or has_subtest_failures:
+        # For failures, inject into report sections (shown in failure report)
+        rep.sections.append(("Runner Output", output_text))
+    else:
+        print(f"\n--- Runner Output ---\n{output_text}")
 
 
 # ============================================================================
@@ -837,8 +817,7 @@ def record_subtest_failure(request):
     """
 
     def _record(name: str):
-        if _subtest_failures_key in request.node.stash:
-            request.node.stash[_subtest_failures_key].append(name)
+        request.node.stash.setdefault(_subtest_failures_key, []).append(name)
 
     return _record
 
