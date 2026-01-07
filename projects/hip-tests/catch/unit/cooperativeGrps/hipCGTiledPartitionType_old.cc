@@ -366,7 +366,7 @@ TEST_CASE("Unit_hipCGThreadBlockTileType") {
   }
 
   SECTION("Nested tile partition") {
-    unsigned int outer_tile_size = 64;  // fixed outer tile size
+    unsigned int outer_tile_size = getWarpSize();
     unsigned int inner_tile_size = GENERATE(2, 4, 8, 16, 32);
     test_group_partition_nested(outer_tile_size, inner_tile_size, use_global_mem);
   }

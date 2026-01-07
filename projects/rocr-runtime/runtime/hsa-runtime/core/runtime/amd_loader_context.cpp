@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -283,18 +283,18 @@ const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_co
   assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
   auto agent_local_region =
       std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
-                   [&](const core::MemoryRegion* region) {
-                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region;
+                   [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region.get();
                      return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
                    });
-  return agent_local_region == amd_agent->regions().end() ? nullptr : *agent_local_region;
+  return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
 }
 
 const core::MemoryRegion* RegionMemory::System(bool is_code) {
   if (is_code)
-    return core::Runtime::runtime_singleton_->system_regions_coarse()[0];
+    return core::Runtime::runtime_singleton_->system_regions_coarse()[0].get();
   else
-    return core::Runtime::runtime_singleton_->system_regions_fine()[0];
+    return core::Runtime::runtime_singleton_->system_regions_fine()[0].get();
 }
 
 bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {

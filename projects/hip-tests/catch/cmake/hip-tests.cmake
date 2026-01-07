@@ -14,14 +14,55 @@ function(hip_add_exe_to_target)
     "${args}"
     "${list_args}"
   )
+  hip_gen_exe_target(
+    NAME ${_NAME}
+    TEST_TARGET_NAME ${_TEST_TARGET_NAME}
+    TEST_SRC ${_TEST_SRC}
+    LINKER_LIBS ${_LINKER_LIBS}
+    COMMON_SHARED_SRC ${_COMMON_SHARED_SRC}
+    COMPILE_OPTIONS ${_COMPILE_OPTIONS}
+    PROPERTY ${_PROPERTY}
+    STANDALONE_FLAG 0
+  )
+  # If STANDALONE_TESTS==1, also generate per-file targets
+  if(STANDALONE_TESTS EQUAL "1")
+    hip_gen_exe_target(
+      NAME ${_NAME}
+      TEST_TARGET_NAME ${_TEST_TARGET_NAME}
+      TEST_SRC ${_TEST_SRC}
+      LINKER_LIBS ${_LINKER_LIBS}
+      COMMON_SHARED_SRC ${_COMMON_SHARED_SRC}
+      COMPILE_OPTIONS ${_COMPILE_OPTIONS}
+      PROPERTY ${_PROPERTY}
+      STANDALONE_FLAG 1
+    )
+  endif()
+
+endfunction()
+
+function(hip_gen_exe_target)
+  set(options)
+  set(args NAME TEST_TARGET_NAME PLATFORM COMPILE_OPTIONS STANDALONE_FLAG)
+  set(list_args TEST_SRC LINKER_LIBS COMMON_SHARED_SRC PROPERTY)
+  cmake_parse_arguments(
+    PARSE_ARGV 0
+    "" # variable prefix
+    "${options}"
+    "${args}"
+    "${list_args}"
+  )
   foreach(SRC_NAME ${TEST_SRC})
 
-    if(NOT STANDALONE_TESTS EQUAL "1")
+    if(NOT _STANDALONE_FLAG EQUAL "1")
       set(_EXE_NAME ${_NAME})
       set(SRC_NAME ${TEST_SRC})
     else()
       # strip extension of src and use exe name as src name
       get_filename_component(_EXE_NAME ${SRC_NAME} NAME_WLE)
+      if(TARGET ${_EXE_NAME})
+        message(WARNING "Duplicate per-file target name detected: ${_EXE_NAME}. Skipping this target!")
+        continue()
+      endif()
     endif()
 
     # Create shared lib of all tests
@@ -79,9 +120,8 @@ function(hip_add_exe_to_target)
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
 
-    if(NOT STANDALONE_TESTS EQUAL "1")
+    if(NOT _STANDALONE_FLAG EQUAL "1")
       break()
     endif()
   endforeach()
 endfunction()
-
