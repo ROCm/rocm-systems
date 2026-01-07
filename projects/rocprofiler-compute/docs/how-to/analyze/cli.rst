@@ -348,8 +348,8 @@ Show System Speed-of-Light and CS_Busy blocks only
 
 .. note::
 
-   Any dispatch filters selected in GUI will override kernel filters, since each
-   dispatch id corresponds to a unique kernel.
+   Any dispatch filters selected (using --dispatch) will override any selected kernel filters (using --kernel)
+   since each dispatch id corresponds to a unique kernel.
 
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
