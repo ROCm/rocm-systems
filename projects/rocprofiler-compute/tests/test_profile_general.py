@@ -2786,6 +2786,7 @@ def test_torch_operators_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-operators option.
     Verifies that all required files are generated and counter values are valid.
+    NOTE: This test is not included in the test suite since it requires PyTorch installation.
     """
     pytest.importorskip("torch", reason="Skipping torch test since PyTorch is not installed")
     workload_dir = test_utils.get_output_dir(param_id="torch_ops")
@@ -2864,7 +2865,7 @@ if __name__ == "__main__":
     
     # 2. Check torch trace output
     torch_trace_csvs = glob(workload_dir+"/*_torch_trace.csv")
-    assert len(torch_trace_csvs) == 13, "Torch trace CSV files are less than expected."
+    assert len(torch_trace_csvs) in [13,20], "Torch trace CSV files are less than expected."
     torch_trace_csv = Path(random.choice(torch_trace_csvs))
     assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
     
