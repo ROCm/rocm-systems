@@ -202,16 +202,12 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 }
 
 // ================================================================================================
-hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_handle_type_t handleType) {
+hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t flags) {
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
   void* metadata;
   auto fd = fdn;
-  uint32_t flags = 0;
-  if (handleType == HSA_HANDLE_TYPE_KMT) {
-    flags |= HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
-  }
   hsa_status_t status = Hsa::interop_map_buffer(1, &agent, fd, flags, &size, &interop_deviceMemory_,
                                                 &metadata_size, (const void**)&metadata);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Map Interop memory %p, size 0x%zx", interop_deviceMemory_,
@@ -239,7 +235,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   int offset;
 
   if (!GlInterop::Export(owner(), targetType, miplevel, &handle, &offset)) return false;
-  if (interopMapBuffer(handle, HSA_HANDLE_TYPE_KMT) != HSA_STATUS_SUCCESS) return false;
+  if (interopMapBuffer(handle, HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != HSA_STATUS_SUCCESS) return false;
 
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + offset;
   return true;
@@ -289,7 +285,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
       return false;
   }
 
-  if (interopMapBuffer(out.dmabuf_fd, HSA_HANDLE_TYPE_FD) != HSA_STATUS_SUCCESS) return false;
+  if (interopMapBuffer(out.dmabuf_fd) != HSA_STATUS_SUCCESS) return false;
 
   close(out.dmabuf_fd);
   deviceMemory_ = static_cast<char*>(interop_deviceMemory_) + out.buf_offset;
@@ -906,7 +902,7 @@ bool Buffer::create(bool alloc_local) {
     auto ext_memory = interop->asExternalMemory();
     amd::GLObject* glObject = interop->asGLObject();
     if (ext_memory != nullptr) {
-      return interopMapBuffer(ext_memory->Handle(), HSA_HANDLE_TYPE_NT) == HSA_STATUS_SUCCESS;
+      return interopMapBuffer(ext_memory->Handle()) == HSA_STATUS_SUCCESS;
     } else if (glObject != nullptr) {
       return createInteropBuffer(GL_ARRAY_BUFFER, 0);
     }
