@@ -140,6 +140,69 @@ class NoOutputPlugin:
             report.longrepr = ""
 
 
+# Debug helper
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Add test configuration to pytest header output."""
+    try:
+        rocprof_config = discover_build_config()
+    except Exception as e:
+        return [f"rocprofiler-systems: Configuration error - {e}"]
+
+    try:
+        gpuInfo = detect_gpu()
+    except Exception as e:
+        return [f"rocprofiler-systems: GPU detection error - {e}"]
+
+    try:
+        llvm_objdump = get_llvm_objdump(rocprof_config.rocm_path)
+    except FileNotFoundError:
+        llvm_objdump = "Not found - Set ROCM_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
+
+    rocm_version = (
+        ".".join(map(str, rocprof_config.rocm_version))
+        if rocprof_config.rocm_version
+        else "Not found"
+    )
+
+    lines = [
+        "",
+        "=" * 70,
+        "Test Configuration:",
+        "=" * 70,
+        f"  ROCm version:   {rocm_version}",
+        f"  ROCm path:      {rocprof_config.rocm_path}",
+        f"  Is installed:   {rocprof_config.is_installed}",
+        "-" * 70,
+        "GPU Information:",
+        f"  Available:      {gpuInfo.available}",
+        f"  Architectures:  {gpuInfo.architectures}",
+        f"  Device count:   {gpuInfo.device_count}",
+        f"  Categories:     {gpuInfo.categories}",
+        "-" * 70,
+        "Directories:",
+        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
+        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
+        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
+        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
+        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
+        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
+        f"  Output dir:     {rocprof_config.test_output_dir}",
+        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
+        "-" * 70,
+        "Executables:",
+        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
+        f"  Run:            {rocprof_config.rocprofsys_run}",
+        f"  Sample:         {rocprof_config.rocprofsys_sample}",
+        f"  Avail:          {rocprof_config.rocprofsys_avail}",
+        f"  Causal:         {rocprof_config.rocprofsys_causal}",
+        f"  MPI exec:       {rocprof_config.mpiexec}",
+        f"  llvm-objdump:   {llvm_objdump}",
+        "=" * 70,
+        "",
+    ]
+    return lines
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
@@ -199,6 +262,39 @@ def pytest_collection_modifyitems(
                 )
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Code that runs after all tests complete."""
+
+    # Disallow xdist workers from executing code after this call
+    if hasattr(session.config, "workerinput"):
+        return
+
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+        return
+
+    import glob
+
+    # Clean up temp files matching patterns
+    for pattern in _cleanup_temp_patterns():
+        for filepath in glob.glob(pattern):
+            _safe_remove_file(Path(filepath))
+
+    # Clean up empty directories in test output areas
+    try:
+        config = discover_build_config()
+        build_dir = config.rocprofsys_build_dir
+    except Exception:
+        return  # Can't get config, skip directory cleanup
+
+    for dir_path in _cleanup_directory_patterns(build_dir):
+        if dir_path.exists():
+            # First pass: remove empty subdirectories
+            for child in list(dir_path.iterdir()):
+                _safe_remove_directory(child, remove_if_empty=True)
+            # Second pass: remove parent if now empty
+            _safe_remove_directory(dir_path, remove_if_empty=True)
+
+
 @lru_cache(maxsize=1)
 def check_use_rocpd() -> bool:
     """Whether ROCpd is available for tests.
@@ -239,6 +335,13 @@ def check_use_perfetto() -> bool:
 # ============================================================================
 # Session-scoped Fixtures
 # ============================================================================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def is_xdist_used(request) -> bool:
+    """Whether xdist is actively being used (parallel mode) for the test session."""
+    # workerinput only exists on xdist worker processes
+    return hasattr(request.config, "workerinput")
 
 
 @pytest.fixture(scope="session")
@@ -410,8 +513,10 @@ def test_output_dir(
 
     This ensures validation always has access to output files.
     """
+    class_name = request.node.cls.__name__ if request.node.cls else None
     test_name = request.node.name
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in test_name)
+    full_name = f"{class_name}__{test_name}" if class_name else test_name
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in full_name)
     output_dir = test_output_base / safe_name
 
     if output_dir.exists():
@@ -586,7 +691,7 @@ def _safe_remove_directory(dirpath: Path, remove_if_empty: bool = True) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def cleanup_temp_files(rocprof_config: RocprofsysConfig):
+def cleanup_temp_files(rocprof_config: RocprofsysConfig, is_xdist_used, request):
     """Session-scoped cleanup fixture that runs AFTER ALL tests complete.
 
     Execution Order:
@@ -606,6 +711,11 @@ def cleanup_temp_files(rocprof_config: RocprofsysConfig):
     - Test config directories
     """
     yield  # All tests run here
+
+    # In xdist, session fixtures run once per worker.
+    # We need to defer cleanup to end of session
+    if is_xdist_used:
+        return
 
     if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
         return
@@ -629,7 +739,7 @@ def cleanup_temp_files(rocprof_config: RocprofsysConfig):
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_module_temp_files(
-    rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest
+    rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest, is_xdist_used
 ):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
@@ -653,6 +763,10 @@ def cleanup_module_temp_files(
     for pattern in ["*.inst", "*.inst.orig"]:
         for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
             _safe_remove_file(Path(filepath))
+
+    # Defer below cleanup to end of session
+    if is_xdist_used:
+        return
 
     # Clean up any temp files in /tmp that match session patterns
     temp_patterns = [
@@ -696,7 +810,7 @@ def cleanup_instrumented_binary(
 
 
 # ============================================================================
-# Pytest Hooks for Result Tracking
+# Pytest Hooks
 # ============================================================================
 
 
@@ -706,69 +820,6 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
-
-
-# Debug helper
-def pytest_report_header(config: pytest.Config) -> list[str]:
-    """Add test configuration to pytest header output."""
-    try:
-        rocprof_config = discover_build_config()
-    except Exception as e:
-        return [f"rocprofiler-systems: Configuration error - {e}"]
-
-    try:
-        gpuInfo = detect_gpu()
-    except Exception as e:
-        return [f"rocprofiler-systems: GPU detection error - {e}"]
-
-    try:
-        llvm_objdump = get_llvm_objdump(rocprof_config.rocm_path)
-    except FileNotFoundError:
-        llvm_objdump = "Not found - Set ROCM_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
-
-    rocm_version = (
-        ".".join(map(str, rocprof_config.rocm_version))
-        if rocprof_config.rocm_version
-        else "Not found"
-    )
-
-    lines = [
-        "",
-        "=" * 70,
-        "Test Configuration:",
-        "=" * 70,
-        f"  ROCm version:   {rocm_version}",
-        f"  ROCm path:      {rocprof_config.rocm_path}",
-        f"  Is installed:   {rocprof_config.is_installed}",
-        "-" * 70,
-        "GPU Information:",
-        f"  Available:      {gpuInfo.available}",
-        f"  Architectures:  {gpuInfo.architectures}",
-        f"  Device count:   {gpuInfo.device_count}",
-        f"  Categories:     {gpuInfo.categories}",
-        "-" * 70,
-        "Directories:",
-        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
-        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
-        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
-        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
-        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
-        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
-        f"  Output dir:     {rocprof_config.test_output_dir}",
-        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
-        "-" * 70,
-        "Executables:",
-        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
-        f"  Run:            {rocprof_config.rocprofsys_run}",
-        f"  Sample:         {rocprof_config.rocprofsys_sample}",
-        f"  Avail:          {rocprof_config.rocprofsys_avail}",
-        f"  Causal:         {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:       {rocprof_config.mpiexec}",
-        f"  llvm-objdump:   {llvm_objdump}",
-        "=" * 70,
-        "",
-    ]
-    return lines
 
 
 # ============================================================================
