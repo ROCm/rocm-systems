@@ -103,10 +103,9 @@ counter_collection_device_unlock(const rocprofiler_agent_t* agent)
     if(ret != 0)
     {
         auto err = errno;
-        ROCP_WARNING << fmt::format(
-            "Failed to unlock device {} (error: {}). Continuing anyway.",
-            agent->id.handle,
-            strerror(err));
+        ROCP_WARNING << fmt::format("Failed to unlock device {} (error: {}). Continuing anyway.",
+                                    agent->id.handle,
+                                    strerror(err));
         return ROCPROFILER_STATUS_ERROR;
     }
 
