@@ -139,10 +139,20 @@ class RocProfCompute_Base:
                     console_debug(f"Injected {inject_script} and {sys.executable} into command")
                     console_debug(f"New command: {' '.join(args.remaining)}")
                 else:
-                    console_error(
-                        "--torch-operators flag requires Python command or Python script. "
-                        f"Found: {args.remaining[0]}"
+                    console_warning(
+                        "--torch-operators flag requires Python command or Python script."
+                        f"Found: {args.remaining[0]}\n"
+                        "Remove --torch-operators flag if not profiling a PyTorch application."
                     )                    
+                    sys.exit(1)
+
+                if args.format_rocprof_output == "rocpd":
+                    args.format_rocprof_output = "csv"
+                    args.retain_rocpd_output = True
+                    console_warning(
+                        "Changed rocprof output format to 'csv' for torch operator profiling.\n"
+                        "Enabled retention of 'rocpd' output in accordance with user input."
+                    )
 
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
