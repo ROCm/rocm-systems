@@ -5692,20 +5692,10 @@ typedef int hsa_handle_t;
 #endif
 
 /**
- * @brief Enumeration of handle types.
- */
-typedef enum {
-  HSA_HANDLE_TYPE_NONE = 0,
-  HSA_HANDLE_TYPE_FD,           //!< File descriptor handle
-  HSA_HANDLE_TYPE_NT,           //!< Windows NT handle
-  HSA_HANDLE_TYPE_KMT,          //!< Windows KMT handle
-  HSA_HANDLE_TYPE_MAX
-} hsa_handle_type_t;
-
-/**
  * @brief Enumeration of interop map flags.
  */
 typedef enum : uint32_t {
+  HSA_INTEROP_MAP_FLAG_NONE = 0,
   HSA_INTEROP_MAP_FLAG_KMT_HANDLE = (1u << 0),
 } hsa_interop_map_flag_t;
 

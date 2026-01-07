@@ -868,7 +868,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                                 hsa_handle_type_t handle_type, size_t* size, void** ptr,
+                                 hsa_interop_map_flag_t flags, size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
   constexpr int tinyArraySize = 8;
   HsaGraphicsResourceInfo info;
@@ -900,7 +900,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   }
 
   const HSA_REGISTER_MEM_FLAGS reg_flags = {
-      .ui32 = {.kmtHandle = (handle_type == HSA_HANDLE_TYPE_KMT)}};
+      .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
   auto status =
       hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);

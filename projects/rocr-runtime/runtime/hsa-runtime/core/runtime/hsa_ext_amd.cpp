@@ -995,15 +995,6 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
 hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
                                         hsa_handle_t interop_handle, uint32_t flags, size_t* size,
                                         void** ptr, size_t* metadata_size, const void** metadata) {
-#if defined(__linux__)
-  hsa_handle_type_t handle_type = HSA_HANDLE_TYPE_FD;
-#else
-  hsa_handle_type_t handle_type = HSA_HANDLE_TYPE_NT;
-#endif
-
-  if (flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE)
-    handle_type = HSA_HANDLE_TYPE_KMT;
-
   static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
@@ -1029,8 +1020,9 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents
     core_agents[i] = device;
   }
 
-  auto ret = core::Runtime::runtime_singleton_->InteropMap(num_agents, core_agents, interop_handle,
-                                                           handle_type, size, ptr, metadata_size, metadata);
+  auto ret = core::Runtime::runtime_singleton_->InteropMap(
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
+      ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
