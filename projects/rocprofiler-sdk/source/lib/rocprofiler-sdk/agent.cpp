@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -56,6 +57,12 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+extern "C" {
+// Pre 1.0.0 aqlprofile does not provide this api, use as fallback
+ROCPROFILER_WEAK hsa_status_t
+aqlprofile_get_version(aqlprofile_version_t* version);
+}
 
 namespace rocprofiler
 {
@@ -944,11 +951,14 @@ get_agent_mapping()
 aqlprofile_version_t
 get_aqlprofile_version()
 {
-    auto ver    = aqlprofile_version_t{};
-    auto status = aqlprofile_get_version(&ver);
-    if(status != HSA_STATUS_SUCCESS)
+    auto ver = aqlprofile_version_t{};
+    if(aqlprofile_get_version != nullptr)
     {
-        ROCP_WARNING << "Failed to get aqlprofile version";
+        auto status = aqlprofile_get_version(&ver);
+        if(status != HSA_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "Failed to get aqlprofile version";
+        }
     }
     return ver;
 }
@@ -982,8 +992,25 @@ get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
 
     const auto runtime_aql_ver = get_aqlprofile_version();
 
+    if(runtime_aql_ver.major == 0)
+    {
+        // Old aqlprofile without versioning support - use the old API
+        aqlprofile_agent_info_t agent_info = {
+            .agent_gfxip          = agent->name,
+            .xcc_num              = agent->num_xcc,
+            .se_num               = agent->num_shader_banks,
+            .cu_num               = agent->cu_count,
+            .shader_arrays_per_se = agent->simd_arrays_per_engine};
+
+        ROCP_INFO << "Using pre-1.0.0 aqlprofile API with aqlprofile_register_agent\n";
+
+        if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to register agent " << agent->name;
+        }
+    }
     // Versioning support for this struct was added in 1.1.0
-    if(runtime_aql_ver.major == 1 && runtime_aql_ver.minor == 0)
+    else if(runtime_aql_ver.major == 1 && runtime_aql_ver.minor == 0)
     {
         aqlprofile_agent_info_v1_t_100 agent_info = {
             .agent_gfxip          = agent->name,
@@ -995,7 +1022,7 @@ get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
             .location_id          = agent->location_id,
         };
 
-        ROCP_TRACE << "Using 1.0.0 aqlprofile aqlprofile_agent_info_v1_t API\n";
+        ROCP_WARNING << "Using 1.0.0 aqlprofile aqlprofile_agent_info_v1_t API\n";
 
         if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
            HSA_STATUS_SUCCESS)
@@ -1006,7 +1033,7 @@ get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
     else
     {
         aqlprofile_agent_info_v1_t agent_info = {
-            .size                 = sizeof(aqlprofile_agent_info_v1_t),
+            .size                 = sizeof(agent_info),
             .agent_gfxip          = agent->name,
             .xcc_num              = agent->num_xcc,
             .se_num               = agent->num_shader_banks,
@@ -1025,6 +1052,8 @@ get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
         }
     }
 #else
+    ROCP_INFO << "Using pre-1.0.0 aqlprofile API with aqlprofile_register_agent\n";
+
     aqlprofile_agent_info_t agent_info = {.agent_gfxip          = agent->name,
                                           .xcc_num              = agent->num_xcc,
                                           .se_num               = agent->num_shader_banks,
