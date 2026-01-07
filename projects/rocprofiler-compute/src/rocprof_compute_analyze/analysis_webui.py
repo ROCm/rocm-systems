@@ -337,7 +337,6 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
         args = self.get_args()
-
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
 
         # create 'mega dataframe'
