@@ -356,6 +356,53 @@ stop_context(const context::context* ctx)
     if(controller) controller->disable_serialization();
 }
 
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t                     context_id,
+                           rocprofiler_buffer_id_t                      buffer_id,
+                           rocprofiler_agent_id_t                       agent_id,
+                           rocprofiler_spm_device_counting_service_cb_t cb,
+                           void*                                        user_data)
+{
+     if(!is_spm_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
+    if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
+    auto& ctx = *ctx_p;
+
+    if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+     if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(!rocprofiler::buffer::get_buffer(buffer_id) &&
+       buffer_id != rocprofiler_buffer_id_t{.handle = 0})
+    {
+        return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+    }
+
+    if(!ctx.spm_device_counter_collection)
+    {
+        ctx.spm_device_counter_collection =
+            std::make_unique<rocprofiler::context::spm_device_counting_service>();
+    }
+
+    if(ctx.spm_device_counter_collection->conf_agents.emplace(agent_id.handle).second == false)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    ctx.spm_device_counter_collection->agent_data.emplace_back();
+    ctx.spm_device_counter_collection->agent_data.back().callback_data =
+        rocprofiler_user_data_t{.ptr = user_data};
+    ctx.spm_device_counter_collection->agent_data.back().agent_id = agent_id;
+    ctx.spm_device_counter_collection->agent_data.back().cb       = cb;
+    ctx.spm_device_counter_collection->agent_data.back().buffer   = buffer_id;
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 }  // namespace SPM
 
 }  // namespace rocprofiler

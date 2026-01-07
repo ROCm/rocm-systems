@@ -131,6 +131,8 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
         for(auto& ctx : rocprofiler::context::get_registered_contexts())
         {
             if(ctx->device_counter_collection) return ctx;
+            else if(ctx->spm_device_counter_collection)
+                return ctx;
         }
         return nullptr;
     }();

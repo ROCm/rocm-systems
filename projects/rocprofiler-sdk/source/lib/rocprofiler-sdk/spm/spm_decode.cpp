@@ -53,6 +53,63 @@ namespace rocprofiler
 {
 namespace SPM
 {
+
+struct buffer_decode_callback_data_t
+{
+    hsa::SPMPacket* packet{};
+    uint64_t        buffer_id{};
+};
+
+std::mutex&
+get_buffer_mut()
+{
+    static auto*& mut = common::static_object<std::mutex>::construct();
+    return *CHECK_NOTNULL(mut);
+}
+
+void
+decode_buffer_cb(uint64_t timestamp,
+                 uint64_t value,
+                 uint64_t index,
+                 int      shader_engine,
+                 void*    userdata)
+{
+    auto _lk                           = std::unique_lock{get_buffer_mut()};
+    auto callback_data                 = static_cast<buffer_decode_callback_data_t*>(userdata);
+    auto spm_packet                    = static_cast<hsa::SPMPacket*>(callback_data->packet);
+    rocprofiler::buffer::instance* buf = nullptr;
+
+    buf = CHECK_NOTNULL(buffer::get_buffer(spm_packet->buffer_id));
+    auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(spm_packet->spm_desc.data);
+    auto& event   = desc_v0.events()[index];
+    auto instance_id = rocprofiler_counter_instance_id_t{};
+    counters::set_dim_in_rec(instance_id,
+                                 rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
+                                 callback_data->buffer_id);
+    counters::set_counter_in_rec(instance_id, event.id);
+    counters::set_dim_in_rec(
+                instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_INSTANCE, event.instance);
+    counters::set_dim_in_rec(
+                instance_id,
+                counters::ROCPROFILER_DIMENSION_AGENT,
+                (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))
+                        ->logical_node_id +
+                    counters::AGENT_ENCODING_OFFSET);
+
+    if(shader_engine > 0)
+        counters::set_dim_in_rec(
+            instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, shader_engine);
+    auto record = rocprofiler_spm_counter_record_t{
+            .size      = sizeof(rocprofiler_spm_counter_record_t),
+            .id        = instance_id,
+            .agent_id  = (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
+            .timestamp = timestamp,
+            .value     = value};
+    
+    buf->emplace(
+            ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, record);
+}
+
 /** @brief Calback for every sample in SPM data buffer
  * [In] timestamp - timestamp of the sample
  * [In] value - value of the sample
@@ -91,7 +148,14 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
     {
         return;
     }
-
+    if(spm_packet->buffer_id.handle != 0)
+    {
+        auto callback_data =
+            buffer_decode_callback_data_t{.packet = spm_packet, .buffer_id = buffer_id};
+        auto status = spm_packet->sym.spm_decode_fn(
+            spm_packet->aql_desc, decode_buffer_cb, data, data_size, &callback_data);
+        if(status != HSA_STATUS_SUCCESS) return;
+    }
     auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(spm_packet->spm_desc.data);
     if(!desc_v0.valid()) return;
 

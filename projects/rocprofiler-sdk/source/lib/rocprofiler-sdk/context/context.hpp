@@ -28,9 +28,10 @@
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -100,6 +101,23 @@ struct spm_dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+struct spm_device_counting_service
+{
+    std::unordered_set<uint64_t>                           conf_agents;
+    std::vector<rocprofiler::SPM::spm_agent_callback_data> agent_data;
+
+    enum class state
+    {
+        DISABLED,
+        LOCKED,
+        ENABLED,
+        EXIT
+    };
+    std::atomic<state> status{state::DISABLED};
+
+    common::Synchronized<bool> enabled{false};
+};
+
 struct device_counting_service
 {
     std::unordered_set<uint64_t>                            conf_agents;
@@ -145,6 +163,7 @@ struct context
     std::unique_ptr<thread_trace::DeviceThreadTracer>   device_thread_trace   = {};
 
     std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
+    std::unique_ptr<spm_device_counting_service>             spm_device_counter_collection = {};
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
 

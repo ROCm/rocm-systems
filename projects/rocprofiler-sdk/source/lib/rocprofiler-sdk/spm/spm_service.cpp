@@ -217,4 +217,16 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
 
     return cb(agent_id, ids.data(), ids.size(), user_data);
 }
+
+
+rocprofiler_status_t
+rocprofiler_configure_spm_device_counting_service(rocprofiler_context_id_t context_id,
+                                                  rocprofiler_buffer_id_t  buffer_id,
+                                                  rocprofiler_agent_id_t   agent_id,
+                                                  rocprofiler_spm_device_counting_service_cb_t cb,
+                                                  void* user_data)
+{
+    return rocprofiler::SPM::configure_agent_collection(
+        context_id, buffer_id, agent_id, cb, user_data);
+}
 }

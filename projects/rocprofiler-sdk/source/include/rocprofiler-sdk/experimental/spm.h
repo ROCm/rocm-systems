@@ -251,4 +251,68 @@ rocprofiler_configure_spm_dispatch_service(
     void* record_callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(2, 4);
 ;
 
+/**
+* @brief (experimental) Callback to set the profile config for the agent.
+ *
+ * @param [in] context_id context id
+ * @param [in] config_id Profile config detailing the counters  and SPM parameters to collect for the agent profiing
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND Returned if the config_id is not found
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the ctx is not valid
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Returned if attempting to make this
+ * call outside of context startup.
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH Agent of profile does not match agent of the
+ * context.
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
+ */
+
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef rocprofiler_status_t (*rocprofiler_spm_device_counting_agent_cb_t)(
+    rocprofiler_context_id_t            context_id,
+    rocprofiler_spm_counter_config_id_t config_id);
+
+/**
+ * @brief (experimental) Configure Profile Counting Service for agent. Called when the context is
+ * started. Selects the counters to be used for agent profiling.
+ *
+ * @param [in]  context_id context id
+ * @param [in]  agent_id agent id
+ * @param [in]  set_config Function to call to set the profile config (see
+ * rocprofiler_device_counting_agent_cb_t)
+ * @param [in]  user_data Data supplied to rocprofiler_configure_device_counting_service
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef void (*rocprofiler_spm_device_counting_service_cb_t)(
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_agent_id_t                     agent_id,
+    rocprofiler_spm_device_counting_agent_cb_t set_config,
+    void*                                      user_data);
+
+/**
+* @brief (experimental) Configure SPM Device Counting Service for agent. There may only be one counting
+* service configured per agent in a context and can be only one active context that is profiling a
+* single agent at a time. Multiple agent contexts can be started at the same time if they are
+* profiling different agents.
+*
+* @param [in] context_id context id
+* @param [in] buffer_id id of the buffer to use for the counting service.
+* @param [in] agent_id agent to configure profiling on.
+* @param [in] cb Callback called when the context is started for the tool to specify what
+* counters to collect (rocprofiler_counter_config_id_t).
+* @param [in] user_data User supplied data to be passed to the callback cb when triggered
+* @return ::rocprofiler_status_t
+* @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist.
+* @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Returned if the buffer is not found.
+* @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned if context already has agent
+*                                                     profiling configured for agent_id.
+* @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_configure_spm_device_counting_service(rocprofiler_context_id_t context_id,
+                                                  rocprofiler_buffer_id_t  buffer_id,
+                                                  rocprofiler_agent_id_t   agent_id,
+                                                 rocprofiler_spm_device_counting_service_cb_t cb,
+                                                 void* user_data)
+ROCPROFILER_NONNULL(4) ROCPROFILER_API;
 ROCPROFILER_EXTERN_C_FINI

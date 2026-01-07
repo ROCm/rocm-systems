@@ -306,6 +306,7 @@ public:
     aqlprofile_spm_buffer_desc_t aql_desc{};
     rocprofiler::SPM::spm_descriptor_t               spm_desc{};
     rocprofiler_spm_dispatch_counting_record_cb_t    record_cb{};
+    rocprofiler_buffer_id_t                          buffer_id{};
     rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
     std::shared_ptr<std::vector<char>>               container_desc_data{};
     aqlprofile_spm_aql_packets_t                     packets{};
