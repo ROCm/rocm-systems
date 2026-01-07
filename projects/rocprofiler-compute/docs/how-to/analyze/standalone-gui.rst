@@ -32,12 +32,6 @@ desired analysis command.
 
 .. note::
 
-   Do not use the ``-k/--kernel`` or ``-d/--dispatch`` command-line filtering
-   options when launching the standalone GUI. Instead, use the dropdown menus in
-   the web interface to filter by kernel or dispatch.
-
-.. note::
-
    Any dispatch filters selected in GUI will override kernel filters, since each
    dispatch id corresponds to a unique kernel.
 

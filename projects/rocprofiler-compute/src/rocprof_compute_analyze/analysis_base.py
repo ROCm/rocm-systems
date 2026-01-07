@@ -405,16 +405,9 @@ class OmniAnalyze_Base:
                     "Please choose a different name."
                 )
 
-        # Prevent --dispatch or --kernel with --gui,
-        # since gui handles it in the frontend
-        if args.gui and (args.gpu_kernel or args.gpu_dispatch_id):
-            console_error(
-                "analysis",
-                "The --gui option cannot be used with "
-                "--dispatch (-d) or --kernel (-k) filters. "
-                "Use the dropdown menus in the GUI frontend "
-                "to filter by dispatch or kernel.",
-            )
+        if args.gpu_kernel and args.gpu_dispatch_id:
+            console_warning(f"Ignoring kernel filter {args.gpu_kernel} since dispatch filter {args.gpu_dispatch_id} is already provided")
+            args.gpu_kernel = []
 
         # Check if any kernel's counters are missing due to iteration multiplexing
         if (

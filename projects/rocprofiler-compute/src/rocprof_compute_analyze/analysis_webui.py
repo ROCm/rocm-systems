@@ -89,6 +89,7 @@ class webui_analysis(OmniAnalyze_Base):
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
             filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        input_filters["kernel"] = filt_kernel_names
 
         # setup app layout
         from utils.gui_components.header import get_header
@@ -150,6 +151,11 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui kernel filter is {kernel_filter}")
             console_debug("analysis", f"gui gpu filter is {gcd_filter}")
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
+
+            # Ignore kernel filtering if dispatch filtering is provided
+            if kernel_filter and disp_filt:
+                console_warning(f"Ignoring kernel filter {kernel_filter} since dispatch filter {disp_filt} is already provided")
+                kernel_filter = []
 
             base_data[base_run].filter_kernel_ids = (
                 [str(k) for k in kernel_filter] if kernel_filter else []

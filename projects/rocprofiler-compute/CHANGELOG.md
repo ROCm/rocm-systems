@@ -49,8 +49,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix issue where counter collection data was empty when profiling workload which spawn multiple child processes
 
-* Disallow using kernel/dispatch (--kernel or --dispatch options) filtering with --gui analyze mode since filtering is supported via dropdown menu in GUI frontend.
-
 * Prevent conflicts between kernel and dispatch filters by ignoring kernel filters if dispatch filters are provided since each dispatch id has a unique kernel.
 
 ### Removed
