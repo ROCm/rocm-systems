@@ -209,7 +209,7 @@ class AMDSMICommands():
             self.logger.print_output()
 
 
-    def list(self, args, multiple_devices=False, gpu=None, cpu=None):
+    def list(self, args, multiple_devices=False, gpu=None):
         """List information for target gpu
 
         Args:
@@ -229,10 +229,9 @@ class AMDSMICommands():
         
         cpu_attributes = ["cpu"]
         for attr in cpu_attributes:
-            if hasattr(args, attr):
-                if getattr(args, attr):
-                   print("NA")
-                   return
+            if hasattr(args, 'cpu') and getattr(args, 'cpu'):
+                print("N/A")
+                return
 
         # Handle No GPU passed
         if args.gpu == None:
