@@ -394,7 +394,7 @@ class GpuAgent : public GpuAgentInt {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -536,7 +536,7 @@ class GpuAgent : public GpuAgentInt {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -594,7 +594,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<const core::Agent*> xgmi_peer_list_;
 
   // Protects xgmi_peer_list_
-  KernelMutex xgmi_peer_list_lock_;
+  std::mutex xgmi_peer_list_lock_;
 
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
@@ -607,19 +607,19 @@ class GpuAgent : public GpuAgentInt {
   lazy_ptr<core::Queue> queues_[QueueCount];
 
   // @brief Mutex to protect the update to coherency type.
-  KernelMutex coherency_lock_;
+  std::mutex coherency_lock_;
 
   // @brief Mutex to protect access to scratch pool.
-  KernelMutex scratch_lock_;
+  std::mutex scratch_lock_;
 
   // @brief Mutex to protect access to ::t1_.
-  KernelMutex t1_lock_;
+  std::mutex t1_lock_;
 
   // @brief Mutex to protect access to blit objects.
-  KernelMutex blit_lock_;
+  std::mutex blit_lock_;
 
   // @brief Mutex to protect sdma gang submissions.
-  KernelMutex sdma_gang_lock_;
+  std::mutex sdma_gang_lock_;
 
   // @brief GPU tick on initialization.
   HsaClockCounters t0_;
@@ -638,7 +638,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   core::Isa* isa_;
 
@@ -729,7 +729,7 @@ class GpuAgent : public GpuAgentInt {
   struct {
     lazy_ptr<core::Queue> queue_;
     int ref_ct_;
-    KernelMutex lock_;
+    std::mutex lock_;
   } gws_queue_;
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
@@ -763,7 +763,7 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Coarse-grain deallocator on this GPU.
   std::function<void(void*)> coarsegrain_deallocator_;
 
-  void* trap_handler_tma_region_;
+  std::unique_ptr<void, std::function<void(void*)>> trap_handler_tma_region_;
 
   /* PC Sampling fields - begin */
   /* 2nd level Trap handler code is based on the offsets within this structure */

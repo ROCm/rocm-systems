@@ -588,7 +588,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
                                            kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
   {"rsmi_dev_vbios_version_get",         {{kDevVBiosVerFName}, {}}},
-  {"rsmi_dev_vbios_build_number_get",    {{kDevVBiosBuildFName}, {}}}, 
+  {"rsmi_dev_vbios_build_number_get",    {{kDevVBiosBuildFName}, {}}},
   {"rsmi_dev_od_volt_info_get",          {{kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_od_volt_info_set",          {{kDevPowerODVoltageFName,
                                            kDevPerfLevelFName},  {}}},
@@ -1067,8 +1067,6 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   sysfs_path += kDevAttribNameMap.at(type);
   switch (type) {
     case kDevGPUMClk:
-    case kDevSocPstate:
-    case kDevXgmiPlpd:
     case kDevProcessIsolation:
     case kDevShaderClean:
     case kDevDCEFClk:
@@ -1082,6 +1080,8 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevComputePartition:
     case kDevMemoryPartition:
     case kDevXcpConfig:
+    case kDevSocPstate:
+    case kDevXgmiPlpd:
       return writeDevInfoStr(type, val, true);
 
     default:
@@ -1245,7 +1245,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   if (type == DevInfoTypes::kDevGpuMetrics &&
       kGpuMetricsCacheDuration > std::chrono::milliseconds::zero()) {
     auto now = std::chrono::steady_clock::now();
-    
+
     std::lock_guard<std::mutex> lock(cache_ptr->mtx);
     cache_ptr->data.assign(
         reinterpret_cast<uint8_t*>(p_binary_data),

@@ -118,7 +118,7 @@ PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_R
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args: Any) -> Union[float, None]:
+def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -127,7 +127,7 @@ def to_min(*args: Any) -> Union[float, None]:
         return min(args)
 
 
-def to_max(*args: Any) -> Union[float, np.ndarray, None]:
+def to_max(*args: Any) -> Union[float, np.ndarray]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -142,8 +142,10 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating, None]:
+) -> Union[float, np.floating]:
     if a is None:
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
         if a.empty:
@@ -173,9 +175,9 @@ def to_avg(
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_median(a: Union[pd.Series, None]) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -186,6 +188,9 @@ def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
 
 def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
+        # Define std as 0.0 if there is only one element
+        if len(a) <= 1:
+            return 0.0
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
@@ -193,20 +198,23 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, pd.Series, None]:
+) -> Union[int, float, pd.Series]:
     if a is None:
-        return None
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
+        return np.nan
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype(int)
+        # "Int64" handles null values
+        return a.astype("Int64")
     elif isinstance(a, str):
         return int(a)
     else:
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_sum(a: Union[pd.Series, None]) -> float:
     if a is None:
         return np.nan
     elif np.isnan(a).all():
@@ -226,9 +234,9 @@ def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
         return round(a, b)
 
 
-def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
@@ -346,7 +354,26 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if eval_result is None or np.isnan(eval_result).any():
+            # Only return "N/A" for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for
+            # downstream operations
+            # Note: None and pd.NA are not detected as scalar by np.isscalar()
+            if (
+                eval_result is None
+                or eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            ):
+                # Do not give warning if None is explicitly specified in expression
+                if "None" not in expr:
+                    console_warning(
+                        f"Could not evaluate expression '{expr}' - likely "
+                        "due to missing counter data."
+                    )
+                else:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - likely "
+                        "explicitly specified."
+                    )
                 return "N/A"
             else:
                 return eval_result
@@ -360,18 +387,18 @@ class MetricEvaluator:
                 return "N/A"
 
         except AttributeError as attribute_error:
-            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(
-                    f"Failed to evaluate expression '{expr}': {attribute_error}."
-                )
-                return "N/A"
-            else:
-                console_error("analysis", str(attribute_error))
-                return "N/A"
+            console_warning(
+                f"Failed to evaluate expression '{expr}': {attribute_error}."
+            )
+            return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Missing data: {exception}. Using empty value.")
-            return ""
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
+
+        except ValueError as value_error:
+            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -553,7 +580,8 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
         return visited, counters
     try:
         tree = ast.parse(
-            formula.replace("$normUnit", "SQ_WAVES")
+            formula
+            .replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
@@ -929,9 +957,12 @@ def calc_builtin_vars(
             # Pass sys_vars so that $num_xcd and other system variables are available
             temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
@@ -946,9 +977,12 @@ def calc_builtin_vars(
             combined_vars = {**sys_vars, **builtin_vars_collection}
             temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
 
@@ -1013,6 +1047,93 @@ def eval_metric(
     for df_id, row_id, col, expr in exprs_to_eval:
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
+    # Check for metrics exceeding theoretical peak due to dual-issue
+    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
+
+
+def validate_dual_issue_metrics(
+    dfs: dict,
+    dfs_type: dict,
+    sys_info: pd.Series,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+) -> None:
+    """
+    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
+    Warns about dual-issue behavior.
+    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
+    """
+    gpu_arch = sys_info.get("gpu_arch", "")
+
+    # Metrics to check for dual-issue warnings
+    valu_utilization_metrics = ["VALU Utilization"]
+    valu_flops_metrics = ["VALU FLOPs (F64)"]
+
+    for df_id, df in dfs.items():
+        if dfs_type[df_id] != "metric_table":
+            continue
+        if "Metric" not in df.columns or "Value" not in df.columns:
+            continue
+
+        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
+        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
+
+        if not has_peak_column:
+            continue
+
+        for _, row in df.iterrows():
+            metric_name = row.get("Metric", "")
+
+            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
+                continue
+
+            try:
+                value = float(row.get("Value", 0))
+                peak = float(row.get(peak_col, 0))
+
+                if peak > 0 and value > peak:
+                    (value / peak) * 100
+                    dual_issue_confirmed = False
+                    if gpu_arch == "gfx950":
+                        if isinstance(raw_pmc_df, dict) and "pmc_perf" in raw_pmc_df:
+                            pmc_df = raw_pmc_df["pmc_perf"]
+                            if "SQ_ACTIVE_INST_VALU2" in pmc_df.columns:
+                                valu2_sum = pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
+                                if valu2_sum > 0:
+                                    dual_issue_confirmed = True
+
+                    # Determine warning message based on metric type
+                    faq_url = (
+                        "https://rocm.docs.amd.com/projects/"
+                        "rocprofiler-compute/en/latest/reference/"
+                        "faq.html#why-does-valu-utilization-exceed-"
+                        "the-theoretical-peak"
+                    )
+
+                    if metric_name in valu_utilization_metrics:
+                        warning_msg = (
+                            "VALU Utilization can go up to 200% "
+                            "because CU can dual-issue instructions. "
+                            f"See {faq_url} for more information."
+                        )
+                    else:  # VALU FLOPs metrics
+                        warning_msg = (
+                            "VALU FLOPs can exceed the peak value "
+                            "because these instructions can be "
+                            "dual-issued in specific circumstances. "
+                            f"See {faq_url} for more information."
+                        )
+
+                    if gpu_arch == "gfx950" and dual_issue_confirmed:
+                        warning_msg += (
+                            " (Dual-issue activity detected "
+                            "via SQ_ACTIVE_INST_VALU2 counter)"
+                        )
+
+                    console_warning(warning_msg)
+
+            except (ValueError, TypeError):
+                # Skip if the value or peak cannot be converted to a float
+                continue
 
 
 def debug_evaluate_metrics(
@@ -1486,9 +1607,9 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     df["instruction"] = (
         df["inst_index"].apply(
-            lambda x: pc_sample_instructions[x]
-            if x < len(pc_sample_instructions)
-            else None
+            lambda x: (
+                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
+            )
         )
         if pc_sample_instructions
         else None
@@ -1498,9 +1619,11 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
     df["source_line"] = (
         df["inst_index"].apply(
-            lambda x: f".../{Path(pc_sample_comments[x]).name}"
-            if x < len(pc_sample_comments)
-            else None
+            lambda x: (
+                f".../{Path(pc_sample_comments[x]).name}"
+                if x < len(pc_sample_comments)
+                else None
+            )
         )
         if pc_sample_comments
         else None
@@ -1566,9 +1689,7 @@ def load_pc_sampling_data(
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
     if not csv_kernel_trace_file_path.exists():
-        console_error(
-            f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False
-        )
+        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
         return pd.DataFrame()
 
     if stochastic_path.exists():
@@ -1601,7 +1722,8 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df.groupby("Instruction_Comment")
+            merged_df
+            .groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
@@ -1635,7 +1757,7 @@ def load_pc_sampling_data(
 
     elif len(workload.filter_kernel_ids) == 1:
         if not json_file_path.exists():
-            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
+            console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
             # NB:

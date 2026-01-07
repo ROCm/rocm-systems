@@ -141,6 +141,59 @@ struct AMDGpuMetricsBase_t {
 };
 using AMDGpuMetricsBaseRef = AMDGpuMetricsBase_t&;
 
+struct AMDGpuMetrics_v10_t {
+    ~AMDGpuMetrics_v10_t() = default;
+
+    struct AMDGpuMetricsHeader_v1_t m_common_header;
+
+    // Driver attached timestamp (in ns)
+    uint64_t m_system_clock_counter;
+
+    // Temperature
+    uint16_t m_temperature_edge;
+    uint16_t m_temperature_hotspot;
+    uint16_t m_temperature_mem;
+    uint16_t m_temperature_vrgfx;
+    uint16_t m_temperature_vrsoc;
+    uint16_t m_temperature_vrmem;
+
+    // Utilization
+    uint16_t m_average_gfx_activity;
+    uint16_t m_average_umc_activity;    // memory controller
+    uint16_t m_average_mm_activity;     // UVD or VCN
+
+    // Power/Energy
+    uint16_t m_average_socket_power;
+    uint32_t m_energy_accumulator;
+
+    // Average clocks
+    uint16_t m_average_gfxclk_frequency;
+    uint16_t m_average_socclk_frequency;
+    uint16_t m_average_uclk_frequency;
+    uint16_t m_average_vclk0_frequency;
+    uint16_t m_average_dclk0_frequency;
+    uint16_t m_average_vclk1_frequency;
+    uint16_t m_average_dclk1_frequency;
+
+    // Current clocks
+    uint16_t m_current_gfxclk;
+    uint16_t m_current_socclk;
+    uint16_t m_current_uclk;
+    uint16_t m_current_vclk0;
+    uint16_t m_current_dclk0;
+    uint16_t m_current_vclk1;
+    uint16_t m_current_dclk1;
+
+    // Throttle status
+    uint32_t m_throttle_status;
+
+    // Fans
+    uint16_t m_current_fan_speed;
+
+    // Link width/speed
+    uint8_t m_pcie_link_width;
+    uint8_t m_pcie_link_speed;      // in 0.1 GT/s
+};
 
 struct AMDGpuMetrics_v11_t {
   ~AMDGpuMetrics_v11_t() = default;
@@ -1115,6 +1168,35 @@ class GpuMetricsBase_t {
 };
 using GpuMetricsBasePtr = std::shared_ptr<GpuMetricsBase_t>;
 using AMDGpuMetricFactories_t = const std::map<AMDGpuMetricVersionFlags_t, GpuMetricsBasePtr>;
+
+class GpuMetricsBase_v10_t final : public GpuMetricsBase_t {
+    public:
+       virtual ~GpuMetricsBase_v10_t() = default;
+
+       size_t sizeof_metric_table() override {
+         return sizeof(AMDGpuMetrics_v10_t);
+       }
+
+       GpuMetricTypePtr_t get_metrics_table() override {
+         if (!m_gpu_metric_ptr) {
+           m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v10_t*){});
+         }
+         assert(m_gpu_metric_ptr != nullptr);
+         return m_gpu_metric_ptr;
+       }
+
+       AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override {
+         return AMDGpuMetricVersionFlags_t::kGpuMetricV10;
+       }
+
+       rsmi_status_t populate_metrics_dynamic_tbl() override;
+       AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
+
+
+    private:
+       AMDGpuMetrics_v10_t m_gpu_metrics_tbl;
+       std::shared_ptr<AMDGpuMetrics_v10_t> m_gpu_metric_ptr;
+};
 
 class GpuMetricsBase_v11_t final : public GpuMetricsBase_t {
  public:

@@ -171,6 +171,7 @@ typedef enum {
   RDC_FI_NUM_OF_COMPUTE_UNITS,     //!< Number of compute units
   RDC_FI_UUID,                     //!< Device UUID
   RDC_FI_GPU_PARTITION_COUNT,
+  RDC_FI_KFD_ID,
 
   /**
    * @brief Frequency related fields
@@ -344,7 +345,6 @@ typedef enum {
   RDC_FI_PROF_CPF_CPF_TCIU_IDLE,
   RDC_FI_PROF_CPF_CPF_TCIU_STALL,
   RDC_FI_PROF_SIMD_UTILIZATION,
-  RDC_FI_PROF_KFD_ID,
 
   /**
    * @brief Raw XGMI counter events
@@ -1537,6 +1537,8 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
   int64_t value;                     //!< The current value that meet the condition
+  uint32_t gpu_index;                //!< GPU index that hit the condition
+  bool  reset_triggered;             //!< if reset was attempted
 } rdc_policy_callback_response_t;
 
 /**
