@@ -94,6 +94,7 @@ class CounterSampler {
   std::map<uint64_t, uint64_t> counter_sizes_;
   std::map<std::vector<std::string>, ProfileSet> cached_profile_sets_;
   mutable std::map<uint64_t, std::string> id_to_name_;  // Per-instance counter ID to name map
+  mutable std::mutex id_to_name_mutex_;  // Protects id_to_name_
 
   mutable std::once_flag roc_counters_init_flag {};
   mutable std::map<uint64_t, std::string> roc_counters {};
