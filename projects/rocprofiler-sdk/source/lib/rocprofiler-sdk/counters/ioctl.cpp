@@ -135,7 +135,7 @@ counter_collection_ptl_disable(const rocprofiler_agent_t* agent)
     if(ret != 0)
     {
         auto err = errno;
-        ROCP_WARNING << fmt::format(
+        ROCP_INFO << fmt::format(
             "Failed to disable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
             strerror(err));
@@ -158,7 +158,7 @@ counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
     if(ret != 0)
     {
         auto err = errno;
-        ROCP_WARNING << fmt::format(
+        ROCP_INFO << fmt::format(
             "Failed to enable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
             strerror(err));
