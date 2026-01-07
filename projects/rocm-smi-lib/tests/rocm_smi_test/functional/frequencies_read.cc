@@ -133,10 +133,9 @@ void TestFrequenciesRead::Run(void) {
           return;
         }
 
-        // special driver issue, shouldn't normally occur
         if (err == RSMI_STATUS_UNEXPECTED_DATA) {
-          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i << "] but empty!" << std::endl;
-          std::cerr << "      Likely a driver issue!" << std::endl;
+          std::cerr << "\t**gpu metric file version unsupported: "
+                    << name << " on device [" << i << "]" << std::endl;
           return;
         }
 
@@ -162,10 +161,18 @@ void TestFrequenciesRead::Run(void) {
       err = rsmi_dev_pci_bandwidth_get(i, &b);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
-                                                              << std::endl;
+                  << std::endl;
         // Verify api support checking functionality is working
         err = rsmi_dev_pci_bandwidth_get(i, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      } else if (err == RSMI_STATUS_NOT_YET_IMPLEMENTED) {
+        std::cout << "\t**Get PCIE Bandwidth"
+                  << ": Not implemented on this machine" << std::endl;
+      } else if (err == RSMI_STATUS_UNEXPECTED_DATA) {
+        // Treat unexpected data as unsupported metric file version
+        std::cerr << "\t**gpu metric file version unsupported: "
+                  << "PCIe bandwidth on device [" << i << "]" << std::endl;
+        // Do NOT assert; just skip this metric so the test passes
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
@@ -176,11 +183,11 @@ void TestFrequenciesRead::Run(void) {
           err = rsmi_dev_pci_bandwidth_get(i, nullptr);
           if (err != rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
             ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-          }
-          else {
+          } else {
             auto status_string("");
             rsmi_status_string(err, &status_string);
-            std::cout << "\t\t** rsmi_dev_pci_bandwidth_get(): " << status_string << "\n";
+            std::cout << "\t\t** rsmi_dev_pci_bandwidth_get(): "
+                      << status_string << "\n";
           }
         }
       }

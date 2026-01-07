@@ -220,7 +220,7 @@ void HostQueue::finish(bool cpu_wait) {
       // Under Windows runtime can't destroy objects in the callback thread.
       // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
       // then keep the lastEnqueueCommand_ for the interrupt handling.
-      if (IS_LINUX || cpu_wait) {
+      if (IS_LINUX || cpu_wait || GPU_ENABLE_PAL != 0) {
         lastEnqueueCommand_->release();
         lastEnqueueCommand_ = nullptr;
       }

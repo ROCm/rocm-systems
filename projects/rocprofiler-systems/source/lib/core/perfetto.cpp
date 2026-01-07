@@ -243,6 +243,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 #endif
 
     auto _filename = config::get_perfetto_output_filename();
+
     if(!trace_data.empty())
     {
         operation::file_output_message<tim::project::rocprofsys> _fom{};
