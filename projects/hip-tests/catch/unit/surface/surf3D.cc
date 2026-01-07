@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <hip_array_common.hh>
 #include <hip_test_common.hh>
 #include <hip_texture_helper.hh>
+#include "surf_common.h"
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -326,16 +327,17 @@ template <typename T> static void runTestRW(const int width, const int height, c
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf3Dread_Positive_Basic", "", char, uchar, short, ushort, int, uint,
-                   float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_surf3Dread_Positive_Basic", "", char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   const int depth = GENERATE(4, 11);
-  runTestR<TestType>(width, height, depth);
+  runTestR<vector_type_helper_t<TestType, 0>>(width, height, depth);
+  runTestR<vector_type_helper_t<TestType, 1>>(width, height, depth);
+  runTestR<vector_type_helper_t<TestType, 2>>(width, height, depth);
+  runTestR<vector_type_helper_t<TestType, 4>>(width, height, depth);
 }
 
 /**
@@ -349,16 +351,17 @@ TEMPLATE_TEST_CASE("Unit_surf3Dread_Positive_Basic", "", char, uchar, short, ush
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf3Dwrite_Positive_Basic", "", char, uchar, short, ushort, int, uint,
-                   float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_surf3Dwrite_Positive_Basic", "", char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   const int depth = GENERATE(4, 11);
-  runTestR<TestType>(width, height, depth);
+  runTestW<vector_type_helper_t<TestType, 0>>(width, height, depth);
+  runTestW<vector_type_helper_t<TestType, 1>>(width, height, depth);
+  runTestW<vector_type_helper_t<TestType, 2>>(width, height, depth);
+  runTestW<vector_type_helper_t<TestType, 4>>(width, height, depth);
 }
 
 /**
@@ -372,16 +375,17 @@ TEMPLATE_TEST_CASE("Unit_surf3Dwrite_Positive_Basic", "", char, uchar, short, us
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf3D_Positive_ReadWrite", "", char, uchar, short, ushort, int, uint,
-                   float, char1, uchar1, short1, ushort1, int1, uint1, float1, char2, uchar2,
-                   short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
-                   uint4, float4) {
+TEMPLATE_TEST_CASE("Unit_surf3D_Positive_ReadWrite", "", char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   const int depth = GENERATE(4, 11);
-  runTestR<TestType>(width, height, depth);
+  runTestRW<vector_type_helper_t<TestType, 0>>(width, height, depth);
+  runTestRW<vector_type_helper_t<TestType, 1>>(width, height, depth);
+  runTestRW<vector_type_helper_t<TestType, 2>>(width, height, depth);
+  runTestRW<vector_type_helper_t<TestType, 4>>(width, height, depth);
 }
 
 /**
