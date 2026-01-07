@@ -102,8 +102,11 @@ counter_collection_device_unlock(const rocprofiler_agent_t* agent)
     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
+        auto err = errno;
         ROCP_WARNING << fmt::format(
-            "Failed to unlock device {} (error: {}). Continuing anyway.", agent->id.handle, ret);
+            "Failed to unlock device {} (error: {}). Continuing anyway.",
+            agent->id.handle,
+            strerror(err));
         return ROCPROFILER_STATUS_ERROR;
     }
 
@@ -131,10 +134,11 @@ counter_collection_ptl_disable(const rocprofiler_agent_t* agent)
     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
+        auto err = errno;
         ROCP_WARNING << fmt::format(
             "Failed to disable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
-            ret);
+            strerror(err));
         return ROCPROFILER_STATUS_ERROR;
     }
 
@@ -153,10 +157,11 @@ counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
     if(ret != 0)
     {
+        auto err = errno;
         ROCP_WARNING << fmt::format(
             "Failed to enable PTL on device {} (error: {}). Continuing anyway.",
             agent->id.handle,
-            ret);
+            strerror(err));
         return ROCPROFILER_STATUS_ERROR;
     }
 
