@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from .predicates import (
     AllOf,
     AlwaysTrue,
+    AnyOf,
     Compare,
     Dominates,
     Predicate,
@@ -70,13 +71,13 @@ METRICS_VL1D_HIT_LOW = ("16.3.5",)
 METRICS_NON_TEMPORAL_SET = ()
 
 METRICS_HIGH_TC_TA_BP = (
+    "15.1.1",
     "15.1.2",
-    "15.1.3",
 )
 
 METRICS_HIGH_TA_VMEM_BP = (
-    "11.2.4",
-    "11.2.9",
+    "11.2.6",
+    "11.2.11",
 )
 
 METRICS_HIGH_VL1D_SET_FULL_STALL = (
@@ -151,6 +152,25 @@ RULES: list[Rule] = [
     Rule(
         node_id=NODE_HIGH_TC_TA_BP,
         metric_ids=METRICS_HIGH_TC_TA_BP,
-        predicate=AlwaysTrue("Testing"),
+        predicate=AllOf([
+            Dominates("15.1.1", ["11.2.6"]),
+        ]),
+    ),
+    Rule(
+        node_id=NODE_HIGH_VL1D_SET_FULL_STALL,
+        metric_ids=METRICS_HIGH_VL1D_SET_FULL_STALL,
+        predicate=AllOf([
+            Dominates("15.1.1", ["11.2.6"]),
+        ]),
+    ),
+    Rule(
+        node_id=NODE_TAGRAM_HOTSPOTTING,
+        metric_ids=METRICS_TAGRAM_HOTSPOTTING,
+        predicate=AnyOf([
+            Dominates("16.3.10", ["16.3.11, 16.3.12, 16.3.13"]),
+            Dominates("16.3.11", ["16.3.10, 16.3.12, 16.3.13"]),
+            Dominates("16.3.12", ["16.3.10, 16.3.11, 16.3.13"]),
+            Dominates("16.3.13", ["16.3.10, 16.3.11, 16.3.12"]),
+        ]),
     ),
 ]

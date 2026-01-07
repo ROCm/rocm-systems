@@ -98,7 +98,7 @@ class MemBwTreePanel(Static):
         self._kernel_data: Optional[dict[str, Any]] = None
 
         self._engine = DecisionEngine()
-        self._last_decision = Optional[DecisionResult]  # DecisionResult
+        self._last_decision: Optional[DecisionResult] = None  # DecisionResult
         self._details: Optional[Static] = None
 
     def compose(self) -> ComposeResult:
@@ -146,7 +146,7 @@ class MemBwTreePanel(Static):
     # Decision -> UI mapping
     # ------------------------------------------------------------------
     def _apply_decision_to_tree(
-        self, root: TreeNode, decision: Optional[DecisionResult]
+        self, root: TreeNode, decision: Optional[DecisionResult] = None
     ) -> None:
         active_ids = set(decision.active_path or [])
 
