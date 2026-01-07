@@ -101,7 +101,9 @@ class db_analysis(OmniAnalyze_Base):
         Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 
+        # Iterate over all workloads
         for workload_path in self._runs.keys():
+            # Add workload
             workload_obj = orm.Workload(
                 name=workload_path.split("/")[-2],
                 sub_name=workload_path.split("/")[-1],
@@ -113,37 +115,7 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(workload_obj)
 
-            for pc_sample in self._pc_sampling_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                Database.get_session().add(
-                    orm.PCsampling(
-                        source=pc_sample.source_line,
-                        instruction=pc_sample.instruction,
-                        count=pc_sample.count,
-                        kernel_name=pc_sample.kernel_name,
-                        offset=pc_sample.offset,
-                        count_issue=pc_sample.count_issued,
-                        count_stall=pc_sample.count_stalled,
-                        stall_reason=pc_sample.stall_reason,
-                        workload=workload_obj,
-                    )
-                )
-
-            for roofline_data in self._roofline_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                Database.get_session().add(
-                    orm.RooflineData(
-                        kernel_name=roofline_data.kernel_name,
-                        total_flops=roofline_data.total_flops,
-                        l1_cache_data=roofline_data.l1_cache_data,
-                        l2_cache_data=roofline_data.l2_cache_data,
-                        hbm_cache_data=roofline_data.hbm_cache_data,
-                        workload=workload_obj,
-                    )
-                )
-
+            # Add kernel
             kernel_objs: dict[str, orm.Kernel] = {}
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -167,6 +139,43 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
+            # Add roofline data points
+            for roofline_data in self._roofline_data_per_workload.get(
+                workload_path, pd.DataFrame()
+            ).itertuples():
+                Database.get_session().add(
+                    orm.RooflineData(
+                        total_flops=roofline_data.total_flops,
+                        l1_cache_data=roofline_data.l1_cache_data,
+                        l2_cache_data=roofline_data.l2_cache_data,
+                        hbm_cache_data=roofline_data.hbm_cache_data,
+                        kernel=kernel_objs[roofline_data.kernel_name],
+                    )
+                )
+
+            # Add pc sampling data
+            for pc_sample in self._pc_sampling_data_per_workload.get(
+                workload_path, pd.DataFrame()
+            ).itertuples():
+                if pc_sample.kernel_name not in kernel_objs:
+                    console_warning(
+                        f"Kernel {pc_sample.kernel_name} from PC sampling data "
+                        "not found in dispatch data. Skipping PC sampling entry."
+                    )
+                    continue
+                Database.get_session().add(
+                    orm.PCsampling(
+                        source=pc_sample.source_line,
+                        instruction=pc_sample.instruction,
+                        count=pc_sample.count,
+                        offset=pc_sample.offset,
+                        count_issue=pc_sample.count_issued,
+                        count_stall=pc_sample.count_stalled,
+                        stall_reason=pc_sample.stall_reason,
+                        kernel=kernel_objs[pc_sample.kernel_name],
+                    )
+                )
+
             # Optimize: Pre-group values by (metric_id, kernel_name) for O(1) lookups
             values_df = self._values_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -179,6 +188,7 @@ class db_analysis(OmniAnalyze_Base):
                         values_grouped[key] = []
                     values_grouped[key].append(value)
 
+            # Add metrics and values
             for metric in self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -205,6 +215,7 @@ class db_analysis(OmniAnalyze_Base):
                             )
                         )
 
+            # Add metadata
             version = get_version(rocprof_compute_home)
             Database.get_session().add(
                 orm.Metadata(
