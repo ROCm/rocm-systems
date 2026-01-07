@@ -569,12 +569,16 @@ class Runtime {
   struct AsyncEventsInfo;
   struct AsyncEventsControl {
     AsyncEventsControl(AsyncEventsInfo *asyncInfo);
+    void Start();
     void Shutdown();
 
     hsa_signal_t wake;
-    os::Thread thread_;
     bool exit;
-  };
+
+    private:
+    AsyncEventsInfo* info_;
+    os::Thread thread_;
+ };
 
   struct AsyncEvents {
     void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
