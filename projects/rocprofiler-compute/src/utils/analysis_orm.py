@@ -45,7 +45,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 
 
 Base = declarative_base()
@@ -63,10 +63,6 @@ class Workload(Base):
 
     # Workload can have multiple kernels
     kernels = relationship("Kernel", back_populates="workload")
-    # Workload can have multiple roofline data points
-    roofline_data_points = relationship("RooflineData", back_populates="workload")
-    # Workload can have multiple pc_sampling values
-    pc_sampling_values = relationship("PCsampling", back_populates="workload")
 
 
 class Metric(Base):
@@ -93,17 +89,16 @@ class RooflineData(Base):
     __tablename__ = f"{PREFIX}roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
-    kernel_name = Column(String)
     total_flops = Column(Float)
     l1_cache_data = Column(Float)
     l2_cache_data = Column(Float)
     hbm_cache_data = Column(Float)
 
-    # Roofline data point can have one workload
-    workload = relationship("Workload", back_populates="roofline_data_points")
+    # Roofline data point can have one kernel
+    kernel = relationship("Kernel", back_populates="roofline_data_points")
 
 
 class Dispatch(Base):
@@ -137,26 +132,29 @@ class Kernel(Base):
     dispatches = relationship("Dispatch", back_populates="kernel")
     # Kernel can have multiple metrics
     metrics = relationship("Metric", back_populates="kernel")
+    # Kernel can have multiple roofline data points
+    roofline_data_points = relationship("RooflineData", back_populates="kernel")
+    # Kernel can have multiple pc_sampling values
+    pc_sampling_values = relationship("PCsampling", back_populates="kernel")
 
 
 class PCsampling(Base):
     __tablename__ = f"{PREFIX}pcsampling"
 
     pc_sampling_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
     )
     source = Column(String)
     instruction = Column(String)
     count = Column(Integer)
-    kernel_name = Column(String)
     offset = Column(Integer)
     count_issue = Column(Integer)
     count_stall = Column(Integer)
     stall_reason = Column(JSON)
 
-    # PCsampling can have one workload
-    workload = relationship("Workload", back_populates="pc_sampling_values")
+    # PCsampling can have one kernel
+    kernel = relationship("Kernel", back_populates="pc_sampling_values")
 
 
 class Value(Base):
