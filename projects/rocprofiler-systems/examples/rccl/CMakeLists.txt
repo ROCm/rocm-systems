@@ -125,6 +125,7 @@ if(hip_FOUND AND rccl_FOUND)
 
         # Create a target for this specific executable that gets built with ALL
         add_custom_target(copy-${_EXE_NAME} ALL DEPENDS ${_EXE_DEST_PATH})
+        add_dependencies(copy-${_EXE_NAME} build-rccl-tests)
 
         # Create imported executable target
         add_executable(rccl-tests::${_EXE_NAME} IMPORTED GLOBAL)
