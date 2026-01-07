@@ -39,7 +39,6 @@ try:
 except ImportError:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
 
-# add watch args
 
 class TestAmdSmiCli(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -47,11 +46,11 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common = common.Common(verbose)
         self.util = runcmd.Util('WARNING')
         self.Debug = False
-        self.PrintCmdsOnly = True
+        self.PrintCmdsOnly = False
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
-        self.AddWatchArgs = False
+        self.AddWatchArgs = True
         self.AddLogLevel = '--loglevel DEBUG'
         self.AddLogLevel = ''
 
@@ -62,6 +61,9 @@ class TestAmdSmiCli(unittest.TestCase):
         cmd = 'amd-smi static --json'
         (rc, data, std_err) = self.util.RunCmdSync(cmd)
         self.static_data = json.loads(data)
+        cmd = 'amd-smi list --json'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.list_data = json.loads(data)
 
         global has_info_printed
         if verbose and has_info_printed is False:
@@ -84,14 +86,20 @@ class TestAmdSmiCli(unittest.TestCase):
         self.FAIL = 1
         self.tab = '    '
         self.tmp_filename = '_tmp.log'
-        self.tmp_folder = 'tmp'
+        self.tmp_folder = '_tmp'
 
         self.openBracket = '['
         self.closeBracket = ']'
         self.openCurlyBracket = '{'
         self.closeCurlyBracket = '}'
 
-        # TODO: For gpu: Add BDF and UUID value
+        self.gpus = ['all']
+        for data in self.list_data:
+            self.gpus.append(data['gpu'])
+            if data['gpu'] == 0:
+                # Only test bdf and uuid when gpu=0
+                self.gpus.append(data['bdf'])
+                self.gpus.append(data['uuid'])
 
         # When parsing, expand each arg with array element
         self.sub_args = \
@@ -99,8 +107,8 @@ class TestAmdSmiCli(unittest.TestCase):
             'CLOCK': ['SYS','DF','DCEF','SOC','MEM','VCLK0','VCLK1','DCLK0','DCLK1','ALL'],
             'PID': [123],
             'NAME': ['AMD'],
-            'GPU': ['all'] + [i for i in range(len(self.common.processors))],
-            'FILE': [self.tmp_filename],
+            'GPU': self.gpus,
+            'FILE': [self.tmp_filename, f'{self.tmp_filename} --overwrite', f'{self.tmp_filename} --append'],
             'SEVERITY': ['nonfatal-uncorrected', 'fatal', 'nonfatal-corrected', 'all'],
             'FOLDER': [self.tmp_folder],
             'FILE_LIMIT': [10],
@@ -122,6 +130,8 @@ class TestAmdSmiCli(unittest.TestCase):
             '--loglevel',
             '--json',
             '--csv',
+            '--append',
+            '--overwrite',
             '--ucode-list',
             '--watch',
             '--watch_time',
@@ -144,10 +154,12 @@ class TestAmdSmiCli(unittest.TestCase):
            (not self.AddWatchArgs and 'Watch' in match_str) or \
            (not self.AddCmdMods and 'Command' in match_str):
             return ['pass']
+
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        lines = std_out.split('\n')
+
         found = False
         options = []
-        lines = std_out.split('\n')
         for index, line in enumerate(lines):
             if found:
                 if not line:
@@ -180,17 +192,27 @@ class TestAmdSmiCli(unittest.TestCase):
                         if '--ucode-list' == items[item_index]:
                             options.append(f'{items[item_index]}')
                             options.append('--fw-list')
-                        elif '--json' == items[item_index] or '--csv' == items[item_index]:
-                            options.append(f'{items[item_index]}')
-                            options.append(f'{items[item_index]} --file {self.tmp_filename}')
-                        elif '--watch_time' == items[item_index] or '--iterations' == items[item_index]:
-                            options.append(f'--watch 1 {items[item_index]} 2')
-                        elif '--loglevel' == items[item_index]:
+                        elif '--json' == items[item_index]:
+                            options.append(f'{{json}}')
+                            options.append(f'{{json_file}}')
+                            options.append(f'{{json_file_append}}')
+                            options.append(f'{{json_file_overwrite}}')
+                        elif '--csv' == items[item_index]:
+                            options.append(f'{{csv}}')
+                            options.append(f'{{csv_file}}')
+                            options.append(f'{{csv_file_append}}')
+                            options.append(f'{{csv_file_overwrite}}')
+                        elif '--append' == items[item_index] or '--overwrite' == items[item_index]:
                             pass
                         elif '--watch' == items[item_index]:
+                            options.append(f'{{watch_time}}')
+                            options.append(f'{{watch_iterations}}')
+                        elif '--watch_time' == items[item_index] or '--iterations' == items[item_index]:
+                            pass
+                        elif '--loglevel' == items[item_index]:
                             pass
                         else:
-                            print('ERROR: bad sub arg {items[item_index]}')
+                            print(f'ERROR: bad sub arg {items[item_index]}')
                     elif len(items) > item_index:
                         if items[item_index+1][0:1] == self.openBracket:
                             items[item_index+1] = items[item_index+1][1:]
@@ -310,29 +332,74 @@ class TestAmdSmiCli(unittest.TestCase):
         # Calculate and substitute in dependent values
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            if self.openCurlyBracket in cmd:
+            while self.openCurlyBracket in cmd:
                 items = cmd.split()
-                # Find gpu index
+                # Find gpu index and mark when gpu=0
+                gpu_0 = False
                 try:
                     i = items.index('--gpu')
-                    gpu_index = items[i+1]
-                    if gpu_index == 'all':
+                    gpu = items[i+1]
+                    if gpu.isdigit():
+                        gpu_index = int(gpu)
+                        if gpu_index == 0:
+                            gpu_0 = True
+                    else:
                         gpu_index = 0
-                    gpu_index = int(gpu_index)
                 except ValueError:
                     gpu_index = 0
 
-
+                # Find conditional arguments
                 posOpen = cmd.find(self.openCurlyBracket)
                 if posOpen < 0:
-                    continue
+                    break
                 posClose = cmd.find(self.closeCurlyBracket, posOpen)
                 if posClose < 0:
-                    continue
+                    break
                 nameStr = cmd[posOpen:posClose+1]
 
-                # For setting --power-cap
-                if nameStr == '{min_power}' or nameStr == '{avg_power}' or nameStr == '{max_power}':
+                if nameStr == '{json}' or nameStr == '{json_file}' or nameStr == '{json_file_append}' or nameStr == '{json_file_overwrite}' or \
+                   nameStr == '{csv}' or nameStr == '{csv_file}' or nameStr == '{csv_file_append}' or nameStr == '{csv_file_overwrite}':
+                    # For adding file options
+                    if not gpu_0:
+                        # Remove all non-zero gpu
+                        cmd = ''
+                    else:
+                        # Only add gpu=0
+                        if nameStr == '{json}':
+                            cmd = cmd.replace(nameStr, '--json', 1)
+                        elif nameStr == '{json_file}':
+                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename}', 1)
+                        elif nameStr == '{json_file_append}':
+                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --append', 1)
+                        elif nameStr == '{json_file_overwrite}':
+                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --overwrite', 1)
+                        elif nameStr == '{csv}':
+                            cmd = cmd.replace(nameStr, '--csv', 1)
+                        elif nameStr == '{csv_file}':
+                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename}', 1)
+                        elif nameStr == '{csv_file_append}':
+                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --append', 1)
+                        elif nameStr == '{csv_file_overwrite}':
+                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --overwrite', 1)
+                        else:
+                            print(f'Error: could not replace json/csv options, {nameStr}  cmd={cmd}')
+                            cmd = ''
+                if nameStr == '{watch_time}' or nameStr == '{watch_iterations}':
+                    # For adding watch options
+                    if not gpu_0:
+                        # Remove all non-zero gpu watches
+                        cmd = ''
+                    elif 'append' in cmd or 'overwrite' in cmd:
+                        # Remove watch with file append/overwrite combo
+                        cmd = ''
+                    else:
+                        # Only add gpu=0 watches
+                        if nameStr == '{watch_time}':
+                            cmd = cmd.replace(nameStr, '--watch 1 --watch_time 2', 1)
+                        else:
+                            cmd = cmd.replace(nameStr, '--watch 1 --iterations 2', 1)
+                elif nameStr == '{min_power}' or nameStr == '{avg_power}' or nameStr == '{max_power}':
+                    # For setting --power-cap
                     # Find power_type
                     for power_type in self.power_types:
                         if power_type in cmd:
@@ -340,7 +407,7 @@ class TestAmdSmiCli(unittest.TestCase):
                         else:
                             power_type = 'N/A'
                     if power_type == 'N/A' or power_type['min_power_limit'] == 'N/A' or power_type['max_power_limit'] == 'N/A':
-                        cmds[index] = ('', '')
+                        cmd = ''
                     else:
                         min_power = power_type['min_power_limit']['value']
                         max_power = power_type['max_power_limit']['value']
@@ -351,10 +418,10 @@ class TestAmdSmiCli(unittest.TestCase):
                             cmd = cmd.replace('{avg_power}', str(avg_power), 1)
                         elif nameStr == '{max_power}':
                             cmd = cmd.replace('{max_power}', str(max_power), 1)
-                        cmds[index] = (cmd, cond)
+            cmds[index] = (cmd, cond)
 
         # Remove empty (cmd,cond) arguments
-        cmds = [cmd_cond for cmd_cond in cmds if cmd_cond != ('', '')]
+        cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != '']
 
         # Remove extra spaces between arguments
         for index, cmd_cond in enumerate(cmds):
@@ -370,6 +437,12 @@ class TestAmdSmiCli(unittest.TestCase):
 
     def RunCmds(self, cmds):
         errors = []
+        msg_len = 0
+        for cmd, cond in cmds:
+            num = len(cmd)
+            if num > msg_len:
+                msg_len = num
+        msg_len += 2
         for cmd, cond in cmds:
             if self.Debug or self.PrintCmdsOnly:
                 print(f'cmd={cmd}')
@@ -393,7 +466,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     if 'CRITICAL' in error_code:
                         error_code = 'Bad loglevel'
 
-            msg=f'{cmd:85s}:'
+            msg=f'{cmd:{msg_len}s}:'
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
                     _msg = f'{msg} Failure: File {self.tmp_filename} does not exist'
@@ -448,7 +521,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     break
                 items = line.split()
                 cmd_args.append(items[0])
-                continue;
+                continue
             if 'Descriptions' in line:
                 found = True
 
@@ -463,6 +536,18 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name('')
         msg = f'{self.tab}### amd-smi'
         self.common.print(msg)
+
+        # Create bad bdf and uuid gpus
+        bdf = self.list_data[0]['bdf']
+        if bdf[-1] == '0':
+            bad_bdf = self.list_data[0]['bdf'][:-1] + '1'
+        else:
+            bad_bdf = self.list_data[0]['bdf'][:-1] + '0'
+        uuid = self.list_data[0]['uuid']
+        if uuid[-1] == '0':
+            bad_uuid = self.list_data[0]['uuid'][:-1] + '1'
+        else:
+            bad_uuid = self.list_data[0]['uuid'][:-1] + '0'
 
         cmds = \
         [
@@ -495,6 +580,12 @@ class TestAmdSmiCli(unittest.TestCase):
             ('amd-smi static --gpu -1', self.FAIL),
             ('amd-smi static --gpu _ALL', self.FAIL),
             (f'amd-smi static --gpu {len(self.common.processors)}', self.FAIL),
+            (f'amd-smi static --gpu {bad_bdf}', self.FAIL),
+            (f'amd-smi static --gpu {self.list_data[0]["bdf"][:-1]}', self.FAIL),
+            (f'amd-smi static --gpu {self.list_data[0]["bdf"] + "0"}', self.FAIL),
+            (f'amd-smi static --gpu {bad_uuid}', self.FAIL),
+            (f'amd-smi static --gpu {self.list_data[0]["uuid"][:-1]}', self.FAIL),
+            (f'amd-smi static --gpu {self.list_data[0]["uuid"] + "0"}', self.FAIL),
             # Test invalid loglevel
             ('amd-smi metric --loglevel BADLEVEL', self.FAIL),
             # Test invalid process PID, NAME
@@ -526,8 +617,6 @@ class TestAmdSmiCli(unittest.TestCase):
             if xgmi_plpd != 'N/A':
                 num_supported = int(xgmi_plpd['num_supported'])
                 cmds.append((f'amd-smi set --xgmi-plpd {num_supported} --gpu {index}', self.FAIL))
-
-        # TODO: For gpu: Add bad BDF value
 
         self.RunCmds(cmds)
         return
@@ -566,6 +655,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print(msg)
 
         cmds = self.CreateCmds('list', 'List Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
+        print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         self.RunCmds(cmds)
         return
 
@@ -621,10 +711,11 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi event'
         self.common.print(msg)
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = f'{self.tab}Needs input'
-            self.common.print(msg)
-            self.skipTest(msg)
+        if not self.PrintCmdsOnly:
+            if self.common.TODO_SKIP_FAIL:
+                msg = f'{self.tab}Needs input'
+                self.common.print(msg)
+                self.skipTest(msg)
 
         cmds = self.CreateCmds('event', 'Event Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
@@ -644,6 +735,21 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi set'
         self.common.print(msg)
 
+        # TODO allow set commands to be executed
+        if not self.PrintCmdsOnly:
+            if self.common.TODO_SKIP_FAIL:
+                msg = f'{self.tab}Needs input'
+                #self.common.print(msg)
+                self.skipTest(msg)
+
+        # Get current settings
+        power_profile = {}
+        for index, gpu in enumerate(self.common.processors):
+            try:
+                power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
+            except amdsmi.AmdSmiLibraryException as e:
+                power_profile[index] = None
+
         cmds = self.CreateCmds('set', 'Set Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
 
@@ -658,23 +764,38 @@ class TestAmdSmiCli(unittest.TestCase):
             if perf_level != 'N/A':
                 perf_level = perf_level.removeprefix('AMDSMI_DEV_PERF_LEVEL_')
                 cmds.append((f'amd-smi set --perf-level {perf_level} --gpu {index}', self.PASS))
-        
-            # TODO:
-            #-P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
-            #                                             CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
-            print(f'TODO: restore amd-smi set --profile PROFILE_LEVEL')
+
+            if power_profile[index]:
+                profile = power_profile[index]['current'].removeprefix('AMDSMI_PWR_PROF_PRST_')
+                cmds.append((f'amd-smi set --profile {profile} --gpu {index}', self.PASS))
 
             # TODO:
+            #python API:
+            #    for the sclk max: amdsmi_get_clk_freq(handle, sclk) -> returns num_supported, current frequency, and list of supported frequency so just need to get the max of that list.
+            #    for the performance mode: amdsmi_get_gpu_perf_level -> returns perf level as string
+            #amd-smi CLI:
+            #    for sclk max: amd-smi static -C sys
+            #    for performance mode: amd-smi metric -l
+            #
             #-d, --perf-determinism SCLKMAX              Enable performance determinism mode and set GFXCLK softmax limit (in MHz)
             print(f'TODO: restore amd-smi set --perf-determinism SCLKMAX')
 
             # TODO:
-            #-C, --compute-partition TYPE/INDEX          Set one of the following accelerator TYPE or profile INDEX:
-            #                                             N, /, A.
-            #                                             Use `sudo amd-smi partition --accelerator` to find acceptable values.
+            #python API:
+            #    amdsmi_get_gpu_compute_partition -> gets current compute partition
+            #amd-smi CLI:
+            #    amd-smi partition --current
+            #
+            #-C, --compute-partition TYPE/INDEX          Set one of the following accelerator TYPE or profile INDEX: N/A.
+            #                                            Use `sudo amd-smi partition --accelerator` to find acceptable values.
             print(f'TODO: restore amd-smi set --compute-partition TYPE/INDEX')
 
             # TODO:
+            #python API:
+            #    amdsmi_get_gpu_memory_partition -> gets current memory partition
+            #amd-smi CLI:
+            #    amd-smi partition –current
+            #
             #-M, --memory-partition PARTITION            Set one of the following the memory partition modes:
             print(f'TODO: restore amd-smi set --memory-partition PARTITION')
         
@@ -686,7 +807,7 @@ class TestAmdSmiCli(unittest.TestCase):
         
             soc_pstate = self.static_data['gpu_data'][index]['soc_pstate']
             if soc_pstate != 'N/A':
-                cmds.append((f'amd-smi set --soc_pstate {soc_pstate} --gpu {index}', self.PASS))
+                cmds.append((f'amd-smi set --soc-pstate {soc_pstate} --gpu {index}', self.PASS))
         
             xgmi_plpd = self.static_data['gpu_data'][index]['xgmi_plpd']
             if xgmi_plpd != 'N/A':
@@ -696,10 +817,10 @@ class TestAmdSmiCli(unittest.TestCase):
             ptl_state = self.static_data['gpu_data'][index]['limit']['ptl_state']
             if ptl_state != 'N/A':
                 if ptl_state == 'Disabled':
-                    ptl_state = 0
+                    ptl_state_value = 0
                 else:
-                    ptl_state = 1
-                cmds.append((f'amd-smi set --ptl-state {ptl_state} --gpu {index}', self.PASS))
+                    ptl_state_value = 1
+                cmds.append((f'amd-smi set --ptl-state {ptl_state_value} --gpu {index}', self.PASS))
 
             ptl_format = self.static_data['gpu_data'][index]['limit']['ptl_format']
             if ptl_format != 'N/A':
@@ -712,10 +833,10 @@ class TestAmdSmiCli(unittest.TestCase):
 
             process_isolation = self.static_data['gpu_data'][index]['process_isolation']
             if process_isolation == 'Disabled':
-                process_isolation = 0
+                process_isolation_value = 0
             else:
-                process_isolation = 1
-            cmds.append((f'amd-smi set --process-isolation {process_isolation} --gpu {index}', self.PASS))
+                process_isolation_value = 1
+            cmds.append((f'amd-smi set --process-isolation {process_isolation_value} --gpu {index}', self.PASS))
 
             print('Restore Starting Values')
             self.RunCmds(cmds)
@@ -727,7 +848,8 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi reset'
         self.common.print(msg)
 
-        if not self.PrintCmdsOnly: # TODO allow reset commands to be executed
+        # TODO allow reset commands to be executed
+        if not self.PrintCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
                 msg = f'{self.tab}Needs Testing, Not Yet Implemented'
                 #self.common.print(msg)
@@ -770,7 +892,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print(msg)
 
         if self.common.TODO_SKIP_FAIL:
-            msg = f'{self.tab}Needs input, Not Yet Implemented'
+            msg = f'{self.tab}Not Yet Implemented'
             #self.common.print(msg)
             self.skipTest(msg)
 
