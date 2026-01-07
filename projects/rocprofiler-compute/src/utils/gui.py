@@ -61,7 +61,7 @@ def multi_bar_chart(
 
 def create_instruction_mix_bar_chart(display_df: pd.DataFrame, df_unit: str) -> px.bar:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0.0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     return px.bar(
         display_df,
@@ -78,7 +78,7 @@ def create_multi_bar_charts(
     display_df: pd.DataFrame, table_id: int, df_unit: str
 ) -> list[px.bar]:
     display_df = display_df.copy()
-    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0.0)
+    display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "N/A" else 0)
 
     nested_bar = multi_bar_chart(table_id, display_df)
     charts = []
