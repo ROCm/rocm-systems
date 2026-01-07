@@ -1788,6 +1788,63 @@ def amdsmi_get_hsmp_metrics_table_version(
 
     return metric_tbl_version.value
 
+def amdsmi_set_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_cpu_rail_isofreq_policy(processor_handle, value)
+    )
+
+def amdsmi_get_cpu_rail_isofreq_policy(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    cpurailiso = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_rail_isofreq_policy(
+            processor_handle, ctypes.byref(cpurailiso)
+        )
+    )
+
+    return cpurailiso.value
+
+def amdsmi_get_dfc_ctrl(
+    processor_handle: processor_handle_t,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    dfc_ctrl = ctypes.c_uint8()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_dfc_ctrl(
+            processor_handle, ctypes.byref(dfc_ctrl)
+        )
+    )
+
+    return dfc_ctrl.value
+
+def amdsmi_set_dfc_ctrl(
+    processor_handle: processor_handle_t,
+    value: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_dfc_ctrl(processor_handle, value)
+    )
 
 # Get 2's complement of 32 bit unsigned integer
 def check_msb_32(num):
