@@ -52,6 +52,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "core/inc/exceptions.h"
 #include "resource.h"
 #include "image_manager_kv.h"
 #include "image_manager_ai.h"
@@ -252,9 +253,6 @@ ImageRuntime* ImageRuntime::instance() {
     }
 
     instance = CreateSingleton();
-    if (instance == NULL) {
-      return NULL;
-    }
 
     // UnloadCallback = &ext_image::ImageRuntime::DestroySingleton;
   }
@@ -268,13 +266,15 @@ ImageRuntime* ImageRuntime::CreateSingleton() {
   if (HSA_STATUS_SUCCESS != instance->blit_kernel_.Initialize()) {
     instance->Cleanup();
     delete instance;
-    return NULL;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, 
+                             "ImageRuntime: Failed to initialize blit kernel");
   }
 
   if (HSA_STATUS_SUCCESS != HSA::hsa_iterate_agents(CreateImageManager, instance)) {
     instance->Cleanup();
     delete instance;
-    return NULL;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "ImageRuntime: Failed to create image managers");
   }
 
   assert(instance->kernarg_pool_.handle != 0);
