@@ -93,6 +93,7 @@ const std::string& CounterSampler::decode_record_name(
   rocprofiler_counter_id_t counter_id = {.handle = 0};
   rocprofiler_query_record_counter_id(rec.id, &counter_id);
 
+  std::lock_guard<std::mutex> lock(id_to_name_mutex_);
   // Check cache first
   auto it = id_to_name_.find(counter_id.handle);
   if (it != id_to_name_.end()) {
