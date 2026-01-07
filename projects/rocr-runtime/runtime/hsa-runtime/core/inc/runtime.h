@@ -51,6 +51,7 @@
 #include <tuple>
 #include <utility>
 #include <thread>
+#include <shared_mutex>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>
@@ -437,15 +438,15 @@ class Runtime {
 
   Agent* region_gpu() { return region_gpu_; }
 
-  const std::vector<const MemoryRegion*>& system_regions_fine() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_fine() const {
     return system_regions_fine_;
   }
 
-  const std::vector<const MemoryRegion*>& system_regions_coarse() const {
+  const std::vector<std::shared_ptr<const MemoryRegion>>& system_regions_coarse() const {
     return system_regions_coarse_;
   }
 
-  amd::hsa::loader::Loader* loader() { return loader_; }
+  amd::hsa::loader::Loader* loader() { return loader_.get(); }
 
   amd::LoaderContext* loader_context() { return &loader_context_; }
 
@@ -719,10 +720,10 @@ class Runtime {
 
   // Will be created before any user could call hsa_init but also could be
   // destroyed before incorrectly written programs call hsa_shutdown.
-  static __forceinline KernelMutex& bootstrap_lock() {
+  static __forceinline std::mutex& bootstrap_lock() {
     // This allocation is meant to last until the last thread has exited.
     // It is intentionally not freed.
-    static KernelMutex* bootstrap_lock_ = new KernelMutex;
+    static std::mutex* bootstrap_lock_ = new std::mutex;
     return *bootstrap_lock_;
   }
   Runtime();
@@ -780,7 +781,7 @@ class Runtime {
   // Also ensures atomicity of pointer info queries by interlocking
   // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo
   // registered & mapped arrays.
-  KernelSharedMutex memory_lock_;
+  std::shared_mutex memory_lock_;
 
   // Array containing driver interfaces for compatible agent kernel-mode
   // drivers. Currently supports AIE agents.
@@ -811,16 +812,16 @@ class Runtime {
   std::vector<uint32_t> gpu_ids_;
 
   // List of all fine grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_fine_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_fine_;
 
   // List of all coarse grain system memory region in the platform.
-  std::vector<const MemoryRegion*> system_regions_coarse_;
+  std::vector<std::shared_ptr<const MemoryRegion>> system_regions_coarse_;
 
   // Matrix of IO link.
   std::vector<LinkInfo> link_matrix_;
 
   // Loader instance.
-  amd::hsa::loader::Loader* loader_;
+  std::unique_ptr<amd::hsa::loader::Loader> loader_;
 
   // Loader context.
   amd::LoaderContext loader_context_;
@@ -832,7 +833,7 @@ class Runtime {
   std::map<const void*, AllocationRegion> allocation_map_;
 
   // Pending prefetch containers.
-  KernelMutex prefetch_lock_;
+  std::mutex prefetch_lock_;
   prefetch_map_t prefetch_map_;
 
   // Allocator using ::system_region_
@@ -853,24 +854,29 @@ class Runtime {
   // Number of Numa Nodes
   size_t num_nodes_;
 
+  struct HsaEventDeleter {
+    void operator()(HsaEvent* event) { InterruptSignal::DestroyEvent(event); }
+  };
+  using unique_hsa_event_ptr = std::unique_ptr<HsaEvent, HsaEventDeleter>;
+
   // @brief AMD HSA event to monitor for virtual memory access fault.
-  HsaEvent* vm_fault_event_;
+  unique_hsa_event_ptr vm_fault_event_;
 
   // @brief HSA signal to contain the VM fault event.
-  Signal* vm_fault_signal_;
+  unique_signal_ptr vm_fault_signal_;
 
   // @brief AMD HSA event to monitor for HW exceptions.
-  HsaEvent* hw_exception_event_;
+  unique_hsa_event_ptr hw_exception_event_;
 
   // @brief HSA signal to contain the HW exceptionevent.
-  Signal* hw_exception_signal_;
+  unique_signal_ptr hw_exception_signal_;
 
   // Custom system event handlers.
   std::vector<std::pair<AMD::callback_t<hsa_amd_system_event_callback_t>, void*>>
       system_event_handlers_;
 
   // System event handler lock
-  KernelMutex system_event_lock_;
+  std::mutex system_event_lock_;
 
   // Internal queue creation notifier
   AMD::callback_t<hsa_amd_runtime_queue_notifier> internal_queue_create_notifier_;
@@ -898,8 +904,8 @@ class Runtime {
 
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
-  std::map<uint64_t, size_t> ipc_sock_server_conns_;
-  KernelMutex ipc_sock_server_lock_;
+  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::mutex ipc_sock_server_lock_;
 
  private:
   void CheckVirtualMemApiSupport();

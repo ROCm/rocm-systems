@@ -463,7 +463,7 @@ perfetto_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds
 
     auto kernel_symbol = m_metadata.get_kernel_symbol(_kds.kernel_id);
     auto _agent_device_id =
-        m_agent_manager.get_agent_by_handle(_kds.agent_id_handle).device_id;
+        m_agent_manager.get_agent_by_handle(_kds.agent_id_handle).device_type_index;
     auto _queue_id_handle = _kds.queue_id_handle;
     auto _stream_handle   = _kds.stream_handle;
     auto _corr_id         = _kds.correlation_id_internal;

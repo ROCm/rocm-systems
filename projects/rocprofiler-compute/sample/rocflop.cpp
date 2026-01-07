@@ -51,6 +51,8 @@ template<typename T> __global__ void fma_throughput(vec4<T>* buffer, int count)
     ptr[tid] = value0 + value1 + value2 + value3;
 }
 
+// MFMA instructions are only available on gfx908 and later (not supported on gfx906)
+#if !defined(__gfx906__)
 __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -80,6 +82,38 @@ __global__ void matmul_fp16_throughput(vec4<float16>* inputs, vec4<float>* outpu
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
 
+__global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int count)
+{
+    int grid_size = gridDim.x * blockDim.x;
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+    float* ptr = inputs;
+
+    float value0 = ptr[0 * grid_size + tid];
+    float value1 = ptr[1 * grid_size + tid];
+    float value2 = ptr[2 * grid_size + tid];
+    float value3 = ptr[2 * grid_size + tid];
+
+    vec4<float> accum0;
+    vec4<float> accum1;
+    vec4<float> accum2;
+    vec4<float> accum3;
+    for(int i = 0; i < count; i++) {
+        for(int j = 0; j < 64; j++) {
+            // 4 MFMA ops
+            accum0 = __builtin_amdgcn_mfma_f32_16x16x4f32(value0, value0, accum0, 0, 0, 0);
+            accum1 = __builtin_amdgcn_mfma_f32_16x16x4f32(value1, value1, accum1, 0, 0, 0);
+            accum2 = __builtin_amdgcn_mfma_f32_16x16x4f32(value2, value2, accum2, 0, 0, 0);
+            accum3 = __builtin_amdgcn_mfma_f32_16x16x4f32(value3, value3, accum3, 0, 0, 0);
+        }
+    }
+
+    outputs[tid] = accum0 + accum1 + accum2 + accum3;
+}
+#endif // !defined(__gfx906__)
+
+// SMFMAC (Sparse MFMA) instructions are only available on gfx90a and later (not on gfx906 or gfx908)
+#if !defined(__gfx906__) && !defined(__gfx908__)
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -115,35 +149,7 @@ __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float1
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
-
-__global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int count)
-{
-    int grid_size = gridDim.x * blockDim.x;
-    int tid = blockDim.x * blockIdx.x + threadIdx.x;
-
-    float* ptr = inputs;
-
-    float value0 = ptr[0 * grid_size + tid];
-    float value1 = ptr[1 * grid_size + tid];
-    float value2 = ptr[2 * grid_size + tid];
-    float value3 = ptr[2 * grid_size + tid];
-
-    vec4<float> accum0;
-    vec4<float> accum1;
-    vec4<float> accum2;
-    vec4<float> accum3;
-    for(int i = 0; i < count; i++) {
-        for(int j = 0; j < 64; j++) {
-            // 4 MFMA ops
-            accum0 = __builtin_amdgcn_mfma_f32_16x16x4f32(value0, value0, accum0, 0, 0, 0);
-            accum1 = __builtin_amdgcn_mfma_f32_16x16x4f32(value1, value1, accum1, 0, 0, 0);
-            accum2 = __builtin_amdgcn_mfma_f32_16x16x4f32(value2, value2, accum2, 0, 0, 0);
-            accum3 = __builtin_amdgcn_mfma_f32_16x16x4f32(value3, value3, accum3, 0, 0, 0);
-        }
-    }
-
-    outputs[tid] = accum0 + accum1 + accum2 + accum3;
-}
+#endif // !defined(__gfx906__) && !defined(__gfx908__)
 
 void HIP_CALL(hipError_t err)
 {
@@ -258,6 +264,7 @@ template<typename T> double fma_throughput_test(int device, int count, int runs 
     return flops;
 }
 
+#if !defined(__gfx906__)
 template<typename matT, typename accumT> double matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -313,7 +320,9 @@ template<typename matT, typename accumT> double matmul_throughput_test(int devic
 
     return flops;
 }
+#endif // !defined(__gfx906__)
 
+#if !defined(__gfx906__) && !defined(__gfx908__)
 template<typename matT, typename accumT> double sparse_matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -328,7 +337,7 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
     } else {
         assert(false);
     }
-    
+
     int ops_per_matmul = k * m * n * 2;
 
     void* buffer1 = nullptr;
@@ -367,6 +376,7 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
 
     return flops;
 }
+#endif // !defined(__gfx906__) && !defined(__gfx908__)
 
 struct Result {
     int device = -1;
@@ -406,7 +416,6 @@ void print_result(const Result& res, uint32_t mask)
     }
     if(mask & SMATRIX_FP16) {
         printf("SMFMAC FP16: %8.2f TFLOPS\n", res.smfmac_fp16 / 1e12);
-
     }
 }
 
@@ -442,8 +451,12 @@ Result run_tests(int device, int runs, uint32_t mask)
         res.valu_int32 = fma_throughput_test<int>(device, 4096, runs);
     }
 
+#if !defined(__gfx906__)
+    // MFMA available on gfx908+ (excludes gfx906 with rev=6)
+    bool has_mfma = arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8));
+    
     if(mask & MATRIX_FP16) {
-        if(arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8))) {
+        if(has_mfma) {
             res.mfma_fp16 = matmul_throughput_test<float16, float>(device, 4096, runs);
         } else {
             res.mfma_fp16 = 0;
@@ -451,20 +464,38 @@ Result run_tests(int device, int runs, uint32_t mask)
     }
     
     if(mask & MATRIX_FP32) {
-        if(arch.major == 0x9 && (arch.minor >= 0x4 || (arch.minor == 0 && arch.rev >= 8))) {
+        if(has_mfma) {
             res.mfma_fp32 = matmul_throughput_test<float, float>(device, 4096, runs);
         } else {
             res.mfma_fp32 = 0;
         }
     }
+#else
+    // MFMA not available when compiling for gfx906
+    if(mask & MATRIX_FP16) {
+        res.mfma_fp16 = 0;
+    }
+    if(mask & MATRIX_FP32) {
+        res.mfma_fp32 = 0;
+    }
+#endif
 
+#if !defined(__gfx906__) && !defined(__gfx908__)
     if(mask & SMATRIX_FP16) {
-        if(arch.major == 9 && arch.minor >= 4) {
+        // SMFMAC only available on gfx90a (MI200) and later, not on gfx906 or gfx908
+        if(arch.major == 0x9 && (arch.minor > 0x4 || (arch.minor == 0 && arch.rev >= 0xa))) {
             res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);
         } else {
             res.smfmac_fp16 = 0;
         }
     }
+#else
+    // SMFMAC not available when compiling for gfx906 or gfx908
+    if(mask & SMATRIX_FP16) {
+        res.smfmac_fp16 = 0;
+    }
+#endif
+
     return res;
 }
 
@@ -567,6 +598,7 @@ void usage()
     std::cout << "--fp16                Run FP16 (VALU) test" << std::endl;
     std::cout << "--fp32                Run FP32 (VALU) test" << std::endl;
     std::cout << "--fp64                Run FP64 (VALU) test" << std::endl;
+    std::cout << "--int32               Run INT32 (VALU) test" << std::endl;
     std::cout << "--matfp16             Run FP16 (MFMA) test" << std::endl;
     std::cout << "--matfp32             Run FP32 (MFMA) test" << std::endl;
     std::cout << "--smatfp16            Run FP16 (SMFMAC) test" << std::endl;

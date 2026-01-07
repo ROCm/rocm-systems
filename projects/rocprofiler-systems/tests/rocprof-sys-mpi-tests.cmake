@@ -73,7 +73,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_CACHED=OFF;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
         "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
@@ -126,8 +126,7 @@ rocprofiler_systems_add_test(
 )
 
 set(_mpip_environment
-    "ROCPROFSYS_TRACE_LEGACY=OFF"
-    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -142,8 +141,7 @@ set(_mpip_environment
 )
 
 set(_mpip_all2all_environment
-    "ROCPROFSYS_TRACE_LEGACY=OFF"
-    "ROCPROFSYS_TRACE_CACHED=ON"
+    "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
