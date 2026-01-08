@@ -97,6 +97,7 @@ struct ValidityError<const T*> {
   enum { value = ValidityError<T*>::value };
 };
 
+
 #define IS_TRUE(var)                                                                               \
   do {                                                                                             \
     if ((var) != true) return HSA_STATUS_ERROR_INVALID_ARGUMENT;                                   \
