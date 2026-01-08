@@ -104,6 +104,12 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
+        if args.attach_pid and args.iteration_multiplexing is not None:
+            console_error(
+                "--attach-pid cannot be used with --iteration-multiplexing. "
+                "Please remove one of these options."
+            )
+
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         if args.remaining:
