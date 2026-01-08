@@ -47,6 +47,7 @@ class TestAmdSmiCli(unittest.TestCase):
         self.util = runcmd.Util('WARNING')
         self.Debug = False
         self.PrintCmdsOnly = False
+        self.PrintCmdsOnly = True
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
@@ -267,9 +268,11 @@ class TestAmdSmiCli(unittest.TestCase):
                                 print(f'TODO: set --clk-level {sub_arg}')
                                 pass
                             elif sub_arg == 'STATUS' and 'ptl' in items[item_index]:  # arg --ptl-status
+                                # TODO: amd-smi static --limit  PTL_STATE
                                 print(f'TODO: set --ptl-status {sub_arg}')
                                 pass
                             elif sub_arg == 'FRMT1,FRMT2':  # arg --ptl-format
+                                # TODO: amd-smi static --limit  PTL_FORMAT
                                 print(f'TODO: set --ptl-format {sub_arg}')
                                 pass
                             elif sub_arg == 'CLK_TYPE' and 'limit' in items[item_index]:  # arg --clk-limit
@@ -717,6 +720,8 @@ class TestAmdSmiCli(unittest.TestCase):
                 self.common.print(msg)
                 self.skipTest(msg)
 
+        # Start process with   amd-smi event
+        # In another process create an event with like   amd-smi reset --gpureset
         cmds = self.CreateCmds('event', 'Event Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
         return
@@ -781,6 +786,7 @@ class TestAmdSmiCli(unittest.TestCase):
             print(f'TODO: restore amd-smi set --perf-determinism SCLKMAX')
 
             # TODO:
+            # types: SPX, DPX, TPX, QPX, CPX
             #python API:
             #    amdsmi_get_gpu_compute_partition -> gets current compute partition
             #amd-smi CLI:
@@ -791,10 +797,11 @@ class TestAmdSmiCli(unittest.TestCase):
             print(f'TODO: restore amd-smi set --compute-partition TYPE/INDEX')
 
             # TODO:
+            # PARTITION: NPS1, NPS2, NPS4, NPS8
             #python API:
             #    amdsmi_get_gpu_memory_partition -> gets current memory partition
             #amd-smi CLI:
-            #    amd-smi partition –current
+            #    amd-smi partition --current
             #
             #-M, --memory-partition PARTITION            Set one of the following the memory partition modes:
             print(f'TODO: restore amd-smi set --memory-partition PARTITION')
@@ -827,6 +834,11 @@ class TestAmdSmiCli(unittest.TestCase):
                 cmds.append((f'amd-smi set --ptl-format {ptl_format} --gpu {index}', self.PASS))
         
             # TODO:
+            # gfxclk sclk sysclk are the same
+            # SCLK -> SYS
+            # MCLK -> MEM
+            # amd-smi metric --clock to get current values
+            # CLK_TYPE: SCLK or MCLK
             #-L, --clk-limit CLK_TYPE LIM_TYPE VALUE     Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies.
             #                                             ex: amd-smi set -L (sclk | mclk) (min | max) value
             print(f'TODO: restore amd-smi set --clk-limit CLK_TYPE LIM_TYPE VALUE')
@@ -891,6 +903,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi ras'
         self.common.print(msg)
 
+        # TODO: Yazen
         if self.common.TODO_SKIP_FAIL:
             msg = f'{self.tab}Not Yet Implemented'
             #self.common.print(msg)
