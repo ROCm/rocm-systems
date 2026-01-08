@@ -31,28 +31,9 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-/**
- * Test Description
- * ------------------------
- *    - Test texture fetching with `tex1D` with different read modes. The test is performed with:
- *      - normalized coordinates
- *      - non-normalized coordinates
- *      - Nearest-point sampling
- *      - Linear filtering
- *      - All combinations of different addressing modes.
- *      - Read mode: `hipReadModeElementType` (all types)
- *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
- * Test source
- * ------------------------
- *    - unit/texture/tex1D.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_tex1D_Positive", "", char, unsigned char, short, unsigned short, int,
-                   unsigned int, float) {
-  CHECK_IMAGE_SUPPORT;
-
+// Helper function to run tex1D tests for a specific type
+template <typename TestType>
+static void runTex1DTest() {
   SECTION("ReadModeElementType") {
     TextureTestParams<TestType> params = {};
     params.extent = make_hipExtent(1024, 0, 0);
@@ -117,6 +98,36 @@ TEMPLATE_TEST_CASE("Unit_tex1D_Positive", "", char, unsigned char, short, unsign
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test texture fetching with `tex1D` with different read modes. The test is performed with:
+ *      - normalized coordinates
+ *      - non-normalized coordinates
+ *      - Nearest-point sampling
+ *      - Linear filtering
+ *      - All combinations of different addressing modes.
+ *      - Read mode: `hipReadModeElementType` (all types)
+ *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex1D.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_tex1D_Positive") {
+  CHECK_IMAGE_SUPPORT;
+
+  SECTION("char") { runTex1DTest<char>(); }
+  SECTION("unsigned char") { runTex1DTest<unsigned char>(); }
+  SECTION("short") { runTex1DTest<short>(); }
+  SECTION("unsigned short") { runTex1DTest<unsigned short>(); }
+  SECTION("int") { runTex1DTest<int>(); }
+  SECTION("unsigned int") { runTex1DTest<unsigned int>(); }
+  SECTION("float") { runTex1DTest<float>(); }
 }
 
 /**

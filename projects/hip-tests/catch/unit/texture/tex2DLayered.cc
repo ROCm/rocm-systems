@@ -31,29 +31,9 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-/**
- * Test Description
- * ------------------------
- *    - Test texture fetching with `tex2DLayered` with different read modes. The test is performed
- * with:
- *      - normalized coordinates
- *      - non-normalized coordinates
- *      - Nearest-point sampling
- *      - Linear filtering
- *      - All combinations of different addressing modes.
- *      - Read mode: `hipReadModeElementType` (all types)
- *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
- * Test source
- * ------------------------
- *    - unit/texture/tex2DLayered.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_tex2DLayered_Positive", "", char, unsigned char, short, unsigned short,
-                   int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT;
-
+// Helper function to run tex2DLayered tests for a specific type
+template <typename TestType>
+static void runTex2DLayeredTest() {
   SECTION("ReadModeElementType") {
     TextureTestParams<TestType> params = {};
     params.extent = make_hipExtent(16, 4, 0);
@@ -162,6 +142,37 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayered_Positive", "", char, unsigned char, short,
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test texture fetching with `tex2DLayered` with different read modes. The test is performed
+ * with:
+ *      - normalized coordinates
+ *      - non-normalized coordinates
+ *      - Nearest-point sampling
+ *      - Linear filtering
+ *      - All combinations of different addressing modes.
+ *      - Read mode: `hipReadModeElementType` (all types)
+ *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex2DLayered.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_tex2DLayered_Positive") {
+  CHECK_IMAGE_SUPPORT;
+
+  SECTION("char") { runTex2DLayeredTest<char>(); }
+  SECTION("unsigned char") { runTex2DLayeredTest<unsigned char>(); }
+  SECTION("short") { runTex2DLayeredTest<short>(); }
+  SECTION("unsigned short") { runTex2DLayeredTest<unsigned short>(); }
+  SECTION("int") { runTex2DLayeredTest<int>(); }
+  SECTION("unsigned int") { runTex2DLayeredTest<unsigned int>(); }
+  SECTION("float") { runTex2DLayeredTest<float>(); }
 }
 
 /**

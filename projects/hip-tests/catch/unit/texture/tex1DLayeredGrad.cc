@@ -31,29 +31,9 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-/**
- * Test Description
- * ------------------------
- *    - Test texture fetching with `tex1DLayeredGrad` with different read modes. The test is
- * performed with:
- *      - normalized coordinates
- *      - non-normalized coordinates
- *      - Nearest-point sampling
- *      - Linear filtering
- *      - All combinations of different addressing modes.
- *      - Read mode: `hipReadModeElementType` (all types)
- *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
- * Test source
- * ------------------------
- *    - unit/texture/tex1DLayeredGrad.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_tex1DLayeredGrad_Positive", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT;
-
+// Helper function to run tex1DLayeredGrad tests for a specific type
+template <typename TestType>
+static void runTex1DLayeredGradTest() {
   SECTION("ReadModeElementType") {
     TextureTestParams<TestType> params = {};
     params.extent = make_hipExtent(1024, 0, 0);
@@ -129,6 +109,37 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayeredGrad_Positive", "", char, unsigned char, sh
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test texture fetching with `tex1DLayeredGrad` with different read modes. The test is
+ * performed with:
+ *      - normalized coordinates
+ *      - non-normalized coordinates
+ *      - Nearest-point sampling
+ *      - Linear filtering
+ *      - All combinations of different addressing modes.
+ *      - Read mode: `hipReadModeElementType` (all types)
+ *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex1DLayeredGrad.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+TEST_CASE("Unit_tex1DLayeredGrad_Positive") {
+  CHECK_IMAGE_SUPPORT;
+
+  SECTION("char") { runTex1DLayeredGradTest<char>(); }
+  SECTION("unsigned char") { runTex1DLayeredGradTest<unsigned char>(); }
+  SECTION("short") { runTex1DLayeredGradTest<short>(); }
+  SECTION("unsigned short") { runTex1DLayeredGradTest<unsigned short>(); }
+  SECTION("int") { runTex1DLayeredGradTest<int>(); }
+  SECTION("unsigned int") { runTex1DLayeredGradTest<unsigned int>(); }
+  SECTION("float") { runTex1DLayeredGradTest<float>(); }
 }
 
 /**

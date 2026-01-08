@@ -31,29 +31,9 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-/**
- * Test Description
- * ------------------------
- *    - Test texture fetching with `tex2DLayeredLod` with different read modes. The test is
- * performed with:
- *      - normalized coordinates
- *      - non-normalized coordinates
- *      - Nearest-point sampling
- *      - Linear filtering
- *      - All combinations of different addressing modes.
- *      - Read mode: `hipReadModeElementType` (all types)
- *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
- * Test source
- * ------------------------
- *    - unit/texture/tex2DLayeredLod.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT;
-
+// Helper function to run tex2DLayeredLod tests for a specific type
+template <typename TestType>
+static void runTex2DLayeredLodTest() {
   SECTION("ReadModeElementType") {
     TextureTestParams<TestType> params = {};
     params.extent = make_hipExtent(16, 4, 0);
@@ -162,6 +142,37 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive", "", char, unsigned char, sho
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test texture fetching with `tex2DLayeredLod` with different read modes. The test is
+ * performed with:
+ *      - normalized coordinates
+ *      - non-normalized coordinates
+ *      - Nearest-point sampling
+ *      - Linear filtering
+ *      - All combinations of different addressing modes.
+ *      - Read mode: `hipReadModeElementType` (all types)
+ *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex2DLayeredLod.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+TEST_CASE("Unit_tex2DLayeredLod_Positive") {
+  CHECK_IMAGE_SUPPORT;
+
+  SECTION("char") { runTex2DLayeredLodTest<char>(); }
+  SECTION("unsigned char") { runTex2DLayeredLodTest<unsigned char>(); }
+  SECTION("short") { runTex2DLayeredLodTest<short>(); }
+  SECTION("unsigned short") { runTex2DLayeredLodTest<unsigned short>(); }
+  SECTION("int") { runTex2DLayeredLodTest<int>(); }
+  SECTION("unsigned int") { runTex2DLayeredLodTest<unsigned int>(); }
+  SECTION("float") { runTex2DLayeredLodTest<float>(); }
 }
 
 /**

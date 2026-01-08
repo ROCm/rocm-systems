@@ -43,21 +43,9 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj, TYPE_t* ds
 #endif
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Basic test where resource type is 2D pitch.
- * Test source
- * ------------------------
- *  - unit/texture/hipTexObjPitch.cc
- * Test requirements
- * ------------------------
- *  - Textures supported on device
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short, unsigned short,
-                   int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT
+// Helper function to run hipTexObjPitch tests for a specific type
+template <typename TestType>
+static void runTexObjPitchTest() {
   (void)hipGetLastError();  // Prevent negative tests affecting this
 
   TestType* B;
@@ -114,6 +102,30 @@ TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, sho
   HIP_CHECK(hipFree(devPtrA));
   HIP_CHECK(hipFree(devPtrB));
   HIP_CHECK(hipDestroyTextureObject(texObj));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Basic test where resource type is 2D pitch.
+ * Test source
+ * ------------------------
+ *  - unit/texture/hipTexObjPitch.cc
+ * Test requirements
+ * ------------------------
+ *  - Textures supported on device
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_hipTexObjPitch_texture2D") {
+  CHECK_IMAGE_SUPPORT
+
+  SECTION("char") { runTexObjPitchTest<char>(); }
+  SECTION("unsigned char") { runTexObjPitchTest<unsigned char>(); }
+  SECTION("short") { runTexObjPitchTest<short>(); }
+  SECTION("unsigned short") { runTexObjPitchTest<unsigned short>(); }
+  SECTION("int") { runTexObjPitchTest<int>(); }
+  SECTION("unsigned int") { runTexObjPitchTest<unsigned int>(); }
+  SECTION("float") { runTexObjPitchTest<float>(); }
 }
 
 /**

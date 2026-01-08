@@ -227,13 +227,50 @@ void runLayered2DTextureTest(BufferType bufferType) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, float) {
+TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray") {
   CHECK_IMAGE_SUPPORT
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Host);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Host);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Host);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Host);
+  SECTION("char") {
+    runLayered2DTextureTest<vector_type_helper_t<char, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<char, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<char, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<char, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned char") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 4>>(BufferType::Host);
+  }
+  SECTION("short") {
+    runLayered2DTextureTest<vector_type_helper_t<short, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<short, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<short, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<short, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned short") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 4>>(BufferType::Host);
+  }
+  SECTION("int") {
+    runLayered2DTextureTest<vector_type_helper_t<int, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<int, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<int, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<int, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned int") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 4>>(BufferType::Host);
+  }
+  SECTION("float") {
+    runLayered2DTextureTest<vector_type_helper_t<float, 0>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<float, 1>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<float, 2>>(BufferType::Host);
+    runLayered2DTextureTest<vector_type_helper_t<float, 4>>(BufferType::Host);
+  }
 }
 
 /**
@@ -261,11 +298,48 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, float) {
+TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray") {
   CHECK_IMAGE_SUPPORT
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Device);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Device);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Device);
-  runLayered2DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Device);
+  SECTION("char") {
+    runLayered2DTextureTest<vector_type_helper_t<char, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<char, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<char, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<char, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned char") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned char, 4>>(BufferType::Device);
+  }
+  SECTION("short") {
+    runLayered2DTextureTest<vector_type_helper_t<short, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<short, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<short, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<short, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned short") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned short, 4>>(BufferType::Device);
+  }
+  SECTION("int") {
+    runLayered2DTextureTest<vector_type_helper_t<int, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<int, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<int, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<int, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned int") {
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<unsigned int, 4>>(BufferType::Device);
+  }
+  SECTION("float") {
+    runLayered2DTextureTest<vector_type_helper_t<float, 0>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<float, 1>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<float, 2>>(BufferType::Device);
+    runLayered2DTextureTest<vector_type_helper_t<float, 4>>(BufferType::Device);
+  }
 }

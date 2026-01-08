@@ -31,28 +31,9 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-/**
- * Test Description
- * ------------------------
- *    - Test texture fetching with `tex1DGrad` with different read modes. The test is performed with:
- *      - normalized coordinates
- *      - non-normalized coordinates
- *      - Nearest-point sampling
- *      - Linear filtering
- *      - All combinations of different addressing modes.
- *      - Read mode: `hipReadModeElementType` (all types)
- *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
- * Test source
- * ------------------------
- *    - unit/texture/tex1DGrad.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive", "", char, unsigned char, short, unsigned short, int,
-                   unsigned int, float) {
-  CHECK_IMAGE_SUPPORT;
-
+// Helper function to run tex1DGrad tests for a specific type
+template <typename TestType>
+static void runTex1DGradTest() {
   SECTION("ReadModeElementType") {
     TextureTestParams<TestType> params = {};
     params.extent = make_hipExtent(1024, 0, 0);
@@ -117,6 +98,36 @@ TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive", "", char, unsigned char, short, un
       }
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test texture fetching with `tex1DGrad` with different read modes. The test is performed with:
+ *      - normalized coordinates
+ *      - non-normalized coordinates
+ *      - Nearest-point sampling
+ *      - Linear filtering
+ *      - All combinations of different addressing modes.
+ *      - Read mode: `hipReadModeElementType` (all types)
+ *      - Read mode: `hipReadModeNormalizedFloat` (char, unsigned char, short, unsigned short only)
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex1DGrad.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+TEST_CASE("Unit_tex1DGrad_Positive") {
+  CHECK_IMAGE_SUPPORT;
+
+  SECTION("char") { runTex1DGradTest<char>(); }
+  SECTION("unsigned char") { runTex1DGradTest<unsigned char>(); }
+  SECTION("short") { runTex1DGradTest<short>(); }
+  SECTION("unsigned short") { runTex1DGradTest<unsigned short>(); }
+  SECTION("int") { runTex1DGradTest<int>(); }
+  SECTION("unsigned int") { runTex1DGradTest<unsigned int>(); }
+  SECTION("float") { runTex1DGradTest<float>(); }
 }
 
 /**

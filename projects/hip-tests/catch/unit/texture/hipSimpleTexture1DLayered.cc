@@ -221,13 +221,50 @@ void runLayered1DTextureTest(BufferType bufferType) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, float) {
+TEST_CASE("Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray") {
   CHECK_IMAGE_SUPPORT
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Host);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Host);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Host);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Host);
+  SECTION("char") {
+    runLayered1DTextureTest<vector_type_helper_t<char, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<char, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<char, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<char, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned char") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 4>>(BufferType::Host);
+  }
+  SECTION("short") {
+    runLayered1DTextureTest<vector_type_helper_t<short, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<short, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<short, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<short, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned short") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 4>>(BufferType::Host);
+  }
+  SECTION("int") {
+    runLayered1DTextureTest<vector_type_helper_t<int, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<int, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<int, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<int, 4>>(BufferType::Host);
+  }
+  SECTION("unsigned int") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 4>>(BufferType::Host);
+  }
+  SECTION("float") {
+    runLayered1DTextureTest<vector_type_helper_t<float, 0>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<float, 1>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<float, 2>>(BufferType::Host);
+    runLayered1DTextureTest<vector_type_helper_t<float, 4>>(BufferType::Host);
+  }
 }
 
 /**
@@ -255,11 +292,48 @@ TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray",
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, float) {
+TEST_CASE("Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray") {
   CHECK_IMAGE_SUPPORT
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Device);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Device);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Device);
-  runLayered1DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Device);
+  SECTION("char") {
+    runLayered1DTextureTest<vector_type_helper_t<char, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<char, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<char, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<char, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned char") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned char, 4>>(BufferType::Device);
+  }
+  SECTION("short") {
+    runLayered1DTextureTest<vector_type_helper_t<short, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<short, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<short, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<short, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned short") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned short, 4>>(BufferType::Device);
+  }
+  SECTION("int") {
+    runLayered1DTextureTest<vector_type_helper_t<int, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<int, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<int, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<int, 4>>(BufferType::Device);
+  }
+  SECTION("unsigned int") {
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<unsigned int, 4>>(BufferType::Device);
+  }
+  SECTION("float") {
+    runLayered1DTextureTest<vector_type_helper_t<float, 0>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<float, 1>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<float, 2>>(BufferType::Device);
+    runLayered1DTextureTest<vector_type_helper_t<float, 4>>(BufferType::Device);
+  }
 }
