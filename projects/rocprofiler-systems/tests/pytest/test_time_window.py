@@ -210,7 +210,6 @@ class TestTraceTimeWindowDelay:
             target="trace-time-window",
             instrument_args=self.RUNTIME_ARGS,
             env=env,
-            timeout=120,
         )
 
         assert_regex(result)

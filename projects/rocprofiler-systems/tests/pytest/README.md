@@ -75,7 +75,7 @@ pytest tests/pytest/test_transpose.py::TestTranspose::test_sampling
 
 | Flag | Description |
 |------|-------------|
-| `--show-output` | Show runner output when tests **pass** (requires -s flag) |
+| `--show-output` | Show runner output when tests **pass** |
 | `--show-output-on-subtest-fail` | Show runner output only when **subtests** fail |
 | `--no-output` | Suppress all output (only show pass/fail) |
 

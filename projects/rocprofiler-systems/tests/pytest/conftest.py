@@ -84,7 +84,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-output",
         action="store_true",
         default=False,
-        help="Show runner output on test pass (adds -s flag)",
+        help="Show runner output on test pass",
     )
     group.addoption(
         "--no-output",
@@ -131,10 +131,8 @@ def pytest_configure(config: pytest.Config) -> None:
     pytest._show_output_on_subtest_fail_flag = config.getoption(
         "--show-output-on-subtest-fail", default=False
     )
-
-    # Disable capture so print output shown
-    if pytest._show_output_flag:
-        config.option.capture = "no"
+    # Store config reference for hooks that need terminal reporter access
+    pytest._config_ref = config
 
 
 # Debug helper
@@ -407,7 +405,7 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 
 @pytest.fixture
 def collect_result(request) -> Callable:
-    """Fixture to collect test results for --show-output display.
+    """Fixture to collect test results for display.
 
     Handled by the `run_test` fixture
 
@@ -744,12 +742,22 @@ def cleanup_instrumented_binary(
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_logreport(report):
-    """Suppress failure details when --no-output is specified."""
-    # Access config via the workaround since report doesn't have direct config access
-    # This hook is called after pytest_runtest_makereport, report has no item reference
-    # We need to check the _no_output_flag set during pytest_configure
+    """Handle output display for passing tests and suppress details when --no-output."""
     if getattr(pytest, "_no_output_flag", False):
         report.longrepr = ""
+        return
+
+    # Extract runner output from report section
+    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    if show_output_flag and report.when == "call" and report.passed:
+        config = getattr(pytest, "_config_ref", None)
+        terminal = config.pluginmanager.get_plugin("terminalreporter")
+        if config and terminal:
+            for section_name, section_content in report.sections:
+                if section_name == "Runner Output":
+                    terminal.write_line(f"\n--- {section_name} ---")
+                    for line in section_content.splitlines():
+                        terminal.write_line(line)
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
@@ -774,7 +782,6 @@ def pytest_runtest_makereport(item, call):
     # Prevent duplicate output (only print once per test function)
     if item.stash.get(_output_printed_key, False):
         return
-    item.stash[_output_printed_key] = True
 
     results = item.stash.get(_results_key, [])
     if not results:
@@ -793,13 +800,10 @@ def pytest_runtest_makereport(item, call):
 
     if not output_parts:
         return
+    item.stash[_output_printed_key] = True
 
-    output_text = "\n".join(output_parts)
-    if rep.failed or has_subtest_failures:
-        # For failures, inject into report sections (shown in failure report)
-        rep.sections.append(("Runner Output", output_text))
-    else:
-        print(f"\n--- Runner Output ---\n{output_text}")
+    output_text = "\n".join(output_parts) + "\n\n"
+    rep.sections.append(("Runner Output", output_text))
 
 
 # ============================================================================

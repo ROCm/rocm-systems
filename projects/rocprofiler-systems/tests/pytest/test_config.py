@@ -91,7 +91,7 @@ class TestConfig:
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=120,
+            timeout=300,  # In xdist, it can take much longer
             fail_on_pass=True,  # Expected to fail
         )
 

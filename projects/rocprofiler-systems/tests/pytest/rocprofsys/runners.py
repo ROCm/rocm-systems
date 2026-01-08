@@ -274,10 +274,14 @@ class BaseRunner(ABC):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
+            # Decode bytes to string
+            stdout = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
+            stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+
             test_result = TestResult(
                 returncode=-1,
-                test_output=e.stdout or "",
-                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                test_output=stdout,
+                extra_output=f"Timeout after {self.timeout}s\n{stderr}",
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -444,10 +448,14 @@ class BinaryRewriteRunner(BaseRunner):
 
         except subprocess.TimeoutExpired as e:
             duration = time.time() - start_time
+            # Decode bytes to string
+            stdout = e.stdout.decode("utf-8", errors="replace") if e.stdout else ""
+            stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+
             test_result = TestResult(
                 returncode=-1,
-                test_output=e.stdout or "",
-                extra_output=f"Timeout after {self.timeout}s\n{e.stderr or ''}",
+                test_output=stdout,
+                extra_output=f"Timeout after {self.timeout}s\n{stderr}",
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
