@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # include guard
 include_guard(DIRECTORY)
 
@@ -127,9 +130,6 @@ endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 set(THREADS_PREFER_PTHREAD_FLAG OFF)
-
-find_library(pthread_LIBRARY NAMES pthread pthreads)
-find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
 find_library(pthread_LIBRARY NAMES pthread pthreads)
 find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)

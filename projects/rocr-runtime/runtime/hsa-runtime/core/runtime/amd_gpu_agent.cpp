@@ -112,7 +112,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       scratch_limit_async_threshold_(0),
       scratch_cache_(
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
-      trap_handler_tma_region_(NULL),
+      trap_handler_tma_region_(nullptr, [this](void* ptr){
+        if (ptr && this->finegrain_allocator_) this->finegrain_deallocator()(ptr);
+      }),
       rec_sdma_eng_override_(false),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
@@ -246,7 +248,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 GpuAgent::~GpuAgent() {
   for (auto& blit : blits_) blit.reset();
 
-  std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
 
@@ -454,22 +455,20 @@ void GpuAgent::InitRegionList() {
           memory_max_frequency_ = mem_props[mem_idx].MemoryClockMax;
         case HSA_HEAPTYPE_GPU_LDS:
         case HSA_HEAPTYPE_GPU_SCRATCH: {
-          MemoryRegion* region =
-              new MemoryRegion(false, false, false, false, true, this, mem_props[mem_idx]);
-
+          std::shared_ptr<MemoryRegion> region = std::make_shared<MemoryRegion>(false, false, false, false, true, this, mem_props[mem_idx]);
           regions_.push_back(region);
 
           if (region->IsLocalMemory()) {
             // Extended Fine-Grain memory
             if (!(isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() == 0))
               regions_.push_back(
-                  new MemoryRegion(false, false, false, true, true, this, mem_props[mem_idx]));
+                  std::make_shared<MemoryRegion>(false, false, false, true, true, this, mem_props[mem_idx]));
 
             // Expose VRAM as uncached/fine grain over PCIe (if enabled) or XGMI.
             bool user_visible = (properties_.HiveID != 0) ||
                 core::Runtime::runtime_singleton_->flag().fine_grain_pcie();
 
-            regions_.push_back(new MemoryRegion(true, false, false, false, user_visible, this,
+            regions_.push_back(std::make_shared<MemoryRegion>(true, false, false, false, user_visible, this,
                                                 mem_props[mem_idx]));
           }
           break;
@@ -561,7 +560,7 @@ void GpuAgent::ReserveScratch()
   size_t available;
   hsa_status_t err = driver().AvailableMemory(node_id(), &available);
   assert(err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
@@ -676,20 +675,20 @@ hsa_status_t GpuAgent::VisitRegion(bool include_peer,
 }
 
 hsa_status_t GpuAgent::VisitRegion(
-    const std::vector<const core::MemoryRegion*>& regions,
+    const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
     hsa_status_t (*callback)(hsa_region_t region, void* data),
     void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
-  for (const core::MemoryRegion* region : regions) {
+  for (const auto& region : regions) {
     if (!region->user_visible()) continue;
 
     const AMD::MemoryRegion* amd_region =
-        reinterpret_cast<const AMD::MemoryRegion*>(region);
+        reinterpret_cast<const AMD::MemoryRegion*>(region.get());
 
     // Only expose system, local, and LDS memory.
     if (amd_region->IsSystem() || amd_region->IsLocalMemory() ||
         amd_region->IsLDS()) {
-      hsa_region_t region_handle = core::MemoryRegion::Convert(region);
+      hsa_region_t region_handle = core::MemoryRegion::Convert(region.get());
       hsa_status_t status = call(region_handle, data);
       if (status != HSA_STATUS_SUCCESS) {
         return status;
@@ -910,7 +909,7 @@ void GpuAgent::InitGWS() {
 }
 
 void GpuAgent::GWSRelease() {
-  ScopedAcquire<KernelMutex> lock(&gws_queue_.lock_);
+  std::lock_guard<std::mutex> lock(gws_queue_.lock_);
   gws_queue_.ref_ct_--;
   if (gws_queue_.ref_ct_ != 0) return;
   InitGWS();
@@ -968,22 +967,22 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
 }
 
 void GpuAgent::SetCopyRequestRefCount(bool set) {
-  ScopedAcquire<KernelMutex> lock(&blit_lock_);
+  std::unique_lock<std::mutex> lock(blit_lock_);
   while (pending_copy_stat_check_ref_) {
-    blit_lock_.Release();
+    lock.unlock();
     os::YieldThread();
-    blit_lock_.Acquire();
+    lock.lock();
   }
   if (!set && pending_copy_req_ref_) pending_copy_req_ref_--;
   else pending_copy_req_ref_++;
 }
 
 void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
-  ScopedAcquire<KernelMutex> lock(&blit_lock_);
+  std::unique_lock<std::mutex> lock(blit_lock_);
   while (pending_copy_req_ref_) {
-    blit_lock_.Release();
+    lock.unlock();
     os::YieldThread();
-    blit_lock_.Acquire();
+    lock.lock();
   }
   if (!set && pending_copy_stat_check_ref_) pending_copy_stat_check_ref_--;
   else pending_copy_stat_check_ref_++;
@@ -1059,7 +1058,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                       std::min(gang_factor, properties_.NumSdmaXgmiEngines);
   }
 
-  ScopedAcquire<KernelMutex> lock(&sdma_gang_lock_);
+  std::lock_guard<std::mutex> lock(sdma_gang_lock_);
   // Manage internal gang signals
   std::vector<core::Signal*> gang_signals;
   if (gang_factor > 1) {
@@ -1642,7 +1641,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
       if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-      for (auto r : regions()) availableBytes += ((AMD::MemoryRegion*)r)->GetCacheSize();
+      for (const auto& r : regions()) availableBytes += ((AMD::MemoryRegion*)(r.get()))->GetCacheSize();
 
       availableBytes += scratch_cache_.free_bytes() - scratch_cache_.reserved_bytes();
 
@@ -1730,7 +1729,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
                                    core::Queue** queue) {
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
-    ScopedAcquire<KernelMutex> lock(&gws_queue_.lock_);
+    std::lock_guard<std::mutex> lock(gws_queue_.lock_);
     auto ret = (*gws_queue_.queue_).get();
     if (ret != nullptr) {
       gws_queue_.ref_ct_++;
@@ -1876,7 +1875,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   */
   bool large;
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   const size_t small_limit = scratch_pool_.size() >> 3;
   bool use_reclaim = true;
 
@@ -2035,7 +2034,7 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
   uint64_t size_per_wave = AlignUp(scratch.alt_size_per_thread * properties_.WaveFrontSize, 1024);
   if (size_per_wave > MAX_WAVE_SCRATCH) return;
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Ensure mapping will be in whole pages.
   scratch.alt_size = AlignUp(scratch.alt_size, 4096);
@@ -2176,7 +2175,7 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
 
-  ScopedAcquire<KernelMutex> lock(&t1_lock_);
+  std::lock_guard<std::mutex> lock(t1_lock_);
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
   // clock read certainty is <4us.
@@ -2261,26 +2260,27 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     ((uint64_t*)tma_region_host)[1] = (uint64_t)pcs_stochastic_buffers;
 
     if (!trap_handler_tma_region_) {
-      trap_handler_tma_region_ = (uint64_t*)finegrain_allocator()(2 * sizeof(uint64_t), 0);
-      if (trap_handler_tma_region_ == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      void* mem = (uint64_t*)finegrain_allocator()(2 * sizeof(uint64_t), 0);
+      if (!mem) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+      trap_handler_tma_region_.reset(mem);
 
       // NearestCpuAgent owns pool returned system_allocator()
       auto cpuAgent = GetNearestCpuAgent()->public_handle();
 
       hsa_status_t ret =
-          AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, trap_handler_tma_region_);
+          AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, trap_handler_tma_region_.get());
       assert(ret == HSA_STATUS_SUCCESS);
     }
 
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
-    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
+    if (DmaCopy(trap_handler_tma_region_.get(), tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
 
     tma_size = 2 * sizeof(uint64_t);
-    tma_addr = trap_handler_tma_region_;
+    tma_addr = trap_handler_tma_region_.get();
   } else if (trap_handler_tma_region_) {
-    finegrain_deallocator()(trap_handler_tma_region_);
-    trap_handler_tma_region_ = NULL;
+    trap_handler_tma_region_.reset(nullptr);
   }
 
   // Bind the trap handler to this node.
@@ -2398,7 +2398,7 @@ lazy_ptr<core::Blit>& GpuAgent::GetXgmiBlit(const core::Agent& dst_agent) {
   uint32_t xgmi_engine_cnt = properties_.NumSdmaXgmiEngines;
   assert((xgmi_engine_cnt > 0) && ("Illegal condition, should not happen"));
 
-  ScopedAcquire<KernelMutex> lock(&xgmi_peer_list_lock_);
+  std::lock_guard<std::mutex> lock(xgmi_peer_list_lock_);
 
   for (uint32_t idx = 0; idx < xgmi_peer_list_.size(); idx++) {
     uint64_t dst_handle = dst_agent.public_handle().handle;
@@ -2490,19 +2490,20 @@ lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(const core::Agent& dst_agent,
 void GpuAgent::Trim() {
   Agent::Trim();
   AsyncReclaimScratchQueues();
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
   scratch_cache_.trim(false);
 }
 
 void GpuAgent::InitAllocators() {
-  for (auto pool : GetNearestCpuAgent()->regions()) {
+  for (const auto& pool : GetNearestCpuAgent()->regions()) {
     if (pool->kernarg()) {
-      system_allocator_ = [pool](size_t size, size_t alignment,
+      const core::MemoryRegion* pool_ptr = pool.get();
+      system_allocator_ = [pool_ptr](size_t size, size_t alignment,
                                  MemoryRegion::AllocateFlags alloc_flags) -> void* {
         assert(alignment <= 4096);
         void* ptr = nullptr;
         return (HSA_STATUS_SUCCESS ==
-                core::Runtime::runtime_singleton_->AllocateMemory(pool, size, alloc_flags, &ptr))
+                core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags, &ptr))
             ? ptr
             : nullptr;
       };
@@ -2513,14 +2514,14 @@ void GpuAgent::InitAllocators() {
   assert(system_allocator_ && "Nearest NUMA node did not have a kernarg pool.");
 
   // Setup this GPU's fine-grain and coarse-grain allocators.
-  for (auto region : regions()) {
-    const AMD::MemoryRegion* amd_region = static_cast<const AMD::MemoryRegion*>(region);
+  for (const auto& region : regions()) {
+    const AMD::MemoryRegion* amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
 
-    auto region_allocator = [region](size_t size,
+    auto region_allocator = [amd_region](size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags) -> void* {
       void* ptr = nullptr;
        return (HSA_STATUS_SUCCESS ==
-               core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
+               core::Runtime::runtime_singleton_->AllocateMemory(amd_region, size, alloc_flags, &ptr))
            ? ptr
            : nullptr;
     };
