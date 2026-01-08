@@ -35,6 +35,174 @@ __global__ void simpleKernelLayered2DArray(hipTextureObject_t tex, TestType* out
 #endif
 }
 
+enum class BufferType { Host, Device };
+
+template <typename TestType>
+void runLayered2DTextureTest(BufferType bufferType) {
+  constexpr int SIZE = 512;
+  constexpr int num_layers = 5;
+  constexpr unsigned int width = SIZE;
+  constexpr unsigned int height = SIZE;
+  constexpr unsigned int size = width * height * num_layers * sizeof(TestType);
+
+  // Allocate and initialize host data
+  TestType* hData = reinterpret_cast<TestType*>(malloc(size));
+  REQUIRE(hData != nullptr);
+  memset(hData, 0, size);
+  for (unsigned int layer = 0; layer < num_layers; layer++) {
+    for (unsigned int i = 0; i < width * height; i++) {
+      initVal(hData[layer * width * height + i]);
+    }
+  }
+
+  // Allocate device buffer if needed
+  TestType* dData = nullptr;
+  TestType* srcData = nullptr;  // Points to the source buffer (host or device)
+  hipMemcpyKind srcToArrayKind, arrayToBufferKind;
+
+  if (bufferType == BufferType::Device) {
+    HIP_CHECK(hipMalloc(&dData, size));
+    HIP_CHECK(hipMemcpy(dData, hData, size, hipMemcpyHostToDevice));
+    srcData = dData;
+    srcToArrayKind = hipMemcpyDeviceToDevice;
+    arrayToBufferKind = hipMemcpyDeviceToDevice;
+  } else {
+    srcData = hData;
+    srcToArrayKind = hipMemcpyHostToDevice;
+    arrayToBufferKind = hipMemcpyDeviceToHost;
+  }
+
+  // Create layered array
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<TestType>();
+  hipArray_t arr;
+  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, num_layers),
+                             hipArrayLayered));
+  hipMemcpy3DParms myparms{};
+
+  SECTION("hipMemcpy3D whole layers") {
+    myparms.srcPos = make_hipPos(0, 0, 0);
+    myparms.dstPos = make_hipPos(0, 0, 0);
+    myparms.srcPtr = make_hipPitchedPtr(srcData, width * sizeof(TestType), width, height);
+    myparms.dstArray = arr;
+    myparms.extent = make_hipExtent(width, height, num_layers);
+    myparms.kind = srcToArrayKind;
+    HIP_CHECK(hipMemcpy3D(&myparms));
+  }
+
+  SECTION("hipMemcpy3D layer by layer") {
+    constexpr unsigned int layerSize = width * height * sizeof(TestType);
+    TestType* hLayerData = reinterpret_cast<TestType*>(malloc(layerSize));
+    REQUIRE(hLayerData != nullptr);
+
+    TestType* dData1 = nullptr;
+    if (bufferType == BufferType::Device) {
+      HIP_CHECK(hipMalloc(&dData1, size));
+      HIP_CHECK(hipMemset(dData1, 0, size));
+    }
+
+    for (unsigned int layer = 0; layer < num_layers; layer++) {
+      // Copy buffer layer to image layer
+      memset(hLayerData, 0, layerSize);
+      memset(&myparms, 0, sizeof(myparms));
+      myparms.srcPos = make_hipPos(0, 0, layer);
+      myparms.dstPos = make_hipPos(0, 0, layer);
+      myparms.srcPtr = make_hipPitchedPtr(srcData, width * sizeof(TestType), width, height);
+      myparms.dstArray = arr;
+      myparms.extent = make_hipExtent(width, height, 1);
+      myparms.kind = srcToArrayKind;
+      HIP_CHECK(hipMemcpy3D(&myparms));
+
+      // Copy image layer to buffer layer
+      memset(&myparms, 0, sizeof(myparms));
+      myparms.srcPos = make_hipPos(0, 0, layer);
+      if (bufferType == BufferType::Device) {
+        myparms.dstPos = make_hipPos(0, 0, layer);
+        myparms.srcArray = arr;
+        myparms.dstPtr = make_hipPitchedPtr(dData1, width * sizeof(TestType), width, height);
+        myparms.extent = make_hipExtent(width, height, 1);
+        myparms.kind = arrayToBufferKind;
+        HIP_CHECK(hipMemcpy3D(&myparms));
+        HIP_CHECK(hipMemcpy(hLayerData, dData1 + layer * width * height, layerSize,
+                           hipMemcpyDeviceToHost));
+      } else {
+        myparms.dstPos = make_hipPos(0, 0, 0);
+        myparms.srcArray = arr;
+        myparms.dstPtr = make_hipPitchedPtr(hLayerData, width * sizeof(TestType), width, height);
+        myparms.extent = make_hipExtent(width, height, 1);
+        myparms.kind = arrayToBufferKind;
+        HIP_CHECK(hipMemcpy3D(&myparms));
+      }
+
+      // Compare layer
+#ifdef DEBUG_DATA
+      for (unsigned int i = 0; i < width * height; i++) {
+        fprintf(stderr, "%4u: %u: %s -- %s\n", layer, i,
+                getString(hData[layer * width * height + i]).c_str(),
+                getString(hLayerData[i]).c_str());
+      }
+#endif
+      REQUIRE(HipTest::checkArray(hData + layer * width * height, hLayerData, width, height, 1));
+    }
+    free(hLayerData);
+    if (dData1 != nullptr) {
+      HIP_CHECK(hipFree(dData1));
+    }
+  }
+
+  // Create texture object
+  hipTextureObject_t tex;
+  hipResourceDesc texRes;
+  memset(&texRes, 0, sizeof(hipResourceDesc));
+  texRes.resType = hipResourceTypeArray;
+  texRes.res.array.array = arr;
+
+  hipTextureDesc texDescr;
+  memset(&texDescr, 0, sizeof(hipTextureDesc));
+  texDescr.normalizedCoords = 0;
+  texDescr.filterMode = hipFilterModePoint;
+  texDescr.addressMode[0] = hipAddressModeClamp;
+  texDescr.addressMode[1] = hipAddressModeClamp;
+  texDescr.addressMode[2] = hipAddressModeClamp;
+  texDescr.readMode = hipReadModeElementType;
+  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, NULL));
+
+  // Allocate device memory for result
+  TestType* dOutputData = nullptr;
+  HIP_CHECK(hipMalloc(&dOutputData, size));
+  if (bufferType == BufferType::Device) {
+    HIP_CHECK(hipMemset(dOutputData, 0, size));
+  }
+
+  // Launch kernel
+  dim3 dimBlock(32, 32);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
+  for (unsigned int layer = 0; layer < num_layers; layer++) {
+    hipLaunchKernelGGL(simpleKernelLayered2DArray<TestType>, dimGrid, dimBlock, 0, 0, tex,
+                       dOutputData, width, height, layer);
+    HIP_CHECK(hipGetLastError());
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Allocate mem for the result on host side
+  TestType* hOutputData = reinterpret_cast<TestType*>(malloc(size));
+  REQUIRE(hOutputData != nullptr);
+  memset(hOutputData, 0, size);
+
+  // Copy result from device to host
+  HIP_CHECK(hipMemcpy(hOutputData, dOutputData, size, hipMemcpyDeviceToHost));
+  REQUIRE(HipTest::checkArray(hData, hOutputData, width, height, num_layers) == true);
+
+  // Cleanup
+  HIP_CHECK(hipFree(dOutputData));
+  HIP_CHECK(hipFreeArray(arr));
+  free(hData);
+  free(hOutputData);
+  HIP_CHECK(hipDestroyTextureObject(tex));
+  if (dData != nullptr) {
+    HIP_CHECK(hipFree(dData));
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -63,120 +231,7 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
                    int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
                    uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
-
-  constexpr int SIZE = 512;
-  constexpr int num_layers = 5;
-  constexpr unsigned int width = SIZE;
-  constexpr unsigned int height = SIZE;
-  constexpr unsigned int size = width * height * num_layers * sizeof(TestType);
-  TestType* hData = reinterpret_cast<TestType*>(malloc(size));
-  REQUIRE(hData != nullptr);
-  memset(hData, 0, size);
-
-  for (unsigned int layer = 0; layer < num_layers; layer++) {
-    for (unsigned int i = 0; i < width * height; i++) {
-      initVal(hData[layer * width * height + i]);
-    }
-  }
-  hipChannelFormatDesc channelDesc;
-  // Allocate array and copy image data
-  channelDesc = hipCreateChannelDesc<TestType>();
-  hipArray_t arr;
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, num_layers),
-                             hipArrayLayered));
-  hipMemcpy3DParms myparms{};
-  SECTION("hipMemcpy3D whole layers") {
-    myparms.srcPos = make_hipPos(0, 0, 0);
-    myparms.dstPos = make_hipPos(0, 0, 0);
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(TestType), width, height);
-    myparms.dstArray = arr;
-    myparms.extent = make_hipExtent(width, height, num_layers);
-    myparms.kind = hipMemcpyHostToDevice;
-    HIP_CHECK(hipMemcpy3D(&myparms));
-  }
-
-  SECTION("hipMemcpy3D layer by layer") {
-    constexpr unsigned int layerSize = width * height * sizeof(TestType);
-    TestType* hLayerData = reinterpret_cast<TestType*>(malloc(layerSize));
-    REQUIRE(hLayerData != nullptr);
-    for (unsigned int layer = 0; layer < num_layers; layer++) {
-      // Copy buffer layer to image layer
-      memset(hLayerData, 0, layerSize);
-      memset(&myparms, 0, sizeof(myparms));
-      // myparms.srcPos = make_hipPos(layerSize * layer, 0, 0);
-      myparms.srcPos = make_hipPos(0, 0, layer);
-      myparms.dstPos = make_hipPos(0, 0, layer);
-      myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(TestType), width, height);
-      myparms.dstArray = arr;
-      myparms.extent = make_hipExtent(width, height, 1);
-      myparms.kind = hipMemcpyHostToDevice;
-      HIP_CHECK(hipMemcpy3D(&myparms));
-
-      // Copy image layer to buffer layer
-      memset(&myparms, 0, sizeof(myparms));
-      myparms.srcPos = make_hipPos(0, 0, layer);
-      myparms.dstPos = make_hipPos(0, 0, 0);
-      myparms.srcArray = arr;
-      myparms.dstPtr = make_hipPitchedPtr(hLayerData, width * sizeof(TestType), width, height);
-      myparms.extent = make_hipExtent(width, height, 1);
-      myparms.kind = hipMemcpyDeviceToHost;
-      HIP_CHECK(hipMemcpy3D(&myparms));
-
-      // Compare layer
-#ifdef DEBUG_DATA
-      for (unsigned int i = 0; i < width * height; i++) {
-        fprintf(stderr, "%4u: %u: %s -- %s\n", layer, i,
-                getString(hData[layer * width * height + i]), getString(hLayerData[i]));
-      }
-#endif
-      REQUIRE(HipTest::checkArray(hData + layer * width * height, hLayerData, width, height, 1));
-    }
-    free(hLayerData);
-  }
-
-  hipTextureObject_t tex;
-  hipResourceDesc texRes;
-  memset(&texRes, 0, sizeof(hipResourceDesc));
-  texRes.resType = hipResourceTypeArray;
-  texRes.res.array.array = arr;
-
-  hipTextureDesc texDescr;
-  memset(&texDescr, 0, sizeof(hipTextureDesc));
-  texDescr.normalizedCoords = 0;
-  texDescr.filterMode = hipFilterModePoint;
-  texDescr.addressMode[0] = hipAddressModeClamp;
-  texDescr.addressMode[1] = hipAddressModeClamp;
-  texDescr.addressMode[2] = hipAddressModeClamp;
-  texDescr.readMode = hipReadModeElementType;
-  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, NULL));
-
-  // Allocate device memory for result
-  TestType* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
-
-  dim3 dimBlock(32, 32);
-  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
-  for (unsigned int layer = 0; layer < num_layers; layer++) {
-    hipLaunchKernelGGL(simpleKernelLayered2DArray<TestType>, dimGrid, dimBlock, 0, 0, tex, dData,
-                       width, height, layer);
-    HIP_CHECK(hipGetLastError());
-  }
-  HIP_CHECK(hipDeviceSynchronize());
-
-  // Allocate mem for the result on host side
-  TestType* hOutputData = reinterpret_cast<TestType*>(malloc(size));
-  REQUIRE(hOutputData != nullptr);
-  memset(hOutputData, 0, size);
-
-  // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
-  REQUIRE(HipTest::checkArray(hData, hOutputData, width, height, num_layers) == true);
-
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(arr));
-  free(hData);
-  free(hOutputData);
-  HIP_CHECK(hipDestroyTextureObject(tex));
+  runLayered2DTextureTest<TestType>(BufferType::Host);
 }
 
 /**
@@ -209,126 +264,5 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray
                    int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
                    uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
-
-  constexpr int SIZE = 512;
-  constexpr int num_layers = 5;
-  constexpr unsigned int width = SIZE;
-  constexpr unsigned int height = SIZE;
-  constexpr unsigned int size = width * height * num_layers * sizeof(TestType);
-  TestType* hData = reinterpret_cast<TestType*>(malloc(size));
-  REQUIRE(hData != nullptr);
-  memset(hData, 0, size);
-
-  for (unsigned int layer = 0; layer < num_layers; layer++) {
-    for (unsigned int i = 0; i < width * height; i++) {
-      initVal(hData[layer * width * height + i]);
-    }
-  }
-
-  TestType* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
-
-  HIP_CHECK(hipMemcpy(dData, hData, size, hipMemcpyHostToDevice));
-
-  hipChannelFormatDesc channelDesc;
-  // Allocate array and copy image data
-  channelDesc = hipCreateChannelDesc<TestType>();
-  hipArray_t arr;
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, num_layers),
-                             hipArrayLayered));
-  hipMemcpy3DParms myparms{};
-  SECTION("hipMemcpy3D whole layers") {
-    myparms.srcPos = make_hipPos(0, 0, 0);
-    myparms.dstPos = make_hipPos(0, 0, 0);
-    myparms.srcPtr = make_hipPitchedPtr(dData, width * sizeof(TestType), width, height);
-    myparms.dstArray = arr;
-    myparms.extent = make_hipExtent(width, height, num_layers);
-    myparms.kind = hipMemcpyDeviceToDevice;
-    HIP_CHECK(hipMemcpy3D(&myparms));
-  }
-
-  SECTION("hipMemcpy3D layer by layer") {
-    constexpr unsigned int layerSize = width * height * sizeof(TestType);
-    TestType* hLayerData = reinterpret_cast<TestType*>(malloc(layerSize));
-    REQUIRE(hLayerData != nullptr);
-    TestType* dData1 = nullptr;
-    HIP_CHECK(hipMalloc(&dData1, size));
-    HIP_CHECK(hipMemset(dData1, 0, size));
-    for (unsigned int layer = 0; layer < num_layers; layer++) {
-      // Copy buffer layer to image layer
-      memset(hLayerData, 0, layerSize);
-      memset(&myparms, 0, sizeof(myparms));
-      myparms.srcPos = make_hipPos(0, 0, layer);
-      myparms.dstPos = make_hipPos(0, 0, layer);
-      myparms.srcPtr = make_hipPitchedPtr(dData, width * sizeof(TestType), width, height);
-      myparms.kind = hipMemcpyDeviceToDevice;
-      myparms.dstArray = arr;
-      myparms.extent = make_hipExtent(width, height, 1);
-      HIP_CHECK(hipMemcpy3D(&myparms));
-
-      // Copy image layer to buffer layer
-      memset(&myparms, 0, sizeof(myparms));
-      myparms.srcPos = make_hipPos(0, 0, layer);
-      myparms.dstPos = make_hipPos(0, 0, layer);
-      myparms.srcArray = arr;
-      myparms.dstPtr = make_hipPitchedPtr(dData1, width * sizeof(TestType), width, height);
-      myparms.extent = make_hipExtent(width, height, 1);
-      myparms.kind = hipMemcpyDeviceToDevice;
-      HIP_CHECK(hipMemcpy3D(&myparms));
-      HIP_CHECK(
-          hipMemcpy(hLayerData, dData1 + layer * width * height, layerSize, hipMemcpyDeviceToHost));
-      // Compare layer
-#ifdef DEBUG_DATA
-      for (unsigned int i = 0; i < width * height; i++) {
-        fprintf(stderr, "%4u: %u: %s -- %s\n", layer, i,
-                getString(hData[layer * width * height + i]).c_str(),
-                getString(hLayerData[i]).c_str());
-      }
-#endif
-      REQUIRE(HipTest::checkArray(hData + layer * width * height, hLayerData, width, height, 1));
-    }
-    free(hLayerData);
-    HIP_CHECK(hipFree(dData1));
-  }
-
-  hipTextureObject_t tex;
-  hipResourceDesc texRes;
-  memset(&texRes, 0, sizeof(hipResourceDesc));
-  texRes.resType = hipResourceTypeArray;
-  texRes.res.array.array = arr;
-
-  hipTextureDesc texDescr;
-  memset(&texDescr, 0, sizeof(hipTextureDesc));
-  texDescr.normalizedCoords = 0;
-  texDescr.filterMode = hipFilterModePoint;
-  texDescr.addressMode[0] = hipAddressModeClamp;
-  texDescr.addressMode[1] = hipAddressModeClamp;
-  texDescr.addressMode[2] = hipAddressModeClamp;
-  texDescr.readMode = hipReadModeElementType;
-  HIP_CHECK(hipCreateTextureObject(&tex, &texRes, &texDescr, NULL));
-  HIP_CHECK(hipMemset(dData, 0, size));
-
-  dim3 dimBlock(32, 32);
-  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y);
-  for (unsigned int layer = 0; layer < num_layers; layer++) {
-    hipLaunchKernelGGL(simpleKernelLayered2DArray<TestType>, dimGrid, dimBlock, 0, 0, tex, dData,
-                       width, height, layer);
-    HIP_CHECK(hipGetLastError());
-  }
-  HIP_CHECK(hipDeviceSynchronize());
-
-  // Allocate mem for the result on host side
-  TestType* hOutputData = reinterpret_cast<TestType*>(malloc(size));
-  REQUIRE(hOutputData != nullptr);
-  memset(hOutputData, 0, size);
-
-  // Copy result from device to host
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
-  REQUIRE(HipTest::checkArray(hData, hOutputData, width, height, num_layers) == true);
-
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(arr));
-  free(hData);
-  free(hOutputData);
-  HIP_CHECK(hipDestroyTextureObject(tex));
+  runLayered2DTextureTest<TestType>(BufferType::Device);
 }
