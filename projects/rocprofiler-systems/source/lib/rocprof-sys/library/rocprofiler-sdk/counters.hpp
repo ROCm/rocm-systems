@@ -22,12 +22,15 @@
 
 #pragma once
 
+#include "common/defines.h"
+
 #include "common/synchronized.hpp"
 #include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
+#include <timemory/operations/types.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <rocprofiler-sdk/agent.h>
@@ -119,57 +122,31 @@ namespace tim
 {
 namespace operation
 {
+using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
+
 template <>
-struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
+struct set_storage<type>
+: protected dynamic_storage_base<storage<type>*, ROCPROFSYS_MAX_THREADS>
 {
-    static constexpr size_t max_threads = 4096;
-    using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-    using storage_array_t = std::vector<storage<type>*>;
-    friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
+    static constexpr size_t max_threads = ROCPROFSYS_MAX_THREADS;
+    using base_type       = dynamic_storage_base<storage<type>*, max_threads>;
+    using storage_array_t = typename base_type::storage_array_t;
 
     ROCPROFSYS_DEFAULT_OBJECT(set_storage)
 
     auto operator()(storage<type>* _v, size_t _idx) const
     {
-        ensure_capacity(_idx);
+        base_type::ensure_capacity(get(), _idx);
         get().at(_idx) = _v;
     }
     auto operator()(type&, size_t) const {}
-    auto operator()(storage<type>* _v) const { std::fill(get().begin(), get().end(), _v); }
-
-private:
-    static std::atomic<size_t>& get_capacity()
+    auto operator()(storage<type>* _v) const
     {
-        static std::atomic<size_t> _cap{max_threads};
-        return _cap;
+        std::fill(get().begin(), get().end(), _v);
     }
 
-    static std::mutex& get_mutex()
-    {
-        static std::mutex _mtx;
-        return _mtx;
-    }
-
-    static void ensure_capacity(size_t _idx)
-    {
-        // Fast path: check atomic capacity (no lock)
-        if(_idx < get_capacity().load(std::memory_order_acquire))
-            return;
-
-        // Slow path: need to resize with lock
-        std::lock_guard<std::mutex> _lock(get_mutex());
-        auto& _v = get();
-
-        // Double-check after acquiring lock
-        if(_idx >= _v.size())
-        {
-            size_t new_size = std::max(_v.size(), size_t(1));
-            while(new_size <= _idx)
-                new_size *= 2;  // Geometric growth (doubling)
-            _v.resize(new_size, nullptr);
-            get_capacity().store(_v.size(), std::memory_order_release);
-        }
-    }
+    // Expose get_capacity for get_storage access
+    using base_type::get_capacity;
 
     static storage_array_t& get()
     {
@@ -179,10 +156,8 @@ private:
 };
 
 template <>
-struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
+struct get_storage<type>
 {
-    using type = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-
     ROCPROFSYS_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
@@ -199,7 +174,8 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
     auto operator()(size_t _idx) const
     {
         // Thread-safe read using atomic capacity
-        if(_idx >= operation::set_storage<type>::get_capacity().load(std::memory_order_acquire))
+        if(_idx >=
+           operation::set_storage<type>::get_capacity().load(std::memory_order_acquire))
             return static_cast<storage<type>*>(nullptr);
         return operation::set_storage<type>::get().at(_idx);
     }
