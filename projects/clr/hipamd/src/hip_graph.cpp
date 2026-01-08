@@ -1530,8 +1530,7 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     *pGraphExec = nullptr;
     return scheduleStatus;
   }
-
-  if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+  if (DEBUG_HIP_GRAPH_DOT_PRINT == 1) {
     static int i = 1;
     std::string filename =
         "graph_" + std::to_string(amd::Os::getProcessId()) + "_dot_print_" + std::to_string(i++);

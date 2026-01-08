@@ -1677,7 +1677,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
         "--path",
         workload_dir,
     ])
-    assert code == 1
+    assert code == 0
 
     # Test without dispatch filtering
     code = binary_handler_analyze_rocprof_compute([

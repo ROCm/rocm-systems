@@ -83,8 +83,9 @@ typedef _Float16 __attribute__((vector_size(16))) __amd_fp16x8_storage_t;
 typedef _Float16 __attribute__((vector_size(64))) __amd_fp16x32_storage_t;
 typedef uint32_t __attribute__((vector_size(24))) __amd_fp6x32_storage_t;
 typedef short __attribute__((vector_size(4))) __amd_shortx2_storage_t;
-#else
-#error "Only supported by HIPCC or GCC >= 13."
 #endif
 
+#if (defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)) ||                          \
+    (defined(__GNUC__) && (__GNUC__ > 13))
 static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8x8_storage_t));
+#endif

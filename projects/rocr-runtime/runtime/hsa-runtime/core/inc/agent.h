@@ -47,6 +47,7 @@
 
 #include <assert.h>
 #include <vector>
+#include <mutex>
 
 #include "core/inc/checked.h"
 #include "core/inc/isa.h"
@@ -291,7 +292,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
                                void* value) const = 0;
 
   // @brief Returns an array of regions owned by the agent.
-  virtual const std::vector<const core::MemoryRegion*>& regions() const = 0;
+  virtual const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const = 0;
 
   // @brief Returns the ISA's supported by the agent.
   // @details The returned vector is a list of pointers to the supported ISA,
@@ -336,7 +337,7 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   __forceinline void Disable() { enabled_ = false; }
 
   virtual void Trim() {
-    for (auto region : regions()) region->Trim();
+    for (const auto& region : regions()) region.get()->Trim();
   }
 
   virtual void ReleaseResources() { }
@@ -385,7 +386,7 @@ protected:
   // Serial memory operations are needed to ensure, among other things, that allocation failures are
   // due to true OOM conditions and per region caching (Trim and Allocate must be serial and
   // exclusive to ensure this).
-  KernelMutex agent_memory_lock_;
+  std::mutex agent_memory_lock_;
 
   // Forbid copying and moving of this object
   DISALLOW_COPY_AND_ASSIGN(Agent);
