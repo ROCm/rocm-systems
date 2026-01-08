@@ -703,6 +703,10 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
 
+   * Do not use ``--attach-pid`` with ``--iteration-multiplexing``.
+     Iteration multiplexing is only supported when using ROCm Compute Profiler with
+     the native counter collection tool. Ensure that ``--attach-pid`` is not used in your profiling command.
+
    * Ensure that your workload runs for enough iterations to cover all counter subsets. 
      When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
      or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
@@ -786,7 +790,3 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 * **Non-deterministic workloads**
 
   Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering of common kernels is recommended.
-
-* **Cannot use with dispatch filtering**
-
-  It is not possible to use dispatch filtering mentioned in :ref:`Filtering <filtering>` with iteration multiplexing, because iteration multiplexing merges counters across dispatches, making it impossible to isolate specific dispatches for profiling and analysis, so attempting to combine them will result in an error.
