@@ -29,6 +29,8 @@
 #include <vector>
 #include <rocstorage/enum_definitions.h>
 #include <rocstorage/result.hpp>
+#include <rocstorage/database.hpp>
+#include <rocstorage/trace.hpp>
 
 // Forward declarations for C API interop
 typedef void *rocprofvis_dm_trace_t;
@@ -131,6 +133,7 @@ public:
 
 private:
   friend class reader;
+  friend class trace;
   explicit track(void *handle);
 
   struct Impl;
@@ -169,6 +172,7 @@ public:
 
 private:
   friend class reader;
+  friend class trace;
   explicit flow_trace(void *handle);
 
   struct Impl;
@@ -204,6 +208,7 @@ public:
 
 private:
   friend class reader;
+  friend class trace;
   explicit stack_trace(void *handle);
 
   struct Impl;
@@ -239,6 +244,7 @@ public:
 
 private:
   friend class reader;
+  friend class trace;
   explicit ext_data(void *handle);
 
   struct Impl;
@@ -308,6 +314,7 @@ public:
 
 private:
   friend class reader;
+  friend class trace;
   explicit query_result(void *handle);
 
   struct Impl;
@@ -553,6 +560,24 @@ public:
 
   /// Get the underlying C API database handle (for interop)
   rocprofvis_dm_database_t c_database_handle() const;
+
+  // ==================== Sub-object Access ====================
+
+  /// Get the underlying trace object
+  /// @return Reference to the trace, or nullptr if not initialized
+  trace *get_trace();
+
+  /// Get the underlying trace object (const)
+  /// @return Reference to the trace, or nullptr if not initialized
+  const trace *get_trace() const;
+
+  /// Get the underlying database object
+  /// @return Reference to the database, or nullptr if not initialized
+  database *get_database();
+
+  /// Get the underlying database object (const)
+  /// @return Reference to the database, or nullptr if not initialized
+  const database *get_database() const;
 
 private:
   reader() = default;

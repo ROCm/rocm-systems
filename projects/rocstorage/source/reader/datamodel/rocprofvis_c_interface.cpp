@@ -7,6 +7,10 @@
 #include "rocprofvis_db_rocprof.h"
 #include "rocprofvis_dm_trace.h"
 
+#include <rocstorage/trace.hpp>
+#include <rocstorage/database.hpp>
+#include <rocstorage/reader.hpp>
+
 #ifdef TEST
 #define ROCPROFVIS_DM_PROPSYMBOL(handle, property) ((RocProfVis::DataModel::DmBase*)handle)->GetPropertySymbol(property)
 #else
@@ -30,12 +34,12 @@
  ***************************************************************************************************/
 
 rocprofvis_dm_database_t rocprofvis_db_open_database(
-                                        rocprofvis_db_filename_t filename, 
+                                        rocprofvis_db_filename_t filename,
                                         rocprofvis_db_type_t db_type){
     PROFILE;
     if (db_type == rocprofvis_db_type_t::kAutodetect) {
         db_type = RocProfVis::DataModel::Database::Autodetect(filename);
-    } 
+    }
     if (db_type == rocprofvis_db_type_t::kRocpdSqlite)
     {
         try {
@@ -52,30 +56,29 @@ rocprofvis_dm_database_t rocprofvis_db_open_database(
             ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN(
                 RocProfVis::DataModel::ERROR_MEMORY_ALLOCATION_FAILURE, nullptr);
         }
-    } else
-        if (db_type == rocprofvis_db_type_t::kRocprofSqlite)
-        {
-            try {
-                RocProfVis::DataModel::Database* db = new RocProfVis::DataModel::RocprofDatabase(filename);
-                if (kRocProfVisDmResultSuccess == db->Open()) {
-                    return db;
-                }
-                else {
-                    ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN("Error! Failed to open database!",
-                                                        nullptr);
-                }
+    } else if (db_type == rocprofvis_db_type_t::kRocprofSqlite)
+    {
+        try {
+            RocProfVis::DataModel::Database* db = new RocProfVis::DataModel::RocprofDatabase(filename);
+            if (kRocProfVisDmResultSuccess == db->Open()) {
+                return db;
             }
-            catch (std::exception ex)
-            {
-                ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN(
-                    RocProfVis::DataModel::ERROR_MEMORY_ALLOCATION_FAILURE, nullptr);
+            else {
+                ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN("Error! Failed to open database!",
+                                                    nullptr);
             }
         }
-        else
+        catch (std::exception ex)
+        {
+            ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN(
+                RocProfVis::DataModel::ERROR_MEMORY_ALLOCATION_FAILURE, nullptr);
+        }
+    }
+    else
     {
         spdlog::debug("Database type not supported!");
         return nullptr;
-    }                                  
+    }
 }
 
 /****************************************************************************************************
@@ -86,12 +89,12 @@ rocprofvis_dm_database_t rocprofvis_db_open_database(
  * 
  ***************************************************************************************************/
 
-rocprofvis_dm_size_t rocprofvis_db_get_memory_footprint(rocprofvis_dm_database_t database){ 
+rocprofvis_dm_size_t rocprofvis_db_get_memory_footprint(rocprofvis_dm_database_t database){
     ROCPROFVIS_ASSERT_MSG_RETURN(database,
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
-                                 kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->GetMemoryFootprint();
+                                 0);
+    rocstorage::database wrapper(database);
+    return wrapper.memory_footprint();
 }
 
 /****************************************************************************************************
@@ -177,14 +180,13 @@ rocprofvis_db_future_cancel(rocprofvis_db_future_t object)
  * 
  ***************************************************************************************************/
 rocprofvis_dm_result_t rocprofvis_db_read_metadata_async(
-                                        rocprofvis_dm_database_t database, 
+                                        rocprofvis_dm_database_t database,
                                         rocprofvis_db_future_t object){
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(database,
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->ReadTraceMetadataAsync(object);
+    return ((RocProfVis::DataModel::Database*) database)->ReadTraceMetadataAsync(object);
 }
 
 /****************************************************************************************************
@@ -213,20 +215,19 @@ rocprofvis_dm_result_t rocprofvis_db_read_trace_slice_async(
     ROCPROFVIS_ASSERT_MSG_RETURN(database,
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->ReadTraceSliceAsync(start,end,num,tracks,object);
+    return ((RocProfVis::DataModel::Database*) database)->ReadTraceSliceAsync(start,end,num,tracks,object);
 }
 
 rocprofvis_dm_result_t rocprofvis_db_build_table_query(
-    rocprofvis_dm_database_t database, 
-    rocprofvis_dm_timestamp_t start, rocprofvis_dm_timestamp_t end, 
-    rocprofvis_db_num_of_tracks_t num, rocprofvis_db_track_selection_t tracks, 
-    rocprofvis_dm_charptr_t where, rocprofvis_dm_charptr_t filter, 
-    rocprofvis_dm_charptr_t group, rocprofvis_dm_charptr_t group_cols, 
-    rocprofvis_dm_charptr_t sort_column, rocprofvis_dm_sort_order_t sort_order, 
-    rocprofvis_dm_num_string_table_filters_t num_string_table_filters, rocprofvis_dm_string_table_filters_t string_table_filters, 
-    uint64_t max_count, uint64_t offset, 
-    bool count_only, bool summary, 
+    rocprofvis_dm_database_t database,
+    rocprofvis_dm_timestamp_t start, rocprofvis_dm_timestamp_t end,
+    rocprofvis_db_num_of_tracks_t num, rocprofvis_db_track_selection_t tracks,
+    rocprofvis_dm_charptr_t where, rocprofvis_dm_charptr_t filter,
+    rocprofvis_dm_charptr_t group, rocprofvis_dm_charptr_t group_cols,
+    rocprofvis_dm_charptr_t sort_column, rocprofvis_dm_sort_order_t sort_order,
+    rocprofvis_dm_num_string_table_filters_t num_string_table_filters, rocprofvis_dm_string_table_filters_t string_table_filters,
+    uint64_t max_count, uint64_t offset,
+    bool count_only, bool summary,
     char** out_query)
 {
     PROFILE;
@@ -235,10 +236,9 @@ rocprofvis_dm_result_t rocprofvis_db_build_table_query(
                                  kRocProfVisDmResultInvalidParameter);
     ROCPROFVIS_ASSERT_MSG_RETURN(out_query, "Error! Query cannot be null.",
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
     std::string query;
-    rocprofvis_dm_result_t result = db->BuildTableQuery(start, end, num, tracks, where, filter, group, group_cols, sort_column, sort_order, 
-                                                        num_string_table_filters, string_table_filters, max_count, offset, count_only, 
+    rocprofvis_dm_result_t result = ((RocProfVis::DataModel::Database*) database)->BuildTableQuery(start, end, num, tracks, where, filter, group, group_cols, sort_column, sort_order,
+                                                        num_string_table_filters, string_table_filters, max_count, offset, count_only,
                                                         summary, query);
     if (result == kRocProfVisDmResultSuccess)
     {
@@ -265,13 +265,12 @@ rocprofvis_dm_result_t rocprofvis_db_export_table_csv_async(
                                  kRocProfVisDmResultInvalidParameter);
     ROCPROFVIS_ASSERT_MSG_RETURN(file_path, "Error! Output path cannot be null.",
                                 kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->ExportTableCSVAsync(query, file_path, object);
+    return ((RocProfVis::DataModel::Database*) database)->ExportTableCSVAsync(query, file_path, object);
 }
 
 rocprofvis_dm_result_t rocprofvis_db_trim_save_async(rocprofvis_dm_database_t database, rocprofvis_dm_timestamp_t start,
                                             rocprofvis_dm_timestamp_t end,
-                                            rocprofvis_dm_charptr_t new_db_path, 
+                                            rocprofvis_dm_charptr_t new_db_path,
                                             rocprofvis_db_future_t object)
 {
     PROFILE;
@@ -283,8 +282,7 @@ rocprofvis_dm_result_t rocprofvis_db_trim_save_async(rocprofvis_dm_database_t da
                                  kRocProfVisDmResultInvalidParameter);
     ROCPROFVIS_ASSERT_MSG_RETURN(new_db_path, "Error! Database path cannot be null.",
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->SaveTrimmedDataAsync(start, end, new_db_path, object);
+    return ((RocProfVis::DataModel::Database*) database)->SaveTrimmedDataAsync(start, end, new_db_path, object);
 }
 
 /****************************************************************************************************
@@ -313,8 +311,7 @@ rocprofvis_dm_result_t  rocprofvis_db_read_event_property_async(
     ROCPROFVIS_ASSERT_MSG_RETURN(database,
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->ReadEventPropertyAsync(type, event_id, object);
+    return ((RocProfVis::DataModel::Database*) database)->ReadEventPropertyAsync(type, event_id, object);
 }
 
 /****************************************************************************************************
@@ -332,18 +329,17 @@ rocprofvis_dm_result_t  rocprofvis_db_read_event_property_async(
  * 
  ***************************************************************************************************/
 rocprofvis_dm_result_t  rocprofvis_db_execute_query_async(
-                                        rocprofvis_dm_database_t database,                                                                
+                                        rocprofvis_dm_database_t database,
                                         rocprofvis_dm_charptr_t query,
                                         rocprofvis_dm_charptr_t description,
-                                        rocprofvis_db_future_t object, 
+                                        rocprofvis_db_future_t object,
                                         rocprofvis_dm_table_id_t* id)
 {
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(database,
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    RocProfVis::DataModel::Database* db = (RocProfVis::DataModel::Database*) database;
-    return db->ExecuteQueryAsync(query, description, object, id);
+    return ((RocProfVis::DataModel::Database*) database)->ExecuteQueryAsync(query, description, object, id);
 }
 
 /*******************************************TRACE INTERFACE*****************************************/
@@ -407,7 +403,7 @@ rocprofvis_dm_result_t rocprofvis_dm_bind_trace_to_database(   rocprofvis_dm_tra
                                  RocProfVis::DataModel::ERROR_DATABASE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
     rocprofvis_dm_db_bind_struct* bind_data=nullptr;
-    if  (kRocProfVisDmResultSuccess == ((RocProfVis::DataModel::Trace*)trace)->BindDatabase(database, bind_data) && 
+    if  (kRocProfVisDmResultSuccess == ((RocProfVis::DataModel::Trace*)trace)->BindDatabase(database, bind_data) &&
          kRocProfVisDmResultSuccess == ((RocProfVis::DataModel::Database*)database)->BindTrace(bind_data))
          return kRocProfVisDmResultSuccess;
     ROCPROFVIS_ASSERT_ALWAYS_MSG_RETURN("Error! Cannot bind trace to database",
@@ -424,14 +420,17 @@ rocprofvis_dm_result_t rocprofvis_dm_bind_trace_to_database(   rocprofvis_dm_tra
  * @return status of operation
  * 
  ***************************************************************************************************/
-rocprofvis_dm_result_t rocprofvis_dm_delete_time_slice( 
+rocprofvis_dm_result_t rocprofvis_dm_delete_time_slice(
                                         rocprofvis_dm_trace_t trace,
                                         rocprofvis_dm_timestamp_t start,
                                         rocprofvis_dm_timestamp_t end){
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteSliceAtTimeRange(start, end);
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_slice(start, end)
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }  
 
 /****************************************************************************************************
@@ -452,7 +451,10 @@ rocprofvis_dm_delete_time_slice_handle(   rocprofvis_dm_trace_t    trace,
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*) trace)->DeleteSliceByHandle(track, handle);
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_slice(track, handle)
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }
 
 /****************************************************************************************************
@@ -463,12 +465,15 @@ rocprofvis_dm_delete_time_slice_handle(   rocprofvis_dm_trace_t    trace,
  * @return status of operation
  * 
  ***************************************************************************************************/
-rocprofvis_dm_result_t rocprofvis_dm_delete_all_time_slices( 
+rocprofvis_dm_result_t rocprofvis_dm_delete_all_time_slices(
                                         rocprofvis_dm_trace_t trace){
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteAllSlices();
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_all_slices()
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }
 
 /****************************************************************************************************
@@ -491,7 +496,12 @@ rocprofvis_dm_result_t  rocprofvis_dm_delete_event_property_for(
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteEventPropertyFor(type, event_id);
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_event_property(
+               static_cast<rocstorage::event_property_type>(type),
+               rocstorage::event_id::from_raw(event_id.value))
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }     
 
 /****************************************************************************************************
@@ -512,7 +522,11 @@ rocprofvis_dm_result_t  rocprofvis_dm_delete_all_event_properties_for(
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteAllEventPropertiesFor(type);
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_all_event_properties(
+               static_cast<rocstorage::event_property_type>(type))
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }    
 
 /****************************************************************************************************
@@ -526,13 +540,16 @@ rocprofvis_dm_result_t  rocprofvis_dm_delete_all_event_properties_for(
  * @return status of operation
  * 
  ***************************************************************************************************/
-rocprofvis_dm_result_t  rocprofvis_dm_delete_table_at( 
+rocprofvis_dm_result_t  rocprofvis_dm_delete_table_at(
                                         rocprofvis_dm_trace_t trace,
                                         rocprofvis_dm_table_id_t id){
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteTableAt(id);
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_table(id)
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }
 
 /****************************************************************************************************
@@ -544,12 +561,15 @@ rocprofvis_dm_result_t  rocprofvis_dm_delete_table_at(
  * @return status of operation
  * 
  ***************************************************************************************************/
-rocprofvis_dm_result_t  rocprofvis_dm_delete_all_tables( 
+rocprofvis_dm_result_t  rocprofvis_dm_delete_all_tables(
                                         rocprofvis_dm_trace_t trace){
     PROFILE;
     ROCPROFVIS_ASSERT_MSG_RETURN(trace, RocProfVis::DataModel::ERROR_TRACE_CANNOT_BE_NULL,
                                  kRocProfVisDmResultInvalidParameter);
-    return ((RocProfVis::DataModel::Trace*)trace)->DeleteAllTables();
+    rocstorage::trace wrapper(trace);
+    return wrapper.delete_all_tables()
+        ? kRocProfVisDmResultSuccess
+        : kRocProfVisDmResultUnknownError;
 }
 
 /***********************************Universal property getters**************************************

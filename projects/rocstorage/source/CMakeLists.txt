@@ -24,6 +24,8 @@ set(rocstorage_sources
     ${CMAKE_CURRENT_LIST_DIR}/writer.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/database.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/common/error.cpp
 )
 target_sources(rocstorage PRIVATE ${rocstorage_sources})

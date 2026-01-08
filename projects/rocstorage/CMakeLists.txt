@@ -61,6 +61,8 @@ set(rocstorage_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/database.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/trace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/error.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/result.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/enum_definitions.h

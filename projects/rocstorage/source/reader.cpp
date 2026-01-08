@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include <rocstorage/reader.hpp>
+#include <rocstorage/database.hpp>
+#include <rocstorage/trace.hpp>
 
 #include "error.hpp"
 #include "reader/datamodel/internal_types.h"
@@ -122,82 +124,28 @@ uint64_t track::num_slices() const {
 // ======================== reader implementation ========================
 
 struct reader::Impl {
-  explicit Impl(const std::string &path, database_type type)
-      : trace_(std::make_unique<Trace>()), database_(nullptr),
-        future_(nullptr) {
-    if (path.empty()) {
-      throw std::runtime_error("Empty database path");
-    }
+  explicit Impl(const std::string &path, database_type type) {
+    // Create trace (owns internal Trace)
+    trace_ = std::make_unique<rocstorage::trace>();
 
-    // SQLite creates the file if it doesn't exist, which we don't want
-    if (!is_valid_sqlite_file(path)) {
-      throw std::runtime_error("File does not exist or is not a valid SQLite database: " + path);
+    // Open database (owns internal Database)
+    auto db_result = rocstorage::database::open(path, type);
+    if (!db_result) {
+      throw std::runtime_error(db_result.get_error().message());
     }
-
-    // Determine database type
-    auto db_type = static_cast<rocprofvis_db_type_t>(type);
-    if (db_type == kAutodetect) {
-      db_type = Database::Autodetect(path.c_str());
-      // If autodetect failed, try rocprof format as fallback
-      if (db_type == kAutodetect) {
-        db_type = kRocprofSqlite;
-      }
-    }
-
-    // Open database
-    if (db_type == kRocpdSqlite) {
-      database_ = std::make_unique<RocpdDatabase>(path.c_str());
-    } else if (db_type == kRocprofSqlite) {
-      database_ = std::make_unique<RocprofDatabase>(path.c_str());
-    } else {
-      throw std::runtime_error("Unsupported database type");
-    }
-
-    if (database_->Open() != kRocProfVisDmResultSuccess) {
-      throw std::runtime_error("Failed to open database: " + path);
-    }
+    database_ = std::move(db_result.value());
 
     // Bind trace to database
-    rocprofvis_dm_db_bind_struct *bind_data = nullptr;
-    auto result = trace_->BindDatabase(database_.get(), bind_data);
-    if (result != kRocProfVisDmResultSuccess) {
-      throw std::runtime_error("Failed to bind trace to database");
-    }
-
-    // Tell database about the trace binding (so BindObject() works)
-    result = database_->BindTrace(bind_data);
-    if (result != kRocProfVisDmResultSuccess) {
-      throw std::runtime_error("Failed to bind database to trace");
+    auto bind_status = database_->bind(*trace_);
+    if (!bind_status) {
+      throw std::runtime_error(bind_status.get_error().message());
     }
   }
 
   bool is_ready() const { return trace_ && database_; }
 
-  std::unique_ptr<Future> allocate_future(progress_callback callback) {
-    callback_ = std::move(callback);
-
-    if (callback_) {
-      return std::make_unique<Future>(
-          [](rocprofvis_db_filename_t filename,
-             rocprofvis_db_progress_percent_t percent,
-             rocprofvis_db_status_t status,
-             rocprofvis_db_status_message_t message, void *user_data) {
-            auto *self = static_cast<Impl *>(user_data);
-            if (self->callback_) {
-              self->callback_(filename, percent, status == kRPVDbSuccess,
-                              message);
-            }
-          },
-          this);
-    }
-
-    return std::make_unique<Future>(nullptr, nullptr);
-  }
-
-  std::unique_ptr<Trace> trace_;
-  std::unique_ptr<Database> database_;
-  std::unique_ptr<Future> future_;
-  progress_callback callback_;
+  std::unique_ptr<rocstorage::trace> trace_;
+  std::unique_ptr<rocstorage::database> database_;
 };
 
 std::unique_ptr<reader> reader::open(const std::string &path,
@@ -242,16 +190,7 @@ bool reader::read_metadata() {
   if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(nullptr);
-  auto result =
-      impl_->database_->ReadTraceMetadataAsync(impl_->future_.get());
-  if (result != kRocProfVisDmResultSuccess) {
-    return false;
-  }
-
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_metadata_async() && impl_->database_->wait();
 }
 
 status reader::try_read_metadata() {
@@ -262,47 +201,31 @@ status reader::try_read_metadata() {
     return error(error_code::not_loaded, "Reader not ready");
   }
 
-  impl_->future_ = impl_->allocate_future(nullptr);
-  auto c_result =
-      impl_->database_->ReadTraceMetadataAsync(impl_->future_.get());
-  if (c_result != kRocProfVisDmResultSuccess) {
-    return from_c_result(c_result, "Failed to start metadata read");
+  auto start_status = impl_->database_->try_read_metadata_async();
+  if (!start_status) {
+    return start_status;
   }
 
-  c_result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  if (c_result != kRocProfVisDmResultSuccess) {
-    return from_c_result(c_result, "Metadata read failed or timed out");
-  }
-
-  return ok();
+  return impl_->database_->try_wait();
 }
 
 bool reader::read_metadata_async(progress_callback callback) {
   if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-  auto result =
-      impl_->database_->ReadTraceMetadataAsync(impl_->future_.get());
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_metadata_async(std::move(callback));
 }
 
 bool reader::wait(uint64_t timeout_sec) {
-  if (!impl_ || !impl_->future_) {
+  if (!impl_ || !impl_->database_) {
     return false;
   }
-
-  // Convert seconds to milliseconds (WaitForCompletion uses ms)
-  // 0 = wait indefinitely
-  uint64_t timeout_ms = (timeout_sec == 0) ? UINT64_MAX : timeout_sec * 1000;
-  auto result = impl_->future_->WaitForCompletion(timeout_ms);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->wait(timeout_sec);
 }
 
 void reader::cancel() {
-  if (impl_ && impl_->future_) {
-    impl_->future_->SetInterrupted();
+  if (impl_ && impl_->database_) {
+    impl_->database_->cancel();
   }
 }
 
@@ -310,36 +233,28 @@ uint64_t reader::start_time() const {
   if (!impl_ || !impl_->trace_) {
     return 0;
   }
-  return impl_->trace_->StartTime();
+  return impl_->trace_->start_time();
 }
 
 uint64_t reader::end_time() const {
   if (!impl_ || !impl_->trace_) {
     return 0;
   }
-  return impl_->trace_->EndTime();
+  return impl_->trace_->end_time();
 }
 
 uint64_t reader::num_tracks() const {
   if (!impl_ || !impl_->trace_) {
     return 0;
   }
-  return impl_->trace_->NumberOfTracks();
+  return impl_->trace_->num_tracks();
 }
 
 std::unique_ptr<track> reader::get_track(uint64_t index) const {
-  if (!impl_ || !impl_->trace_ || index >= num_tracks()) {
+  if (!impl_ || !impl_->trace_) {
     return nullptr;
   }
-
-  rocprofvis_dm_track_t handle = nullptr;
-  auto result = impl_->trace_->GetPropertyAsHandle(kRPVDMTrackHandleIndexed,
-                                                     index, &handle);
-  if (result != kRocProfVisDmResultSuccess || !handle) {
-    return nullptr;
-  }
-
-  return std::unique_ptr<track>(new track(handle));
+  return impl_->trace_->get_track(index);
 }
 
 result<std::unique_ptr<track>> reader::try_get_track(uint64_t index) const {
@@ -349,61 +264,23 @@ result<std::unique_ptr<track>> reader::try_get_track(uint64_t index) const {
   if (!impl_->trace_) {
     return error(error_code::not_loaded, "Trace not loaded");
   }
-  if (index >= num_tracks()) {
-    return error(error_code::index_out_of_bounds,
-                 "Track index " + std::to_string(index) + " out of range (0-" +
-                 std::to_string(num_tracks() - 1) + ")");
-  }
-
-  rocprofvis_dm_track_t handle = nullptr;
-  auto c_result = impl_->trace_->GetPropertyAsHandle(kRPVDMTrackHandleIndexed,
-                                                      index, &handle);
-  if (c_result != kRocProfVisDmResultSuccess) {
-    return from_c_result(c_result, "Failed to get track at index " +
-                                   std::to_string(index));
-  }
-  if (!handle) {
-    return error(error_code::invalid_property,
-                 "Track handle is null for index " + std::to_string(index));
-  }
-
-  return std::unique_ptr<track>(new track(handle));
+  return impl_->trace_->try_get_track(index);
 }
 
 std::vector<std::unique_ptr<track>> reader::get_tracks() const {
-  std::vector<std::unique_ptr<track>> tracks;
-  auto count = num_tracks();
-  tracks.reserve(count);
-
-  for (uint64_t i = 0; i < count; ++i) {
-    if (auto t = get_track(i)) {
-      tracks.push_back(std::move(t));
-    }
+  if (!impl_ || !impl_->trace_) {
+    return {};
   }
-
-  return tracks;
+  return impl_->trace_->get_tracks();
 }
 
 bool reader::read_slice(uint64_t start, uint64_t end,
                         const std::vector<uint32_t> &track_ids) {
-  if (!impl_ || !impl_->is_ready() || track_ids.empty()) {
+  if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
-    return false;
-  }
-
-  impl_->future_ = impl_->allocate_future(nullptr);
-  auto result = impl_->database_->ReadTraceSliceAsync(
-      start, end, static_cast<uint16_t>(track_ids.size()),
-      const_cast<uint32_t *>(track_ids.data()), impl_->future_.get());
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return false;
-  }
-
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_slice_async(start, end, track_ids) &&
+         impl_->database_->wait();
 }
 
 status reader::try_read_slice(uint64_t start, uint64_t end,
@@ -414,65 +291,54 @@ status reader::try_read_slice(uint64_t start, uint64_t end,
   if (!impl_->is_ready()) {
     return error(error_code::not_loaded, "Reader not ready");
   }
-  if (track_ids.empty()) {
-    return error(error_code::invalid_parameter, "No track IDs specified");
-  }
-  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
-    return error(error_code::invalid_parameter,
-                 "Too many track IDs specified (max " +
-                 std::to_string(std::numeric_limits<uint16_t>::max()) + ")");
+
+  auto start_status = impl_->database_->try_read_slice_async(start, end, track_ids);
+  if (!start_status) {
+    return start_status;
   }
 
-  impl_->future_ = impl_->allocate_future(nullptr);
-  auto c_result = impl_->database_->ReadTraceSliceAsync(
-      start, end, static_cast<uint16_t>(track_ids.size()),
-      const_cast<uint32_t *>(track_ids.data()), impl_->future_.get());
-
-  if (c_result != kRocProfVisDmResultSuccess) {
-    return from_c_result(c_result, "Failed to start slice read");
-  }
-
-  c_result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  if (c_result != kRocProfVisDmResultSuccess) {
-    return from_c_result(c_result, "Slice read failed or timed out");
-  }
-
-  return ok();
+  return impl_->database_->try_wait();
 }
 
 bool reader::read_slice_async(uint64_t start, uint64_t end,
                               const std::vector<uint32_t> &track_ids,
                               progress_callback callback) {
-  if (!impl_ || !impl_->is_ready() || track_ids.empty()) {
+  if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-  if (track_ids.size() > std::numeric_limits<uint16_t>::max()) {
-    return false;
-  }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-  auto result = impl_->database_->ReadTraceSliceAsync(
-      start, end, static_cast<uint16_t>(track_ids.size()),
-      const_cast<uint32_t *>(track_ids.data()), impl_->future_.get());
-
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_slice_async(start, end, track_ids, std::move(callback));
 }
 
 uint64_t reader::memory_footprint() const {
   if (!impl_ || !impl_->trace_) {
     return 0;
   }
-  uint64_t footprint = 0;
-  impl_->trace_->GetPropertyAsUint64(kRPVDMTraceMemoryFootprintUInt64, 0,
-                                       &footprint);
-  return footprint;
+  return impl_->trace_->memory_footprint();
 }
 
 rocprofvis_dm_trace_t reader::c_trace_handle() const {
-  return impl_ ? impl_->trace_.get() : nullptr;
+  return impl_ && impl_->trace_ ? impl_->trace_->c_handle() : nullptr;
 }
 
 rocprofvis_dm_database_t reader::c_database_handle() const {
+  return impl_ && impl_->database_ ? impl_->database_->c_handle() : nullptr;
+}
+
+// ======================== Sub-object Access ========================
+
+trace *reader::get_trace() {
+  return impl_ ? impl_->trace_.get() : nullptr;
+}
+
+const trace *reader::get_trace() const {
+  return impl_ ? impl_->trace_.get() : nullptr;
+}
+
+database *reader::get_database() {
+  return impl_ ? impl_->database_.get() : nullptr;
+}
+
+const database *reader::get_database() const {
   return impl_ ? impl_->database_.get() : nullptr;
 }
 
@@ -482,37 +348,35 @@ bool reader::delete_slice(uint64_t start, uint64_t end) {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-  return impl_->trace_->DeleteSliceAtTimeRange(start, end) ==
-         kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_slice(start, end);
 }
 
 bool reader::delete_slice(uint32_t track_id, void *slice_handle) {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-  return impl_->trace_->DeleteSliceByHandle(track_id, slice_handle) ==
-         kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_slice(track_id, slice_handle);
 }
 
 bool reader::delete_all_slices() {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-  return impl_->trace_->DeleteAllSlices() == kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_all_slices();
 }
 
 bool reader::delete_all_tables() {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-  return impl_->trace_->DeleteAllTables() == kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_all_tables();
 }
 
 bool reader::delete_table(uint64_t table_id) {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-  return impl_->trace_->DeleteTableAt(table_id) == kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_table(table_id);
 }
 
 // ======================== Event Properties ========================
@@ -521,22 +385,8 @@ bool reader::read_event_property(event_property_type type, event_id id) {
   if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(nullptr);
-
-  rocprofvis_dm_event_id_t c_id;
-  c_id.value = id.raw();
-
-  auto result = impl_->database_->ReadEventPropertyAsync(
-      static_cast<rocprofvis_dm_event_property_type_t>(type), c_id,
-      impl_->future_.get());
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return false;
-  }
-
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_event_property_async(type, id.raw()) &&
+         impl_->database_->wait();
 }
 
 bool reader::read_event_property_async(event_property_type type, event_id id,
@@ -544,88 +394,43 @@ bool reader::read_event_property_async(event_property_type type, event_id id,
   if (!impl_ || !impl_->is_ready()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-
-  rocprofvis_dm_event_id_t c_id;
-  c_id.value = id.raw();
-
-  auto result = impl_->database_->ReadEventPropertyAsync(
-      static_cast<rocprofvis_dm_event_property_type_t>(type), c_id,
-      impl_->future_.get());
-
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->read_event_property_async(type, id.raw(),
+                                                     std::move(callback));
 }
 
 std::unique_ptr<flow_trace> reader::get_flow_trace(event_id id) const {
   if (!impl_ || !impl_->trace_) {
     return nullptr;
   }
-
-  rocprofvis_dm_handle_t handle = nullptr;
-  auto result = impl_->trace_->GetPropertyAsHandle(
-      kRPVDMFlowTraceHandleByEventID, id.raw(), &handle);
-
-  if (result != kRocProfVisDmResultSuccess || !handle) {
-    return nullptr;
-  }
-
-  return std::unique_ptr<flow_trace>(new flow_trace(handle));
+  return impl_->trace_->get_flow_trace(id);
 }
 
 std::unique_ptr<stack_trace> reader::get_stack_trace(event_id id) const {
   if (!impl_ || !impl_->trace_) {
     return nullptr;
   }
-
-  rocprofvis_dm_handle_t handle = nullptr;
-  auto result = impl_->trace_->GetPropertyAsHandle(
-      kRPVDMStackTraceHandleByEventID, id.raw(), &handle);
-
-  if (result != kRocProfVisDmResultSuccess || !handle) {
-    return nullptr;
-  }
-
-  return std::unique_ptr<stack_trace>(new stack_trace(handle));
+  return impl_->trace_->get_stack_trace(id);
 }
 
 std::unique_ptr<ext_data> reader::get_ext_data(event_id id) const {
   if (!impl_ || !impl_->trace_) {
     return nullptr;
   }
-
-  rocprofvis_dm_handle_t handle = nullptr;
-  auto result = impl_->trace_->GetPropertyAsHandle(kRPVDMExtInfoHandleByEventID,
-                                                     id.raw(), &handle);
-
-  if (result != kRocProfVisDmResultSuccess || !handle) {
-    return nullptr;
-  }
-
-  return std::unique_ptr<ext_data>(new ext_data(handle));
+  return impl_->trace_->get_ext_data(id);
 }
 
 bool reader::delete_event_property(event_property_type type, event_id id) {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-
-  rocprofvis_dm_event_id_t c_id;
-  c_id.value = id.raw();
-
-  return impl_->trace_->DeleteEventPropertyFor(
-             static_cast<rocprofvis_dm_event_property_type_t>(type), c_id) ==
-         kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_event_property(type, id);
 }
 
 bool reader::delete_all_event_properties(event_property_type type) {
   if (!impl_ || !impl_->trace_) {
     return false;
   }
-
-  return impl_->trace_->DeleteAllEventPropertiesFor(
-             static_cast<rocprofvis_dm_event_property_type_t>(type)) ==
-         kRocProfVisDmResultSuccess;
+  return impl_->trace_->delete_all_event_properties(type);
 }
 
 // ======================== Query Execution ========================
@@ -634,33 +439,7 @@ std::string reader::build_table_query(const table_query_options &options) const 
   if (!impl_ || !impl_->database_) {
     return "";
   }
-
-  // Build C-style string array for string_table_filters
-  std::vector<const char *> filter_ptrs;
-  for (const auto &s : options.string_table_filters) {
-    filter_ptrs.push_back(s.c_str());
-  }
-
-  std::string query;
-  auto result = impl_->database_->BuildTableQuery(
-      options.start_time, options.end_time,
-      static_cast<uint16_t>(options.track_ids.size()),
-      const_cast<uint32_t *>(options.track_ids.data()),
-      options.where_clause.empty() ? nullptr : options.where_clause.c_str(),
-      options.filter.empty() ? nullptr : options.filter.c_str(),
-      options.group_by.empty() ? nullptr : options.group_by.c_str(),
-      options.group_columns.empty() ? nullptr : options.group_columns.c_str(),
-      options.sort_column.empty() ? nullptr : options.sort_column.c_str(),
-      static_cast<rocprofvis_dm_sort_order_t>(options.order),
-      static_cast<uint16_t>(filter_ptrs.size()),
-      filter_ptrs.empty() ? nullptr : filter_ptrs.data(), options.max_count,
-      options.offset, options.count_only, options.summary, query);
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return "";
-  }
-
-  return query;
+  return impl_->database_->build_table_query(options);
 }
 
 uint64_t reader::execute_query(const std::string &query,
@@ -669,19 +448,12 @@ uint64_t reader::execute_query(const std::string &query,
     return 0;
   }
 
-  impl_->future_ = impl_->allocate_future(nullptr);
-
-  uint64_t table_id = 0;
-  auto result = impl_->database_->ExecuteQueryAsync(
-      query.c_str(), description.empty() ? "" : description.c_str(),
-      impl_->future_.get(), &table_id);
-
-  if (result != kRocProfVisDmResultSuccess) {
+  uint64_t table_id = impl_->database_->execute_query_async(query, description);
+  if (table_id == 0) {
     return 0;
   }
 
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  if (result != kRocProfVisDmResultSuccess) {
+  if (!impl_->database_->wait()) {
     return 0;
   }
 
@@ -694,45 +466,22 @@ uint64_t reader::execute_query_async(const std::string &query,
   if (!impl_ || !impl_->is_ready() || query.empty()) {
     return 0;
   }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-
-  uint64_t table_id = 0;
-  auto result = impl_->database_->ExecuteQueryAsync(
-      query.c_str(), description.empty() ? "" : description.c_str(),
-      impl_->future_.get(), &table_id);
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return 0;
-  }
-
-  return table_id;
+  return impl_->database_->execute_query_async(query, description,
+                                               std::move(callback));
 }
 
 uint64_t reader::num_tables() const {
   if (!impl_ || !impl_->trace_) {
     return 0;
   }
-
-  uint64_t count = 0;
-  impl_->trace_->GetPropertyAsUint64(kRPVDMNumberOfTablesUInt64, 0, &count);
-  return count;
+  return impl_->trace_->num_tables();
 }
 
 std::unique_ptr<query_result> reader::get_table(uint64_t table_id) const {
   if (!impl_ || !impl_->trace_) {
     return nullptr;
   }
-
-  rocprofvis_dm_handle_t handle = nullptr;
-  auto result = impl_->trace_->GetPropertyAsHandle(kRPVDMTableHandleByID,
-                                                     table_id, &handle);
-
-  if (result != kRocProfVisDmResultSuccess || !handle) {
-    return nullptr;
-  }
-
-  return std::unique_ptr<query_result>(new query_result(handle));
+  return impl_->trace_->get_table(table_id);
 }
 
 // ======================== Export / Save ========================
@@ -742,18 +491,8 @@ bool reader::export_to_csv(const std::string &query,
   if (!impl_ || !impl_->is_ready() || query.empty() || file_path.empty()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(nullptr);
-
-  auto result = impl_->database_->ExportTableCSVAsync(
-      query.c_str(), file_path.c_str(), impl_->future_.get());
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return false;
-  }
-
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->export_to_csv_async(query, file_path) &&
+         impl_->database_->wait();
 }
 
 bool reader::export_to_csv_async(const std::string &query,
@@ -762,13 +501,8 @@ bool reader::export_to_csv_async(const std::string &query,
   if (!impl_ || !impl_->is_ready() || query.empty() || file_path.empty()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-
-  auto result = impl_->database_->ExportTableCSVAsync(
-      query.c_str(), file_path.c_str(), impl_->future_.get());
-
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->export_to_csv_async(query, file_path,
+                                               std::move(callback));
 }
 
 bool reader::save_trimmed(uint64_t start, uint64_t end,
@@ -776,18 +510,8 @@ bool reader::save_trimmed(uint64_t start, uint64_t end,
   if (!impl_ || !impl_->is_ready() || new_path.empty()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(nullptr);
-
-  auto result = impl_->database_->SaveTrimmedDataAsync(
-      start, end, new_path.c_str(), impl_->future_.get());
-
-  if (result != kRocProfVisDmResultSuccess) {
-    return false;
-  }
-
-  result = impl_->future_->WaitForCompletion(kDefaultTimeoutMs);
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->save_trimmed_async(start, end, new_path) &&
+         impl_->database_->wait();
 }
 
 bool reader::save_trimmed_async(uint64_t start, uint64_t end,
@@ -796,13 +520,8 @@ bool reader::save_trimmed_async(uint64_t start, uint64_t end,
   if (!impl_ || !impl_->is_ready() || new_path.empty()) {
     return false;
   }
-
-  impl_->future_ = impl_->allocate_future(std::move(callback));
-
-  auto result = impl_->database_->SaveTrimmedDataAsync(
-      start, end, new_path.c_str(), impl_->future_.get());
-
-  return result == kRocProfVisDmResultSuccess;
+  return impl_->database_->save_trimmed_async(start, end, new_path,
+                                              std::move(callback));
 }
 
 // ======================== flow_trace implementation ========================
