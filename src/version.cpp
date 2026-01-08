@@ -24,7 +24,7 @@
  */
 
 
-const char rocr4wslbuildid[] __attribute__((used)) = "ROCR4WSL BUILD ID: " STRING(ROCR4WSL_VERSION);
+const char rocdxgbuildid[] __attribute__((used)) = "ROCDXG BUILD ID: " STRING(ROCDXG_VERSION);
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
   CHECK_DXG_OPEN();

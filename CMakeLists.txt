@@ -31,8 +31,10 @@ set ( ROCDXG "rocdxg" )
 set ( ROCDXG_PACKAGE "rocdxg-roct" )
 set ( ROCDXG_COMPONENT "lib${ROCDXG}" )
 set ( ROCDXG_TARGET "${ROCDXG}" )
+set ( ROCDXG_VERSION "1.1.0")
 
-project ( ${ROCDXG_TARGET} VERSION 25.20.10)
+project ( ${ROCDXG_TARGET} VERSION ${ROCDXG_VERSION} )
+# Project/version initialized; expose version to code via target defs below
 
 # Optionally, build ROCDXG with ccache.
 set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
@@ -52,7 +54,7 @@ include ( utils )
 include ( GNUInstallDirs )
 
 ## Setup the package version.
-get_version ( "1.0.0" )
+get_version ( "${ROCDXG_VERSION}" )
 
 set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
 set ( BUILD_VERSION_MINOR ${VERSION_MINOR} )
@@ -140,6 +142,9 @@ target_include_directories( ${ROCDXG_TARGET}
 
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 
+# Ensure version macro is defined for this target
+target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
+
 target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
 target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy)
 
@@ -152,8 +157,6 @@ set_property ( TARGET ${ROCDXG_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}"
 find_package(PkgConfig)
 # get OS-info for OS-specific build dependencies
 get_os_info()
-
-find_package(PkgConfig)
 # Check for libraries required for building
 find_library(LIBC NAMES c REQUIRED)
 message(STATUS "LIBC:" ${LIBC})
@@ -239,7 +242,7 @@ configure_file ( librocdxg.pc.in librocdxg.pc @ONLY )
 
 install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/librocdxg.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev )
 
-install(CODE "execute_process(COMMAND ldconfig)")
+install(CODE "execute_process(COMMAND ldconfig)" COMPONENT binary)
 
 ###########################
 # Packaging directives
@@ -259,25 +262,12 @@ set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig
 # Install License file
 install ( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
 
-# Make proper version for appending
-# Default Value is 99999, setting it first
-set(ROCM_VERSION_FOR_PACKAGE "99999")
-if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-  set(ROCM_VERSION_FOR_PACKAGE $ENV{ROCM_LIBPATCH_VERSION})
-endif()
-
 # Prepare final version for the CPACK use
-set(PACKAGE_VERSION_STR "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
+set(PACKAGE_VERSION_STR "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 set(CPACK_PACKAGE_VERSION "${PACKAGE_VERSION_STR}")
 
 # Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/ROCT-Thunk-Interface")
 set(CPACK_DEBIAN_PACKAGE_NAME "rocdxg-roct")
-if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-   set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-else()
-   set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
-endif()
 
 # Debian binary package specific variables (runtime package)
 set(CPACK_DEBIAN_BINARY_PACKAGE_NAME "rocdxg-roct")
