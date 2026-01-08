@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
 #include <algorithm>
+#include "texture_common.h"
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -341,31 +342,9 @@ static void testMipmapTextureObj(size_t width, size_t height, size_t depth, floa
   HIP_CHECK(hipFreeMipmappedArray(mipmapArray));
 }
 
-/**
- * Test Description
- * ------------------------
- * - The suite will test following functions with hipReadModeElementType and hipFilterModePoint
-     in 3D
-       creating MipMap array,
-       getting level array,
-       creating/initilizing texture and surface objects on level array,
-       creating texture object on the mipmap array,
-       verifing the texture object
- * Test source
- * ------------------------
- * - catch\unit\texture\hipTextureMipmapObj3D.cc
- * Test requirements
- * ------------------------
- *  - Host specific (WINDOWS)
- *  - Textures supported on device
- *  - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType", "", char, uchar,
-                   short, ushort, int, uint, float, char1, uchar1, short1, ushort1, int1, uint1,
-                   float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4, uchar4,
-                   short4, ushort4, int4, uint4, float4) {
-  CHECK_IMAGE_SUPPORT
-
+// Helper function to run all test sections for hipReadModeElementType with hipFilterModePoint
+template <typename TestType>
+static void runElementTypePointTests() {
   SECTION(
       "Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 23, 21, 47") {
@@ -392,29 +371,9 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType", 
   }
 }
 
-/**
- * Test Description
- * ------------------------
- * - The suite will test following functions with hipReadModeNormalizedFloat on integer types in 3D
-       creating MipMap array,
-       getting level array,
-       creating/initilizing texture and surface objects on level array,
-       creating texture object on the mipmap array,
-       verifing the texture object
- * Test source
- * ------------------------
- * - catch\unit\texture\hipTextureMipmapObj3D.cc
- * Test requirements
- * ------------------------
- *  - Host specific (WINDOWS)
- *  - Textures supported on device
- *  - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloat", "", char, uchar,
-                   short, ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2,
-                   char4, uchar4, short4, ushort4) {
-  CHECK_IMAGE_SUPPORT
-
+// Helper function to run all test sections for hipReadModeNormalizedFloat
+template <typename TestType>
+static void runNormalizedFloatTests() {
   SECTION(
       "Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeClamp 23, 21, 67") {
@@ -465,29 +424,9 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloa
   }
 }
 
-/**
- * Test Description
- * ------------------------
- * - The suite will test following functions with hipReadModeElementType and hipFilterModeLinear
-     on float types in 3D,
-       creating MipMap array,
-       getting level array,
-       creating/initilizing texture and surface objects on level array,
-       creating texture object on the mipmap array,
-       verifing the texture object
- * Test source
- * ------------------------
- * - catch\unit\texture\hipTextureMipmapObj3D.cc
- * Test requirements
- * ------------------------
- *  - Host specific (WINDOWS)
- *  - Textures supported on device
- *  - HIP_VERSION >= 5.7
- */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType float only", "",
-                   float, float1, float2, float4) {
-  CHECK_IMAGE_SUPPORT
-
+// Helper function to run all test sections for hipReadModeElementType with hipFilterModeLinear (float only)
+template <typename TestType>
+static void runElementTypeLinearFloatTests() {
   SECTION(
       "Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeClamp 23, 17, 301, 0., 0., 0.") {
@@ -518,4 +457,87 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType fl
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeBorder>(67, 131, 67, -0.3, -0.67, 0.88);
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - The suite will test following functions with hipReadModeElementType and hipFilterModePoint
+     in 3D
+       creating MipMap array,
+       getting level array,
+       creating/initilizing texture and surface objects on level array,
+       creating texture object on the mipmap array,
+       verifing the texture object
+ * Test source
+ * ------------------------
+ * - catch\unit\texture\hipTextureMipmapObj3D.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific (WINDOWS)
+ *  - Textures supported on device
+ *  - HIP_VERSION >= 5.7
+ */
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType", "", char,
+                   unsigned char, short, unsigned short, int, unsigned int, float) {
+  CHECK_IMAGE_SUPPORT
+  runElementTypePointTests<vector_type_helper_t<TestType, 0>>();
+  runElementTypePointTests<vector_type_helper_t<TestType, 1>>();
+  runElementTypePointTests<vector_type_helper_t<TestType, 2>>();
+  runElementTypePointTests<vector_type_helper_t<TestType, 4>>();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - The suite will test following functions with hipReadModeNormalizedFloat on integer types in 3D
+       creating MipMap array,
+       getting level array,
+       creating/initilizing texture and surface objects on level array,
+       creating texture object on the mipmap array,
+       verifing the texture object
+ * Test source
+ * ------------------------
+ * - catch\unit\texture\hipTextureMipmapObj3D.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific (WINDOWS)
+ *  - Textures supported on device
+ *  - HIP_VERSION >= 5.7
+ */
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloat", "", char,
+                   unsigned char, short, unsigned short) {
+  CHECK_IMAGE_SUPPORT
+  runNormalizedFloatTests<vector_type_helper_t<TestType, 0>>();
+  runNormalizedFloatTests<vector_type_helper_t<TestType, 1>>();
+  runNormalizedFloatTests<vector_type_helper_t<TestType, 2>>();
+  runNormalizedFloatTests<vector_type_helper_t<TestType, 4>>();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - The suite will test following functions with hipReadModeElementType and hipFilterModeLinear
+     on float types in 3D,
+       creating MipMap array,
+       getting level array,
+       creating/initilizing texture and surface objects on level array,
+       creating texture object on the mipmap array,
+       verifing the texture object
+ * Test source
+ * ------------------------
+ * - catch\unit\texture\hipTextureMipmapObj3D.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific (WINDOWS)
+ *  - Textures supported on device
+ *  - HIP_VERSION >= 5.7
+ */
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType float only", "",
+                   float) {
+  CHECK_IMAGE_SUPPORT
+  runElementTypeLinearFloatTests<vector_type_helper_t<TestType, 0>>();
+  runElementTypeLinearFloatTests<vector_type_helper_t<TestType, 1>>();
+  runElementTypeLinearFloatTests<vector_type_helper_t<TestType, 2>>();
+  runElementTypeLinearFloatTests<vector_type_helper_t<TestType, 4>>();
 }

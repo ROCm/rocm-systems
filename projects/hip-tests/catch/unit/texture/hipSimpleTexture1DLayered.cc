@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <hip_array_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
+#include "texture_common.h"
 // #define DEBUG_DATA
 
 template <typename TestType>
@@ -221,11 +222,12 @@ void runLayered1DTextureTest(BufferType bufferType) {
  *  - HIP_VERSION >= 6.0
  */
 TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray", "", char,
-                   unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
-                   int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
-                   uchar4, short4, ushort4, int4, uint4, float4) {
+                   unsigned char, short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
-  runLayered1DTextureTest<TestType>(BufferType::Host);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Host);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Host);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Host);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Host);
 }
 
 /**
@@ -254,9 +256,10 @@ TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray",
  *  - HIP_VERSION >= 6.0
  */
 TEMPLATE_TEST_CASE("Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray", "", char,
-                   unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
-                   int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
-                   uchar4, short4, ushort4, int4, uint4, float4) {
+                   unsigned char, short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
-  runLayered1DTextureTest<TestType>(BufferType::Device);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 0>>(BufferType::Device);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 1>>(BufferType::Device);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 2>>(BufferType::Device);
+  runLayered1DTextureTest<vector_type_helper_t<TestType, 4>>(BufferType::Device);
 }
