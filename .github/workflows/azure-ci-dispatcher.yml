@@ -27,10 +27,10 @@ on:
       - main
       - release-staging/rocm-rel-7.*
     paths-ignore:  # Do not trigger full tests on documentation-only changes
-      - '**.txt'
-      - '**.md'
-      - '**.rtf'
-      - '**.rst'
+      - '**/*.txt'
+      - '**/*.md'
+      - '**/*.rtf'
+      - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
