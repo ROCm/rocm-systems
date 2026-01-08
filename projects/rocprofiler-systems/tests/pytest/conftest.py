@@ -98,6 +98,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Show runner output only when subtests fail",
     )
+    group.addoption(
+        "--ctest-integration",
+        action="store_true",
+        default=False,
+        help="Enable CTest integration (developer flag)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -130,6 +136,9 @@ def pytest_configure(config: pytest.Config) -> None:
     pytest._show_output_flag = config.getoption("--show-output", default=False)
     pytest._show_output_on_subtest_fail_flag = config.getoption(
         "--show-output-on-subtest-fail", default=False
+    )
+    pytest._ctest_integration_flag = config.getoption(
+        "--ctest-integration", default=False
     )
     # Store config reference for hooks that need terminal reporter access
     pytest._config_ref = config
@@ -555,36 +564,54 @@ def apply_rocpd_marker(request):
 
 def _cleanup_temp_patterns() -> list[str]:
     """Return list of temp file patterns to clean up."""
-    return [
-        # rocprofiler-systems temp files
-        "/tmp/buffered_storage*.bin",
-        "/tmp/metadata*.json",
-        "/tmp/rocprof-sys-*.tmp",
-        "/tmp/rocprofsys-*.tmp",
-        # Perfetto temp files
-        "/tmp/perfetto-*.proto",
-        "/tmp/perfetto_trace*.proto",
-        # HSA/ROCm temp files
-        "/tmp/hsa-*.tmp",
-        "/tmp/rocm-*.tmp",
-        "/tmp/hip-*.tmp",
-        # Instrumented binaries that might be left over
-        "/tmp/*.inst",
-        # Causal profiling temp files
-        "/tmp/causal-*.json",
-        "/tmp/experiments-*.coz",
-        # Core dumps (if any)
-        "/tmp/core.*",
-    ]
+    patterns = []
+
+    if not getattr(pytest, "_ctest_integration_flag", False):
+        patterns.extend(
+            [
+                "/tmp/buffered_storage*.bin",
+                "/tmp/metadata*.json",
+            ]
+        )
+
+    # Other rocprofiler-systems temp files (always cleaned)
+    patterns.extend(
+        [
+            "/tmp/rocprof-sys-*.tmp",
+            "/tmp/rocprofsys-*.tmp",
+            # Perfetto temp files
+            "/tmp/perfetto-*.proto",
+            "/tmp/perfetto_trace*.proto",
+            # HSA/ROCm temp files
+            "/tmp/hsa-*.tmp",
+            "/tmp/rocm-*.tmp",
+            "/tmp/hip-*.tmp",
+            # Instrumented binaries that might be left over
+            "/tmp/*.inst",
+            # Causal profiling temp files
+            "/tmp/causal-*.json",
+            "/tmp/experiments-*.coz",
+            # Core dumps (if any)
+            "/tmp/core.*",
+        ]
+    )
+
+    return patterns
 
 
 def _cleanup_directory_patterns(build_dir: Path) -> list[Path]:
     """Return list of directories to check for cleanup."""
-    return [
-        build_dir / "rocprof-sys-pytest-output",
-        build_dir / "rocprof-sys-tests-output",
-        build_dir / "rocprof-sys-tests-config",
-    ]
+    patterns = []
+    if not getattr(pytest, "_ctest_integration_flag", False):
+        patterns.extend(
+            [
+                build_dir / "rocprof-sys-pytest-output",
+                build_dir / "rocprof-sys-tests-output",
+                build_dir / "rocprof-sys-tests-config",
+            ]
+        )
+
+    return patterns
 
 
 def _safe_remove_file(filepath: Path) -> None:
@@ -694,14 +721,11 @@ def cleanup_module_temp_files(
     if is_xdist_used:
         return
 
-    # Clean up any temp files in /tmp that match session patterns
-    temp_patterns = [
-        "/tmp/buffered_storage*.bin",
-        "/tmp/metadata*.json",
-    ]
-    for pattern in temp_patterns:
-        for filepath in glob.glob(pattern):
-            _safe_remove_file(Path(filepath))
+    # Clean up trace cache temp files
+    if not getattr(pytest, "_ctest_integration_flag", False):
+        for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
+            for filepath in glob.glob(pattern):
+                _safe_remove_file(Path(filepath))
 
 
 @pytest.fixture

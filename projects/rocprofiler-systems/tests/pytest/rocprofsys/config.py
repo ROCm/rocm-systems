@@ -266,7 +266,7 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
 
 
 def _find_mpiexec() -> Optional[Path]:
-    """Find MPI laucnher executable."""
+    """Find MPI launcher executable."""
     for candidate in ["mpiexec", "mpirun"]:
         path = shutil.which(candidate)
         if path:
