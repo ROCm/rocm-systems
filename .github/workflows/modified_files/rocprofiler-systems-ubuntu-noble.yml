@@ -1,17 +1,17 @@
-name: rocprofiler-systems Debian (GCC, Python, ROCm)
-run-name: debian
+name: rocprofiler-systems Ubuntu 24.04 (GCC, Python, ROCm)
+run-name: ubuntu-noble
 
 on:
   push:
     branches:
       - develop
     paths:
-      - '.github/workflows/rocprofiler-systems-debian.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!**/*.txt'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
+      - '!**.txt'
+      - '!**.md'
+      - '!**.rtf'
+      - '!**.rst'
       - '!**/.markdownlint-ci2.yaml'
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
@@ -22,12 +22,12 @@ on:
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
-      - '.github/workflows/rocprofiler-systems-debian.yml'
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!**/*.txt'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
+      - '!**.txt'
+      - '!**.md'
+      - '!**.rtf'
+      - '!**.rst'
       - '!**/.markdownlint-ci2.yaml'
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
@@ -46,10 +46,10 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
-  debian:
+  ubuntu-noble:
     runs-on: ubuntu-latest
     container:
-      image: dgaliffiamd/rocprofiler-systems:ci-base-debian-${{ matrix.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -57,8 +57,7 @@ jobs:
         python: ['ON']
         build-type: ['Release']
         build-dyninst: ['ON']
-        os-release: ['12']
-        rocm-version: ['6.4', '7.0', '7.1']
+        rocm-version: ['0.0', '6.3', '6.4', '7.0', '7.1']
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
@@ -93,7 +92,7 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
-        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/jammy/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
         apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
@@ -120,7 +119,7 @@ jobs:
         fi
         TAG=""
         python3 ./scripts/run-ci.py -B build \
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-debian-${{matrix.os-release}}-${{ matrix.compiler }}${TAG} \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}${TAG} \
           --build-jobs 2 \
           --site GitHub \
           -- \
@@ -139,7 +138,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_MAX_THREADS=64 \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
           $CMAKE_PREFIX_PATH_ARG \
@@ -174,7 +173,7 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         cmake --build build --target install --parallel 2
-        rm -rf /opt/rocprofiler-systems
+        rm -fr /opt/rocprofiler-systems/
 
     - name: CPack and Install
       working-directory: projects/rocprofiler-systems/
