@@ -182,9 +182,10 @@ client_data::initialize_event_info()
             if(agent_info_it == agent_counter_info.end())
             {
                 ROCPROFSYS_WARNING_F(0,
-                                     "Skipping GPU device %lu due to counter not found "
-                                     "for the specified architecture\n",
-                                     _dev_index);
+                                     "Skipping GPU device %lu (%s, handle=0x%lx) due to "
+                                     "counter not found for the specified architecture\n",
+                                     _dev_index, aitr.agent->name.c_str(),
+                                     aitr.agent->handle);
                 continue;
             }
 

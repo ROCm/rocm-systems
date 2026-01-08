@@ -292,11 +292,34 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto found_counters =
             timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
 
-        ROCPROFSYS_ABORT_F(
-            "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
+        // Determine which counters were not found
+        auto missing_counters = std::vector<std::string>{};
+        for(const auto& counter : counters)
+        {
+            if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
+                missing_counters.emplace_back(counter);
+        }
+        auto missing_counters_str = timemory::join::join(
+            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+
+        // In production, warn and continue with available counters
+        ROCPROFSYS_WARNING_F(0,
+                             "Unable to find all counters for agent %i (gpu-%li, %s). "
+                             "Requested: %s. Found: %s. Missing: %s. Continuing with "
+                             "available counters.\n",
+                             tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                             tool_agent_v->agent->name.c_str(),
+                             requested_counters.c_str(), found_counters.c_str(),
+                             missing_counters_str.c_str());
+
+        // In CI, throw to catch issues early
+        ROCPROFSYS_CI_THROW(
+            true,
+            "Unable to find all counters for agent %i (gpu-%li, %s). Requested: %s. "
+            "Found: %s. Missing: %s",
             tool_agent_v->agent->node_id, tool_agent_v->device_id,
             tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
-            found_counters.c_str());
+            found_counters.c_str(), missing_counters_str.c_str());
     }
 
     if(!counters_v.empty())
