@@ -43,6 +43,7 @@
  *
  */
 
+#include <thread>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -157,7 +158,7 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_fan_speed_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(static_cast<float>(duration.count())/repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration.count(), static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
@@ -183,12 +184,36 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_temp_metric_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds"  << std::endl;
+                << std::to_string(static_cast<float>(duration.count())/repeat) << " microseconds"  << std::endl;
       EXPECT_LT(duration.count(), (static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat));
     }
     skip = false;
 
     // test execution time for rsmi_dev_gpu_metrics_info_get
+    // test execution time for rsmi_dev_gpu_metrics_info_get with detailed breakdown
+    std::cout << "\n\t=== Detailed timing for rsmi_dev_gpu_metrics_info_get ===" << std::endl;
+    
+    // Warmup call
+    ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
+    
+    // Single call timing breakdown
+    auto single_start = std::chrono::high_resolution_clock::now();
+    ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
+    auto single_stop = std::chrono::high_resolution_clock::now();
+    auto single_duration = std::chrono::duration_cast<std::chrono::microseconds>(single_stop - single_start);
+    std::cout << "\tSingle call duration: " << single_duration.count() << " microseconds" << std::endl;
+    
+    // Now run the full 300 iterations
+    
+    // Test first 10 calls individually to see variance
+    std::cout << "\tFirst 10 individual call timings:" << std::endl;
+    for (int test_call = 0; test_call < 10; ++test_call) {
+      auto call_start = std::chrono::high_resolution_clock::now();
+      ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
+      auto call_stop = std::chrono::high_resolution_clock::now();
+      auto call_duration = std::chrono::duration_cast<std::chrono::microseconds>(call_stop - call_start);
+      std::cout << "\t  Call " << test_call << ": " << call_duration.count() << " μs" << std::endl;
+    }
     start = std::chrono::high_resolution_clock::now();
     for (int i=0; i < static_cast<int>(repeat); ++i) {
       ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
@@ -209,7 +234,7 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((kMETRICS_ELAPSED_MICROSEC_BASE * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_gpu_metrics_info_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(static_cast<float>(duration.count())/repeat) << " microseconds" << std::endl;
       EXPECT_LT(static_cast<float>(duration.count()),
                 static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
@@ -235,10 +260,15 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_metrics_xcd_counter_get() average execution time: "
-                << std::to_string(duration.count()/repeat) << " microseconds" << std::endl;
+                << std::to_string(static_cast<float>(duration.count())/repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration.count(), static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
+    // Add cooling period between devices to prevent thermal/load effects
+    if (dv_ind < num_monitor_devs() - 1) {
+      std::cout << "\n\tCooling period between devices..." << std::endl;
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
   }
 
   std::cout.precision(prev);
