@@ -395,7 +395,7 @@ class Roofline:
                     f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.html"
                 )
 
-            console_log("roofline", "Empirical Roofline HTML files saved!")
+            console_log("roofline", "Empirical Roofline HTML file saved!")
         else:
             # Create HTML output for GUI mode.
             ops_graph = (
