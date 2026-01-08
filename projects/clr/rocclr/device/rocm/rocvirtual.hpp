@@ -390,6 +390,7 @@ class VirtualGPU : public device::VirtualDevice {
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {}
 
   virtual address allocKernelArguments(size_t size, size_t alignment) final;
+  virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
   virtual void ReleaseAllHwQueues() final;
   virtual void ReleaseHwQueue() final;
 
@@ -458,6 +459,17 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
   bool ForceIrq() const { return force_irq_; }
+
+  //! SDMA engine affinity management
+  uint32_t AssignedSdmaEngine() const {
+    return assigned_sdma_engine_;
+  }
+  void SetAssignedSdmaEngine(uint32_t engine_mask) {
+    assigned_sdma_engine_ = engine_mask;
+  }
+  void ClearAssignedSdmaEngine() {
+    assigned_sdma_engine_ = 0;
+  }
 
  private:
   //! Dispatches a barrier with blocking HSA signals
@@ -627,6 +639,9 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_barrier_index_ = 0;           //!< The last HW queue write index for a packet
                                               //!< with a completion signal
   hsa_signal_t last_completion_signal_{};     //!< The last completion signal
+
+  //! SDMA engine affinity tracking for this VirtualGPU/stream
+  uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
 
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
