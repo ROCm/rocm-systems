@@ -2871,8 +2871,7 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
 }
 
 // ================================================================================================
-hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
-                                      hsa_queue_t* last_assigned_queue) {
+hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse) {
   // Only reuse queues when we've reached the maximum limit, unless forced
   // Below the limit, return nullptr to allow creating new queues
   if (!force_reuse && queuePool_[qIndex].size() < settings().max_hw_queues_) {
@@ -2888,39 +2887,23 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
     uint32_t mode = settings().dynamic_queues_;
 
     // gfx9XX pipe distribution: queues map to pipes via queue_id % num_pipes
-    // When enabled, prefer queues on different pipes when load metrics are equal
     const bool pipe_dist = settings().queue_pipe_dist_;
     const uint32_t num_pipes = numHwPipes_;
-    const uint64_t last_pipe = (last_assigned_queue != nullptr && pipe_dist)
-                                   ? (last_assigned_queue->id % num_pipes)
-                                   : UINT64_MAX;
 
     lowest = std::min_element(
         queuePool_[qIndex].begin(), queuePool_[qIndex].end(),
-        [mode, last_assigned_queue, pipe_dist, num_pipes, last_pipe](PoolRef A, PoolRef B) {
+        [mode, pipe_dist, num_pipes](PoolRef A, PoolRef B) {
           if (mode >= 1) {
             // Mode 1+: Advanced weighted metric with dedicated queue penalty
             // Metric = dedicated_queue_penalty + (depth << 4) + refCount
             uint64_t metricA = A.second.GetLoadMetric(A.first, mode);
             uint64_t metricB = B.second.GetLoadMetric(B.first, mode);
 
-            if (metricA == metricB) {
-              // gfx9XX pipe distribution: prefer a queue on a different pipe
-              if (pipe_dist && last_pipe != UINT64_MAX) {
-                uint64_t pipeA = A.first->id % num_pipes;
-                uint64_t pipeB = B.first->id % num_pipes;
-                bool A_same_pipe = (pipeA == last_pipe);
-                bool B_same_pipe = (pipeB == last_pipe);
-
-                // Prefer the queue on a different pipe
-                if (A_same_pipe != B_same_pipe) {
-                  return !A_same_pipe;  // A wins if on different pipe
-                }
-              }
-              // On tie (or same pipe status), prefer last_assigned_queue for stickiness
-              if (A.first == last_assigned_queue) return true;   // A wins
-              if (B.first == last_assigned_queue) return false;  // B wins
-              return false;  // No preference otherwise
+            if (metricA == metricB && pipe_dist) {
+              // gfx9XX pipe distribution: prefer lower pipe IDs for consistent distribution
+              uint64_t pipeA = A.first->id % num_pipes;
+              uint64_t pipeB = B.first->id % num_pipes;
+              return pipeA < pipeB;
             }
             return metricA < metricB;
           } else {
@@ -2943,11 +2926,10 @@ hsa_queue_t* Device::getQueueFromPool(const uint qIndex, bool force_reuse,
 }
 
 // ================================================================================================
-hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
-                                        hsa_queue_t* last_assigned_queue) {
+hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority) {
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
   auto queue = acquireQueue(queue_size, false, std::vector<uint32_t>{},
-                            priority, true, false, last_assigned_queue);
+                            priority, true, false);
   return queue;
 }
 
@@ -2955,7 +2937,7 @@ hsa_queue_t* Device::AcquireActiveQueue(amd::CommandQueue::Priority priority,
 hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   const std::vector<uint32_t>& cuMask,
                                   amd::CommandQueue::Priority priority, bool managed,
-                                  bool dedicated_queue, hsa_queue_t* last_assigned_queue) {
+                                  bool dedicated_queue) {
   hsa_amd_queue_priority_t queue_priority;
   uint qIndex;
   switch (priority) {
@@ -3007,7 +2989,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // decide when to start reclaiming queues.
     if (!coop_queue && (cuMask.size() == 0) &&
         (queuePool_[qIndex].size() >= settings().max_hw_queues_)) {
-      hsa_queue_t* queue = getQueueFromPool(qIndex, false, last_assigned_queue);
+      hsa_queue_t* queue = getQueueFromPool(qIndex, false);
       if (queue != nullptr) {
         if (!managed) {
           num_queues_[qIndex]++;
