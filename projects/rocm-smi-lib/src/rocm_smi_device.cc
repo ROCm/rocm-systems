@@ -379,8 +379,7 @@ static const std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}
 };
 
-const std::map<DevInfoTypes, const char*>
-Device::devInfoTypesStrings = {
+static const std::map<DevInfoTypes, const char*> devInfoTypesStrings = {
   {kDevPerfLevel, "kDevPerfLevel"},
   {kDevOverDriveLevel, "kDevOverDriveLevel"},
   {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
