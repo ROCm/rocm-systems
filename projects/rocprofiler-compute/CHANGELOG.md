@@ -55,6 +55,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
 
+* Improved Roofline documentation
+  * Dedicated Roofline page includes conceptual information and usage within each mode, with examples.
+  * Individual modes' documentation pages redirect to this single source of information.
+
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
 ### Added

@@ -560,104 +560,7 @@ This option checks if there is existing profiling data in the workload directory
 	b) Profile mode runs but is limited to collecting only roofline performance counters.
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
-Roofline options
-----------------
-
-``--sort <desired_sort>``
-   Allows you to specify whether you would like to overlay top kernel or top
-   dispatch data in your roofline plot.
-
-``-m``, ``--mem-level <cache_level>``
-   Allows you to specify specific levels of cache to include in your roofline
-   plot.
-
-``--device <gpu_id>``
-   Allows you to specify a device ID to collect performance data from when
-   running a roofline benchmark on your system.
-
-``-k``, ``--kernel <kernel-substr>``
-   Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
-   utility. See :ref:`profiling-kernel-filtering`.
-
-``--roofline-data-type <datatype>``
-   Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
-
-.. note::
-
-  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
-
-Each kernel in your ``.pdf`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline PDF includes an integrated multi-subplot layout with:
-
-1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
-2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
-3. **Full Kernel Names Table** - Lists complete kernel names with their corresponding plot markers
-
-
-Roofline only
--------------
-
-The following example demonstrates profiling roofline data only:
-
-.. code-block:: shell-session
-
-   $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
-                                    __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-   ...
-   INFO [roofline] Generating pmc_perf.csv (roofline counters only).
-   INFO Rocprofiler-Compute version: 3.3.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO Target: MI300X_A1
-   INFO Command: ./tests/occupancy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Dispatch Selection: None
-   INFO Filtered sections: ['4']
-   INFO 
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters (Roofline Only)
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO 
-   INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
-   INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
-   ...
-   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO [roofline] No roofline data found. Generating...
-   Empirical Roofline Calculation
-   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 8
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   ...
-An inspection of our workload output folder shows ``.pdf`` plots were generated
-successfully.
-
-.. code-block:: shell-session
-
-   $ ls workloads/occupancy/MI300X_A1
-   total 48
-   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.pdf
-   drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
-   -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
-   -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
-   -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
-
-.. note::
-
-   * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-
-The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
-plot.
-
-.. image:: ../../data/profile/sample-roof-plot.jpg
-   :align: center
-   :alt: Sample ROCm Compute Profiler roofline output
-   :width: 800
+For details about Roofline in profiling mode, including command line options and examples (with code samples and expected outputs), see :ref:`Roofline Profiling Options <roofline-Profiling-options>`.
 
 
 .. _iteration-multiplexing:
@@ -687,7 +590,7 @@ To enable iteration multiplexing in ROCm Compute Profiler, use the
 ``--iteration-multiplexing`` option in your profiling command. You can optionally specify
 the policy for multiplexing. The available policies are:
 
-* ``kernel`` 
+* ``kernel``
    The counters are divided based on the kernels being executed. Each kernel call
    for a particular kernel collects a different subset of counters.
 * ``kernel_launch_params``
@@ -707,10 +610,10 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--attach-pid`` is not used in your profiling command.
 
-   * Ensure that your workload runs for enough iterations to cover all counter subsets. 
-     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)  
-     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy), 
-     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations 
+   * Ensure that your workload runs for enough iterations to cover all counter subsets.
+     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)
+     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy),
+     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations
      is too low, some counters may not be collected.
 
    * Launch paramaters for ``kernel_launch_params`` policy.
@@ -736,11 +639,11 @@ The following example demonstrates how to use iteration multiplexing with the
    [INFO] Kernel Selection: None
    [INFO] Dispatch Selection: None
    [INFO] Filtered sections: All
-   [INFO] 
+   [INFO]
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    [INFO] Collecting Performance Counters
    [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   [INFO] 
+   [INFO]
    [INFO] Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
    [INFO] Iteration multiplexing: kernel
    [INFO] [profiling] Current input files: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_IFETCH_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_LDS.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_LEVEL_WAVES.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_0.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_1.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_10.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_11.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_12.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_2.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_3.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_4.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_5.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_6.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_7.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_8.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_9.txt

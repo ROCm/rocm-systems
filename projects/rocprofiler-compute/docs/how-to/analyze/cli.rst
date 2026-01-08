@@ -15,7 +15,7 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 * :ref:`Metric customization <cli-analysis-options>`: Isolate a subset of built-in metrics or build your own profiling configuration.
 
 * :ref:`Filtering <cli-analysis-options>`: Hone in on a particular kernel, GPU ID, or dispatch ID via post-process filtering.
-  
+
 * :ref:`Per-kernel roofline analysis <per-kernel-roofline>`: Detailed arithmetic intensity and performance analysis for individual kernels.
 
 Run ``rocprof-compute analyze -h`` for more details.
@@ -53,6 +53,7 @@ There are three high-level GPU analysis views:
    :align: left
    :alt: Memory Chart
 
+.. _cli-empirical-hierarchical-roofline:
 **Empirical hierarchical roofline:**
 
 .. code-block:: shell-session
@@ -67,6 +68,8 @@ There are three high-level GPU analysis views:
    * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
    * Visualized memory chart requires the width of the terminal output to be greater than or equal to 234 to display the whole chart properly.
    * Visualized Roofline chart is adapted to the initial terminal size only. If it is not clear, you may need to adjust the terminal size and regenerate it to check the display effect. Roofline analysis provides detailed, structured table output with measured empirical peak values for comparison.
+
+   See :ref:`Roofline Analysis Options <roofline-Analysis-options>` for more information about Roofline and its usage in analysis mode.
 
 .. _cli-list-available-metrics:
 
@@ -346,6 +349,12 @@ Show System Speed-of-Light and CS_Busy blocks only
    this case, ``1`` is the ID for System Speed-of-Light and ``5.1.0`` the ID for
    GPU Busy Cycles metric.
 
+.. note::
+
+   Dispatch filtering via ``-d`` or ``--dispatch`` is not supported for profiling
+   data collected with ``--iteration-multiplexing`` option.
+
+.. _cli-filter-kernel:
 Filter kernels
   First, list the top kernels in your application using `--list-stats`.
 
@@ -397,70 +406,7 @@ Filter kernels
   You should see your filtered kernels indicated by an asterisk in the **Top
   Stats** table.
 
-.. _per-kernel-roofline:
-
-Per-kernel roofline analysis
-  When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
-
-  .. code-block:: shell-session
-
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
-  This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
-
-  .. code-block:: text
-
-   ================================================================================
-   4. Roofline
-   ================================================================================
-   (4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points
-   --------------------------------------------------------------------------------
-   Kernel 0: vecCopy(double*, double*, double*, int, int) (100.0%)
-      |
-      ├─ 4.1 Roofline Rate Metrics:
-      |   ╒═════════════╤════════════════════╤═══════════════════╤═════════╤════════════════════╕
-      |   │ Metric_ID   │ Metric             │ Value             │ Unit    │   Peak (Empirical) │
-      |   ╞═════════════╪════════════════════╪═══════════════════╪═════════╪════════════════════╡
-      |   │ 4.1.0       │ VALU FLOPs         │                   │ Gflop/s │           61286.40 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.1       │ MFMA FLOPs (F64)   │                   │ Gflop/s │          108544.33 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.2       │ MFMA FLOPs (F32)   │                   │ Gflop/s │          104531.42 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.3       │ MFMA FLOPs (F16)   │                   │ Gflop/s │          709169.38 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.4       │ MFMA FLOPs (BF16)  │ 0.0               │ Gflop/s │          388161.09 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.5       │ MFMA FLOPs (F8)    │ 0.0               │ Gflop/s │         1446089.60 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.6       │ MFMA IOPs (Int8)   │                   │ Giop/s  │          737317.94 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.7       │ HBM Bandwidth      │                   │ Gb/s    │            3231.95 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.8       │ L2 Cache Bandwidth │                   │ Gb/s    │           19096.81 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.9       │ L1 Cache Bandwidth │ 3880.358726762844 │ Gb/s    │           25006.24 │
-      |   ├─────────────┼────────────────────┼───────────────────┼─────────┼────────────────────┤
-      |   │ 4.1.10      │ LDS Bandwidth      │                   │ Gb/s    │           54920.88 │
-      |   ╘═════════════╧════════════════════╧═══════════════════╧═════════╧════════════════════╛
-      ├─ 4.2 Roofline AI Plot Points:
-      |   ╒═════════════╤══════════════════════╤═════════╤════════════╕
-      |   │ Metric_ID   │ Metric               │ Value   │ Unit       │
-      |   ╞═════════════╪══════════════════════╪═════════╪════════════╡
-      |   │ 4.2.0       │ AI HBM               │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.1       │ AI L2                │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.2       │ AI L1                │         │ Flops/byte │
-      |   ├─────────────┼──────────────────────┼─────────┼────────────┤
-      |   │ 4.2.3       │ Performance (GFLOPs) │         │ Gflop/s    │
-      |   ╘═════════════╧══════════════════════╧═════════╧════════════╛
-  The per-kernel analysis uses YAML-based metric evaluation for accurate calculations.
-
-  Analyze multiple kernels for comparison:
-
-  .. code-block:: shell-session
-
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
+  Kernel filtering also applies to Roofline analysis, where per-kernel arithmetic intensity points and bandwidth metrics are displayed. See :ref:`Roofline Analysis Kernel Filtering <roofline-Analysis-kernel-filtering>` for more details and example code.
 
 Baseline comparison
   .. code-block:: shell

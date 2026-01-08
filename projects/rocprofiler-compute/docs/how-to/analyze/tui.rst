@@ -94,3 +94,5 @@ The TUI implementation has several limitations that will be addressed in future 
 
 * **Filtering capabilities**: Advanced filtering options such as kernel filtering and dispatch
   filtering are currently not supported. These features will be available in upcoming releases.
+
+* **Roofline Analysis**: Roofline model analysis is not currently supported and block 4 is not displayed in this mode. See :ref:`Roofline Analysis Options <roofline-Analysis-options>` for other analysis modes that support Roofline analysis.
