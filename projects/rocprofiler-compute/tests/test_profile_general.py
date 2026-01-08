@@ -89,7 +89,7 @@ CSVS = sorted([
 ])
 
 ROOF_ONLY_FILES = sorted([
-    "empirRoof_gpu-0_FP32.pdf",
+    "empirRoof_gpu-0_FP32.html",
     "pmc_perf.csv",
     "roofline.csv",
     "sysinfo.csv",
@@ -813,9 +813,9 @@ def test_path_csv(
 @pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
-    Test basic roofline PDF generation with full validation pipeline.
+    Test basic roofline HTML generation with full validation pipeline.
     This test runs the complete validation flow including counter logging
-    and metric comparison (if enabled in config). Validates that roofline PDFs
+    and metric comparison (if enabled in config). Validates that roofline HTMLs
     are generated with the integrated multi-subplot layout (roofline plot +
     plot points table + kernel names table).
     """
@@ -1134,9 +1134,9 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
 
     assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) == 0, (
-        "No roofline PDF should be generated when no kernels match"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) == 0, (
+        "No roofline HTML should be generated when no kernels match"
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1212,12 +1212,12 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     [
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            ["empirRoof_gpu-0_FP32.pdf"],
+            ["empirRoof_gpu-0_FP32.html"],
             "FP32_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            ["empirRoof_gpu-0_FP16.pdf"],
+            ["empirRoof_gpu-0_FP16.html"],
             "FP16_datatype",
         ),
         (
@@ -1605,12 +1605,12 @@ def test_roofline_bound_status_calculation():
 @pytest.mark.roofline_2
 def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
     """
-    Test roofline PDF generation with many kernels (10+) to verify:
+    Test roofline HTML generation with many kernels (10+) to verify:
     - Dynamic height calculation works
-    - PDF is generated successfully
+    - HTML is generated successfully
     - File size is reasonable
 
-    Note: This test uses a regular workload but validates the PDF structure
+    Note: This test uses a regular workload but validates the HTML structure
     can handle the multi-subplot layout properly.
     """
     if soc in ("MI100"):
@@ -1626,19 +1626,19 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
 
     assert returncode == 0, "Roofline profiling should succeed"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) > 0, "At least one roofline PDF should be generated"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, "At least one roofline HTML should be generated"
 
-    for pdf_file in pdf_files:
-        assert pdf_file.exists(), f"PDF file {pdf_file} should exist"
-        file_size = pdf_file.stat().st_size
+    for html_file in html_files:
+        assert html_file.exists(), f"HTML file {html_file} should exist"
+        file_size = html_file.stat().st_size
 
-        # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
+        # HTML should be larger than 10KB (has content) but less than 50MB (reasonable)
         assert file_size > 10000, (
-            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+            f"HTML {html_file} too small ({file_size} bytes), may be malformed"
         )
         assert file_size < 50000000, (
-            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+            f"HTML {html_file} too large ({file_size} bytes), may have issues"
         )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
