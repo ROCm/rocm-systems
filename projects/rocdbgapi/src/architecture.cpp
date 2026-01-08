@@ -349,6 +349,8 @@ public:
   bool are_trap_handler_ttmps_initialized (const wave_t &wave) const override;
   void initialize_trap_handler_ttmps (const wave_t &wave) const override;
 
+  void simulate_trap_handler_fixup (const wave_t &wave) const override;
+
   std::pair<amd_dbgapi_wave_state_t, amd_dbgapi_wave_stop_reasons_t>
   wave_get_state (wave_t &wave) const override;
   void wave_set_state (wave_t &wave,
@@ -1488,6 +1490,12 @@ amdgcn_architecture_t::initialize_spi_ttmps (const wave_t &wave) const
 
 void
 amdgcn_architecture_t::initialize_trap_handler_ttmps (
+  const wave_t & /* wave  */) const
+{
+}
+
+void
+amdgcn_architecture_t::simulate_trap_handler_fixup (
   const wave_t & /* wave  */) const
 {
 }
@@ -7603,6 +7611,12 @@ protected:
   gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
                           std::string target_triplet);
 
+  static constexpr size_t sq_wave_mode_msbs_shift = 12;
+  static constexpr size_t sq_wave_mode_msbs_size = 8;
+  static constexpr uint32_t sq_wave_mode_msbs_mask
+    = utils::bit_mask (sq_wave_mode_msbs_shift,
+                       sq_wave_mode_msbs_shift + sq_wave_mode_msbs_size - 1);
+
   class cwsr_record_t : public gfx12_architecture_t::cwsr_record_t
   {
   protected:
@@ -7677,6 +7691,8 @@ protected:
   std::optional<trap_id_t> trap_id (const wave_t &wave) const override;
 
   void initialize_trap_handler_ttmps (const wave_t &wave) const override;
+
+  void simulate_trap_handler_fixup (const wave_t &wave) const override;
 
   void simulate_trap_handler (wave_t &wave, agent_address_t pc,
                               std::optional<trap_id_t> trap_id) const override;
@@ -8156,6 +8172,76 @@ gfx12_5_architecture_t::simulate_trap_handler (
   /* Then halt the wave.  */
   state_priv_reg |= sq_wave_state_priv_halt_mask;
   wave.write_register (amdgpu_regnum_t::state_priv, state_priv_reg);
+}
+
+void
+gfx12_5_architecture_t::simulate_trap_handler_fixup (const wave_t &wave) const
+{
+  /* If XNACK_ERROR was raised, the trap handler did not do the fixup, we need
+     to do it here instead.  */
+  uint32_t excp_flag_priv = {};
+  wave.read_register (amdgpu_regnum_t::excp_flag_priv, &excp_flag_priv);
+  if (!(excp_flag_priv & sq_wave_excp_priv_memviol_mask))
+    return;
+
+  uint64_t pc;
+  wave.read_register (amdgpu_regnum_t::pc, &pc);
+
+  /* Disassemble the next 2 instructions.  */
+  std::optional<instruction_t> insn = wave.instruction_at_pc ();
+
+  auto is_valu = [] (const instruction_t &i) -> bool
+  {
+    /* Reproduce the logic from the trap handler.  */
+
+    /* Check for VOP1, VOP2 or VOPC which all have bit31 of the first
+       dword 0.  */
+    if ((i.word<0> () & (1u << 31)) == 0)
+      return true;
+
+    if (uint32_t sel = utils::bit_extract (i.word<0> (), 26, 31);
+        sel == 0x35 /* VOP3 or VOP3SD  */
+        || sel == 0x32 /* VOPD  */)
+      return true;
+
+    /* VOPD3  */
+    if (utils::bit_extract (i.word<0> (), 24, 31) == 0xcf)
+      return true;
+
+    /* No fixup needed for VOP3PX2.  */
+    if (uint32_t prefix = utils::bit_extract (i.word<0> (), 16, 31);
+        prefix == 0xcc350000 || prefix == 0xcc3a0000)
+      return false;
+
+    /* VOP3P.  */
+    if (utils::bit_extract (i.word<0> (), 24, 31) == 0xcc)
+      return true;
+
+    return false;
+  };
+
+  if (!insn.has_value () || !insn->is_valid () || !is_valu (*insn))
+    return;
+
+  /* Check if the next instruction is a s_set_vgpr_msb.  */
+  std::optional<instruction_t> next_insn
+    = wave.instruction_at_pc (insn->size ());
+
+  if (!next_insn.has_value () || !next_insn->is_valid ()
+      || !is_sopp_encoding<6> (*next_insn))
+    return;
+
+  /* We have a VALU instruction, followed by a s_set_vgpr_msb.  The compiler
+     used the top 8 bits of the immediate to save the "current" value of the
+     MSBs that need to be restored.  */
+  uint8_t msbs
+    = utils::bit_extract<uint8_t> (simm16_operand (*next_insn), 8, 15);
+
+  uint32_t mode_reg;
+  wave.read_register (amdgpu_regnum_t::mode, &mode_reg);
+  mode_reg = (mode_reg & ~sq_wave_mode_msbs_mask)
+             | (static_cast<uint32_t> (msbs) << sq_wave_mode_msbs_shift);
+  wave.write_register (amdgpu_regnum_t::mode, mode_reg);
 }
 
 bool

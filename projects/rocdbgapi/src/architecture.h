@@ -285,6 +285,9 @@ public:
      trap handler.  */
   virtual void initialize_trap_handler_ttmps (const wave_t &wave) const = 0;
 
+  /* Fixup the wave state.  */
+  virtual void simulate_trap_handler_fixup (const wave_t &wave) const = 0;
+
   virtual size_t maximum_queue_packet_count () const = 0;
 
   virtual std::unique_ptr<const kernel_descriptor_t>

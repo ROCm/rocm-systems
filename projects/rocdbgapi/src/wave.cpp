@@ -384,6 +384,9 @@ wave_t::update (
       m_ttmps_initialized = true;
     }
 
+  /* Fixup wave state, if necessary.  */
+  architecture.simulate_trap_handler_fixup (*this);
+
   /* Update the wave's state if this is a new wave, or if the wave was running
      the last time the queue it belongs to was resumed.  */
   amd_dbgapi_wave_state_t prev_state = m_state;
