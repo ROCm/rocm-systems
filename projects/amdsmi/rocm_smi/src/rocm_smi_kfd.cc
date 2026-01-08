@@ -29,11 +29,13 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -47,6 +49,7 @@ namespace amd::smi {
 
 static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+static const char *kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
 
 
 
@@ -96,6 +99,37 @@ static const char *kKFDNodePropHIVE_IDStr =            "hive_id";
 
 static bool is_number(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+// Helper function to get secondary context directories under a KFD process
+// Returns a vector of full paths to context_xxxx directories
+// For example: /sys/class/kfd/kfd/proc/1685/context_0
+static std::vector<std::string> GetSecondaryContextPaths(const std::string& proc_path) {
+  std::vector<std::string> context_paths;
+
+  DIR* dir = opendir(proc_path.c_str());
+  if (!dir) {
+    return context_paths;
+  }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    // Skip . and ..
+    if (entry->d_name[0] == '.') continue;
+
+    // Check if the entry starts with "context_"
+    if (strncmp(entry->d_name, kKFDContextPrefix, strlen(kKFDContextPrefix)) == 0) {
+      std::string context_path = proc_path + "/" + entry->d_name;
+      // Verify it's a directory
+      struct stat st;
+      if (stat(context_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+        context_paths.push_back(context_path);
+      }
+    }
+  }
+
+  closedir(dir);
+  return context_paths;
 }
 
 static std::string KFDDevicePath(uint32_t dev_id) {
@@ -283,6 +317,9 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
 
   std::string proc_id_str;
   std::string tmp;
+  // Keep track of PIDs we've already seen to avoid duplicates
+  // (e.g., if both "1234" and "pid:1234-id:1" exist)
+  std::unordered_set<uint32_t> seen_pids;
 
   while (dentry != nullptr) {
     if (dentry->d_name[0] == '.') {
@@ -291,16 +328,36 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
     }
 
     proc_id_str = dentry->d_name;
-    assert(is_number(proc_id_str) && "Unexpected file name in kfd/proc dir");
-    if (!is_number(proc_id_str)) {
-      dentry = readdir(proc_dir);
-      continue;
+
+    // Check if the entry is a plain number (traditional format)
+    if (is_number(proc_id_str)) {
+      uint32_t pid = static_cast<uint32_t>(std::stoi(proc_id_str));
+      if (seen_pids.find(pid) == seen_pids.end()) {
+        seen_pids.insert(pid);
+        if (procs && *num_procs_found < num_allocated) {
+          procs[*num_procs_found].process_id = pid;
+        }
+        ++(*num_procs_found);
+      }
     }
-    if (procs && *num_procs_found < num_allocated) {
-      procs[*num_procs_found].process_id =
-                                static_cast<uint32_t>(std::stoi(proc_id_str));
+    // Check for "pid:XXXX-id:X" format (alternative format for multi-context processes)
+    else if (proc_id_str.find("pid:") == 0) {
+      // Extract PID from "pid:XXXX-id:X" format
+      size_t dash_pos = proc_id_str.find('-');
+      if (dash_pos != std::string::npos) {
+        std::string pid_part = proc_id_str.substr(4, dash_pos - 4);  // Extract XXXX from "pid:XXXX-id:X"
+        if (is_number(pid_part)) {
+          uint32_t pid = static_cast<uint32_t>(std::stoi(pid_part));
+          if (seen_pids.find(pid) == seen_pids.end()) {
+            seen_pids.insert(pid);
+            if (procs && *num_procs_found < num_allocated) {
+              procs[*num_procs_found].process_id = pid;
+            }
+            ++(*num_procs_found);
+          }
+        }
+      }
     }
-    ++(*num_procs_found);
 
     dentry = readdir(proc_dir);
   }
@@ -318,6 +375,30 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
   out->clear();
 
   std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+
+  // Helper lambda to extract GPU IDs from files in a directory
+  auto extract_gpu_ids_from_dir = [&out](const std::string& dir_path) {
+    DIR* d = opendir(dir_path.c_str());
+    if (!d) return;
+
+    struct dirent* e;
+    while ((e = readdir(d))) {
+      if (e->d_name[0] == '.') continue; // skip "."/".." and hidden entries
+
+      // Grab KFD GPU id from one of these fields
+      if (!strncmp(e->d_name, "stats_", 6)) {
+        out->insert(strtoull(e->d_name + 6, nullptr, 10));
+      } else if (!strncmp(e->d_name, "vram_", 5)) {
+        out->insert(strtoull(e->d_name + 5, nullptr, 10));
+      } else if (!strncmp(e->d_name, "counters_", 9)) {
+        out->insert(strtoull(e->d_name + 9, nullptr, 10));
+      } else if (!strncmp(e->d_name, "sdma_", 5)) {
+        out->insert(strtoull(e->d_name + 5, nullptr, 10));
+      }
+    }
+    closedir(d);
+  };
+
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
@@ -344,6 +425,38 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
   }
 
   closedir(d);
+
+  // Also check secondary contexts (context_xxxx directories)
+  // These are created by the KFD multiple contexts feature
+  std::vector<std::string> context_paths = GetSecondaryContextPaths(pdir);
+  for (const auto& context_path : context_paths) {
+    extract_gpu_ids_from_dir(context_path);
+  }
+
+  // Also check for "pid:PID-id:X" format directories at the parent level
+  // This is another format used for multi-context processes
+  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
+  DIR* proc_root = opendir(kKFDProcPathRoot);
+  if (proc_root) {
+    struct dirent* root_entry;
+    while ((root_entry = readdir(proc_root))) {
+      if (root_entry->d_name[0] == '.') continue;
+      std::string entry_name = root_entry->d_name;
+      if (entry_name.find(pid_prefix) == 0) {
+        // Found a pid:PID-id:X directory for this process
+        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
+        extract_gpu_ids_from_dir(alternate_path);
+
+        // Also check for context_xxxx in this alternate path
+        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+        for (const auto& alt_context_path : alt_context_paths) {
+          extract_gpu_ids_from_dir(alt_context_path);
+        }
+      }
+    }
+    closedir(proc_root);
+  }
+
   return 0;
 
 }
@@ -352,6 +465,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
 // gpus_found.
 // Directory structure:
 //     /sys/class/kfd/kfd/proc/<pid>/queues/<queue id>/gpuid
+//     /sys/class/kfd/kfd/proc/<pid>/context_<id>/queues/<queue id>/gpuid (for secondary contexts)
 
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   int err;
@@ -366,58 +480,105 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
     return 0;
   }
 
-  std::string queues_dir = kKFDProcPathRoot;
-  queues_dir += "/";
-  queues_dir += std::to_string(pid);
-  queues_dir += "/queues";
+  std::string proc_path = kKFDProcPathRoot;
+  proc_path += "/";
+  proc_path += std::to_string(pid);
 
-  auto queues_dir_hd = opendir(queues_dir.c_str());
+  // Helper lambda to read GPU IDs from queues in a given base path
+  auto read_gpus_from_queues = [&](const std::string& base_path) -> int {
+    std::string queues_dir = base_path + "/queues";
+    auto queues_dir_hd = opendir(queues_dir.c_str());
 
-  if (queues_dir_hd == nullptr) {
-    std::string err_str = "Unable to open queues directory for process ";
-    err_str += std::to_string(pid);
-    perror(err_str.c_str());
-    return ESRCH;
+    if (queues_dir_hd == nullptr) {
+      // Directory doesn't exist, which is okay for secondary contexts
+      return 0;
+    }
+
+    auto q_dentry = readdir(queues_dir_hd);
+    std::string tmp;
+
+    while (q_dentry != nullptr) {
+      if (q_dentry->d_name[0] == '.') {
+        q_dentry = readdir(queues_dir_hd);
+        continue;
+      }
+
+      if (!is_number(q_dentry->d_name)) {
+        q_dentry = readdir(queues_dir_hd);
+        continue;
+      }
+
+      std::string q_gpu_id_str = queues_dir + '/' + q_dentry->d_name + "/gpuid";
+
+      int read_err = ReadSysfsStr(q_gpu_id_str, &tmp);
+      if (read_err) {
+        q_dentry = readdir(queues_dir_hd);
+        continue;
+      }
+
+      uint64_t val;
+      try {
+        val = static_cast<uint64_t>(std::stoi(tmp));
+      } catch (...) {
+        std::cerr << "Error; read invalid data: " << tmp << " from " <<
+                                                      q_gpu_id_str << std::endl;
+        closedir(queues_dir_hd);
+        return ENXIO;  // Return "no such device" if we read an invalid gpu id
+      }
+      gpu_set->insert(val);
+
+      q_dentry = readdir(queues_dir_hd);
+    }
+
+    closedir(queues_dir_hd);
+    return 0;
+  };
+
+  // Read from primary process queues
+  err = read_gpus_from_queues(proc_path);
+  if (err != 0 && err != ESRCH) {
+    return err;
   }
 
-  auto q_dentry = readdir(queues_dir_hd);
-
-  std::string q_gpu_id_str;
-  std::string q_dir;
-
-  std::string tmp;
-
-  while (q_dentry != nullptr) {
-    if (q_dentry->d_name[0] == '.') {
-      q_dentry = readdir(queues_dir_hd);
-      continue;
+  // Read from secondary context queues
+  std::vector<std::string> context_paths = GetSecondaryContextPaths(proc_path);
+  for (const auto& context_path : context_paths) {
+    err = read_gpus_from_queues(context_path);
+    if (err != 0 && err != ESRCH) {
+      return err;
     }
+  }
 
-    if (!is_number(q_dentry->d_name)) {
-      q_dentry = readdir(queues_dir_hd);
-      continue;
+  // Also check for "pid:PID-id:X" format directories at the parent level
+  // This is another format used for multi-context processes
+  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
+  DIR* proc_root = opendir(kKFDProcPathRoot);
+  if (proc_root) {
+    struct dirent* root_entry;
+    while ((root_entry = readdir(proc_root))) {
+      if (root_entry->d_name[0] == '.') continue;
+      std::string entry_name = root_entry->d_name;
+      if (entry_name.find(pid_prefix) == 0) {
+        // Found a pid:PID-id:X directory for this process
+        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
+        err = read_gpus_from_queues(alternate_path);
+        if (err != 0 && err != ESRCH) {
+          closedir(proc_root);
+          return err;
+        }
+
+        // Also check for context_xxxx in this alternate path
+        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+        for (const auto& alt_context_path : alt_context_paths) {
+          err = read_gpus_from_queues(alt_context_path);
+          if (err != 0 && err != ESRCH) {
+            closedir(proc_root);
+            return err;
+          }
+        }
+      }
     }
-
-    q_gpu_id_str = queues_dir + '/' + q_dentry->d_name + "/gpuid";
-
-    err = ReadSysfsStr(q_gpu_id_str, &tmp);
-    if (err) {
-      q_dentry = readdir(queues_dir_hd);
-      continue;
-    }
-
-    uint64_t val;
-    try {
-      val = static_cast<uint64_t>(std::stoi(tmp));
-    } catch (...) {
-      std::cerr << "Error; read invalid data: " << tmp << " from " <<
-                                                    q_gpu_id_str << std::endl;
-      closedir(queues_dir_hd);
-      return ENXIO;  // Return "no such device" if we read an invalid gpu id
-    }
-    gpu_set->insert(val);
-
-    q_dentry = readdir(queues_dir_hd);
+    closedir(proc_root);
   }
 
   // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
@@ -426,10 +587,6 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
     return kfd_ret;
   }
 
-  errno = 0;
-  if (closedir(queues_dir_hd)) {
-    return errno;
-  }
   return 0;
 }
 
@@ -485,64 +642,128 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->cu_occupancy = 0;
   proc->evicted_time = 0;
 
+  // Collect all paths to read metrics from: primary process + secondary contexts
+  std::vector<std::string> metric_paths;
+  metric_paths.push_back(proc_str_path);
+
+  // Add secondary context paths (context_xxxx directories)
+  // These are created by the KFD multiple contexts feature
+  std::vector<std::string> context_paths = GetSecondaryContextPaths(proc_str_path);
+  for (const auto& context_path : context_paths) {
+    metric_paths.push_back(context_path);
+  }
+
+  // Also check for "pid:PID-id:X" format directories at the parent level
+  // This is another format used for multi-context processes
+  std::string pid_prefix = "pid:" + std::to_string(pid) + "-id:";
+  DIR* proc_root = opendir(kKFDProcPathRoot);
+  if (proc_root) {
+    struct dirent* root_entry;
+    while ((root_entry = readdir(proc_root))) {
+      if (root_entry->d_name[0] == '.') continue;
+      std::string entry_name = root_entry->d_name;
+      if (entry_name.find(pid_prefix) == 0) {
+        // Found a pid:PID-id:X directory for this process
+        std::string alternate_path = std::string(kKFDProcPathRoot) + "/" + entry_name;
+        metric_paths.push_back(alternate_path);
+
+        // Also check for context_xxxx in this alternate path
+        std::vector<std::string> alt_context_paths = GetSecondaryContextPaths(alternate_path);
+        for (const auto& alt_context_path : alt_context_paths) {
+          metric_paths.push_back(alt_context_path);
+        }
+      }
+    }
+    closedir(proc_root);
+  }
+
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
 
-    std::string vram_str_path = proc_str_path;
-    vram_str_path += "/vram_";
-    vram_str_path += std::to_string(gpu_id);
+    // Aggregate metrics from primary process and all secondary contexts
+    for (const auto& metric_base_path : metric_paths) {
+      std::string vram_str_path = metric_base_path;
+      vram_str_path += "/vram_";
+      vram_str_path += std::to_string(gpu_id);
 
-    err = ReadSysfsStr(vram_str_path, &tmp);
-    auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+      err = ReadSysfsStr(vram_str_path, &tmp);
+      auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
-    // Report all errors, except ENOENT (2), which should be ignored
-    // and the proc->vram_usage should be unmodified
-    if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
-      return sysfs_data_errcode;
-    }
-    // Do not store any invalid values
-    else if (sysfs_data_errcode == 0) {
-      proc->vram_usage += std::stoull(tmp);
-    }
+      // Report all errors, except ENOENT (2), which should be ignored
+      // and the proc->vram_usage should be unmodified
+      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
+        return sysfs_data_errcode;
+      }
+      // Do not store any invalid values
+      else if (sysfs_data_errcode == 0) {
+        proc->vram_usage += std::stoull(tmp);
+      }
 
-    std::string sdma_str_path = proc_str_path;
-    sdma_str_path += "/sdma_";
-    sdma_str_path += std::to_string(gpu_id);
+      std::string sdma_str_path = metric_base_path;
+      sdma_str_path += "/sdma_";
+      sdma_str_path += std::to_string(gpu_id);
 
-    err = ReadSysfsStr(sdma_str_path, &tmp);
-    sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+      err = ReadSysfsStr(sdma_str_path, &tmp);
+      sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
-    if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
-      return sysfs_data_errcode;
-    }
-    else if (sysfs_data_errcode == 0) {
-      proc->sdma_usage += std::stoull(tmp);
-    }
+      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
+        return sysfs_data_errcode;
+      }
+      else if (sysfs_data_errcode == 0) {
+        proc->sdma_usage += std::stoull(tmp);
+      }
 
-    // Build the path and read from Sysfs file, info that
-    // encodes Compute Unit usage by a process of interest
-    std::string cu_occupancy_path = proc_str_path;
-    cu_occupancy_path += "/stats_";
-    cu_occupancy_path += std::to_string(gpu_id);
-    cu_occupancy_path += "/cu_occupancy";
+      // Build the path and read from Sysfs file, info that
+      // encodes Compute Unit usage by a process of interest
+      std::string cu_occupancy_path = metric_base_path;
+      cu_occupancy_path += "/stats_";
+      cu_occupancy_path += std::to_string(gpu_id);
+      cu_occupancy_path += "/cu_occupancy";
 
-    err = GetProcessKFDStats(cu_occupancy_path, kfd_stat);
-    if (err != 0){
-      return err;
-    }
-    proc->cu_occupancy = kfd_stat;
+      err = GetProcessKFDStats(cu_occupancy_path, kfd_stat);
+      if (err != 0){
+        // For secondary contexts, ENOENT is acceptable if stats don't exist
+        if (err != ENOENT || metric_base_path == proc_str_path) {
+          // Only return error for primary process, or non-ENOENT errors
+          if (metric_base_path == proc_str_path || err != ENOENT) {
+            // Check if file actually exists before returning error
+            if (FileExists(cu_occupancy_path.c_str()) || err != ENOENT) {
+              return err;
+            }
+          }
+        }
+      } else {
+        // Aggregate cu_occupancy (use max value as it represents peak usage)
+        if (kfd_stat != KFD_STATS_INVALID && kfd_stat > proc->cu_occupancy) {
+          proc->cu_occupancy = kfd_stat;
+        }
+      }
 
-    std::string evicted_time_path = proc_str_path;
-    evicted_time_path += "/stats_";
-    evicted_time_path += std::to_string(gpu_id);
-    evicted_time_path += "/evicted_ms";
+      std::string evicted_time_path = metric_base_path;
+      evicted_time_path += "/stats_";
+      evicted_time_path += std::to_string(gpu_id);
+      evicted_time_path += "/evicted_ms";
 
-    err = GetProcessKFDStats(evicted_time_path, kfd_stat);
-    if (err != 0){
-      return err;
-    }
-    proc->evicted_time = kfd_stat;
-
+      err = GetProcessKFDStats(evicted_time_path, kfd_stat);
+      if (err != 0){
+        // For secondary contexts, ENOENT is acceptable if stats don't exist
+        if (metric_base_path == proc_str_path || err != ENOENT) {
+          if (FileExists(evicted_time_path.c_str()) || err != ENOENT) {
+            return err;
+          }
+        }
+      } else {
+        // Aggregate evicted_time (sum all evicted times)
+        if (kfd_stat != KFD_STATS_INVALID) {
+          // Handle potential overflow by checking before addition
+          if (proc->evicted_time <= UINT32_MAX - kfd_stat) {
+            proc->evicted_time += kfd_stat;
+          } else {
+            proc->evicted_time = UINT32_MAX;  // Cap at max value
+          }
+        }
+      }
+    }  // End of metric_paths loop
   }
 
   return 0;

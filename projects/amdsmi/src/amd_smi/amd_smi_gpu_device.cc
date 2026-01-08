@@ -184,28 +184,75 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
 
         // Safely handle KFD processes to get total memory_usage of the process
         uint64_t kfd_gpu_id = get_kfd_gpu_id();
-        std::string kfd_path = "/sys/class/kfd/kfd/proc/" +
-                            std::to_string(rsmi_proc_info.process_id) +
-                            "/vram_" + std::to_string(kfd_gpu_id);
+        std::string kfd_proc_path = "/sys/class/kfd/kfd/proc/" +
+                            std::to_string(rsmi_proc_info.process_id);
+        std::string kfd_vram_file = "/vram_" + std::to_string(kfd_gpu_id);
 
-        // Check if the file exists before attempting to open it
-        if (access(kfd_path.c_str(), R_OK) == 0) {
-            std::ifstream kfd_file(kfd_path.c_str());
-            if (kfd_file.is_open()) {
-                std::string line;
-                if (std::getline(kfd_file, line)) {
-                    try {
-                        uint64_t vram_bytes = std::stoull(line);
-                        amdsmi_proc_info.mem = vram_bytes; // Already in bytes
-                    } catch (const std::exception& e) {
-                        // Handle conversion error gracefully
-                        std::ostringstream ss;
-                        ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
-                        LOG_DEBUG(ss);
+        // Helper lambda to read VRAM from a path and add to total
+        auto read_vram_from_path = [&](const std::string& base_path) -> uint64_t {
+            uint64_t vram_bytes = 0;
+            std::string vram_path = base_path + kfd_vram_file;
+            if (access(vram_path.c_str(), R_OK) == 0) {
+                std::ifstream kfd_file(vram_path.c_str());
+                if (kfd_file.is_open()) {
+                    std::string line;
+                    if (std::getline(kfd_file, line)) {
+                        try {
+                            vram_bytes = std::stoull(line);
+                        } catch (const std::exception& e) {
+                            std::ostringstream ss;
+                            ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
+                            LOG_DEBUG(ss);
+                        }
+                    }
+                    kfd_file.close();
+                }
+            }
+            return vram_bytes;
+        };
+
+        // Helper lambda to read VRAM from all contexts in a directory
+        auto read_vram_from_all_contexts = [&](const std::string& base_path) -> uint64_t {
+            uint64_t total = read_vram_from_path(base_path);
+
+            // Check for secondary contexts (context_xxxx directories)
+            DIR* dir = opendir(base_path.c_str());
+            if (dir != nullptr) {
+                struct dirent* entry;
+                while ((entry = readdir(dir)) != nullptr) {
+                    if (strncmp(entry->d_name, "context_", 8) == 0) {
+                        std::string context_path = base_path + "/" + entry->d_name;
+                        total += read_vram_from_path(context_path);
                     }
                 }
-                kfd_file.close();
+                closedir(dir);
             }
+            return total;
+        };
+
+        // Read VRAM from primary process
+        uint64_t total_vram = read_vram_from_all_contexts(kfd_proc_path);
+
+        // Also check for "pid:PID-id:X" format directories at the parent level
+        // This is another format used for multi-context processes
+        std::string kfd_root = "/sys/class/kfd/kfd/proc/";
+        std::string pid_prefix = "pid:" + std::to_string(rsmi_proc_info.process_id) + "-id:";
+        DIR* proc_root = opendir(kfd_root.c_str());
+        if (proc_root != nullptr) {
+            struct dirent* root_entry;
+            while ((root_entry = readdir(proc_root)) != nullptr) {
+                if (root_entry->d_name[0] == '.') continue;
+                std::string entry_name = root_entry->d_name;
+                if (entry_name.find(pid_prefix) == 0) {
+                    std::string alternate_path = kfd_root + entry_name;
+                    total_vram += read_vram_from_all_contexts(alternate_path);
+                }
+            }
+            closedir(proc_root);
+        }
+
+        if (total_vram > 0) {
+            amdsmi_proc_info.mem = total_vram;
         }
 
         return status_code;
