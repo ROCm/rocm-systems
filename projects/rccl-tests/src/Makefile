@@ -14,7 +14,7 @@ DEBUG ?= 0
 NCCL_HOME ?= ""
 CUSTOM_RCCL_LIB ?= ""
 
-HIPCC ?= $(ROCM_PATH)/bin/amdclang++
+HIPCC ?= $(ROCM_PATH)/llvm/bin/amdclang++
 HIPCONFIG = $(ROCM_PATH)/bin/hipconfig
 HIPIFY_PL_EXE=$(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -quiet-warnings
@@ -23,6 +23,9 @@ CXX = $(HIPCC)
 HIPCUFLAGS := -std=c++14
 LDFLAGS    :=
 HIPLDFLAGS :=
+
+# Clang compiler fails to auto detect device lib path in some ROCK builds
+DEVICE_LIB_PATH := $(if $(wildcard $(ROCM_PATH)/amdgcn/bitcode),,--rocm-device-lib-path=$(ROCM_PATH)/llvm/amdgcn/bitcode)
 
 # Set to 1 to enable MPI support (multi-process/multi-node)
 MPI ?= 0
@@ -96,8 +99,7 @@ HIPLDFLAGS += -Wl,-rpath,$(NCCL_HOME) -L$(NCCL_HOME) -L$(NCCL_HOME)/lib
 endif
 
 HIPCUFLAGS += -I$(ROCM_PATH)/include
-HIPCUFLAGS += -I$(ROCM_PATH)/include/hip
-HIPCUFLAGS += -x hip -D__HIP_PLATFORM_AMD__ -D__HIPCC__ $(GPU_TARGETS_FLAGS)
+HIPCUFLAGS += -x hip -D__HIP_PLATFORM_AMD__ -D__HIPCC__ $(DEVICE_LIB_PATH) $(GPU_TARGETS_FLAGS)
 LDFLAGS    += -L$(ROCM_PATH)/lib -lhsa-runtime64 -lrt
 ifneq ($(CUSTOM_RCCL_LIB), "")
 HIPLDFLAGS += -L$(CUSTOM_RCCL_LIB)

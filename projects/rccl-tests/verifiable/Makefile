@@ -19,12 +19,15 @@ VERBOSE ?= 0
 DEBUG ?= 0
 NCCL_HOME ?= ""
 
-HIPCC = $(ROCM_PATH)/bin/amdclang++
+HIPCC = $(ROCM_PATH)/llvm/bin/amdclang++
 CXX = $(HIPCC)
 
 HIPCUFLAGS := -std=c++14
 LDFLAGS    :=
 HIPLDFLAGS :=
+
+# Clang compiler fails to auto detect device lib path in some ROCK builds
+DEVICE_LIB_PATH := $(if $(wildcard $(ROCM_PATH)/amdgcn/bitcode),,--rocm-device-lib-path=$(ROCM_PATH)/llvm/amdgcn/bitcode)
 
 ifneq ($(NCCL_HOME), "")
 HIPCUFLAGS += -I$(NCCL_HOME)/ -I$(NCCL_HOME)/include
@@ -32,7 +35,7 @@ HIPLDFLAGS   += -Wl,-rpath,$(NCCL_HOME) -L$(NCCL_HOME) -L$(NCCL_HOME)/lib
 endif
 
 HIPCUFLAGS += -I$(ROCM_PATH)/include
-HIPCUFLAGS += -I$(ROCM_PATH)/include/hip
+HIPCUFLAGS += $(DEVICE_LIB_PATH)
 LDFLAGS    += -L$(ROCM_PATH)/lib -lhsa-runtime64 -lrt
 HIPLDFLAGS += $(CUSTOM_RCCL_LIB) -L$(ROCM_PATH)/lib -lhsa-runtime64 -lamdhip64 -lstdc++ -lrt
 
