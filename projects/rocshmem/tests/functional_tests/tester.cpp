@@ -52,6 +52,7 @@
 #include "sync_all_tester.hpp"
 #include "team_sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
+#include "team_alltoallv_tester.hpp"
 #include "team_alltoallmem_on_stream_tester.hpp"
 #include "team_broadcastmem_on_stream_tester.hpp"
 #include "team_barrier_tester.hpp"
@@ -234,6 +235,12 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
         std::cout << "Alltoall Test ###" << std::endl;
       }
       testers.push_back(new TeamAlltoallTester<float>(args));
+      return testers;
+    case TeamAllToAllvTestType:
+      if (rank == 0) {
+        std::cout << "Alltoallv Test ###" << std::endl;
+      }
+      testers.push_back(new TeamAlltoallvTester<float>(args));
       return testers;
     case TeamAlltoallmemOnStreamTestType:
       if (rank == 0)
@@ -646,6 +653,7 @@ bool Tester::peLaunchesKernel() {
     case TeamCtxInfraTestBlockType:
     case TeamCtxInfraTestOddEvenType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case PingPongTestType:
     case BarrierAllTestType:
