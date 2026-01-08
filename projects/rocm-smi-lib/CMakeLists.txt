@@ -37,8 +37,8 @@ set(SHARE_INSTALL_PREFIX "share/${ROCM_SMI}" CACHE STRING "Tests and Example ins
 # provide git to utilities
 find_program(GIT NAMES git)
 
-# CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
-option(DISABLE_CPACK "disable CPACK from running" OFF)
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_CPACK "disable LINTIAN from building" OFF)
 
 # Set Lintian Support Flags
 set(BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides")
@@ -414,7 +414,7 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
-if(NOT DISABLE_CPACK)
+if(NOT DISABLE_LINTIAN_SUPPORT)
     # Configure Lintian Specific Package Data
     configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 endif()
@@ -442,27 +442,25 @@ if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
     endif()
 endif()
 
-if(NOT DISABLE_CPACK)
-    include(CPack)
+include(CPack)
 
-    cpack_add_component(
-        dev
-        DISPLAY_NAME "Development"
-        DESCRIPTION "Development needed header files for ROCM-SMI"
-        DEPENDS dev)
+cpack_add_component(
+  dev
+  DISPLAY_NAME "Development"
+  DESCRIPTION "Development needed header files for ROCM-SMI"
+  DEPENDS dev)
 
-    cpack_add_component(
-        asan
-        DISPLAY_NAME "ASAN"
-        DESCRIPTION "ASAN libraries for the ROCM-SMI"
-        DEPENDS asan)
+cpack_add_component(
+  asan
+  DISPLAY_NAME "ASAN"
+  DESCRIPTION "ASAN libraries for the ROCM-SMI"
+  DEPENDS asan)
 
-    cpack_add_component_group("tests")
-    cpack_add_component(tests GROUP tests)
-    if(NOT BUILD_SHARED_LIBS)
-        cpack_add_component_group("static")
-        cpack_add_component(dev GROUP static)
-    endif()
+cpack_add_component_group("tests")
+cpack_add_component(tests GROUP tests)
+if(NOT BUILD_SHARED_LIBS)
+  cpack_add_component_group("static")
+  cpack_add_component(dev GROUP static)
 endif()
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

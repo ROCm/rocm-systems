@@ -41,6 +41,9 @@ generic_add_rocm()
 # provide git to utilities
 find_program(GIT NAMES git)
 
+# LINTIAN-CPACK interferes with inbox packaging, add an option to disable it but don't disable by default
+option(DISABLE_LINTIAN_SUPPORT "disable LINTIAN Support from building" OFF)
+
 # Set Lintian Support Flags
 set(BUILD_ENABLE_LINTIAN_OVERRIDES OFF CACHE BOOL "Enable/Disable Lintian Overrides")
 set(BUILD_DEBIAN_PKGING_FLAG OFF CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build")
@@ -573,7 +576,7 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
-if(NOT DISABLE_CPACK)
+if(NOT DISABLE_LINTIAN_SUPPORT)
     # Configure Lintian Specific Package Data
     configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 endif()
@@ -601,8 +604,6 @@ if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
     endif()
 endif()
 
-if(NOT DISABLE_CPACK)
-    include(CPack)
-    generic_package_post()
-endif()
+include(CPack)
 
+generic_package_post()
