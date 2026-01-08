@@ -8,10 +8,10 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
     paths-ignore:  # Do not trigger on documentation-only changes
-      - '**.txt'
-      - '**.md'
-      - '**.rtf'
-      - '**.rst'
+      - '**/*.txt'
+      - '**/*.md'
+      - '**/*.rtf'
+      - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
@@ -21,10 +21,10 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
     paths-ignore:  # Do not trigger on documentation-only changes
-      - '**.txt'
-      - '**.md'
-      - '**.rtf'
-      - '**.rst'
+      - '**/*.txt'
+      - '**/*.md'
+      - '**/*.rtf'
+      - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
