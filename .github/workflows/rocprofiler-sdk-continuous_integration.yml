@@ -121,6 +121,9 @@ jobs:
         shell: bash
         run: |
           set -v
+          which git
+          git --version
+          git config --global --add safe.directory '*'
           git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           # collect submodule paths for cache 'path'
