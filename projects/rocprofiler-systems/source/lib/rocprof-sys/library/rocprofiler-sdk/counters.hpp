@@ -124,19 +124,56 @@ struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
     static constexpr size_t max_threads = 4096;
     using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
-    using storage_array_t = std::array<storage<type>*, max_threads>;
+    using storage_array_t = std::vector<storage<type>*>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;
 
     ROCPROFSYS_DEFAULT_OBJECT(set_storage)
 
-    auto operator()(storage<type>* _v, size_t _idx) const { get().at(_idx) = _v; }
+    auto operator()(storage<type>* _v, size_t _idx) const
+    {
+        ensure_capacity(_idx);
+        get().at(_idx) = _v;
+    }
     auto operator()(type&, size_t) const {}
-    auto operator()(storage<type>* _v) const { get().fill(_v); }
+    auto operator()(storage<type>* _v) const { std::fill(get().begin(), get().end(), _v); }
 
 private:
+    static std::atomic<size_t>& get_capacity()
+    {
+        static std::atomic<size_t> _cap{max_threads};
+        return _cap;
+    }
+
+    static std::mutex& get_mutex()
+    {
+        static std::mutex _mtx;
+        return _mtx;
+    }
+
+    static void ensure_capacity(size_t _idx)
+    {
+        // Fast path: check atomic capacity (no lock)
+        if(_idx < get_capacity().load(std::memory_order_acquire))
+            return;
+
+        // Slow path: need to resize with lock
+        std::lock_guard<std::mutex> _lock(get_mutex());
+        auto& _v = get();
+
+        // Double-check after acquiring lock
+        if(_idx >= _v.size())
+        {
+            size_t new_size = std::max(_v.size(), size_t(1));
+            while(new_size <= _idx)
+                new_size *= 2;  // Geometric growth (doubling)
+            _v.resize(new_size, nullptr);
+            get_capacity().store(_v.size(), std::memory_order_release);
+        }
+    }
+
     static storage_array_t& get()
     {
-        static storage_array_t _v = { nullptr };
+        static storage_array_t _v(max_threads, nullptr);
         return _v;
     }
 };
@@ -161,6 +198,9 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()(size_t _idx) const
     {
+        // Thread-safe read using atomic capacity
+        if(_idx >= operation::set_storage<type>::get_capacity().load(std::memory_order_acquire))
+            return static_cast<storage<type>*>(nullptr);
         return operation::set_storage<type>::get().at(_idx);
     }
 
