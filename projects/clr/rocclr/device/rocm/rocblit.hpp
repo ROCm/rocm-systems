@@ -259,8 +259,6 @@ class DmaBlitManager : public device::HostBlitManager {
 
   bool completeOperation_;        //!< DMA blit manager must complete operation
   amd::Context* context_;         //!< A dummy context
-  uint32_t sdmaEngineReadMask_;   //!< SDMA Engine Read Mask
-  uint32_t sdmaEngineWriteMask_;  //!< SDMA Engine Write Mask
 
  private:
   //! Disable copy constructor

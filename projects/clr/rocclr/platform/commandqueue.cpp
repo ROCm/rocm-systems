@@ -231,6 +231,8 @@ void HostQueue::finish(bool cpu_wait) {
       lastEnqueueCommand_ = nullptr;
     }
   }
+  // Release SDMA engine assignments
+  vdev()->ReleaseSdmaEngines();
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 
