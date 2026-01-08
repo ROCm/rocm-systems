@@ -22,6 +22,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "hip_kpack.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
 #include "utils/flags.hpp"
@@ -31,6 +32,7 @@
 
 namespace hip {
 constexpr unsigned __hipFatMAGIC2 = 0x48495046;  // "HIPF"
+constexpr unsigned __hipKpackMAGIC = 0x4B504948;  // "HIPK"
 
 PlatformState* PlatformState::platform_;  // Initiaized as nullptr by default
 
@@ -73,15 +75,26 @@ static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const c
 
 void** __hipRegisterFatBinary(const void* data) {
   const __CudaFatBinaryWrapper* fbwrapper = reinterpret_cast<const __CudaFatBinaryWrapper*>(data);
-  if (fbwrapper->magic != __hipFatMAGIC2 || fbwrapper->version != 1) {
-    LogPrintfError("Cannot Register fat binary. FatMagic: %u version: %u ", fbwrapper->magic,
-                   fbwrapper->version);
-    return nullptr;
+
+  // Check for HIPK magic (kpack external reference)
+  if (fbwrapper->magic == __hipKpackMAGIC && fbwrapper->version == 1) {
+    // This is a kpack'd binary - fbwrapper->binary points to MessagePack metadata
+    bool success{};
+    auto fat_binary_info = PlatformState::instance().addFatBinary(fbwrapper->binary, success);
+    return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
   }
 
-  bool success{};
-  auto fat_binary_info = PlatformState::instance().addFatBinary(fbwrapper->binary, success);
-  return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
+  // Check for HIPF magic (traditional fat binary)
+  if (fbwrapper->magic == __hipFatMAGIC2 && fbwrapper->version == 1) {
+    bool success{};
+    auto fat_binary_info = PlatformState::instance().addFatBinary(fbwrapper->binary, success);
+    return success ? reinterpret_cast<void**>(fat_binary_info) : nullptr;
+  }
+
+  // Unknown magic
+  LogPrintfError("Cannot Register fat binary. FatMagic: 0x%x version: %u ", fbwrapper->magic,
+                 fbwrapper->version);
+  return nullptr;
 }
 
 void __hipRegisterFunction(hip::FatBinaryInfo** modules, const void* hostFunction,

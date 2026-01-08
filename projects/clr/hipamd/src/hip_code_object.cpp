@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "hip_code_object.hpp"
+#include "hip_kpack.hpp"
 #include "amd_hsa_elf.hpp"
 
 #include <cstring>
@@ -265,11 +266,115 @@ hipError_t StatCO::digestFatBinary(const void* data, FatBinaryInfo*& programs) {
     return hipSuccess;
   }
 
-  // Create a new fat binary object and extract the fat binary for all devices.
+  // Check if this is kpack metadata
+  if (isKpackMetadata(data)) {
+    // This is a kpack'd binary - lazy load the code object
+    KpackLoader& loader = GetKpackLoader();
+
+    if (!loader.IsEnabled()) {
+      LogError("Kpack metadata found but kpack loading is disabled");
+      return hipErrorNotSupported;
+    }
+
+    // Parse kpack metadata
+    KpackMetadata metadata;
+    constexpr size_t kMaxMetadataSize = 64 * 1024;  // 64KB max for metadata
+    hipError_t err = loader.ParseKpackMetadata(data, kMaxMetadataSize, metadata);
+    if (err != hipSuccess) {
+      LogError("Failed to parse kpack metadata");
+      return err;
+    }
+
+    // Discover binary path (to resolve relative paths)
+    std::string binary_path;
+    err = loader.DiscoverBinaryPath(data, binary_path);
+    if (err != hipSuccess) {
+      // If we can't discover binary path, try without it (absolute paths only)
+      binary_path = "";
+    }
+
+    // Build architecture list for all devices
+    // We'll load code object for each device
+    FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(nullptr, nullptr);
+    bool any_device_loaded = false;
+
+    for (auto device : g_devices) {
+      const char* device_arch = device->isa().name();
+      std::vector<std::string> arch_list = BuildArchFallbackList(std::string(device_arch));
+
+      // Load code object from kpack
+      void* code_object = nullptr;
+      size_t code_object_size = 0;
+      err = loader.LoadCodeObject(metadata, binary_path, arch_list, &code_object,
+                                    &code_object_size);
+
+      if (err == hipErrorNoBinaryForGpu) {
+        // Architecture not in kpack (expected for some devices)
+        LogInfo("No kpack code object for device %s - architecture not in bundle", device_arch);
+        continue;
+      } else if (err == hipErrorFileNotFound) {
+        // Kpack file missing - log warning but continue (non-fatal)
+        // This allows the application to proceed if other devices have code
+        std::string arch_list_str;
+        for (const auto& arch : arch_list) {
+          if (!arch_list_str.empty()) arch_list_str += ", ";
+          arch_list_str += arch;
+        }
+        LogPrintfWarning("Kpack archive file missing for device %s", device_arch);
+        LogPrintfInfo("  Tried architectures: %s", arch_list_str.c_str());
+        LogPrintfInfo("  This indicates an incomplete kpack installation");
+        LogPrintfInfo("  Application will continue but this device will not be available");
+        LogPrintfInfo("  To fix: Install architecture-specific package or check ROCM_KPACK_PATH");
+        continue;  // Try next device
+      } else if (err != hipSuccess) {
+        LogError("Failed to load code object from kpack for device %s", device_arch);
+        delete fatBinaryInfo;
+        return err;
+      }
+
+      // Add device program
+      err = fatBinaryInfo->AddDevProgram(device, code_object, code_object_size, 0);
+
+      // Free the code object memory
+      loader.FreeCodeObject(code_object);
+
+      if (err != hipSuccess) {
+        LogError("Failed to add device program for kpack code object");
+        delete fatBinaryInfo;
+        return err;
+      }
+
+      any_device_loaded = true;
+    }
+
+    if (!any_device_loaded) {
+      LogError("No code objects loaded from kpack for any device");
+      delete fatBinaryInfo;
+      return hipErrorNoBinaryForGpu;
+    }
+
+    programs = fatBinaryInfo;
+    return hipSuccess;
+  }
+
+  // Traditional fat binary path
   FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(nullptr, data);
   hipError_t err = fatBinaryInfo->ExtractFatBinaryUsingCOMGR(g_devices);
   programs = fatBinaryInfo;
   return err;
+}
+
+bool StatCO::isKpackMetadata(const void* data) const {
+  // Kpack metadata is MessagePack format
+  // Check for MessagePack map marker (0x80-0x8f for fixmap, 0xde for map16, 0xdf for map32)
+  const unsigned char* bytes = static_cast<const unsigned char*>(data);
+  if (bytes[0] >= 0x80 && bytes[0] <= 0x8f) {
+    return true;  // MessagePack fixmap
+  }
+  if (bytes[0] == 0xde || bytes[0] == 0xdf) {
+    return true;  // MessagePack map16 or map32
+  }
+  return false;
 }
 
 FatBinaryInfo** StatCO::addFatBinary(const void* data, bool initialized, bool& success) {

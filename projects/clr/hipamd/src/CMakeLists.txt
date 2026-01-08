@@ -110,6 +110,7 @@ target_sources(amdhip64 PRIVATE
   hip_graph.cpp
   hip_hmm.cpp
   hip_intercept.cpp
+  hip_kpack.cpp
   hip_memory.cpp
   hip_mempool.cpp
   hip_mempool_impl.cpp
@@ -154,9 +155,38 @@ target_include_directories(amdhip64
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include)
 
+# Add rocm-kpack include directory if found
+if(ROCM_KPACK_LIBRARY)
+  target_include_directories(amdhip64 PRIVATE ${ROCM_PATH}/include /opt/rocm/include)
+endif()
+
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+
+# Find msgpack-cxx for kpack metadata parsing
+find_package(msgpackc-cxx QUIET)
+if(msgpackc-cxx_FOUND)
+  target_link_libraries(amdhip64 PRIVATE msgpackc-cxx)
+  target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_KPACK=1)
+else()
+  message(WARNING "msgpack-cxx not found, kpack support will be disabled")
+  target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_KPACK=0)
+endif()
+
+# Find rocm-kpack runtime library
+find_library(ROCM_KPACK_LIBRARY
+  NAMES rocm_kpack
+  PATHS ${ROCM_PATH}/lib /opt/rocm/lib
+  NO_DEFAULT_PATH)
+
+if(ROCM_KPACK_LIBRARY)
+  target_link_libraries(amdhip64 PRIVATE ${ROCM_KPACK_LIBRARY})
+  message(STATUS "Found rocm-kpack library: ${ROCM_KPACK_LIBRARY}")
+else()
+  message(WARNING "rocm-kpack library not found, kpack loading will fail at runtime")
+endif()
+
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

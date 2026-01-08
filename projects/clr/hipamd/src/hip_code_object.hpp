@@ -158,6 +158,9 @@ class StatCO : public CodeObject {
   hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
   void RemoveAllFatBinaries();
 
+  // Kpack support: check if data is kpack metadata
+  bool isKpackMetadata(const void* data) const;
+
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
   hipError_t registerStatFunction(const void* hostFunction, Function* func);
   hipError_t registerStatGlobalVar(const void* hostVar, Var* var);
@@ -189,6 +192,9 @@ class StatCO : public CodeObject {
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
+
+  // Kpack metadata storage: maps module data pointer to kpack metadata pointer
+  std::unordered_map<const void*, const void*> kpack_metadata_map_;
 };
 
 };  // namespace hip
