@@ -346,7 +346,7 @@ def print_noise_clamp_summary() -> None:
     max_pct = _NOISE_CLAMP_STATS["max_rel"] * 100
     console_warning(
         f"Counter variance corrected: {count} value(s) adjusted "
-        f"(max {max_pct:.1f}% deviation). Consider re-profiling if accuracy is critical."
+        f"(max {max_pct:.1f}% deviation from multi-pass collection)."
     )
 
 

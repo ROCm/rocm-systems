@@ -31,10 +31,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Implemented hybrid threshold-based clamping (`NOISE_CLAMP`) for L2 cache metrics to handle negative values from multi-pass profiling variance:
-  * Uses dual-threshold model: relative (0.5%) + absolute (10,000 counts) for silent clamping
-  * All negative values are clamped to 0 for display (eliminates physically impossible negative counts)
-  * Warnings issued only when errors exceed both thresholds (≥2% relative AND ≥50,000 absolute), reducing false positives from the previous 0.1% relative-only approach
+* Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
+  * Negative values are clamped to 0 (eliminates physically impossible negative counts)
+  * Warnings issued only when relative error exceeds 1% (anomaly detection)
   * Added unit tests for noise clamping logic (`@pytest.mark.noise_clamp`)
 
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
