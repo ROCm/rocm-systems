@@ -102,8 +102,6 @@ jobs:
           tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-          # TODO: Remove this once https://github.com/ROCm/rccl/pull/2128 is merged and included in TheRock
-          sed -i 's/#warning/#pragma message/g' ${{ env.ROCM_PATH }}/include/rccl/rccl.h
 
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
@@ -328,6 +326,7 @@ jobs:
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_BUILD_FMT=OFF \
+            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
@@ -482,8 +481,6 @@ jobs:
           tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-          # TODO: Remove this once https://github.com/ROCm/rccl/pull/2128 is merged and included in TheRock
-          sed -i 's/#warning/#pragma message/g' ${{ env.ROCM_PATH }}/include/rccl/rccl.h
 
       - name: Install requirements (venv)
         timeout-minutes: 10
@@ -638,6 +635,7 @@ jobs:
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
             -DROCPROFILER_BUILD_FMT=OFF \
+            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DPython3_EXECUTABLE=$(which python3) \
@@ -683,8 +681,6 @@ jobs:
         tar -xf ${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
         ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-        # TODO: Remove this once https://github.com/ROCm/rccl/pull/2128 is merged and included in TheRock
-        sed -i 's/#warning/#pragma message/g' ${{ env.ROCM_PATH }}/include/rccl/rccl.h
 
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
@@ -855,6 +851,7 @@ jobs:
           --run-attempt ${{ github.run_attempt }}
           --
           -DROCPROFILER_BUILD_FMT=OFF \
+          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
