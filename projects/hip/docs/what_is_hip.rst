@@ -26,8 +26,8 @@ code.
 * Developers can specialize for the platform to tune for performance or handle
   tricky cases.
 
-ROCm offers compilers (``clang``, ``hipcc``), code profilers (``rocprof``,
-``omnitrace``), debugging tools (``rocgdb``), libraries and HIP with the runtime
+ROCm offers compilers (``clang``, ``hipcc``), code profilers (``rocprofv3``),
+debugging tools (``rocgdb``), libraries and HIP with the runtime
 API and kernel language, to create heterogeneous applications running on both
 CPUs and GPUs. ROCm provides marshalling libraries like
 :doc:`hipFFT <hipfft:index>` or :doc:`hipBLAS <hipblas:index>` that act as a
