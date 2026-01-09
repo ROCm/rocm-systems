@@ -473,10 +473,10 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return dim3(1024); }
+inline dim3 GenerateThreadDimensions() { return dim3(512); }
 
 inline dim3 GenerateBlockDimensions() {
-  return dim3(8);
+  return dim3(4);
 }
 
 // Configures and creates the TestCore for a single device, and a single kernel launch
