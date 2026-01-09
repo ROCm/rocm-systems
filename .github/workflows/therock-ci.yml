@@ -20,16 +20,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-    paths-ignore:  # Do not trigger full tests on documentation-only changes
-      - '**/*.txt'
-      - '**/*.md'
-      - '**/*.rtf'
-      - '**/*.rst'
-      - '**/.markdownlint-ci2.yaml'
-      - '**/.readthedocs.yaml'
-      - '**/.spellcheck.local.yaml'
-      - 'docs/**'
-      - 'projects/*/docs/**'
   workflow_dispatch:
     inputs:
       projects:
