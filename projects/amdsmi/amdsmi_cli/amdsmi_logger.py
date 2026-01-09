@@ -1036,6 +1036,7 @@ class AMDSMILogger():
                 amdgpu_version = str(driver_version['driver_version'])[:80]
         fw_pldm_version = str(output['version_info']['fw pldm version'])
         vbios_version = str(output['version_info']['vbios version'])
+        kernel_version = str(output['version_info']['kernel version'])
 
         # print GPU info
         print(default_line_1)
@@ -1051,6 +1052,7 @@ class AMDSMILogger():
             print("| VBIOS Version:   {0:22s}  {1:35s} |".format(vbios_version, ""))
         if fw_pldm_version != "N/A":
             print("| FW PLDM:         {0:15s}  {1:42s} |".format(fw_pldm_version, ""))
+        print("| kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
 
         print("| Platform:        {0:25.25s} {1:34s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)

@@ -7517,10 +7517,12 @@ class AMDSMICommands():
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
+                        "kernel version": "N/A",
                         "fw pldm version": "N/A",
                         "vbios version": "N/A",
                         "rocm version": (False, "N/A")}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
+        version_info['kernel version'] = os.uname().release
         try:
             version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
         except amdsmi_exception.AmdSmiLibraryException as e:
