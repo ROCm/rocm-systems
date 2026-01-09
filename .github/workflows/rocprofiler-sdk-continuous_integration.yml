@@ -848,6 +848,7 @@ jobs:
           --memcheck ${{ matrix.system.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
+          -DROCPROFILER_BUILD_FMT=OFF \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
