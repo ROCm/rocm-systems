@@ -14,7 +14,7 @@ on:
     inputs:
       projects:
         type: string
-        description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/clr projects/rocminfo'"
+        description: "Override: comma-separated list of projects to test (e.g., 'projects/clr,projects/rocminfo'). Leave blank for normal behavior (auto-detect from changes). Use 'all' to test all projects."
 
 permissions:
   contents: read
@@ -31,6 +31,7 @@ jobs:
     with:
       external_source_checkout: true
       therock_ref: users/jayhawk-commits/deduplicate-ci
+      projects: ${{ inputs.projects || '' }}
     permissions:
       contents: read
       id-token: write
