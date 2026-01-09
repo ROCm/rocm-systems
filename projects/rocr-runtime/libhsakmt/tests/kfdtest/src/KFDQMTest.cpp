@@ -37,6 +37,9 @@
 
 #include "Dispatch.hpp"
 
+const unsigned int FILL_VALUE = 0x01010101;
+const unsigned int INIT_VALUE = 0x5A5A5A5A;
+
 extern unsigned int g_TestGPUsNum;
 
 void KFDQMTest::SetUp() {
@@ -1711,7 +1714,7 @@ TEST_F(KFDQMTest, QueuePriorityOnSamePipe) {
     TEST_END
 }
 
-void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, void* pDstBuf, int node) {
+void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* arg0, void* arg1, int node) {
     PM4Queue queue;
 
     if (node == -1)
@@ -1720,7 +1723,7 @@ void KFDQMTest::SyncDispatch(const HsaMemoryBuffer& isaBuffer, void* pSrcBuf, vo
     ASSERT_GE_GPU(node, 0, node) << "failed to get GPU Node";
 
     Dispatch dispatch(isaBuffer);
-    dispatch.SetArgs(pSrcBuf, pDstBuf);
+    dispatch.SetArgs(arg0, arg1);
     dispatch.SetDim(1, 1, 1);
 
     ASSERT_SUCCESS_GPU(queue.Create(node), node);
@@ -1765,13 +1768,13 @@ void KFDQMTest::SimpleWriteDispatch(int gpuNode) {
     HsaMemoryBuffer srcBuffer(PAGE_SIZE, gpuNode, false);
     HsaMemoryBuffer destBuffer(PAGE_SIZE, gpuNode);
 
-    srcBuffer.Fill(0x01010101);
+    srcBuffer.Fill(FILL_VALUE);
 
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()),gpuNode);
 
     SyncDispatch(isaBuffer, srcBuffer.As<void*>(), destBuffer.As<void*>(), gpuNode);
 
-    EXPECT_EQ(destBuffer.As<unsigned int*>()[0], 0x01010101);
+    EXPECT_EQ(destBuffer.As<unsigned int*>()[0], FILL_VALUE);
 
 }
 
@@ -1783,6 +1786,63 @@ TEST_F(KFDQMTest, SimpleWriteDispatch) {
     }));
 
     TEST_END
+}
+
+void KFDQMTest::GpuMemCopyTest(int gpuNode) {
+
+    HSAuint32 m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AR) {
+        LOG() << "Skipping test: MultipleWordsDispatch test not yet available for this family id." << std::endl;
+        return;
+    }
+
+    const size_t bufSize = PAGE_SIZE;
+    HsaMemoryBuffer srcBuffer(bufSize, gpuNode, false);
+    HsaMemoryBuffer dstBuffer(bufSize, gpuNode, false);
+    HsaMemoryBuffer dstLocalBuffer(bufSize, gpuNode, false, true);
+    HsaMemoryBuffer verifyBuffer(bufSize, gpuNode, false);
+
+    srcBuffer.Fill(FILL_VALUE, 0, bufSize);
+
+    // SDMA copy
+    dstBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, true));
+
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(dstBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // Blit kernel copy
+    dstBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, false));
+
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(dstBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // SDMA copy to local memory
+    verifyBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstLocalBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, true));
+    ASSERT_TRUE(GPUMemCopy(verifyBuffer.As<void*>(), dstLocalBuffer.As<void*>(), bufSize, gpuNode, true));
+    
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(verifyBuffer.As<unsigned int*>()[i], FILL_VALUE);
+
+    // Blit kernel copy to local memory
+    verifyBuffer.Fill(INIT_VALUE, 0, bufSize);
+    ASSERT_TRUE(GPUMemCopy(dstLocalBuffer.As<void*>(), srcBuffer.As<void*>(), bufSize, gpuNode, false));
+    ASSERT_TRUE(GPUMemCopy(verifyBuffer.As<void*>(), dstLocalBuffer.As<void*>(), bufSize, gpuNode, false));
+    
+    for (size_t i = 0; i < bufSize / sizeof(unsigned int); ++i)
+        EXPECT_EQ(verifyBuffer.As<unsigned int*>()[i], FILL_VALUE);
+}
+
+TEST_F(KFDQMTest, GpuMemCopyTest) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->GpuMemCopyTest(gpuNode);
+    }));
+
+    TEST_END;
 }
 
 void KFDQMTest::MultipleCpQueuesStressDispatch(int gpuNode) {

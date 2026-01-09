@@ -271,7 +271,6 @@ Examples:
         required=False,
         nargs="?",
         choices=[
-            # "simple",
             "kernel",
             "kernel_launch_params",
         ],
@@ -279,7 +278,6 @@ Examples:
         help=(
             "\t\t\tChoose the iteration multiplexing policy: "
             "(DEFAULT: kernel_launch_params).\n"
-            # "\t\t\t   simple (i.e. Round robin over all kernel dispatches\n"
             "\t\t\t   kernel (i.e. Round robin counters over kernel calls with "
             "unique kernel names.)\n"
             "\t\t\t   kernel_launch_params (i.e. Round robin counters over "
