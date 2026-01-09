@@ -805,14 +805,14 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v1_t
     uint8_t vm_id;             ///< virtual memory ID
     uint8_t queue_id;          ///< queue id
     uint8_t microengine_id;    ///< ACE (microengine) index
-
+    uint8_t reserved[5];
     /// @var cu_or_wgp_id
     /// @brief Compute unit index on GFX9 or workgroup processor index on GFX10+.
 } rocprofiler_pc_sampling_hw_id_v1_t;
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_hw_id_v1_t) == 11,
+        sizeof(rocprofiler_pc_sampling_hw_id_v1_t) == 11 + 5,
         "Increasing the size of the rocprofiler_pc_sampling_hw_id_v1_t is not permitted");)
 
 /**
@@ -822,7 +822,6 @@ ROCPROFILER_CXX_CODE(
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
 {
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -835,17 +834,15 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v0_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v0_t) == 64,
+        sizeof(rocprofiler_pc_sampling_record_v0_t) == 56,
         "Increasing the size of the rocprofiler_pc_sampling_record_v0_t is not permitted");)
 
 /**
- * @brief 96B in total (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
+ * @brief 88B in total (experimental) PC sampling records tailored for host-trap on GFX9 and Navi4x
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
 {
-    // 64B
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -856,8 +853,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
     rocprofiler_pc_sampling_hw_id_v1_t hw_id;
     // 12B
     rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
-    // 1B (probably padded to 4B)
-    uint8_t wave_in_group;  ///< wave position in the workgroup
+    // 4B for padding (1B is suffient)
+    uint32_t wave_in_group;  ///< wave position in the workgroup
 
     /// @var correlation_id
     /// @brief API launch call id that matches dispatch ID
@@ -865,18 +862,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v1_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v1_t) == 96,
+        sizeof(rocprofiler_pc_sampling_record_v1_t) == 88,
         "Increasing the size of the rocprofiler_pc_sampling_record_v1_t is not permitted");)
 
 /**
- * @brief 104B in total (experimental) PC Sampling Record tailored for stochastic sampling on
+ * @brief 96B in total (experimental) PC Sampling Record tailored for stochastic sampling on
  * MI300/MI350
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
 {
-    // 64B
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -888,8 +883,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
         hw_id;  ///< 8B if we use ::rocprofiler_pc_sampling_hw_id_record_packed_t
     // 12B
     rocprofiler_dim3_t workgroup_position;  ///< work group position in 3D grid
-    // 1B (padded to 4B probably)
-    uint8_t wave_in_group;  ///< wave position in the workgroup
+    // 4B for padding (1B is suffient)
+    uint32_t wave_in_group;  ///< wave position in the workgroup
     // 8B
     rocprofiler_pc_sampling_snapshot_information_v0_t snapshot_information;
 
@@ -899,18 +894,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v2_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v2_t) == 104,
+        sizeof(rocprofiler_pc_sampling_record_v2_t) == 96,
         "Increasing the size of the rocprofiler_pc_sampling_record_v2_t is not permitted");)
 
 /**
- * @brief 112B in total (experimental) PC sampling record tailored for host-trap sampling
+ * @brief 104B in total (experimental) PC sampling record tailored for host-trap sampling
  * on future gen architectures.
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
 {
-    // 64B
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -939,18 +932,16 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v3_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v3_t) == 112,
+        sizeof(rocprofiler_pc_sampling_record_v3_t) == 104,
         "Increasing the size of the rocprofiler_pc_sampling_record_v3_t is not permitted");)
 
 /**
- * @brief 136B in total (experimental) PC sampling record tailored for stochastic on future gen
+ * @brief 128B in total (experimental) PC sampling record tailored for stochastic on future gen
  * architectures.
  *
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
 {
-    // 64B
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -986,16 +977,14 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v4_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v4_t) == 136,
+        sizeof(rocprofiler_pc_sampling_record_v4_t) == 128,
         "Increasing the size of the rocprofiler_pc_sampling_record_v4_t is not permitted");)
 
 /**
- * @brief 136B in total (experimental) PC sampling record tailored for stochastic future gen arch
+ * @brief 128B in total (experimental) PC sampling record tailored for stochastic future gen arch
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
 {
-    // 64B
-    uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -1030,7 +1019,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_v5_t
 
 ROCPROFILER_CXX_CODE(
     static_assert(
-        sizeof(rocprofiler_pc_sampling_record_v5_t) == 136,
+        sizeof(rocprofiler_pc_sampling_record_v5_t) == 128,
         "Increasing the size of the rocprofiler_pc_sampling_record_v5_t is not permitted");)
 
 /**
