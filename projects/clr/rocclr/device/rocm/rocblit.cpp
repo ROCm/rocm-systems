@@ -507,7 +507,11 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     // Check if this VirtualGPU already has an assigned engine with affinity
     uint32_t assignedEngineMask = gpu().AssignedSdmaEngine();
 
-    if (assignedEngineMask != 0) {
+    // For inter-GPU copies, always query preferred engine based on agents
+    // because the allocator has special logic to select high-bandwidth engines
+    // for specific src/dst pairs, and we shouldn't reuse an engine from a different copy type
+
+    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter) {
       // This VirtualGPU/stream already has an assigned engine - just use it
       // Stream ordering handles any busy conditions naturally
       copyMask = assignedEngineMask;
