@@ -82,6 +82,9 @@ if(hip_FOUND AND rccl_FOUND)
             list(APPEND RCCL_GPU_TARGETS ${arch})
         endif()
     endforeach()
+    if(RCCL_GPU_TARGETS STREQUAL "")
+        set(RCCL_GPU_TARGETS "gfx906") # Dummy
+    endif()
 
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})

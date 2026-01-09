@@ -796,7 +796,9 @@ def cleanup_instrumented_binary(
 def pytest_runtest_logreport(report):
     """Handle output display for passing tests and suppress details when --no-output."""
     if getattr(pytest, "_no_output_flag", False):
-        report.longrepr = ""
+        # Don't modify longrepr for skipped tests - pytest expects tuple format for skip reason
+        if not report.skipped:
+            report.longrepr = ""
         return
 
     # Determine if we should show runner output

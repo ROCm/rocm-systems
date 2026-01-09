@@ -649,6 +649,7 @@ class TestRunBinary:
         empty_cfg.write_text("#\n# empty config file\n#\n")
 
         tmpdir = test_output_dir / "tmpdir"
+        tmpdir = tmpdir.resolve()
         tmpdir.mkdir(parents=True, exist_ok=True)
 
         args = [

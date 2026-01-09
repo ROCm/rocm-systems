@@ -77,7 +77,7 @@ class RocprofsysConfig:
         Returns:
             LD_LIBRARY_PATH string with rocprofiler-systems libraries
         """
-        paths = [str(self.rocprofsys_lib_dir)]
+        paths = [str(self.rocprofsys_lib_dir.resolve())]
 
         existing = os.environ.get("LD_LIBRARY_PATH", "")
         if existing:
@@ -211,7 +211,7 @@ def _find_rocm_path() -> Optional[Path]:
         "/usr/local/rocm",
     ]:
         if candidate and Path(candidate).exists():
-            return Path(candidate)
+            return Path(candidate).resolve()
     return None
 
 
@@ -257,7 +257,7 @@ def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
     for search_dir in search_paths:
         exe = search_dir / name
         if exe.exists() and exe.is_file():
-            return exe
+            return exe.resolve()
 
     # Fallback to PATH
     path_exe = shutil.which(name)
@@ -287,7 +287,7 @@ def discover_install_config(
     if install_dir is None:
         env_install = os.environ.get("ROCPROFSYS_INSTALL_DIR")
         if env_install:
-            install_dir = Path(env_install)
+            install_dir = Path(env_install).resolve()
         else:
             for candidate in [
                 _find_rocm_path(),
@@ -419,9 +419,9 @@ def discover_build_config(
     if build_dir is None:
         env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
         if env_build:
-            build_dir = Path(env_build)
+            build_dir = Path(env_build).resolve()
         else:
-            build_dir = Path(__file__).parent.parent.parent.parent.parent.parent
+            build_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent
 
     if build_dir is None or not build_dir.exists():
         raise FileNotFoundError(
