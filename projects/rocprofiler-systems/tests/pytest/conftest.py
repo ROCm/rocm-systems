@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
 Pytest configuration and fixtures for rocprofiler-systems tests.
@@ -184,7 +165,6 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Categories:     {gpuInfo.categories}",
         "-" * 70,
         "Directories:",
-        f"  Root dir:       {rocprof_config.rocprofsys_root_dir}",
         f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
         f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
         f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
@@ -267,13 +247,25 @@ def pytest_collection_modifyitems(
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Code that runs after all tests complete."""
+    """Code that runs after all tests complete
+
+    If ROCPROFSYS_KEEP_TEST_OUTPUT is not set to OFF, this code cleans up:
+    - Temporary buffered storage files
+    - Temporary metadata files
+    - Perfetto temp files
+    - HSA/ROCm temp files
+    - Instrumented binaries
+    - Causal profiling temp files
+    - Empty pytest output directories
+    - Test config directories
+    """
 
     # Disallow xdist workers from executing code after this call
+    # Only the master process should run this code
     if hasattr(session.config, "workerinput"):
         return
 
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
         return
 
     import glob
@@ -368,18 +360,6 @@ def gpu_info() -> GPUInfo:
 
 
 @pytest.fixture(scope="session")
-def root_dir(rocprof_config: RocprofsysConfig) -> Path:
-    """Path to the rocprofiler-systems root directory (or install directory)."""
-    return rocprof_config.rocprofsys_root_dir
-
-
-@pytest.fixture(scope="session")
-def build_dir(rocprof_config: RocprofsysConfig) -> Path:
-    """Path to rocprofiler-systems build directory (or install directory)."""
-    return rocprof_config.rocprofsys_build_dir
-
-
-@pytest.fixture(scope="session")
 def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
     """Path to tests directory."""
     return rocprof_config.rocprofsys_tests_dir
@@ -462,7 +442,7 @@ def test_output_dir(
 
     # === CLEANUP PHASE (runs AFTER test body completes) ===
     # Cleanup on success unless ROCPROFSYS_KEEP_TEST_OUTPUT is set
-    keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1"
+    keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1"
     test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
 
     if not keep_output and not test_failed and output_dir.exists():
@@ -558,7 +538,7 @@ def apply_rocpd_marker(request):
 
 
 # ============================================================================
-# Cleanup Fixtures
+# Cleanup Functions - pytest_sessionfinish hook also uses these
 # ============================================================================
 
 
@@ -607,7 +587,6 @@ def _cleanup_directory_patterns(build_dir: Path) -> list[Path]:
             [
                 build_dir / "rocprof-sys-pytest-output",
                 build_dir / "rocprof-sys-tests-output",
-                build_dir / "rocprof-sys-tests-config",
             ]
         )
 
@@ -643,53 +622,6 @@ def _safe_remove_directory(dirpath: Path, remove_if_empty: bool = True) -> None:
         pass
 
 
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_temp_files(rocprof_config: RocprofsysConfig, is_xdist_used, request):
-    """Session-scoped cleanup fixture that runs AFTER ALL tests complete.
-
-    Execution Order:
-        1. Session starts
-        2. All test modules run (with their validations)
-        3. Session ends
-        4. This cleanup runs (after yield)
-
-    Cleans up:
-    - Temporary buffered storage files
-    - Temporary metadata files
-    - Perfetto temp files
-    - HSA/ROCm temp files
-    - Instrumented binaries
-    - Causal profiling temp files
-    - Empty pytest output directories
-    - Test config directories
-    """
-    yield  # All tests run here
-
-    # In xdist, session fixtures run once per worker.
-    # We need to defer cleanup to end of session
-    if is_xdist_used:
-        return
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
-        return
-
-    import glob
-
-    # Clean up temp files matching patterns
-    for pattern in _cleanup_temp_patterns():
-        for filepath in glob.glob(pattern):
-            _safe_remove_file(Path(filepath))
-
-    # Clean up empty directories in test output areas
-    for dir_path in _cleanup_directory_patterns(rocprof_config.rocprofsys_build_dir):
-        if dir_path.exists():
-            # First pass: remove empty subdirectories
-            for child in list(dir_path.iterdir()):
-                _safe_remove_directory(child, remove_if_empty=True)
-            # Second pass: remove parent if now empty
-            _safe_remove_directory(dir_path, remove_if_empty=True)
-
-
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_module_temp_files(
     rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest, is_xdist_used
@@ -707,7 +639,7 @@ def cleanup_module_temp_files(
     """
     yield  # All tests in module run here
 
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
         return
 
     import glob
@@ -745,7 +677,7 @@ def cleanup_instrumented_binary(
 
     yield
 
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
         return
 
     # Clean up any new .inst files

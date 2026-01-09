@@ -25,6 +25,7 @@
 #
 include_guard(GLOBAL)
 
+include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
 # test groups
@@ -78,6 +79,44 @@ set_tests_properties(
 
 # ------------------------------------------------------------------------------#
 #
+# Move test files to build directory
+#
+# ------------------------------------------------------------------------------#
+
+set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+)
+
+set(ROCPROFSYS_TEST_SCRIPTS
+    ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
+    ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
+    ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
+)
+
+add_custom_target(
+    move-test-files
+    ALL
+    COMMAND
+        ${CMAKE_COMMAND} -E make_directory
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    # copy_directory for directories (copy_if_different only works for files)
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocpd-validation-rules
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+)
+
+# ------------------------------------------------------------------------------#
+#
 # Pytests install
 #
 # ------------------------------------------------------------------------------#
@@ -96,15 +135,9 @@ if(NOT ROCPROFSYS_INSTALL_EXAMPLES)
 endif()
 
 if(ROCPROFSYS_INSTALL_TESTING)
-    # Pytest
-    include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-
     # Python Validation scripts
     install(
-        PROGRAMS
-            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-            ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
-            ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
+        PROGRAMS ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )
@@ -113,22 +146,9 @@ if(ROCPROFSYS_INSTALL_TESTING)
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )
-    # Install the test configuration files
-    install(
-        DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-config
-        DESTINATION share/rocprofiler-systems/tests
-        COMPONENT rocprofiler-systems-tests
-    )
     # Scripts
     install(
-        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
-        DESTINATION share/rocprofiler-systems/tests
-        COMPONENT rocprofiler-systems-tests
-    )
-    # Nic
-    install(
-        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
-        PROGRAMS ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
+        PROGRAMS ${ROCPROFSYS_TEST_SCRIPTS}
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )

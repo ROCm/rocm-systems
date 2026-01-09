@@ -68,6 +68,21 @@ if(hip_FOUND AND rccl_FOUND)
         return()
     endif()
 
+    # Parse comment describing supported gfx targets from rccl src/Makefile
+    execute_process(
+        COMMAND grep "Currently, supports" ${rccl-tests_SOURCE_DIR}/src/Makefile
+        OUTPUT_VARIABLE _supported_line
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    # Extract just the gfx architectures
+    string(REGEX MATCHALL "gfx[0-9a-z]+" RCCL_SUPPORTED_TARGETS "${_supported_line}")
+    set(RCCL_GPU_TARGETS "")
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        if(arch IN_LIST RCCL_SUPPORTED_TARGETS)
+            list(APPEND RCCL_GPU_TARGETS ${arch})
+        endif()
+    endforeach()
+
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
@@ -78,7 +93,9 @@ if(hip_FOUND AND rccl_FOUND)
     add_custom_target(
         build-rccl-tests
         ALL
-        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} -j
+        COMMAND
+            make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
+            GPU_TARGETS=${RCCL_GPU_TARGETS} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."

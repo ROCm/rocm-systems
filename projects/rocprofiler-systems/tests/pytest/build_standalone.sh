@@ -118,7 +118,7 @@ Environment Variables:
     ROCPROFSYS_INSTALL_DIR          - Path to rocprofiler-systems installation
     ROCPROFSYS_BUILD_DIR            - Path to build directory (for development)
     ROCPROFSYS_SOURCE_DIR           - Path to source directory (for development)
-    ROCPROFSYS_KEEP_TEST_OUTPUT     - Keep test output on success (ON/OFF, default: OFF)
+    ROCPROFSYS_KEEP_TEST_OUTPUT     - Keep test output on success (ON/OFF, default: ON)
     ROCPROFSYS_USE_ROCPD            - Enable/disable ROCpd validation (ON/OFF, default: ON if available)
     ROCPROFSYS_VALIDATE_PERFETTO    - Enable/disable Perfetto validation (ON/OFF, default: ON if available)
     ROCPROFSYS_TRACE_PROC_SHELL     - Path to trace_processor_shell binary (auto-detected)
@@ -197,7 +197,7 @@ build_pyinstaller() {
 
     # Install pytest plugins needed for bundling
     echo "Installing pytest and required plugins..."
-    pip install pytest pytest-subtests pytest-timeout
+    pip install pytest pytest-subtests pytest-timeout pytest-xdist
 
     # Create spec file for more control
     cat > "${SCRIPT_DIR}/rocprofsys_tests.spec" << SPEC_EOF
@@ -240,6 +240,7 @@ a = Analysis(
         'pytest_subtests',
         'pytest_subtests.plugin',
         'pytest_timeout',
+        'xdist',
         'rocprofsys',
         'rocprofsys.config',
         'rocprofsys.runners',
@@ -329,7 +330,7 @@ FROM quay.io/pypa/manylinux2014_x86_64
 
 # Install Python and pip
 RUN /opt/python/cp310-cp310/bin/python -m pip install --upgrade pip
-RUN /opt/python/cp310-cp310/bin/python -m pip install pyinstaller pytest pytest-subtests pytest-timeout
+RUN /opt/python/cp310-cp310/bin/python -m pip install pyinstaller pytest pytest-subtests pytest-timeout pytest-xdist
 
 # Set Python path
 ENV PATH="/opt/python/cp310-cp310/bin:$PATH"
@@ -370,7 +371,7 @@ a = Analysis(
     hiddenimports=[
         'pytest', '_pytest', '_pytest.assertion', '_pytest.config',
         '_pytest.fixtures', '_pytest.python',
-        'pytest_subtests', 'pytest_subtests.plugin', 'pytest_timeout',
+        'pytest_subtests', 'pytest_subtests.plugin', 'pytest_timeout', 'xdist',
         'rocprofsys', 'rocprofsys.config', 'rocprofsys.runners',
         'rocprofsys.validators', 'rocprofsys.gpu',
     ],
@@ -589,7 +590,7 @@ MAIN_EOF
     echo ""
     echo "Requirements on target machine:"
     echo "  - Python 3.8+"
-    echo "  - Install dependencies: pip install pytest pytest-subtests pytest-timeout"
+    echo "  - Install dependencies: pip install pytest pytest-subtests pytest-timeout pytest-xdist"
 }
 
 # Main build process
@@ -631,7 +632,7 @@ if [[ $BUILD_PYINSTALLER -eq 1 || $BUILD_PYINSTALLER_DOCKER -eq 1 ]]; then
 fi
 if [[ $BUILD_SHIV -eq 1 ]]; then
     echo "   Shiv:        python3 rocprofsys-tests.pyz -v"
-    echo "   (Requires: pip install pytest pytest-subtests pytest-timeout)"
+    echo "   (Requires: pip install pytest pytest-subtests pytest-timeout pytest-xdist)"
 fi
 echo ""
 echo "4. Common pytest options:"

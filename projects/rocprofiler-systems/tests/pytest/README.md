@@ -7,7 +7,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r tests/pytest/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### Running Tests
@@ -38,7 +38,7 @@ ROCPROFSYS_INSTALL_DIR=<install prefix> pytest <install prefix>/share/rocprofile
 ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest /opt/rocprofiler-systems/share/rocprofiler-systems/tests/pytest/
 ```
 
-Default output directory: `/tmp/rocprof-sys-pytest-output/`
+Default output directory: `/tmp/$USER/rocprof-sys-pytest-output/`
 
 > **Note:** Install mode requires `ROCPROFSYS_INSTALL_EXAMPLES=ON` and `ROCPROFSYS_INSTALL_TESTING=ON` during build.
 
@@ -49,7 +49,7 @@ Default output directory: `/tmp/rocprof-sys-pytest-output/`
 | `ROCPROFSYS_BUILD_DIR` | Path to build directory | Auto-detected |
 | `ROCPROFSYS_INSTALL_DIR` | Path to install prefix (enables install mode) | Not set |
 | `ROCPROFSYS_SOURCE_DIR` | Path to source directory | Auto-detected |
-| `ROCPROFSYS_KEEP_TEST_OUTPUT` | Keep test output on success (`ON`/`OFF`) | `OFF` |
+| `ROCPROFSYS_KEEP_TEST_OUTPUT` | Keep test output on success (`ON`/`OFF`) | `ON` |
 | `ROCPROFSYS_USE_ROCPD` | Enable/disable ROCpd validation (`ON`/`OFF`) | `ON` if available |
 | `ROCPROFSYS_VALIDATE_PERFETTO` | Enable/disable Perfetto tracing (`ON`/`OFF`) | `ON` if available|
 | `ROCPROFSYS_TRACE_PROCESSOR_SHELL` | Path to trace_processor_shell binary | Auto-detected |

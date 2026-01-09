@@ -1,24 +1,5 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 """
 Test runners for different rocprofiler-systems instrumentation modes.
@@ -137,7 +118,7 @@ class TestResult:
         Args:
             keep_on_failure: If True, keep files when test failed for debugging
         """
-        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
             return
 
         if keep_on_failure and not self.success:
@@ -153,7 +134,7 @@ class TestResult:
 
     def cleanup_instrumented_binaries(self) -> None:
         """Clean up only the instrumented binary files."""
-        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
             return
 
         for inst_file in self._instrumented_files:
@@ -187,7 +168,7 @@ class BaseRunner(ABC):
         self.run_args = run_args or []
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
-        self.working_directory = working_directory or config.rocprofsys_root_dir
+        self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_base_environment()
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
@@ -432,7 +413,7 @@ class BinaryRewriteRunner(BaseRunner):
                 text=True,
                 timeout=self.timeout,
                 env=full_env,
-                cwd=self.config.rocprofsys_root_dir,
+                cwd=self.config.rocprofsys_build_dir,
             )
 
             duration = time.time() - start_time
@@ -524,7 +505,7 @@ class BinaryRewriteRunner(BaseRunner):
 
     def cleanup(self) -> None:
         """Clean up instrumented binary files."""
-        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "0") == "1":
+        if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
             return
 
         for inst_file in self._instrumented_files:

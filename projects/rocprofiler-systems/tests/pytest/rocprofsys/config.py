@@ -1,26 +1,8 @@
-# MIT License
-#
-# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 from dataclasses import dataclass
+import getpass
 import os
 from pathlib import Path
 import shutil
@@ -36,7 +18,6 @@ class RocprofsysConfig:
     Contains necessary paths to configure tests for build or for install modes.
 
         Attributes:
-        - rocprofsys_root_dir: Path to either the source or install directory
         - rocprofsys_build_dir: Path to either the build or install directory
         - rocprofsys_instrument: Path to rocprof-sys-instrument executable
         - rocprofsys_run: Path to rocprof-sys-run executable
@@ -55,7 +36,6 @@ class RocprofsysConfig:
         - is_installed: Whether this is an installed configuration
     """
 
-    rocprofsys_root_dir: Path
     rocprofsys_build_dir: Path
     rocprofsys_instrument: Path
     rocprofsys_run: Path
@@ -113,7 +93,7 @@ class RocprofsysConfig:
         """Get path to a test target executable.
 
         When is_installed is True, searches in the following order:
-        1. rocprofsys_root_dir/name (build directory layout)
+        1. rocprofsys_build_dir/name (build directory layout)
         2. rocprofsys_examples_dir/name/name (build directory layout)
         3. PATH lookup
 
@@ -193,8 +173,7 @@ class RocprofsysConfig:
         return {
             "ROCPROFSYS_CI": "ON",
             "ROCPROFSYS_CONFIG_FILE": "",
-            "ROCPROFSYS_TRACE_LEGACY": "OFF",
-            "ROCPROFSYS_TRACE_CACHED": "ON",
+            "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
@@ -213,8 +192,7 @@ class RocprofsysConfig:
     def get_base_binary_environment(self) -> dict[str, str]:
         """Get base environment variables for rocprof-sys binary test execution."""
         return {
-            "ROCPROFSYS_TRACE_LEGACY": "OFF",
-            "ROCPROFSYS_TRACE_CACHED": "ON",
+            "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
@@ -351,8 +329,12 @@ def discover_install_config(
     tests_dir = install_dir / "share" / "rocprofiler-systems" / "tests"
     rocpd_validation_rules = tests_dir / "rocpd-validation-rules"
 
-    # Create a temporary directory for test outputs if needed
-    output_dir = Path(tempfile.gettempdir()) / "rocprof-sys-pytest-output"
+    # Create a temporary directory for test outputs
+    try:
+        username = getpass.getuser()
+    except Exception:
+        username = str(os.getuid())
+    output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rocm_path = _find_rocm_path()
@@ -382,7 +364,6 @@ def discover_install_config(
         )
 
     return RocprofsysConfig(
-        rocprofsys_root_dir=install_dir,
         rocprofsys_build_dir=install_dir,
         rocprofsys_instrument=rocprof_instrument,
         rocprofsys_run=rocprof_run,
@@ -404,7 +385,6 @@ def discover_install_config(
 
 def discover_build_config(
     build_dir: Optional[Path] = None,
-    source_dir: Optional[Path] = None,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.
 
@@ -429,25 +409,13 @@ def discover_build_config(
     if os.environ.get("ROCPROFSYS_INSTALL_DIR"):
         return discover_install_config()
 
+    # All files should be in the build directory
     if build_dir is None:
         env_build = os.environ.get("ROCPROFSYS_BUILD_DIR")
         if env_build:
             build_dir = Path(env_build)
         else:
-            test_dir = Path(__file__).parent.parent.parent.parent
-            for candidate in [
-                test_dir / "rocprof-sys-build",
-                test_dir / "build" / "debug",
-                test_dir / "build" / "release",
-                test_dir / "build",
-                Path.cwd() / "rocprof-sys-build",
-                Path.cwd() / "build" / "debug",
-                Path.cwd() / "build" / "release",
-                Path.cwd() / "build",
-            ]:
-                if candidate.exists() and (candidate / "bin").exists():
-                    build_dir = candidate
-                    break
+            build_dir = Path(__file__).parent.parent.parent.parent.parent.parent
 
     if build_dir is None or not build_dir.exists():
         raise FileNotFoundError(
@@ -455,45 +423,6 @@ def discover_build_config(
             "  - ROCPROFSYS_BUILD_DIR: Path to build directory\n"
             "  - ROCPROFSYS_INSTALL_DIR: Path to installation prefix"
         )
-
-    if source_dir is None:
-        env_source = os.environ.get("ROCPROFSYS_SOURCE_DIR")
-        if env_source:
-            source_dir = Path(env_source)
-        else:
-            cmake_cache = build_dir / "CMakeCache.txt"
-            if cmake_cache.exists():
-                content = cmake_cache.read_text()
-                match = re.search(r"CMAKE_HOME_DIRECTORY:INTERNAL=(.+)", content)
-                if match:
-                    source_dir = Path(match.group(1))
-
-            if source_dir is None:
-                # Walk up from build_dir
-                source_dir = build_dir
-                # If source dir is higher, build_dir should be specified
-                for _ in range(2):
-                    parent = source_dir.parent
-                    if parent == source_dir:
-                        break
-                    if source_dir.name in (
-                        "build",
-                        "debug",
-                        "release",
-                        "rocprof-sys-build",
-                    ):
-                        source_dir = parent
-                    else:
-                        break
-
-            # Validate that we found a valid source directory
-            if not (source_dir / "CMakeLists.txt").exists():
-                raise FileNotFoundError(
-                    f"Could not find source directory. Detected '{source_dir}' but it does not "
-                    f"contain CMakeLists.txt. Set ROCPROFSYS_SOURCE_DIR environment variable."
-                )
-
-    source_dir = source_dir.resolve()
 
     rocm_path = _find_rocm_path()
     mpiexec = _find_mpiexec()
@@ -524,8 +453,9 @@ def discover_build_config(
             f"Searched in: {search_paths}"
         )
 
+    share_path = build_dir / "share" / "rocprofiler-systems"
+
     return RocprofsysConfig(
-        rocprofsys_root_dir=source_dir,
         rocprofsys_build_dir=build_dir,
         rocprofsys_instrument=rocprof_instrument,
         rocprofsys_run=rocprof_run,
@@ -536,8 +466,8 @@ def discover_build_config(
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
         rocprofsys_examples_dir=build_dir,  # Example binaries are (almost always) in root of build directory
-        rocprofsys_tests_dir=source_dir / "tests",
-        rocpd_validation_rules=source_dir / "tests" / "rocpd-validation-rules",
+        rocprofsys_tests_dir=share_path / "tests",
+        rocpd_validation_rules=share_path / "tests" / "rocpd-validation-rules",
         test_output_dir=build_dir / "rocprof-sys-pytest-output",
         mpiexec=mpiexec,
         rocm_version=_get_rocm_version(),
