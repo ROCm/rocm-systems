@@ -24,6 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
+# OpenMP will not be traced if no GPU is available, this includes CPU-only
+pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.openmp
+
 
 # ============================================================================
 # OpenMP Fixtures
@@ -111,7 +115,6 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestOpenMPCG:
     """Tests for OpenMP Conjugate Gradient example."""
 
@@ -163,7 +166,6 @@ class TestOpenMPCG:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestOpenMPLU:
     """Tests for OpenMP LU decomposition example."""
 
@@ -196,7 +198,7 @@ class TestOpenMPLU:
 # ============================================================================
 
 
-@pytest.mark.gpu
+@pytest.mark.openmp_target
 class TestOpenMPTarget:
     """Tests for OpenMP target offload (GPU) example."""
 
@@ -245,7 +247,7 @@ class TestOpenMPTarget:
     ],
     ids=["parallel-for-simd-atomic", "team-default-shared"],
 )
-@pytest.mark.gpu
+@pytest.mark.ompvv
 class TestOpenMPVVHost:
     """Tests for OpenMP VV host programs."""
 
@@ -361,7 +363,8 @@ class TestOpenMPVVHost:
     ],
     ids=["target-simd-if", "target-teams-distribute-parallel-for-collapse"],
 )
-@pytest.mark.gpu
+@pytest.mark.openmp_target
+@pytest.mark.ompvv
 class TestOpenMPVVOffload:
     """Tests for OpenMP VV offload programs."""
 
@@ -442,7 +445,7 @@ class TestOpenMPVVOffload:
 # ============================================================================
 
 
-@pytest.mark.gpu
+@pytest.mark.sampling_duration
 class TestSamplingDuration:
     """Tests for sampling duration functionality."""
 
@@ -496,7 +499,7 @@ class TestSamplingDuration:
 # ============================================================================
 
 
-@pytest.mark.gpu
+@pytest.mark.no_tmp_files
 class TestNoTmpFiles:
     """Tests for operation without temporary files."""
 

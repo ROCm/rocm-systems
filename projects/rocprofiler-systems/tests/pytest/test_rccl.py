@@ -8,6 +8,9 @@ MPI is unsupported for RCCL tests.
 """
 
 import pytest
+
+pytestmark = pytest.mark.rccl
+
 from pathlib import Path
 
 # =============================================================================

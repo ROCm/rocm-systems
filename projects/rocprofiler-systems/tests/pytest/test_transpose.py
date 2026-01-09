@@ -29,6 +29,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
+pytestmark = pytest.mark.transpose
+pytestmark = pytest.mark.gpu
+
 from rocprofsys import (
     GPUInfo,
 )
@@ -73,7 +76,6 @@ def transpose_rules(validation_rules_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestTranspose:
     """Basic transpose tests with all instrumentation modes."""
 
@@ -185,7 +187,6 @@ class TestTranspose:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestTransposeTwoKernels:
     """Test transpose with two kernels configuration (1 iteration, 2x2 size)."""
 
@@ -227,7 +228,6 @@ class TestTransposeTwoKernels:
 # ============================================================================
 
 
-@pytest.mark.gpu
 @pytest.mark.loops
 class TestTransposeLoops:
     """Test transpose with loop instrumentation."""
@@ -285,7 +285,6 @@ class TestTransposeLoops:
 # ============================================================================
 
 
-@pytest.mark.gpu
 @pytest.mark.rocprofiler
 class TestTransposeROCProfiler:
     """Test transpose with ROCProfiler counter collection."""
@@ -353,7 +352,6 @@ class TestTransposeROCProfiler:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestTransposeParametrized:
     """Parametrized tests for various transpose configurations."""
 

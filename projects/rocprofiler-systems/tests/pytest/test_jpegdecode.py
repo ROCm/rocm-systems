@@ -7,6 +7,10 @@ Tests for the jpegdecode example.
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.decode
+pytestmark = pytest.mark.jpegdecode
+
 from rocprofsys import (
     GPUInfo,
     RocprofsysConfig,
@@ -45,7 +49,6 @@ def jpeg_decode_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-@pytest.mark.gpu
 class TestJPEGDecode:
     """Tests for the jpegdecode example."""
 

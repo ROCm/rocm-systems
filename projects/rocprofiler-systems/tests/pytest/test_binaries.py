@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
+pytestmark = pytest.mark.rocprof_binary
+
 from rocprofsys import (
     RocprofsysConfig,
 )

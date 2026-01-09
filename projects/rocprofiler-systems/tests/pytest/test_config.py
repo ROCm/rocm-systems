@@ -6,6 +6,9 @@ General configuration file tests.
 """
 
 import pytest
+
+pytestmark = pytest.mark.rocprof_config
+
 from pathlib import Path
 
 import shutil

@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.roctx
 
 # =============================================================================
 # rocTX fixtures
@@ -46,7 +48,6 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-@pytest.mark.gpu
 class TestRoctx:
     """Tests for rocTX marker API."""
 

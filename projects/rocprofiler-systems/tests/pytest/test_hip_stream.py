@@ -14,6 +14,7 @@ import pytest
 
 @pytest.mark.gpu
 @pytest.mark.rocm_min_version("7.0")
+@pytest.mark.group_by_queue
 class TestTransposeGroupByQueue:
     """Tests for transpose with group by queue"""
 
@@ -55,6 +56,7 @@ class TestTransposeGroupByQueue:
 
 @pytest.mark.gpu
 @pytest.mark.rocm_min_version("7.0")
+@pytest.mark.group_by_stream
 class TestTransposeGroupByStream:
     def test_sampling(
         self,

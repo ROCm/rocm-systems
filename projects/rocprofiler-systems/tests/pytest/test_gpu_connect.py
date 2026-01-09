@@ -44,6 +44,7 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 @pytest.mark.gpu
+@pytest.mark.xgmi
 class TestGPUConnect:
     """Tests for GPU connectivity tests."""
 

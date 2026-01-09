@@ -58,6 +58,15 @@ _output_printed_key: StashKey[bool] = StashKey()
 # ============================================================================
 
 
+@lru_cache(maxsize=1)
+def get_rocprof_config() -> RocprofsysConfig:
+    """Return the rocprofiler-systems configuration."""
+    try:
+        return discover_build_config()
+    except Exception as e:
+        raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add custom command-line options."""
     group = parser.getgroup("rocprofsys", "rocprofiler-systems test options")
@@ -80,6 +89,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Show runner output only when subtests fail",
     )
     group.addoption(
+        "--output-log",
+        action="store",
+        default="@test_output_dir@/pytest-output.txt",
+        help="Write log output to the specified file",
+    )
+    group.addoption(
+        "--monochrome",
+        action="store_true",
+        default=False,
+        help="Runners use ROCPROFSYS_MONOCHROME=ON",
+    )
+    group.addoption(
         "--ctest-integration",
         action="store_true",
         default=False,
@@ -89,21 +110,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
+    # Disable color output by default for cleaner log files
+    config.option.color = "no"
+
+    rocprof_config = get_rocprof_config()
+
+    # Functional markers (use arguments or do more than just label a test)
+
     config.addinivalue_line(
         "markers",
         "gpu: mark test as requiring a GPU (default: any available GPU)",
-    )
+    )  # triggers GPU check in run_test unless no_check_target_arch=True
     config.addinivalue_line(
         "markers",
         "gpu_category_exclude(categories): exclude tests that require a specific GPU category (instinct, radeon, apu)",
     )
-    config.addinivalue_line("markers", "mpi: mark test as requiring MPI")
-    config.addinivalue_line("markers", "rocm: mark test as requiring ROCm")
-    config.addinivalue_line(
-        "markers", "rocprofiler: mark test as using ROCProfiler counters"
-    )
-    config.addinivalue_line("markers", "slow: mark test as slow running")
-    config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
     config.addinivalue_line(
         "markers",
         "rocm_min_version(version): mark test as requiring minimum ROCm version",
@@ -112,7 +133,49 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
-    # Set flags for hooks that can't access config directly
+
+    # Non-functional informational markers
+
+    config.addinivalue_line("markers", "mpi: mark test as requiring MPI")
+    config.addinivalue_line("markers", "rocm: mark test as requiring ROCm")
+    config.addinivalue_line(
+        "markers", "rocprofiler: mark test as using ROCProfiler counters"
+    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
+
+    # Can be described using generic desc below
+    label_list = [
+        "decode",
+        "videodecode",
+        "jpegdecode",
+        "rocprof_binary",
+        "rocprof_config",
+        "xgmi",
+        "group_by_queue",
+        "group_by_stream",
+        "openmp",
+        "openmp_target",
+        "ompvv",
+        "sampling_duration",
+        "no_tmp_files",
+        "rccl",
+        "roctx",
+        "time_window",
+        "transpose",
+    ]
+    for label in label_list:
+        config.addinivalue_line("markers", f"{label}: label test as {label}")
+
+    # Other logic that needs to occur here
+
+    # Log file path configuration - store path for pytest_sessionstart
+    log_file = config.getoption(
+        "--output-log", default="@test_output_dir@/pytest-output.txt"
+    )
+    log_file = log_file.replace("@test_output_dir@", str(rocprof_config.test_output_dir))
+    config._output_log_path = Path(log_file)
+
     pytest._no_output_flag = config.getoption("--no-output", default=False)
     pytest._show_output_flag = config.getoption("--show-output", default=False)
     pytest._show_output_on_subtest_fail_flag = config.getoption(
@@ -125,11 +188,38 @@ def pytest_configure(config: pytest.Config) -> None:
     pytest._config_ref = config
 
 
+def pytest_sessionstart(session):
+    """Set up terminal output redirection after plugins are loaded."""
+    config = session.config
+    if not hasattr(config, "_output_log_path"):
+        return
+
+    log_path = config._output_log_path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    config._log_file_handle = open(log_path, "w")
+
+    terminal = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal:
+        tw = terminal._tw
+        file_handle = config._log_file_handle
+
+        # Wrap write method to redirect to file
+        # (line and sep internally call write, so we only need to wrap write)
+        original_write = tw.write
+
+        def redirect_to_file(s, **kwargs):
+            original_write(s, **kwargs)
+            file_handle.write(str(s))
+            file_handle.flush()
+
+        tw.write = redirect_to_file
+
+
 # Debug helper
 def pytest_report_header(config: pytest.Config) -> list[str]:
     """Add test configuration to pytest header output."""
     try:
-        rocprof_config = discover_build_config()
+        rocprof_config = get_rocprof_config()
     except Exception as e:
         return [f"rocprofiler-systems: Configuration error - {e}"]
 
@@ -192,7 +282,7 @@ def pytest_collection_modifyitems(
 ) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
-    rocprof_config = discover_build_config()
+    rocprof_config = get_rocprof_config()
 
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_mpi = pytest.mark.skip(reason="MPI not available")
@@ -277,7 +367,7 @@ def pytest_sessionfinish(session, exitstatus):
 
     # Clean up empty directories in test output areas
     try:
-        config = discover_build_config()
+        config = get_rocprof_config()
         build_dir = config.rocprofsys_build_dir
     except Exception:
         return  # Can't get config, skip directory cleanup
@@ -289,6 +379,12 @@ def pytest_sessionfinish(session, exitstatus):
                 _safe_remove_directory(child, remove_if_empty=True)
             # Second pass: remove parent if now empty
             _safe_remove_directory(dir_path, remove_if_empty=True)
+
+
+def pytest_unconfigure(config):
+    """Clean up resources at end of session."""
+    if hasattr(config, "_log_file_handle"):
+        config._log_file_handle.close()
 
 
 @lru_cache(maxsize=1)
@@ -303,7 +399,7 @@ def check_use_rocpd() -> bool:
     if os.environ.get("ROCPROFSYS_USE_ROCPD", "").upper() == "OFF":
         return False
     gpu_info = detect_gpu()
-    rocprof_config = discover_build_config()
+    rocprof_config = get_rocprof_config()
     if not gpu_info.available:
         return False
     rocm_version = rocprof_config.rocm_version
@@ -347,7 +443,7 @@ def rocprof_config() -> RocprofsysConfig:
     Discovers build directory and creates configuration object.
     Can be overridden with ROCPROFSYS_BUILD_DIR environment variable.
     """
-    return discover_build_config()
+    return get_rocprof_config()
 
 
 @pytest.fixture(scope="session")
@@ -703,12 +799,12 @@ def pytest_runtest_logreport(report):
         report.longrepr = ""
         return
 
-    # Extract runner output from report section
+    # Determine if we should show runner output
     show_output_flag = getattr(pytest, "_show_output_flag", False)
     if show_output_flag and report.when == "call" and report.passed:
         config = getattr(pytest, "_config_ref", None)
-        terminal = config.pluginmanager.get_plugin("terminalreporter")
-        if config and terminal:
+        terminal = config.pluginmanager.get_plugin("terminalreporter") if config else None
+        if terminal:
             for section_name, section_content in report.sections:
                 if section_name == "Runner Output":
                     terminal.write_line(f"\n--- {section_name} ---")
@@ -848,6 +944,11 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
                     )
             except FileNotFoundError:
                 pass
+
+        # Apply --monochrome option if set
+        if request.config.getoption("--monochrome", default=False):
+            env = env.copy() if env else {}
+            env["ROCPROFSYS_MONOCHROME"] = "ON"
 
         try:
             runner = runner_class(

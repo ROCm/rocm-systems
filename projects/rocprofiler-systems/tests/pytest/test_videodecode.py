@@ -7,6 +7,10 @@ Tests for the videodecode example.
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+pytestmark = pytest.mark.decode
+pytestmark = pytest.mark.videodecode
+
 from rocprofsys import (
     GPUInfo,
     RocprofsysConfig,
@@ -44,7 +48,6 @@ def video_decode_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-@pytest.mark.gpu
 class TestVideoDecode:
     """Tests for the videodecode example."""
 

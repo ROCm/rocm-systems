@@ -32,10 +32,10 @@ If auto detection of the build directory fails, specify `ROCPROFSYS_BUILD_DIR=<p
 Runs tests using binaries from your install location.
 
 ```bash
-ROCPROFSYS_INSTALL_DIR=<install prefix> pytest <install prefix>/share/rocprofiler-systems/tests/pytest/
+ROCPROFSYS_INSTALL_DIR=<install prefix> pytest tests/pytest/
 
 # Using /opt/rocprofiler-systems
-ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest /opt/rocprofiler-systems/share/rocprofiler-systems/tests/pytest/
+ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest tests/pytest/
 ```
 
 Default output directory: `/tmp/$USER/rocprof-sys-pytest-output/`
@@ -78,6 +78,7 @@ pytest tests/pytest/test_transpose.py::TestTranspose::test_sampling
 | `--show-output` | Show runner output when tests **pass** |
 | `--show-output-on-subtest-fail` | Show runner output only when **subtests** fail |
 | `--no-output` | Suppress all output (only show pass/fail) |
+| `--output-log=<path>` | Write pytest output to the specified file (default: `<test_output_dir>/pytest-output.txt`) |
 
 #### Output Display Logic
 
@@ -86,10 +87,22 @@ The `_result_output` fixture controls when runner output is printed:
 | Scenario | Default | `--show-output-on-subtest-fail` | `--show-output` |
 |----------|---------|--------------------------------|-----------------|
 | Test passes | ❌ | ❌ | ✅ |
-| Main test fails | pytest captures | pytest captures | pytest captures |
 | Subtest fails | ❌ | ✅ | ✅ |
+| Main test fails | ✅ | ✅ | ✅ |
 
-> **Perfetto GLIBC Issue:** If Perfetto validation fails due to GLIBC version mismatch, set `ROCPROFSYS_TRACE_PROCESSOR_SHELL` to a compatible binary.
+**Note:** With `--show-output`, runner output appears *before* the failure report. With `--show-output-on-subtest-fail`, it appears *after* (in the FAILURES section). This is due to how pytest processes report sections.
+
+#### Perfetto GLIBC Issue
+
+If Perfetto validation fails due to GLIBC version mismatch (this may occur on RHEL-8.x or SUSE-15.5), set `ROCPROFSYS_TRACE_PROCESSOR_PATH` to a compatible binary.
+
+```bash
+curl -L https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -o /tmp/$USER/trace_processor_shell
+chmod +x /tmp/$USER/trace_processor_shell
+export ROCPROFSYS_TRACE_PROCESSOR_PATH=/tmp/$USER/trace_processor_shell
+```
+
+Then run pytest with the environment variable set.
 
 ---
 
@@ -97,17 +110,16 @@ The `_result_output` fixture controls when runner output is printed:
 
 ### Markers
 
-| Marker | Description | Extra Behavior |
-|--------|-------------|----------------|
-| `@pytest.mark.gpu` | Requires a GPU | Enables checks to verify if the target binary was compiled for the detected architecture and skips if not. Can be disabled with `no_check_target_arch=True` in `run_test` |
-| `@pytest.mark.mpi` | Requires MPI | |
-| `@pytest.mark.rocm` | Requires ROCm | |
-| `@pytest.mark.rocprofiler` | Uses ROCProfiler counters | |
-| `@pytest.mark.rocm_min_version("X.Y.Z")` | Requires minimum ROCm version | |
-| `@pytest.mark.gpu_category_exclude(["category"])` | Exclude specific GPU categories | |
-| `@pytest.mark.loops` | Tests loop instrumentation | |
-| `@pytest.mark.slow` | Marks test as slow | |
-| `@pytest.mark.rocpd("env_fixture")` | Uses ROCpd | Injects `ROCPROFSYS_USE_ROCPD=ON` into the specified env fixture |
+**Functional markers** (have extra behavior beyond labeling):
+
+| Marker | Description |
+|--------|-------------|
+| `@pytest.mark.gpu` | Requires a GPU. Enables architecture checks in `run_test` (skip if target binary doesn't support detected GPU). Disable with `no_check_target_arch=True`. |
+| `@pytest.mark.gpu_category_exclude(["category"])` | Exclude tests for specific GPU categories (e.g., `instinct`, `radeon`, `apu`). |
+| `@pytest.mark.rocm_min_version("X.Y.Z")` | Skip test if ROCm version is below the specified minimum. |
+| `@pytest.mark.rocpd("env_fixture")` | Injects `ROCPROFSYS_USE_ROCPD=ON` into the specified environment fixture. |
+
+For the full list of markers (including informational labels like `mpi`, `slow`, `roctx`, etc.), see `pytest_configure()` in `conftest.py`.
 
 ### File Structure
 
