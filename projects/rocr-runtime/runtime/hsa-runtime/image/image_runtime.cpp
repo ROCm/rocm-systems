@@ -44,11 +44,15 @@
 
 #include <assert.h>
 #include <climits>
+#include <cstring>
+#include <vector>
 #include <mutex>
+#include <algorithm>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "core/inc/exceptions.h"
 #include "resource.h"
 #include "image_manager_kv.h"
 #include "image_manager_ai.h"
@@ -57,8 +61,95 @@
 #include "image_manager_gfx12.h"
 #include "device_info.h"
 
+
+#define SINGLE_MIP_LEVEL 1
+
 namespace rocr {
 namespace image {
+
+  static inline uint32_t ComputeMaxMipLevels(const hsa_ext_image_descriptor_t& d) {
+    uint32_t w = d.width  ? d.width  : 1;
+    uint32_t h = d.height ? d.height : 1;
+    uint32_t depth = d.depth ? d.depth : 1;
+    uint32_t dim_max = w;
+    switch (d.geometry) {
+      case HSA_EXT_IMAGE_GEOMETRY_1D:
+      case HSA_EXT_IMAGE_GEOMETRY_1DA:
+      case HSA_EXT_IMAGE_GEOMETRY_1DB:
+        dim_max = w; break;
+      case HSA_EXT_IMAGE_GEOMETRY_2D:
+      case HSA_EXT_IMAGE_GEOMETRY_2DA:
+      case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
+      case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
+        dim_max = std::max(w, h); break;
+      case HSA_EXT_IMAGE_GEOMETRY_3D:
+        dim_max = std::max(std::max(w, h), depth); break;
+      default:
+        break;
+    }
+    uint32_t levels = 0;
+    while (dim_max > 0) { ++levels; dim_max >>= 1; }
+    return (levels == 0) ? 1 : levels;
+  }
+
+hsa_status_t ImageRuntime::GetMipmapArraySizeAndAlignment(
+    hsa_agent_t component,
+    const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_data_layout_t layout,
+    size_t row_pitch,
+    size_t slice_pitch,
+    size_t& size_out,
+    size_t& alignment_out) {
+  size_out = 0;
+  alignment_out = 0;
+
+  if (num_mipmap_levels == 0 || num_mipmap_levels > ComputeMaxMipLevels(desc))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Validate the image format and geometry.
+  uint32_t capability = 0;
+  hsa_status_t status =
+      GetImageCapability(component, desc.format, desc.geometry, capability);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+
+  if (capability == 0) {
+    return static_cast<hsa_status_t>(
+        HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED);
+  }
+
+  const hsa_ext_image_geometry_t geometry = desc.geometry;
+  uint32_t max_width = 0;
+  uint32_t max_height = 0;
+  uint32_t max_depth = 0;
+  uint32_t max_array_size = 0;
+
+  ImageManager* manager = image_manager(component);
+
+  // Validate the image dimension.
+  manager->GetImageInfoMaxDimension(component, geometry, max_width, max_height,
+                                    max_depth, max_array_size);
+
+  if (desc.width > max_width || desc.height > max_height ||
+      desc.depth > max_depth || desc.array_size > max_array_size) {
+    return static_cast<hsa_status_t>(
+        HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED);
+  }
+
+  hsa_ext_image_data_info_t mipmap_info = {0};
+  status = manager->CalculateImageSizeAndAlignment(component, desc, layout,
+                    num_mipmap_levels, row_pitch, slice_pitch, mipmap_info);
+  if (HSA_STATUS_SUCCESS != status) {
+    return status;
+  }
+
+  alignment_out = mipmap_info.alignment;
+  size_out = mipmap_info.size;
+
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
   assert(data != nullptr);
@@ -162,9 +253,6 @@ ImageRuntime* ImageRuntime::instance() {
     }
 
     instance = CreateSingleton();
-    if (instance == NULL) {
-      return NULL;
-    }
 
     // UnloadCallback = &ext_image::ImageRuntime::DestroySingleton;
   }
@@ -178,13 +266,15 @@ ImageRuntime* ImageRuntime::CreateSingleton() {
   if (HSA_STATUS_SUCCESS != instance->blit_kernel_.Initialize()) {
     instance->Cleanup();
     delete instance;
-    return NULL;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, 
+                             "ImageRuntime: Failed to initialize blit kernel");
   }
 
   if (HSA_STATUS_SUCCESS != HSA::hsa_iterate_agents(CreateImageManager, instance)) {
     instance->Cleanup();
     delete instance;
-    return NULL;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "ImageRuntime: Failed to create image managers");
   }
 
   assert(instance->kernarg_pool_.handle != 0);
@@ -350,8 +440,9 @@ hsa_status_t ImageRuntime::GetImageSizeAndAlignment(
         HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED);
   }
 
-  return manager->CalculateImageSizeAndAlignment(component, desc,
-    image_data_layout, image_data_row_pitch, image_data_slice_pitch, image_info);
+  return manager->CalculateImageSizeAndAlignment(
+      component, desc, image_data_layout, SINGLE_MIP_LEVEL,
+      image_data_row_pitch, image_data_slice_pitch, image_info);
 }
 
 hsa_status_t ImageRuntime::CreateImageHandle(
@@ -421,7 +512,7 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
 
   if(image_layout->version!=1)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
-
+  
   uint32_t id;
   HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
 
@@ -445,6 +536,64 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
   if (core::Runtime::runtime_singleton_->flag().image_print_srd()) image->printSRD();
 
   image_handle.handle = image->Convert();
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
+    hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data, const hsa_access_permission_t access_permission,
+    uint32_t num_mipmap_levels,
+    hsa_ext_image_t& image_handle) {
+  
+  image_handle.handle = 0;
+  
+  if (!IsMultipleOf(image_data, 256)) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  if (image_layout->version != 1) {
+    return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
+
+  uint32_t id;
+  HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
+
+  if (image_layout->deviceID != (0x1002 << 16 | id)) {
+    return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
+  }
+
+  if (num_mipmap_levels == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const metadata_amd_t* desc = reinterpret_cast<const metadata_amd_t*>(image_layout);
+
+  MipmappedArray* mipmap_array = MipmappedArray::Create(component);
+  if (!mipmap_array) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  mipmap_array->component = component;
+  mipmap_array->desc = mipmap_descriptor;
+  mipmap_array->permission = access_permission;
+  mipmap_array->num_levels = num_mipmap_levels;
+  mipmap_array->data = const_cast<void*>(image_data);
+  mipmap_array->flags = 0;
+
+  ImageManager* manager = image_manager(component);
+  if (!manager) {
+    MipmappedArray::Destroy(mipmap_array);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  hsa_status_t status = manager->PopulateMipmapSrd(*mipmap_array, desc);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(mipmap_array);
+    return status;
+  }
+
+  image_handle.handle = mipmap_array->Convert();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -571,6 +720,154 @@ hsa_status_t ImageRuntime::DestroySamplerHandle(
 
   Sampler::Destroy(sampler);
 
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
+    hsa_agent_t component, const hsa_ext_image_descriptor_t& mipmap_descriptor,
+    const void* image_data, const hsa_access_permission_t access_permission,
+    uint32_t num_mipmap_levels,
+    const hsa_ext_image_data_layout_t mipmap_layout,
+    size_t image_data_row_pitch, size_t image_data_slice_pitch,
+    hsa_ext_image_t& image_handle) {
+  image_handle.handle = 0;
+  if (mipmap_descriptor.width == 0 || num_mipmap_levels == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  ImageManager* manager = image_manager(component);
+  if (!manager) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  // Validate mipmap array size and alignment requirements
+  size_t required_size = 0;
+  size_t required_alignment = 0;
+  hsa_status_t status = GetMipmapArraySizeAndAlignment(
+      component, mipmap_descriptor, num_mipmap_levels, mipmap_layout, image_data_row_pitch,
+      image_data_slice_pitch, required_size, required_alignment);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+
+  // Verify image_data alignment
+  assert(image_data != NULL);
+  assert(IsMultipleOf(image_data, required_alignment));
+
+  // Create a new mipmapped array object
+  MipmappedArray* mipmap_array = MipmappedArray::Create(component);
+  if (!mipmap_array) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Determine the tile mode
+  // 1DB (1D buffered) geometry MUST always be LINEAR per HSA spec
+  // LINEAR layout forces linear swizzle mode (required by API)
+  // TILED allows AddrLib to use internal heuristics to select optimal swizzle mode
+  if (mipmap_descriptor.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    // 1DB always uses linear addressing per HSA specification
+    mipmap_array->tile_mode = Image::TileMode::LINEAR;
+  } else if (mipmap_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR) {
+    // Explicit LINEAR layout forces linear swizzle mode
+    mipmap_array->tile_mode = Image::TileMode::LINEAR;
+  } else {
+    // OPAQUE layout: Let AddrLib choose the best swizzle mode
+    mipmap_array->tile_mode = Image::TileMode::TILED;
+  }
+
+  debug_print("Tile mode = %u (0: LINEAR, 1: TILED)", mipmap_array->tile_mode);
+
+  // Initialize the mipmapped array object
+  mipmap_array->component = component;
+  mipmap_array->data = const_cast<void*>(image_data);
+  mipmap_array->desc = mipmap_descriptor;
+  mipmap_array->permission = access_permission;
+  mipmap_array->num_levels = num_mipmap_levels;
+  mipmap_array->flags = 0;
+
+  manager->PopulateMipmapSrd(*mipmap_array);
+  debug_print("Populating mipmapped array SRD...");
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd())
+    mipmap_array->printSRD();
+
+  manager->printSRDDetailed(mipmap_array->srd);
+
+  // assert(mipmap_array->size == required_size);
+  image_handle.handle = mipmap_array->Convert();
+  debug_print("output handle = %lu", image_handle.handle);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::DestroyMipmapArrayHandle(
+    const hsa_ext_image_t& image_handle) {
+  const MipmappedArray* mipmap_array = MipmappedArray::Convert(image_handle.handle);
+
+  if (mipmap_array == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  MipmappedArray::Destroy(const_cast<MipmappedArray*>(mipmap_array));
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
+    hsa_agent_t component, const hsa_ext_image_t& mipmapped_array,
+    uint32_t mip_level, hsa_ext_image_t& level_image_out) {
+
+  level_image_out.handle = 0;
+
+  // Get GPU architecture version
+  uint32_t chip_id;
+  hsa_status_t status = GetGPUAsicID(component, &chip_id);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+  uint32_t major_ver = MajorVerFromDevID(chip_id);
+  if (major_ver < 9) {
+    debug_print("ERROR: Mip level views not supported on GFX%u hardware\n", major_ver);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Validate mip level
+  if (mip_level < 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Convert handle to internal object and perform basic sanity.
+  rocr::image::MipmappedArray* array =
+          rocr::image::MipmappedArray::Convert(mipmapped_array.handle);
+  if (!array || array->num_levels == 0 || mip_level >= array->num_levels) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  debug_print("Creating mip level %u view for %u level mipmap\n",
+              mip_level, array->num_levels);
+
+  // Create a view that references the parent mipmap array
+  MipmappedArray* level_view = MipmappedArray::Create(component);
+  if (!level_view) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  // Copy entire parent structure (srd is a fixed array, so it's deep-copied automatically)
+  *level_view = *array;
+
+  // Modify SRD to select only the specific mip level
+  ImageManager* manager = image_manager(component);
+  if (!manager) {
+    MipmappedArray::Destroy(level_view);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  status = manager->PopulateMipLevelSrd(*level_view, *array, mip_level);
+  if (status != HSA_STATUS_SUCCESS) {
+    MipmappedArray::Destroy(level_view);
+    return status;
+  }
+
+  debug_print("Created mip level view using SRD fields");
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd())
+    level_view->printSRD();
+
+  manager->printSRDDetailed(level_view->srd);
+
+  // Return handle
+  level_image_out.handle = level_view->Convert();
   return HSA_STATUS_SUCCESS;
 }
 

@@ -1,9 +1,9 @@
 /*
- * Copyright © Advanced Micro Devices, Inc., or its affiliates. 
- * 
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
  * SPDX-License-Identifier: MIT
  */
- 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -73,7 +73,7 @@ static hsa_status_t get_hsa_agents(hsa_agent_t agent, void *data) {
     rsrcFactory->AddAgentInfo(agent_info, false);
     return HSA_STATUS_SUCCESS;
   }
-  
+
   // Device is a Gpu agent, build an instance of AgentInfo
   AgentInfo *agent_info = reinterpret_cast<AgentInfo *>(malloc(sizeof(AgentInfo)));
   agent_info->dev_id = agent;
@@ -89,7 +89,7 @@ static hsa_status_t get_hsa_agents(hsa_agent_t agent, void *data) {
   // Initialize memory regions to zero
   agent_info->kernarg_region.handle = 0;
   agent_info->coarse_region.handle = 0;
-  
+
   // Find and Bind Memory regions of the Gpu agent
   hsa_agent_iterate_regions(agent, find_memregions, agent_info);
 
@@ -343,7 +343,7 @@ bool HsaRsrcFactory::LoadAndFinalize(AgentInfo *agent_info,
     return false;
   }
   brig_module_v3 = tool.brigModule();
-  
+
   // Create hsail program.
   hsa_ext_program_t hsailProgram;
   status = hsa_ext_program_create(HSA_MACHINE_MODEL_LARGE,
@@ -396,7 +396,7 @@ bool HsaRsrcFactory::LoadAndFinalize(AgentInfo *agent_info,
   hsa_executable_symbol_t kernelSymbol;
   status = hsa_executable_get_symbol(hsaExecutable, NULL,
                              kernel_name, agent_info->dev_id, 0, &kernelSymbol);
-  
+
   // Update output parameter
   *code_desc = kernelSymbol;
   return true;
@@ -440,7 +440,7 @@ bool HsaRsrcFactory::LoadAndFinalize(AgentInfo *agent_info,
 
 // Add an instance of AgentInfo representing a Hsa Gpu agent
 void HsaRsrcFactory::AddAgentInfo(AgentInfo *agent_info, bool gpu) {
-  
+
   // Add input to Gpu list
   if (gpu) {
     gpu_list_.push_back(agent_info);
@@ -511,7 +511,7 @@ uint32_t HsaRsrcFactory::GetPrintDebugInfo() {
 // Process command line arguments. The method will capture
 // various user command line parameters for tests to use
 void HsaRsrcFactory::ProcessCmdline( ) {
- 
+
   // Command line arguments are given
   uint32_t idx;
   uint32_t arg_idx;
@@ -572,7 +572,7 @@ uint32_t HsaRsrcFactory::GetArgIndex(char *arg_value ) {
   if (!strcmp(HsaRsrcFactory::print_debug_key_, arg_value)) {
       return 5;
   }
-  
+
   return 108;
 
 }

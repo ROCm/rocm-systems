@@ -237,7 +237,7 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
-                raw_pmc = self.iteration_multiplex_merge_counters(
+                raw_pmc = self.iteration_multiplex_impute_counters(
                     raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
                 )
