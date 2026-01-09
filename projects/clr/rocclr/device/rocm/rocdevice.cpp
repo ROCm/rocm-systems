@@ -3479,9 +3479,10 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   amd::ScopedLock lock(lock_);
 
   // Get valid engine mask based on operation type (read vs write)
-  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaRead)
+  // Limit to 6 engines (bits 0-5) by masking with 0x3F
+  uint32_t validEngineMask = ((engine_type == HwQueueEngine::SdmaRead)
                               ? device_.maxSdmaReadMask_
-                              : device_.maxSdmaWriteMask_;
+                              : device_.maxSdmaWriteMask_) & 0x3F;
 
   // Simple round-robin path if all engines have equal bandwidth
   // Disabled by default - use preferred engine logic for current GPUs
