@@ -1,6 +1,6 @@
 .. meta::
   :description: This chapter provides an introduction to the HIP API.
-  :keywords: AMD, ROCm, HIP, CUDA, C++ language extensions
+  :keywords: AMD, ROCm, HIP, C++ language extensions
 
 .. _intro-to-hip:
 
