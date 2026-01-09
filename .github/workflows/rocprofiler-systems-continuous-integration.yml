@@ -5,6 +5,15 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode'
+        required: false
+        default: 'continuous'
+        type: choice
+        options:
+          - continuous
+          - nightly
   push:
     branches: [ develop ]
     paths:
