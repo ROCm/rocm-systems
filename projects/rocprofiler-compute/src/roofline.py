@@ -376,7 +376,7 @@ class Roofline:
                 all_flops_ceiling_data[str(dt)] = self.__ceiling_data
 
         # Output will be different depending on interaction type:
-        # Save PDFs if we're in "standalone roofline" mode,
+        # Save HTMLs if we're in "standalone roofline" mode,
         # otherwise return HTML to be used in GUI outputif flops_figure:
 
         if self.__run_parameters["is_standalone"]:
@@ -386,28 +386,16 @@ class Roofline:
                     kernel_list += "_" + name
 
             if ops_figure:
-                actual_height = int(ops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                ops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                ops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.html"
                 )
 
             if flops_figure:
-                actual_height = int(flops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                flops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                flops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.html"
                 )
 
-            console_log("roofline", "Empirical Roofline PDFs saved!")
+            console_log("roofline", "Empirical Roofline HTML file saved!")
         else:
             # Create HTML output for GUI mode.
             ops_graph = (

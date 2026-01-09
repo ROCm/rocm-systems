@@ -27,6 +27,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Option ``--rocprofiler-sdk-library-path`` has been changed to ``--rocprofiler-tool-library-path`` to better reflect the fact that we provide flexibility in choosing the path to ROCprofiler-SDK tool and not the library.
 
+* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
+
 ### Resolved issues
 
 * Implemented hybrid threshold-based clamping (`NOISE_CLAMP`) for L2 cache metrics to handle negative values from multi-pass profiling variance:
