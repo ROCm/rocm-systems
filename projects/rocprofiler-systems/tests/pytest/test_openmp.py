@@ -25,9 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pytest
 
 # OpenMP will not be traced if no GPU is available, this includes CPU-only
-pytestmark = pytest.mark.gpu
-pytestmark = pytest.mark.openmp
-
+pytestmark = [pytest.mark.gpu, pytest.mark.openmp]
 
 # ============================================================================
 # OpenMP Fixtures

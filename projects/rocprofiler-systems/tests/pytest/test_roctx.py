@@ -15,8 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-pytestmark = pytest.mark.roctx
+pytestmark = [pytest.mark.gpu, pytest.mark.roctx]
 
 # =============================================================================
 # rocTX fixtures

@@ -29,8 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 
-pytestmark = pytest.mark.transpose
-pytestmark = pytest.mark.gpu
+pytestmark = [pytest.mark.transpose, pytest.mark.gpu]
 
 from rocprofsys import (
     GPUInfo,

@@ -7,9 +7,7 @@ Tests for the videodecode example.
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-pytestmark = pytest.mark.decode
-pytestmark = pytest.mark.videodecode
+pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.videodecode]
 
 from rocprofsys import (
     GPUInfo,

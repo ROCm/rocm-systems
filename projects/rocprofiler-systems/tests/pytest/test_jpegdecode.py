@@ -7,9 +7,7 @@ Tests for the jpegdecode example.
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-pytestmark = pytest.mark.decode
-pytestmark = pytest.mark.jpegdecode
+pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.jpegdecode]
 
 from rocprofsys import (
     GPUInfo,
