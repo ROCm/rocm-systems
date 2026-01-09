@@ -86,8 +86,8 @@ namespace cg = cooperative_groups;
 
 static constexpr size_t kBufferLen = 1024 * 1024;
 
-// TODO format
-__global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf, unsigned long long* result) {
+__global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf,
+                         unsigned long long* result) {
   extern __shared__ unsigned long long tmp[];
 
   cg::thread_block tb = cg::this_thread_block();
@@ -113,7 +113,7 @@ __global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf, 
   if (local_tid == 0) {
     sum = 0;
     for (size_t i = 0; i < workgroup_size; i++) {
-        sum += tmp[i];
+      sum += tmp[i];
     }
     tmp_buf[wid] = sum;
   }
@@ -189,10 +189,9 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Basic", "[multigpu]") {
   for (int i = 0; i < device_num; i++) {
     HIP_CHECK(hipSetDevice(i));
 
-    // TODO format
-    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&num_blocks, test_gws,
-                                                           dimBlock.x * dimBlock.y * dimBlock.z,
-                                                           dimBlock.x * sizeof(unsigned long long)));
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &num_blocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z,
+        dimBlock.x * sizeof(unsigned long long)));
 
     INFO("GPU" << i << " has block size = " << dimBlock.x << " and num blocks per CU " << num_blocks
                << "\n");

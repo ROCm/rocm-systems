@@ -27,10 +27,10 @@ namespace cg = cooperative_groups;
 
 static constexpr size_t kBufferLen = 1024 * 1024;
 
-// TODO format
-__global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf, unsigned long long* result) {
+__global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf,
+                         unsigned long long* result) {
   extern __shared__ unsigned long long tmp[];
-  
+
   cg::thread_block tb = cg::this_thread_block();
   cg::grid_group gg = cg::this_grid();
 
@@ -84,7 +84,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
   hipStream_t stream;
 
   A_h = reinterpret_cast<int*>(malloc(buffer_size));
-  for (uint32_t i = 0; i < kBufferLen; i++) {
+  for (uint32_t i = 0; i < kBufferLen; ++i) {
     A_h[i] = static_cast<int>(i);
   }
 
