@@ -11,13 +11,13 @@ on:
       - '.github/workflows/rocprofiler-compute-formatting.yml'
       - 'projects/rocprofiler-compute/**'
     paths-ignore:  # Do not trigger on documentation-only changes
-      - '**/*.txt'
       - '**/*.md'
       - '**/*.rtf'
       - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
+      - '**/.wordlist.txt'
       - 'docs/**'
       - 'projects/*/docs/**'
 

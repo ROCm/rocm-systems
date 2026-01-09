@@ -6,13 +6,13 @@ on:
     paths:
       - "projects/rocprofiler-systems/**"
     paths-ignore:  # Do not trigger on documentation-only changes
-      - '**/*.txt'
       - '**/*.md'
       - '**/*.rtf'
       - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
+      - '**/.wordlist.txt'
       - 'docs/**'
       - 'projects/*/docs/**'
     tags:

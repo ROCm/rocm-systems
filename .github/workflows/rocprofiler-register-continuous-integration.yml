@@ -7,24 +7,24 @@ on:
     paths:
       - 'projects/rocprofiler-register/**'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
-      - '!**/*.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/.markdownlint-ci2.yaml'
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
   pull_request:
     paths:
       - 'projects/rocprofiler-register/**'
       - '.github/workflows/rocprofiler-register-continuous-integration.yml'
-      - '!**/*.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/.markdownlint-ci2.yaml'
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

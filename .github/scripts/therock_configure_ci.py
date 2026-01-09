@@ -87,21 +87,17 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 SKIPPABLE_PATH_PATTERNS = [
     "docs/*",
     ".gitignore",
-    "*.txt",
     "*.md",
     "*.rtf",
     "*.rst",
     "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
     "projects/*/docs/*",
     "projects/*/.gitignore",
-    "projects/*/*.md",
-    "projects/*/*.rst",
     "shared/*/docs/*",
     "shared/*/.gitignore",
-    "shared/*/*.md",
-    "shared/*/*.rst",
 ]
 
 
