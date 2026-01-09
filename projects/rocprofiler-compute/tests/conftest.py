@@ -95,7 +95,9 @@ def binary_handler_profile_rocprof_compute(request):
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            command_rocprof_compute = (
+                baseline_opts + options + ["--output-directory", workload_dir]
+            )
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
@@ -130,7 +132,9 @@ def binary_handler_profile_rocprof_compute(request):
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
+            command_rocprof_compute = (
+                baseline_opts + options + ["--output-directory", workload_dir]
+            )
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
