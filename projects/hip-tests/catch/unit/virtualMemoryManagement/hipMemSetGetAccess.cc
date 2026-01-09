@@ -1524,36 +1524,36 @@ TEST_CASE("Unit_hipMemSetAccess_MultipleOffsets") {
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
+
   // Data sizes
-	constexpr size_t SIZES[] = {DATA_SIZE * 261, DATA_SIZE * 351, DATA_SIZE * 813};
+  constexpr size_t SIZES[] = {DATA_SIZE * 261, DATA_SIZE * 351, DATA_SIZE * 813};
   constexpr int NSIZES = 3;
+
   // Find recommended granularity for device
-	size_t granularity;
-	hipMemAllocationProp alloc_prop = {};
-	alloc_prop.type = hipMemAllocationTypePinned;
-	alloc_prop.location.type = hipMemLocationTypeDevice;
-	alloc_prop.location.id = 0;
-	HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop, hipMemAllocationGranularityRecommended));
+  size_t granularity;
+  hipMemAllocationProp alloc_prop{};
+  alloc_prop.type = hipMemAllocationTypePinned;
+  alloc_prop.location.type = hipMemLocationTypeDevice;
+  alloc_prop.location.id = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop,
+                                          hipMemAllocationGranularityRecommended));
   INFO("Device recommended granularity : " << granularity);
 
-  // Reserve a 1 GB va range
-	constexpr size_t maxSize = 1ull << 30;
-	hipDeviceptr_t pool_addr;
-	HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&pool_addr), maxSize, 0, 0, 0));
-	INFO("Reserved virtual memory pool at " << reinterpret_cast<void*>(pool_addr));
+  // Reserve a 1 GB VA range
+  constexpr size_t reservedSize = 1ull << 30;
+  hipDeviceptr_t pool_addr;
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<void**>(&pool_addr), reservedSize, 0, 0, 0));
+  INFO("Reserved virtual memory pool at " << reinterpret_cast<void*>(pool_addr));
 
   std::vector<size_t> regions(NSIZES, 0);
-
-	for (size_t i = 0; i < NSIZES; ++i)
-	{
+  for (size_t i = 0; i < NSIZES; ++i) {
     size_t rounded = SIZES[i];
-		if(rounded %  granularity != 0)
-		{
-			rounded = granularity * ((rounded / granularity) + 1);
-		}
-		regions[i] = rounded;
+    if (rounded % granularity != 0) {
+      rounded = granularity * ((rounded / granularity) + 1);
+    }
+    regions[i] = rounded;
     INFO("Final Size at index " << i << " : " << regions[i]);
-	}
+  }
 
   // Initialize host buffer
   size_t max_size = *std::max_element(regions.begin(), regions.end());
@@ -1561,62 +1561,59 @@ TEST_CASE("Unit_hipMemSetAccess_MultipleOffsets") {
   REQUIRE(ptrA_h != nullptr);
   int* ptrB_h = static_cast<int*>(malloc(max_size));
   REQUIRE(ptrB_h != nullptr);
-  for (int idx = 0; idx < max_size / sizeof(int) ; idx++) {
+  for (int idx = 0; idx < static_cast<int>(max_size / sizeof(int)); ++idx) {
     ptrA_h[idx] = idx;
   }
 
-  hipMemAllocationProp prop = {};
-	prop.type = hipMemAllocationTypePinned;
-	prop.location.type = hipMemLocationTypeDevice;
-	prop.location.id = 0;
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = 0;
 
-	size_t pool_size = 0;
-	for (size_t i = 0; i < NSIZES; ++i)
-	{
-    // Creat phys memory handle and map to offsets of va range
-		hipMemGenericAllocationHandle_t handle;
-		HIP_CHECK(hipMemCreate(&handle, regions[i], &prop, 0));
+  size_t pool_size = 0;
+  for (size_t i = 0; i < NSIZES; ++i) {
+    // Create phys memory handle and map to offsets of VA range
+    hipMemGenericAllocationHandle_t handle;
+    HIP_CHECK(hipMemCreate(&handle, regions[i], &prop, 0));
+
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(pool_addr);
     uiptr += pool_size;
-		HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), regions[i], 0, handle, 0));
-		HIP_CHECK(hipMemRelease(handle));
+    HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), regions[i], 0, handle, 0));
+    HIP_CHECK(hipMemRelease(handle));
 
-		hipMemAccessDesc access = {};
-		access.location.type = hipMemLocationTypeDevice;
-		access.location.id = 0;
-		access.flags = hipMemAccessFlagsProtReadWrite;
-    // Set Access for each offset of original va
-		HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(uiptr), regions[i], &access, 1));
-		pool_size += regions[i];
+    hipMemAccessDesc access{};
+    access.location.type = hipMemLocationTypeDevice;
+    access.location.id = 0;
+    access.flags = hipMemAccessFlagsProtReadWrite;
+
+    // Set access for each offset of original VA
+    HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(uiptr), regions[i], &access, 1));
+    pool_size += regions[i];
 
     // Copy host buffer to device
     HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<void*>(uiptr), ptrA_h, regions[i]));
 
     // Verify device data
     HIP_CHECK(hipMemcpyDtoH(ptrB_h, reinterpret_cast<void*>(uiptr), regions[i]));
-    for (int idx = 0; idx < regions[i] / sizeof(int); idx++) {
+    for (int idx = 0; idx < static_cast<int>(regions[i] / sizeof(int)); ++idx) {
       REQUIRE(ptrB_h[idx] == idx);
     }
-	}
+  }
 
   // Unmap VMM
-	pool_size = 0;
-	for (size_t i = 0; i < NSIZES; ++i)
-	{
+  pool_size = 0;
+  for (size_t i = 0; i < NSIZES; ++i) {
     unsigned long long uiptr = reinterpret_cast<unsigned long long>(pool_addr);
     uiptr += pool_size;
-		HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), regions[i]));
-		pool_size += regions[i];
-	}
+    HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), regions[i]));
+    pool_size += regions[i];
+  }
 
-	HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(pool_addr), maxSize));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(pool_addr), reservedSize));
   free(ptrA_h);
   free(ptrB_h);
-	CTX_DESTROY();
+  CTX_DESTROY();
 }
-
-
-
 
 /**
  * End doxygen group VirtualMemoryManagementTest.

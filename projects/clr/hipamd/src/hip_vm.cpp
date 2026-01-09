@@ -381,11 +381,13 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
         }
       }
       if (!buffer_match) {
-        LogPrintfError("Requested addr 0x%x not mapped!", ptr);
+        LogPrintfError("Requested addr %p not mapped!", ptr);
         HIP_RETURN(hipErrorInvalidValue);
       }
       if (subbuffer_size != size && accumulated_buffer_size != size) {
-        LogPrintfError("Given size %zu doesn't match mapped size!", size);
+        LogPrintfError(
+          "Given size %zu doesn't match sub-buffer size %zu or accumulated size %zu!",
+          size, subbuffer_size, accumulated_buffer_size);
         HIP_RETURN(hipErrorInvalidValue);
       }
     }
