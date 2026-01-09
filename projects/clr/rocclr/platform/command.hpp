@@ -1395,11 +1395,6 @@ class AccumulateCommand : public Command {
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
 
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<std::string>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
-  }
-
   //! Set kernel names by reference
   void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
     kernelNamesRef_ = kernelNames;
