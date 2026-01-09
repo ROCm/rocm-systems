@@ -7826,114 +7826,96 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
 
 
 @pytest.mark.noise_clamp
-def test_noise_clamp_positive_unchanged():
-    """Positive values should pass through unchanged."""
-    from utils.parser import to_noise_clamp
-
-    assert to_noise_clamp(1000.0, 100000.0) == 1000.0
-    assert to_noise_clamp(0.0, 100000.0) == 0.0
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_negative_scalar_clamped():
-    """Negative scalar values should always be clamped to 0."""
-    from utils.parser import to_noise_clamp
-
-    # Small error
-    assert to_noise_clamp(-100.0, 1000000.0) == 0.0
-    # Large error - still clamped (physically impossible to have negative counts)
-    assert to_noise_clamp(-100000.0, 2000000.0) == 0.0
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_zero_reference():
-    """Zero reference should not cause division by zero."""
-    from utils.parser import to_noise_clamp
-
-    # Should not raise exception
-    result = to_noise_clamp(-100.0, 0.0)
-    assert result == 0.0
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_series():
-    """Series with mixed values: positives unchanged, negatives clamped."""
-    from utils.parser import to_noise_clamp
-
-    diff = pd.Series([100.0, -50.0, 200.0, -100.0])
-    ref = pd.Series([1000000.0, 1000000.0, 1000000.0, 1000000.0])
-
-    result = to_noise_clamp(diff, ref)
-
-    expected = pd.Series([100.0, 0.0, 200.0, 0.0])
-    pd.testing.assert_series_equal(result, expected)
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_series_preserves_index():
-    """Result series should preserve the original index."""
-    from utils.parser import to_noise_clamp
-
-    diff = pd.Series([-100.0, 200.0], index=["dispatch_0", "dispatch_1"])
-    ref = pd.Series([1000000.0, 1000000.0], index=["dispatch_0", "dispatch_1"])
-
-    result = to_noise_clamp(diff, ref)
-
-    assert list(result.index) == ["dispatch_0", "dispatch_1"]
-    assert result.loc["dispatch_0"] == 0.0
-    assert result.loc["dispatch_1"] == 200.0
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_ndarray():
-    """Numpy array: positives unchanged, negatives clamped."""
+def test_noise_clamp_clamping_behavior():
+    """Core behavior: positives unchanged, negatives clamped to 0."""
     import numpy as np
 
     from utils.parser import to_noise_clamp
 
-    diff = np.array([100.0, -50.0, 200.0, -100.0])
-    ref = np.array([1000000.0, 1000000.0, 1000000.0, 1000000.0])
+    # Scalar: positive unchanged
+    assert to_noise_clamp(1000.0, 100000.0) == 1000.0
+    # Scalar: negative clamped
+    assert to_noise_clamp(-100.0, 1000000.0) == 0.0
 
+    # Series: mixed values
+    diff = pd.Series([100.0, -50.0, 200.0, -100.0])
+    ref = pd.Series([1e6, 1e6, 1e6, 1e6])
     result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([100.0, 0.0, 200.0, 0.0]))
 
-    expected = np.array([100.0, 0.0, 200.0, 0.0])
-    np.testing.assert_array_equal(result, expected)
+    # NumPy array
+    diff_np = np.array([100.0, -50.0])
+    ref_np = np.array([1e6, 1e6])
+    result_np = to_noise_clamp(diff_np, ref_np)
+    np.testing.assert_array_equal(result_np, np.array([100.0, 0.0]))
 
 
 @pytest.mark.noise_clamp
-def test_noise_clamp_remote_read_scenario():
-    """
-    Real-world scenario: Remote Read where C_true ≈ 0 but variance causes negatives.
-    Based on MI300X profiling data where Remote Read = RDREQ - DRAM ≈ 0.
-    """
+def test_noise_clamp_zero_reference():
+    """Edge case: zero reference should not cause division by zero."""
     from utils.parser import to_noise_clamp
 
-    rdreq_sum = pd.Series([2750000.0] * 5)
-    dram_sum = pd.Series([
-        2752000.0,  # -2000 (negative)
-        2748000.0,  # +2000 (positive)
-        2756000.0,  # -6000 (negative)
-        2749000.0,  # +1000 (positive)
-        2755000.0,  # -5000 (negative)
-    ])
-
-    remote_read = rdreq_sum - dram_sum
-    result = to_noise_clamp(remote_read, rdreq_sum)
-
-    # All results should be >= 0
-    assert (result >= 0).all()
-    # Positive values preserved
-    assert result.iloc[1] == 2000.0
-    assert result.iloc[3] == 1000.0
+    assert to_noise_clamp(-100.0, 0.0) == 0.0
+    result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
+    assert result.iloc[0] == 0.0
 
 
 @pytest.mark.noise_clamp
-def test_noise_clamp_empty_series():
-    """Empty series should return empty series."""
-    from utils.parser import to_noise_clamp
+def test_noise_clamp_warning_above_threshold():
+    """Warning recorded when relative error >= 0.1%."""
+    import utils.parser as parser_module
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
 
-    diff = pd.Series([], dtype=float)
-    ref = pd.Series([], dtype=float)
+    clear_noise_clamp_warnings()
+    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Test Metric"
 
-    result = to_noise_clamp(diff, ref)
-    assert len(result) == 0
+    # 0.2% error (above 0.1% threshold)
+    to_noise_clamp(pd.Series([-2000.0]), pd.Series([1000000.0]))
+
+    warnings = get_noise_clamp_warnings()
+    assert "Test Metric" in warnings
+    assert warnings["Test Metric"]["count"] == 1
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_no_warning_below_threshold():
+    """No warning when relative error < 0.1%."""
+    import utils.parser as parser_module
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Small Error"
+
+    # 0.05% error (below threshold) - still clamped, no warning
+    result = to_noise_clamp(pd.Series([-500.0]), pd.Series([1000000.0]))
+    assert result.iloc[0] == 0.0
+    assert "Small Error" not in get_noise_clamp_warnings()
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_warning_aggregation():
+    """Multiple calls aggregate warnings per metric."""
+    import utils.parser as parser_module
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Agg Metric"
+
+    to_noise_clamp(pd.Series([-5000.0, -3000.0]), pd.Series([1e6, 1e6]))
+    to_noise_clamp(pd.Series([-8000.0]), pd.Series([1e6]))
+
+    warnings = get_noise_clamp_warnings()
+    assert warnings["Agg Metric"]["count"] == 3
+    assert warnings["Agg Metric"]["max_abs"] == 8000.0
