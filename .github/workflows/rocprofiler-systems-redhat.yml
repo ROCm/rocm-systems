@@ -109,8 +109,8 @@ jobs:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip" &&
-        USE_HIP=OFF &&
-        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_HIP=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
+        USE_ROCM=OFF &&
+        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_ROCM=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
         python3 ./scripts/run-ci.py -B build
           --name ${TAG}
           --build-jobs 2
@@ -122,7 +122,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_ROCM=${USE_HIP}
+          -DROCPROFSYS_USE_ROCM=${USE_ROCM}
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_BUILD_DYNINST=ON
