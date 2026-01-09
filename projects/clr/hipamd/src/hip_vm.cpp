@@ -369,17 +369,23 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
   if (mem_object) {
     memLocationType = static_cast<hipMemLocationType>(mem_object->getUserData().locationType);
     if (mem_object->parent()) {
+      bool buffer_match = false;
       size_t accumulated_buffer_size = 0;
+      size_t subbuffer_size = 0;
       for (auto sub_buffer : mem_object->parent()->subBuffers()) {
-        accumulated_buffer_size += sub_buffer->getSize();
-        if (accumulated_buffer_size > size) {
-          HIP_RETURN(hipErrorInvalidValue);
-        } else if (accumulated_buffer_size == size) {
-          break;
+        size_t current_size = sub_buffer->getSize();
+        accumulated_buffer_size += current_size;
+        if (sub_buffer->getSvmPtr() == ptr) {
+          subbuffer_size = current_size;
+          buffer_match = true;
         }
       }
-
-      if (accumulated_buffer_size != size) {
+      if (!buffer_match) {
+        LogPrintfError("Requested addr 0x%x not mapped!", ptr);
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      if (subbuffer_size != size && accumulated_buffer_size != size) {
+        LogPrintfError("Given size %zu doesn't match mapped size!", size);
         HIP_RETURN(hipErrorInvalidValue);
       }
     }
