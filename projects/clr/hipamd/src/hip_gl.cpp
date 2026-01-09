@@ -95,7 +95,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
 
   std::call_once(amd::interopOnce, setupGLInteropOnce);
 
-  static const bool VALIDATE_ONLY = true;
+  constexpr bool VALIDATE_ONLY = true;
   if (deviceList == hipGLDeviceListNextFrame) {
     LogError(" hipGLDeviceListNextFrame not supported yet");
     HIP_RETURN(hipErrorNotSupported);
@@ -159,7 +159,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
 
 static inline void clearGLErrors(const amd::Context& amdContext) {
   GLenum glErr, glLastErr = GL_NO_ERROR;
-  while (1) {
+  while (true) {
     glErr = amdContext.glenv()->glGetError_();
     if (glErr == GL_NO_ERROR || glErr == glLastErr) {
       break;
@@ -194,9 +194,9 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
     LogError("invalid resource/image");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // arrayIndex higher than zero not implmented
+  // arrayIndex higher than zero not implemented
   if (arrayIndex > 0) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
   amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
 
@@ -256,7 +256,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     HIP_RETURN(hipErrorUnknown);
   }
 
-  amd::ImageGL* pImageGL = NULL;
+  amd::ImageGL* pImageGL = nullptr;
   GLenum glErr;
   GLenum glTarget = 0;
   GLenum glInternalFormat;
@@ -395,11 +395,11 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_SAMPLES,
                                                   (GLint*)&numSamples);
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
-      LogWarning("Cannot get  numbers of samples of GL \"texture\" object");
+      LogWarning("Cannot get number of samples of GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
     }
     if (numSamples > 1) {
-      LogWarning("MSAA \"texture\" object is not suppoerted for the device");
+      LogWarning("MSAA \"texture\" object is not supported for the device");
       HIP_RETURN(hipErrorInvalidValue);
     }
 
@@ -420,7 +420,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
           LogWarning("Cannot get the depth of \"miplevel\" of GL \"texure\"");
           HIP_RETURN(hipErrorInvalidValue);
         }
-      // Fall trough to process other dimensions...
+        [[fallthrough]];
       case 2:
         clearGLErrors(amdContext);
         amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_HEIGHT,
@@ -429,7 +429,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
           LogWarning("Cannot get the height of \"miplevel\" of GL \"texure\"");
           HIP_RETURN(hipErrorInvalidValue);
         }
-      // Fall trough to process other dimensions...
+        [[fallthrough]];
       case 1:
         clearGLErrors(amdContext);
         amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_WIDTH,
@@ -511,7 +511,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   }
   // Create interop object
   if (pImageGL->getInteropObj() == nullptr) {
-    LogWarning("cannot create object of class BufferGL");
+    LogWarning("cannot create interop object for ImageGL");
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
   }
@@ -607,7 +607,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   // Create interop object
   if (pBufferGL->getInteropObj() == nullptr) {
-    LogWarning("cannot create object of class BufferGL");
+    LogWarning("cannot create interop object for BufferGL");
     HIP_RETURN(hipErrorUnknown);
   }
 
@@ -769,7 +769,8 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   if (resource == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  reinterpret_cast<amd::BufferGL*>(resource)->release();
+  // Cast to amd::Memory* (base class) since resource can be either BufferGL or ImageGL
+  reinterpret_cast<amd::Memory*>(resource)->release();
 
   HIP_RETURN(hipSuccess);
 }
