@@ -31,6 +31,52 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
+// Helper function to run atomicSub tests (single kernel)
+template <typename TestType>
+static void runAtomicSubTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicSub tests (multiple kernels)
+template <typename TestType>
+static void runAtomicSubMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, warp_size,
+                                                                      sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, warp_size,
+                                                                      cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -56,25 +102,13 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicSub_Positive", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSub>(warp_size, cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicSub_Positive") {
+  SECTION("int") { runAtomicSubTest<int>(); }
+  SECTION("unsigned int") { runAtomicSubTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicSubTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicSubTest<unsigned long long>(); }
+  SECTION("float") { runAtomicSubTest<float>(); }
+  SECTION("double") { runAtomicSubTest<double>(); }
 }
 
 /**
@@ -101,27 +135,13 @@ TEMPLATE_TEST_CASE("Unit_atomicSub_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicSub_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, warp_size,
-                                                                      sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSub>(2, warp_size,
-                                                                      cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicSub_Positive_Multi_Kernel") {
+  SECTION("int") { runAtomicSubMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicSubMultiKernelTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicSubMultiKernelTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicSubMultiKernelTest<unsigned long long>(); }
+  SECTION("float") { runAtomicSubMultiKernelTest<float>(); }
+  SECTION("double") { runAtomicSubMultiKernelTest<double>(); }
 }
 
 /**
