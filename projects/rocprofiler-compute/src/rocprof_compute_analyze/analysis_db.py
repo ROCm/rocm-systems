@@ -117,6 +117,7 @@ class db_analysis(OmniAnalyze_Base):
 
             # Add kernel
             kernel_objs: dict[str, orm.Kernel] = {}
+
             for dispatch in self._dispatch_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
@@ -182,44 +183,56 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
-            # Optimize: Pre-group values by (metric_id, kernel_name) for O(1) lookups
-            values_df = self._values_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            )
-            values_grouped = {}
-            if not values_df.empty:
-                for value in values_df.itertuples():
-                    key = (value.metric_id, value.kernel_name)
-                    if key not in values_grouped:
-                        values_grouped[key] = []
-                    values_grouped[key].append(value)
+            # Add metrics and values - iterate on values, create metrics as needed
+            metrics_info_dict = {
+                row.metric_id: row
+                for row in self._metrics_info_data_per_workload.get(
+                    workload_path, pd.DataFrame()
+                ).itertuples()
+            }
+            metric_objs: dict[tuple[str, str], orm.Metric] = {}
 
-            # Add metrics and values
-            for metric in self._metrics_info_data_per_workload.get(
+            for value in self._values_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                for kernel_name in kernel_objs.keys():
-                    metric_obj = orm.Metric(
-                        name=metric.name,
-                        metric_id=metric.metric_id,
-                        description=metric.description,
-                        unit=metric.unit,
-                        table_name=metric.table_name,
-                        sub_table_name=metric.sub_table_name,
-                        kernel=kernel_objs[kernel_name],
+                # Check if kernel exists
+                if value.kernel_name not in kernel_objs:
+                    console_warning(
+                        f"Kernel {value.kernel_name} from values data "
+                        "not found in dispatch data. Skipping metric value."
                     )
-                    Database.get_session().add(metric_obj)
+                    continue
 
-                    # Direct lookup instead of iterating through all values
-                    key = (metric.metric_id, kernel_name)
-                    for value in values_grouped.get(key, []):
-                        Database.get_session().add(
-                            orm.Value(
-                                metric=metric_obj,
-                                value_name=value.value_name,
-                                value=value.value,
-                            )
+                # Create or reuse metric object
+                key = (value.kernel_name, value.metric_id)
+                if key not in metric_objs:
+                    # Fetch metric info
+                    if value.metric_id not in metrics_info_dict:
+                        console_warning(
+                            f"Metric {value.metric_id} from values data "
+                            "not found in metrics info. Skipping metric value."
                         )
+                        continue
+                    metric_info = metrics_info_dict[value.metric_id]
+                    metric_objs[key] = orm.Metric(
+                        name=metric_info.name,
+                        metric_id=metric_info.metric_id,
+                        description=metric_info.description,
+                        unit=metric_info.unit,
+                        table_name=metric_info.table_name,
+                        sub_table_name=metric_info.sub_table_name,
+                        kernel=kernel_objs[value.kernel_name],
+                    )
+                    Database.get_session().add(metric_objs[key])
+
+                # Add value
+                Database.get_session().add(
+                    orm.Value(
+                        metric=metric_objs[key],
+                        value_name=value.value_name,
+                        value=value.value,
+                    )
+                )
 
             # Add metadata
             version = get_version(rocprof_compute_home)
