@@ -1041,7 +1041,7 @@ class AMDSMILogger():
         print(default_line_1)
         # Split the version line into 3 lines, each wrapping to the same width
         print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
-        if amdgpu_version != "N/A":
+        if amdgpu_version.strip() != "N/A":
             print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
         if rocm_version != "N/A":
             print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
