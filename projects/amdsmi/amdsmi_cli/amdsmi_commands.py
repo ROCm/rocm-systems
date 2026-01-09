@@ -1431,7 +1431,7 @@ class AMDSMICommands():
         self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
-    def bad_pages(self, args, multiple_devices=False, gpu=None, retired=None, pending=None, un_res=None):
+    def bad_pages(self, args, multiple_devices=False, gpu=None, retired=None, pending=None, un_res=None, hex_format=None):
         """ Get bad pages information for target gpu
 
         Args:
@@ -1441,6 +1441,7 @@ class AMDSMICommands():
             retired (bool, optional) - Value override for args.retired
             pending (bool, optional) - Value override for args.pending/
             un_res (bool, optional) - Value override for args.un_res
+            hex_format (bool, optional) - Value override for args.hex
 
         Raises:
             IndexError: Index error if gpu list is empty
@@ -1457,6 +1458,8 @@ class AMDSMICommands():
             args.pending = pending
         if un_res:
             args.un_res = un_res
+        if hex_format is not None:
+            args.hex = hex_format
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -1500,8 +1503,13 @@ class AMDSMICommands():
                 for bad_page in bad_page_info:
                     if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.RESERVED:
                         bad_page_info_entry = {}
-                        bad_page_info_entry["page_address"] = bad_page["page_address"]
-                        bad_page_info_entry["page_size"] = bad_page["page_size"]
+                        # Format page address and size based on --hex flag
+                        if args.hex:
+                            bad_page_info_entry["page_address"] = f"0x{bad_page['page_address']:x}"
+                            bad_page_info_entry["page_size"] = f"0x{bad_page['page_size']:x}"
+                        else:
+                            bad_page_info_entry["page_address"] = bad_page["page_address"]
+                            bad_page_info_entry["page_size"] = bad_page["page_size"]
                         status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
                         bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)
@@ -1522,8 +1530,13 @@ class AMDSMICommands():
                 for bad_page in bad_page_info:
                     if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.PENDING:
                         bad_page_info_entry = {}
-                        bad_page_info_entry["page_address"] = bad_page["page_address"]
-                        bad_page_info_entry["page_size"] = bad_page["page_size"]
+                        # Format page address and size based on --hex flag
+                        if args.hex:
+                            bad_page_info_entry["page_address"] = f"0x{bad_page['page_address']:x}"
+                            bad_page_info_entry["page_size"] = f"0x{bad_page['page_size']:x}"
+                        else:
+                            bad_page_info_entry["page_address"] = bad_page["page_address"]
+                            bad_page_info_entry["page_size"] = bad_page["page_size"]
                         status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
                         bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)
@@ -1544,8 +1557,13 @@ class AMDSMICommands():
                 for bad_page in bad_page_info:
                     if bad_page["status"] == amdsmi_interface.AmdSmiMemoryPageStatus.UNRESERVABLE:
                         bad_page_info_entry = {}
-                        bad_page_info_entry["page_address"] = bad_page["page_address"]
-                        bad_page_info_entry["page_size"] = bad_page["page_size"]
+                        # Format page address and size based on --hex flag
+                        if hasattr(args, 'hex') and args.hex:
+                            bad_page_info_entry["page_address"] = f"0x{bad_page['page_address']:x}"
+                            bad_page_info_entry["page_size"] = f"0x{bad_page['page_size']:x}"
+                        else:
+                            bad_page_info_entry["page_address"] = bad_page["page_address"]
+                            bad_page_info_entry["page_size"] = bad_page["page_size"]
                         status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
                         bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)

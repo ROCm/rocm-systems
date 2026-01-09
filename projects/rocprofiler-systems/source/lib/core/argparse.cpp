@@ -1073,6 +1073,23 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("papi_events");
     }
 
+    if(_data.environ_filter("gpu_events", _data))
+    {
+        _parser
+            .add_argument({ "-G", "--gpu-events" },
+                          "Set the GPU hardware counter events to record (ref: "
+                          "`rocprof-sys-avail -H -c GPU`)")
+            .min_count(1)
+            .dtype("[EVENT ...]")
+            .action([&](parser_t& p) {
+                auto _events = join(array_config_t{ "," }, p.get<strvec_t>("gpu-events"));
+                update_env(_data, "ROCPROFSYS_ROCM_EVENTS", _events);
+            });
+
+        _data.processed_environs.emplace("gpu_events");
+        _data.processed_environs.emplace("rocm_events");
+    }
+
     add_group_arguments(_parser, "category", _data, true);
     add_group_arguments(_parser, "io", _data, true);
     add_group_arguments(_parser, "perfetto", _data, true);
