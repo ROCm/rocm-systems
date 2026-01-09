@@ -1277,7 +1277,12 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     return ret;
   }
 
+  // Debug: log each line as we read it
+  int line_num = 0;
   while (std::getline(fs, line)) {
+    ss.str("");  // Clear stringstream
+    ss << "DEBUG readDevInfoMultiLineStr: line " << line_num++ << " = '" << line << "'";
+    LOG_INFO(ss);
     retVec->push_back(line);
   }
   fs.close();

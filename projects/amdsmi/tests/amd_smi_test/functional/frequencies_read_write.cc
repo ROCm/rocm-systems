@@ -96,6 +96,13 @@ void TestFrequenciesReadWrite::Run(void) {
     for (uint32_t clk = AMDSMI_CLK_TYPE_FIRST; clk <= AMDSMI_CLK_TYPE__MAX; ++clk) {
       amdsmi_clk = (amdsmi_clk_type_t)clk;
 
+      // Set performance level to AUTO before reading frequencies
+      // This ensures all frequency levels are visible in sysfs
+      ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+      if (ret != AMDSMI_STATUS_SUCCESS && ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+        std::cerr << "Failed to set perf level to AUTO: " << ret << std::endl;
+      }
+
       auto freq_read = [&]() -> bool {
         // Skip AMDSMI_CLK_TYPE_PCIE, which does not supported in rocm-smi.
         if (auto it = clk_type_map.find(amdsmi_clk); it != clk_type_map.end()) {
@@ -166,6 +173,11 @@ void TestFrequenciesReadWrite::Run(void) {
         }
 
         CHK_ERR_ASRT(ret)
+        // Set back to AUTO mode to ensure frequency visibility before reading
+        ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+        if (ret != AMDSMI_STATUS_SUCCESS && ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+          std::cerr << "Warning: Failed to set perf level to AUTO" << std::endl;
+        }
         ret =  amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
         if (ret != AMDSMI_STATUS_SUCCESS) {
           return;
@@ -183,13 +195,6 @@ void TestFrequenciesReadWrite::Run(void) {
           return;
         }
         if (ret != AMDSMI_STATUS_SUCCESS) {
-          return;
-        }
-
-        ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
-        if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-          std::cout << "\t**Setting performance level is not supported on this machine. Skipping..." << std::endl;
-          ret = AMDSMI_STATUS_SUCCESS;
           return;
         }
       };
