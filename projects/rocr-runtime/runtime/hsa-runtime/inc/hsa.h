@@ -5692,12 +5692,12 @@ typedef int hsa_handle_t;
 #endif
 
 /**
- * @brief Enumeration of interop map flags.
+ * @brief Interop map flags.
  */
-typedef enum : uint32_t {
-  HSA_INTEROP_MAP_FLAG_NONE = 0,
-  HSA_INTEROP_MAP_FLAG_KMT_HANDLE = (1u << 0),
-} hsa_interop_map_flag_t;
+typedef uint32_t hsa_interop_map_flag_t;
+
+#define HSA_INTEROP_MAP_FLAG_NONE        0u
+#define HSA_INTEROP_MAP_FLAG_KMT_HANDLE  (1u << 0)
 
 /**
  * @brief Platform-independent container for a Windows LUID.
