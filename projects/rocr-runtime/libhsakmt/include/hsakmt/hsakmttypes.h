@@ -355,8 +355,6 @@ typedef struct _HsaNodeProperties
 
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
-
-    HSAuint8        HasExpertSchedMode;// 1 if KFD supports expert scheduling mode
 } HsaNodeProperties;
 
 
