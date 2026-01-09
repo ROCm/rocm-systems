@@ -79,17 +79,18 @@ private:
   template <typename... Args>
   void validate_sqlite3_result(int sqlite3_error_code, const char *query,
                                Args &&...args) {
+    if (sqlite3_error_code == SQLITE_OK ||
+        sqlite3_error_code == SQLITE_DONE) {
+      return;
+    }
+
     std::stringstream ss;
     ss << "\n===========================================================\n";
     ss << "Database Error\n";
     ((ss << args << " "), ...);
     ss << "\nQuery: " << query << "\n";
-    // Fetch error message of last sqlite3_* call
     const auto *error_message = sqlite3_errstr(sqlite3_error_code);
     switch (sqlite3_error_code) {
-    case SQLITE_OK:
-    case SQLITE_DONE:
-      return;
     case SQLITE_CONSTRAINT: {
       sqlite3_stmt *stmt;
 

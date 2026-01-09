@@ -93,6 +93,7 @@ struct writer::impl {
   explicit impl(std::shared_ptr<data_storage::database> database,
                 std::string uuid)
       : m_database(std::move(database)), m_uuid(std::move(uuid)),
+        m_uuid_cstr(m_uuid.c_str()),
         m_data_identifiers(std::make_unique<data_identifiers>()) {
     if (!m_database) {
       throw std::invalid_argument(
@@ -112,13 +113,9 @@ struct writer::impl {
   size_t insert_string(const char *str) {
     auto it = m_data_identifiers->m_string_map.find(str);
     if (it != m_data_identifiers->m_string_map.end())
-      return m_data_identifiers->m_string_map.at(str);
+      return it->second;
 
-    data_storage::queries::table_insert_query query;
-    m_database->execute_query(query.set_table_name("rocpd_string_" + m_uuid)
-                                  .set_columns("guid", "string")
-                                  .set_values(m_uuid, str)
-                                  .get_query_string());
+    m_insert_statements->m_insert_string_statement(m_uuid_cstr, str);
 
     const auto string_id = m_database->get_last_insert_id();
     m_data_identifiers->m_string_map.emplace(str, string_id);
@@ -203,7 +200,7 @@ struct writer::impl {
                       const char *call_stack, const char *line_info,
                       const char *extdata) {
     m_insert_statements->m_insert_event_statement(
-        m_uuid.c_str(), string_primary_key, stack_id, parent_stack_id,
+        m_uuid_cstr, string_primary_key, stack_id, parent_stack_id,
         correlation_id, call_stack, line_info, extdata);
     return m_database->get_last_insert_id();
   }
@@ -222,7 +219,7 @@ struct writer::impl {
 
     const auto pmc_description_id = it->second;
     m_insert_statements->m_insert_pmc_event_statement(
-        m_uuid.c_str(), event_id, pmc_description_id, value, extdata);
+        m_uuid_cstr, event_id, pmc_description_id, value, extdata);
   }
 
   void insert_pmc_description(
@@ -269,14 +266,14 @@ struct writer::impl {
     }
     auto track_info = it->second;
     m_insert_statements->m_insert_sample_statement(
-        m_uuid.c_str(), track_info.track_id, timestamp, event_id, extdata);
+        m_uuid_cstr, track_info.track_id, timestamp, event_id, extdata);
   }
 
   void insert_region(size_t node_id, size_t process_id, size_t thread_id,
                      size_t start, size_t end, size_t name_id, size_t event_id,
                      const char *extdata) {
     m_insert_statements->m_insert_region_statement(
-        m_uuid.c_str(), node_id, process_id, thread_id, start, end, name_id,
+        m_uuid_cstr, node_id, process_id, thread_id, start, end, name_id,
         event_id, extdata);
   }
 
@@ -295,7 +292,7 @@ struct writer::impl {
         query.set_table_name("rocpd_info_thread_" + m_uuid)
             .set_columns("guid", "nid", "ppid", "pid", "tid", "name", "start",
                          "end", "extdata")
-            .set_values(m_uuid.c_str(), node_id, parent_process_id, process_id,
+            .set_values(m_uuid_cstr, node_id, parent_process_id, process_id,
                         thread_id, name, start, end, extdata)
             .get_query_string());
 
@@ -333,7 +330,7 @@ struct writer::impl {
       size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
       size_t event_id, const char *extdata) {
     m_insert_statements->m_insert_kernel_dispatch_statement(
-        m_uuid.c_str(), node_id, process_id, thread_id, agent_id, kernel_id,
+        m_uuid_cstr, node_id, process_id, thread_id, agent_id, kernel_id,
         dispatch_id, queue_id, stream_id, start, end, private_segment_size,
         group_segment_size, workgroup_size_x, workgroup_size_y,
         workgroup_size_z, grid_size_x, grid_size_y, grid_size_z, region_name_id,
@@ -348,7 +345,7 @@ struct writer::impl {
                           size_t region_name_id, size_t event_id,
                           const char *extdata) {
     m_insert_statements->m_insert_memory_copy_statement(
-        m_uuid.c_str(), node_id, process_id, thread_id, start, end, name_id,
+        m_uuid_cstr, node_id, process_id, thread_id, start, end, name_id,
         dst_agent_id, dst_addr, src_agent_id, src_addr, size, queue_id,
         stream_id, region_name_id, event_id, extdata);
   }
@@ -363,7 +360,7 @@ struct writer::impl {
                             uint32_t arch_vgrp_count, uint32_t accum_vgrp_count,
                             const char *extdata) {
     m_insert_statements->m_insert_kernel_symbol_statement(
-        id, m_uuid.c_str(), node_id, process_id, code_obj_id, name,
+        id, m_uuid_cstr, node_id, process_id, code_obj_id, name,
         display_name, kernel_obj, kernarg_segmnt_size,
         kernarg_segment_alignment, group_segment_size, private_segment_size,
         sgrp_count, arch_vgrp_count, accum_vgrp_count, extdata);
@@ -374,14 +371,14 @@ struct writer::impl {
                           size_t ld_size, size_t ld_delta,
                           const char *storage_type, const char *extdata) {
     m_insert_statements->m_insert_code_object_statement(
-        id, m_uuid.c_str(), node_id, process_id, agent_id, uri, ld_base,
+        id, m_uuid_cstr, node_id, process_id, agent_id, uri, ld_base,
         ld_size, ld_delta, storage_type, extdata);
   }
 
   void insert_args(size_t event_id, size_t position, const char *type,
                    const char *name, const char *value, const char *extdata) {
     m_insert_statements->m_insert_args_statement(
-        m_uuid.c_str(), event_id, position, type, name, value, extdata);
+        m_uuid_cstr, event_id, position, type, name, value, extdata);
   }
 
   void insert_memory_alloc(size_t node_id, size_t process_id, size_t thread_id,
@@ -392,12 +389,12 @@ struct writer::impl {
                            const char *extdata) {
     if (agent_id.has_value()) {
       m_insert_statements->m_insert_memory_alloc_statement(
-          m_uuid.c_str(), node_id, process_id, thread_id, agent_id.value(),
+          m_uuid_cstr, node_id, process_id, thread_id, agent_id.value(),
           type, level, start, end, address, size, queue_id, stream_id, event_id,
           extdata);
     } else {
       m_insert_statements->m_insert_memory_alloc_no_agent_statement(
-          m_uuid.c_str(), node_id, process_id, thread_id, type, level, start,
+          m_uuid_cstr, node_id, process_id, thread_id, type, level, start,
           end, address, size, queue_id, stream_id, event_id, extdata);
     }
   }
@@ -415,6 +412,7 @@ struct writer::impl {
 
   std::shared_ptr<data_storage::database> m_database;
   std::string m_uuid;
+  const char *m_uuid_cstr;
   std::unique_ptr<data_storage::insert_statements> m_insert_statements;
   std::unique_ptr<data_identifiers> m_data_identifiers;
 };
