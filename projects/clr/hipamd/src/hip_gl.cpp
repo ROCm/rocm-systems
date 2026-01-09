@@ -64,6 +64,23 @@ void setupGLInteropOnce() {
   }
 }
 
+// Convert HIP graphics register flags to OpenCL memory flags.
+// HIP flags indicate access patterns, CL flags indicate memory properties.
+// The mapping preserves the semantic meaning (read-only, write-only, read-write).
+static cl_mem_flags convertHipGraphicsFlagsToCL(unsigned int hipFlags) {
+  // Check for read-only flags
+  if (hipFlags & hipGraphicsRegisterFlagsReadOnly ||
+      hipFlags & hipGraphicsRegisterFlagsTextureGather) {
+    return CL_MEM_READ_ONLY;
+  }
+  // Check for write-only flag
+  if (hipFlags & hipGraphicsRegisterFlagsWriteDiscard) {
+    return CL_MEM_WRITE_ONLY;
+  }
+  // Default to read-write (covers FlagsNone and FlagsSurfaceLoadStore)
+  return CL_MEM_READ_WRITE;
+}
+
 static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_objects,
                                               std::vector<amd::Memory*>& interopObjects) {
   if ((num_objects == 0 && mem_objects != nullptr) ||
@@ -229,10 +246,12 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
                                       unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterImage, resource, image, target, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard) ||
-        (flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
-        (flags & hipGraphicsRegisterFlagsTextureGather))) {
+  // Valid flags for image registration (can be combined or None)
+  constexpr unsigned int kValidImageFlags =
+      hipGraphicsRegisterFlagsReadOnly | hipGraphicsRegisterFlagsWriteDiscard |
+      hipGraphicsRegisterFlagsSurfaceLoadStore | hipGraphicsRegisterFlagsTextureGather;
+  // Reject if any bits outside the valid mask are set
+  if (flags & ~kValidImageFlags) {
     LogError("invalid parameter \"flags\"");
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -495,8 +514,9 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   }
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
+  cl_mem_flags clFlags = convertHipGraphicsFlagsToCL(flags);
   pImageGL = new (amdContext)
-      amd::ImageGL(amdContext, clType, flags, clImageFormat, static_cast<size_t>(gliTexWidth),
+      amd::ImageGL(amdContext, clType, clFlags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
                    image, 0, glInternalFormat, clGLType, numSamples, target);
 
@@ -537,8 +557,11 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
                                        unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterBuffer, resource, buffer, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard))) {
+  // Valid flags for buffer registration (can be combined or None)
+  constexpr unsigned int kValidBufferFlags =
+      hipGraphicsRegisterFlagsReadOnly | hipGraphicsRegisterFlagsWriteDiscard;
+  // Reject if any bits outside the valid mask are set
+  if (flags & ~kValidBufferFlags) {
     LogError("invalid parameter \"flags\"");
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -552,7 +575,6 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   GLenum glErr;
   GLenum glTarget = GL_ARRAY_BUFFER;
   GLint gliSize = 0;
-  GLint gliMapped = 0;
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
 
@@ -593,7 +615,8 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }  // Release scoped lock
 
   // Now create BufferGL object
-  pBufferGL = new (amdContext) amd::BufferGL(amdContext, flags, gliSize, 0, buffer);
+  cl_mem_flags clFlags = convertHipGraphicsFlagsToCL(flags);
+  pBufferGL = new (amdContext) amd::BufferGL(amdContext, clFlags, gliSize, 0, buffer);
 
   if (!pBufferGL) {
     LogWarning("cannot create object of class BufferGL");
