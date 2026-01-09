@@ -51,22 +51,16 @@ __global__ void Type_to_fp6(T* f, __hip_fp6_storage_t* res, size_t size) {
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Basic test to convert given interger values to FP6 type in the host
- * with E2M3 and E3M2 formats.
- * Test source
- * ------------------------
- *  - /unit/deviceLib/fp6_ocp.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.5
- */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long int, long long int,
-                   short int) {
+// Helper function to run fp6 host-side integer conversion tests
+template <typename TestType>
+static void runFp6HostIntegerConversionTest() {
   SECTION("Fp6 with e2m3") {
-    std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7, -0, -1, -2, -3, -4, -5, -6, -7};
+    std::vector<TestType> input;
+    if constexpr (std::is_signed_v<TestType>) {
+      input = {0, 1, 2, 3, 4, 5, 6, 7, -0, -1, -2, -3, -4, -5, -6, -7};
+    } else {
+      input = {0, 1, 2, 3, 4, 5, 6, 7};
+    }
     for (const auto val : input) {
       __hip_fp6_e2m3 fp6(val);
       float ret = fp6;
@@ -75,10 +69,15 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
       REQUIRE(ret == val);
     }
   }
-  SECTION("Fp6 with e3m2 ") {
-    std::vector<TestType> input = {0,  1,  2,  3,   4,   5,   6,   7,   8,   10, 12,
-                                   14, 16, 20, 24,  28,  -0,  -1,  -2,  -3,  -4, -5,
-                                   -6, -7, -8, -10, -12, -14, -16, -20, -24, -28};
+  SECTION("Fp6 with e3m2") {
+    std::vector<TestType> input;
+    if constexpr (std::is_signed_v<TestType>) {
+      input = {0,  1,  2,  3,   4,   5,   6,   7,   8,   10, 12,
+               14, 16, 20, 24,  28,  -0,  -1,  -2,  -3,  -4, -5,
+               -6, -7, -8, -10, -12, -14, -16, -20, -24, -28};
+    } else {
+      input = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28};
+    }
     for (const auto val : input) {
       __hip_fp6_e3m2 fp6(val);
       float ret = fp6;
@@ -92,7 +91,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
 /**
  * Test Description
  * ------------------------
- *  - Basic test to convert given unsigned interger values to FP6 type in the host
+ *  - Basic test to convert given signed and unsigned integer values to FP6 type in the host
  * with E2M3 and E3M2 formats.
  * Test source
  * ------------------------
@@ -101,63 +100,83 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int, long int,
-                   long long int, short int) {
-  SECTION("Fp6 with e2m3") {
-    std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7};
-    for (const auto val : input) {
-      __hip_fp6_e2m3 fp6(val);
-      float ret = fp6;
-      INFO("In: " << val);
-      INFO("Out: " << ret);
-      REQUIRE(ret == val);
-    }
-  }
-  SECTION("Fp6 with e3m2 ") {
-    std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28};
-    for (const auto val : input) {
-      __hip_fp6_e3m2 fp6(val);
-      float ret = fp6;
-      INFO("In: " << val);
-      INFO("Out: " << ret);
-      REQUIRE(ret == val);
-    }
-  }
+TEST_CASE("Unit_all_fp6_ocp_vector_cvt_integer_data") {
+  SECTION("int") { runFp6HostIntegerConversionTest<int>(); }
+  SECTION("long int") { runFp6HostIntegerConversionTest<long int>(); }
+  SECTION("long long int") { runFp6HostIntegerConversionTest<long long int>(); }
+  SECTION("short int") { runFp6HostIntegerConversionTest<short int>(); }
+  SECTION("unsigned int") { runFp6HostIntegerConversionTest<unsigned int>(); }
+  SECTION("unsigned long int") { runFp6HostIntegerConversionTest<unsigned long int>(); }
+  SECTION("unsigned long long int") { runFp6HostIntegerConversionTest<unsigned long long int>(); }
+  SECTION("unsigned short int") { runFp6HostIntegerConversionTest<unsigned short int>(); }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Basic test to convert given unsigned interger values to FP6 type in the device
- * with E2M3 and E3M2 formats.
- * Test source
- * ------------------------
- *  - /unit/deviceLib/fp6_ocp.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.5
- */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", unsigned int,
-                   unsigned long int, unsigned long long int, unsigned short int) {
+// Helper function to run fp6 device-side integer conversion tests
+template <typename TestType>
+static void runFp6DeviceIntegerConversionTest() {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;
   std::vector<__hip_fp6_storage_t> all_vals;
-  constexpr TestType lhs = 0;
-  constexpr TestType rhs = 64;
-  constexpr TestType step = 1;
 
-  f_vals.reserve(500);
-  all_vals.reserve(500);
+  if constexpr (std::is_signed_v<TestType>) {
+    SECTION("all representable numbers") {
+      all_vals = get_all_fp6_ocp_nums();
+      f_vals.reserve(all_vals.size());
 
-  for (TestType fval = lhs; fval <= rhs; fval += step) {
-    if (is_e2m3) {
-      __hip_fp6_e2m3 tmp(fval);
-      all_vals.push_back(tmp.__x);
-    } else {
-      __hip_fp6_e3m2 tmp(fval);
-      all_vals.push_back(tmp.__x);
+      for (const auto& fp6 : all_vals) {
+        TestType f = 0;
+        float f_ = 0.0;
+        if (is_e2m3) {
+          __hip_fp6_e2m3 tmp;
+          tmp.__x = fp6;
+          f_ = tmp;
+          f = f_;
+        } else {
+          __hip_fp6_e3m2 tmp;
+          tmp.__x = fp6;
+          f_ = tmp;
+          f = f_;
+        }
+        f_vals.push_back(f);
+      }
     }
-    f_vals.push_back(fval);
+    SECTION("Range stepped numbers") {
+      constexpr TestType lhs = -30;
+      constexpr TestType rhs = 30;
+      constexpr TestType step = 1;
+
+      f_vals.reserve(500);
+      all_vals.reserve(500);
+
+      for (TestType fval = lhs; fval <= rhs; fval += step) {
+        if (is_e2m3) {
+          __hip_fp6_e2m3 tmp(fval);
+          all_vals.push_back(tmp.__x);
+        } else {
+          __hip_fp6_e3m2 tmp(fval);
+          all_vals.push_back(tmp.__x);
+        }
+        f_vals.push_back(fval);
+      }
+    }
+  } else {
+    constexpr TestType lhs = 0;
+    constexpr TestType rhs = 64;
+    constexpr TestType step = 1;
+
+    f_vals.reserve(500);
+    all_vals.reserve(500);
+
+    for (TestType fval = lhs; fval <= rhs; fval += step) {
+      if (is_e2m3) {
+        __hip_fp6_e2m3 tmp(fval);
+        all_vals.push_back(tmp.__x);
+      } else {
+        __hip_fp6_e3m2 tmp(fval);
+        all_vals.push_back(tmp.__x);
+      }
+      f_vals.push_back(fval);
+    }
   }
 
   TestType* d_f_vals;
@@ -213,7 +232,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", un
 /**
  * Test Description
  * ------------------------
- *  - Basic test to convert given interger values to FP6 type in device with
+ *  - Basic test to convert given signed and unsigned integer values to FP6 type in device with
  *  E2M3 and E3M2 formats.
  *  Test source
  * ------------------------
@@ -222,100 +241,13 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", un
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data_device", "", int, long int,
-                   long long int, short int) {
-  bool is_e2m3 = GENERATE(true, false);
-  std::vector<TestType> f_vals;
-  std::vector<__hip_fp6_storage_t> all_vals;
-  SECTION("all representable numbers") {
-    all_vals = get_all_fp6_ocp_nums();
-    f_vals.reserve(all_vals.size());
-
-    for (const auto& fp6 : all_vals) {
-      TestType f = 0;
-      float f_ = 0.0;
-      if (is_e2m3) {
-        __hip_fp6_e2m3 tmp;
-        tmp.__x = fp6;
-        f_ = tmp;
-        f = f_;
-      } else {
-        __hip_fp6_e3m2 tmp;
-        tmp.__x = fp6;
-        f_ = tmp;
-        f = f_;
-      }
-      f_vals.push_back(f);
-    }
-  }
-  SECTION("Range stepped numbers") {
-    constexpr TestType lhs = -30;
-    constexpr TestType rhs = 30;
-    constexpr TestType step = 1;
-
-    f_vals.reserve(500);
-    all_vals.reserve(500);
-
-    for (TestType fval = lhs; fval <= rhs; fval += step) {
-      if (is_e2m3) {
-        __hip_fp6_e2m3 tmp(fval);
-        all_vals.push_back(tmp.__x);
-      } else {
-        __hip_fp6_e3m2 tmp(fval);
-        all_vals.push_back(tmp.__x);
-      }
-      f_vals.push_back(fval);
-    }
-  }
-
-  TestType* d_f_vals;
-  __hip_fp6_storage_t* d_res;
-
-  HIP_CHECK(hipMalloc(&d_f_vals, sizeof(TestType) * f_vals.size()));
-  HIP_CHECK(hipMalloc(&d_res, sizeof(__hip_fp6_storage_t) * f_vals.size()));
-
-  HIP_CHECK(
-      hipMemcpy(d_f_vals, f_vals.data(), sizeof(TestType) * f_vals.size(), hipMemcpyHostToDevice));
-
-  auto fp6_kernel = is_e2m3 ? Type_to_fp6<true, TestType> : Type_to_fp6<false, TestType>;
-  fp6_kernel<<<(f_vals.size() / 64) + 1, 64>>>(d_f_vals, d_res, f_vals.size());
-
-  std::vector<__hip_fp6_storage_t> final_res(f_vals.size(), static_cast<__hip_fp6_storage_t>(0));
-
-  HIP_CHECK(hipMemcpy(final_res.data(), d_res, sizeof(__hip_fp6_storage_t) * final_res.size(),
-                      hipMemcpyDeviceToHost));
-
-  for (size_t i = 0; i < final_res.size(); i++) {
-    INFO("Checking: " << f_vals[i] << " for: " << (is_e2m3 ? "e2m3" : "e3m2")
-                      << " original: " << (int)all_vals[i] << " convert back: " << (int)final_res[i]
-                      << " Idx : " << i);
-    TestType gpu_cvt_res = 0.0f, cpu_cvt_res = 0.0f;
-    float gpu_cvt_res_ = 0.0, cpu_cvt_res_ = 0.0;
-    if (is_e2m3) {
-      __hip_fp6_e2m3 gtmp;
-      gtmp.__x = final_res[i];
-      gpu_cvt_res_ = gtmp;
-      gpu_cvt_res = gpu_cvt_res_;
-      __hip_fp6_e2m3 ctmp;
-      ctmp.__x = all_vals[i];
-      cpu_cvt_res_ = ctmp;
-      cpu_cvt_res = cpu_cvt_res_;
-    } else {
-      __hip_fp6_e3m2 gtmp;
-      gtmp.__x = final_res[i];
-      gpu_cvt_res_ = gtmp;
-      gpu_cvt_res = gpu_cvt_res_;
-      __hip_fp6_e3m2 ctmp;
-      ctmp.__x = all_vals[i];
-      cpu_cvt_res_ = ctmp;
-      cpu_cvt_res = cpu_cvt_res_;
-    }
-
-    INFO("cpu cvt val: " << cpu_cvt_res << " gpu cvt val: " << gpu_cvt_res);
-    REQUIRE(cpu_cvt_res == gpu_cvt_res);
-  }
-
-  HIP_CHECK(hipFree(d_f_vals));
-  HIP_CHECK(hipFree(d_res));
+TEST_CASE("Unit_all_fp6_ocp_vector_cvt_integer_data_device") {
+  SECTION("int") { runFp6DeviceIntegerConversionTest<int>(); }
+  SECTION("long int") { runFp6DeviceIntegerConversionTest<long int>(); }
+  SECTION("long long int") { runFp6DeviceIntegerConversionTest<long long int>(); }
+  SECTION("short int") { runFp6DeviceIntegerConversionTest<short int>(); }
+  SECTION("unsigned int") { runFp6DeviceIntegerConversionTest<unsigned int>(); }
+  SECTION("unsigned long int") { runFp6DeviceIntegerConversionTest<unsigned long int>(); }
+  SECTION("unsigned long long int") { runFp6DeviceIntegerConversionTest<unsigned long long int>(); }
+  SECTION("unsigned short int") { runFp6DeviceIntegerConversionTest<unsigned short int>(); }
 }

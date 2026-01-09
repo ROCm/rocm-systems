@@ -20,6 +20,7 @@ THE SOFTWARE.
 */
 
 #include <algorithm>
+#include <type_traits>
 
 #include <hip_test_common.hh>
 
@@ -195,21 +196,16 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Basic test to convert given signed interger data to FP4 type with E2M1
- * format.
- * Test source
- * ------------------------
- *  - /unit/deviceLib/fp4_ocp.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.5
- */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long long int, short int) {
+// Helper function to run fp4 from integer data tests
+template <typename TestType>
+static void runFp4FromIntegerDataTest() {
   SECTION("Fp4 with e2m1") {
-    std::vector<TestType> input{-1, 0, 1};
+    std::vector<TestType> input;
+    if constexpr (std::is_signed_v<TestType>) {
+      input = {-1, 0, 1};
+    } else {
+      input = {1, 2, 3};
+    }
     for (const auto val : input) {
       __hip_fp4_e2m1 fp4(val);
       float ret = fp4;
@@ -223,7 +219,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long lo
 /**
  * Test Description
  * ------------------------
- *  - Basic test to convert given unsigned integer data to FP4 type with E2M1
+ *  - Basic test to convert given signed and unsigned integer data to FP4 type with E2M1
  * format.
  * Test source
  * ------------------------
@@ -232,37 +228,22 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long lo
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int, unsigned long int,
-                   unsigned long long int, unsigned short int) {
-  SECTION("Fp4 with e2m1") {
-    std::vector<TestType> input{1, 2, 3};
-    for (const auto val : input) {
-      __hip_fp4_e2m1 fp4(val);
-      float ret = fp4;
-      INFO("In: " << val);
-      INFO("Out: " << ret);
-      REQUIRE(ret == val);
-    }
-  }
+TEST_CASE("Unit_all_fp4_from_integer_data") {
+  SECTION("int") { runFp4FromIntegerDataTest<int>(); }
+  SECTION("long int") { runFp4FromIntegerDataTest<long int>(); }
+  SECTION("long long int") { runFp4FromIntegerDataTest<long long int>(); }
+  SECTION("short int") { runFp4FromIntegerDataTest<short int>(); }
+  SECTION("unsigned int") { runFp4FromIntegerDataTest<unsigned int>(); }
+  SECTION("unsigned long int") { runFp4FromIntegerDataTest<unsigned long int>(); }
+  SECTION("unsigned long long int") { runFp4FromIntegerDataTest<unsigned long long int>(); }
+  SECTION("unsigned short int") { runFp4FromIntegerDataTest<unsigned short int>(); }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Basic test to convert given signed interger data to FP4 type in device with E2M1
- * format.
- * Test source
- * ------------------------
- *  - /unit/deviceLib/fp4_ocp.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.5
- */
-
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, long long int,
-                   short int) {
-  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
-                             0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
+// Helper function to run fp4 from integer data device tests
+template <typename TestType>
+static void runFp4FromIntegerDataDeviceTest() {
+  const std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
+                                    0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
   auto fp4x1_l = [] __device__(TestType * inputs, float* outputs, size_t size) {
     int i = threadIdx.x;
     if (i < size) {
@@ -273,8 +254,14 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, l
 
   std::vector<TestType> inputs;
   inputs.reserve(30);
-  for (int i = 0; i <= 6; i += 1) {
-    inputs.push_back(i);
+  if constexpr (std::is_signed_v<TestType>) {
+    for (int i = 0; i <= 6; i += 1) {
+      inputs.push_back(i);
+    }
+  } else {
+    for (int i = -6; i <= 6; i += 1) {
+      inputs.push_back(i);
+    }
   }
   TestType* d_in;
   float* d_out;
@@ -301,7 +288,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, l
 /**
  * Test Description
  * ------------------------
- *  - Basic test to convert given unsigned interger data to FP4 type in device with E2M1
+ *  - Basic test to convert given signed and unsigned integer data to FP4 type in device with E2M1
  * format.
  * Test source
  * ------------------------
@@ -310,43 +297,15 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, l
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsigned int,
-                   unsigned long int, unsigned long long int, unsigned short int) {
-  std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
-                             0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-  auto fp4x1_l = [] __device__(TestType * inputs, float* outputs, size_t size) {
-    int i = threadIdx.x;
-    if (i < size) {
-      __hip_fp4_e2m1 fp4(inputs[i]);
-      outputs[i] = fp4;
-    }
-  };
-
-  std::vector<TestType> inputs;
-  inputs.reserve(30);
-  for (int i = -6; i <= 6; i += 1) {
-    inputs.push_back(i);
-  }
-  TestType* d_in;
-  float* d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(TestType) * inputs.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * inputs.size()));
-
-  HIP_CHECK(
-      hipMemcpy(d_in, inputs.data(), sizeof(TestType) * inputs.size(), hipMemcpyHostToDevice));
-  lambda_kernel_launch<<<1, 32>>>(fp4x1_l, d_in, d_out, inputs.size());
-
-  std::vector<float> outputs(inputs.size(), 0.0f);
-  HIP_CHECK(hipMemcpy(outputs.data(), d_out, sizeof(float) * inputs.size(), hipMemcpyDeviceToHost));
-
-  for (size_t i = 0; i < inputs.size(); i++) {
-    auto lbound = std::lower_bound(all_fp4.begin(), all_fp4.end(), outputs[i]);
-    INFO("Original: " << inputs[i] << " Output: " << *lbound);
-    REQUIRE(*lbound == outputs[i]);
-  }
-
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
+TEST_CASE("Unit_all_fp4_from_integer_data_device") {
+  SECTION("int") { runFp4FromIntegerDataDeviceTest<int>(); }
+  SECTION("long int") { runFp4FromIntegerDataDeviceTest<long int>(); }
+  SECTION("long long int") { runFp4FromIntegerDataDeviceTest<long long int>(); }
+  SECTION("short int") { runFp4FromIntegerDataDeviceTest<short int>(); }
+  SECTION("unsigned int") { runFp4FromIntegerDataDeviceTest<unsigned int>(); }
+  SECTION("unsigned long int") { runFp4FromIntegerDataDeviceTest<unsigned long int>(); }
+  SECTION("unsigned long long int") { runFp4FromIntegerDataDeviceTest<unsigned long long int>(); }
+  SECTION("unsigned short int") { runFp4FromIntegerDataDeviceTest<unsigned short int>(); }
 }
 
 /**

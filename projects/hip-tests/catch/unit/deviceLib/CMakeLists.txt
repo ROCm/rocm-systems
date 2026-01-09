@@ -22,13 +22,8 @@
 set(TEST_SRC
     floatMath.cc
     anyAll.cc
-    ballot.cc
-    clz.cc
-    ffs.cc
-    funnelshift.cc
-    brev.cc
-    popc.cc
     ldg.cc
+    bit_intrinsics.cc
     threadfence_system.cc
     syncthreadsand.cc
     syncthreadscount.cc
@@ -67,7 +62,6 @@ endif()
 # AMD only tests
 set(AMD_TEST_SRC
     unsafeAtomicAddDevice.cc
-    mbcnt.cc
     bitExtract.cc
     bitInsert.cc
     floatTM.cc
@@ -92,22 +86,14 @@ set(AMD_TEST_SRC
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC
-    AtomicAdd_Coherent_withunsafeflag.cc
-    AtomicAdd_Coherent_withoutflag.cc
-    AtomicAdd_Coherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withoutflag.cc
-    AtomicAdd_NonCoherent_withnoUnsafeflag.cc
-    AtomicAdd_NonCoherent_withunsafeflag.cc
+    AtomicAdd_Coherent.cc
+    AtomicAdd_NonCoherent.cc
     BuiltIns_fmax.cc
     BuiltIns_fmin.cc
     BuiltIns_fadd.cc
     unsafeAtomicAdd_RTC.cc
-    unsafeAtomicAdd_Coherent_withunsafeflag.cc
-    unsafeAtomicAdd_Coherent_withoutflag.cc
-    unsafeAtomicAdd_Coherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withoutflag.cc
-    unsafeAtomicAdd_NonCoherent_withnounsafeflag.cc
-    unsafeAtomicAdd_NonCoherent_withunsafeflag.cc
+    unsafeAtomicAdd_Coherent.cc
+    unsafeAtomicAdd_NonCoherent.cc
 )
 
 set(AMD_GFX940_SPEC_TEST_SRC

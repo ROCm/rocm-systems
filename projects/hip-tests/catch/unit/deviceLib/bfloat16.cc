@@ -479,8 +479,9 @@ template <typename Type> __global__ void bf16_cvt_to_integral(Type* in, float* o
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_bf16_conversion_to_integral_type", , unsigned short, short, int,
-                   unsigned int) {
+// Helper function to run bf16 conversion to integral type tests
+template <typename TestType>
+static void runBf16ConversionToIntegralTest() {
   constexpr TestType start = std::is_unsigned<TestType>::value
                                  ? std::numeric_limits<unsigned short>::min()
                                  : std::numeric_limits<short>::min();
@@ -521,6 +522,13 @@ TEMPLATE_TEST_CASE("Unit_bf16_conversion_to_integral_type", , unsigned short, sh
       if (gpu_res[i] != res[i]) CHECK((std::fabs(gpu_res[i] - res[i]) / res[i]) < (1.0 / 128.0f));
     }
   }
+}
+
+TEST_CASE("Unit_bf16_conversion_to_integral_type") {
+  SECTION("unsigned short") { runBf16ConversionToIntegralTest<unsigned short>(); }
+  SECTION("short") { runBf16ConversionToIntegralTest<short>(); }
+  SECTION("int") { runBf16ConversionToIntegralTest<int>(); }
+  SECTION("unsigned int") { runBf16ConversionToIntegralTest<unsigned int>(); }
 }
 
 __global__ void bf162_eq(float* in, char* out, size_t size) {
@@ -589,7 +597,7 @@ TEST_CASE("Unit_bf162_basic") {
 
 
 TEST_CASE("Unit_bf16_operators_host") {
-  SECTION("Sanity with 1 and 0") {
+  SECTION("bf16 - Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     auto bf16_one = HIPRT_ONE_BF16;
     auto bf16_zero = HIPRT_ZERO_BF16;
@@ -597,7 +605,7 @@ TEST_CASE("Unit_bf16_operators_host") {
     REQUIRE((bf16_one + bf16_zero) == (bf16_zero + bf16_one));
   }
 
-  SECTION("Compare") {
+  SECTION("bf16 - Compare") {
     auto l = __float2bfloat16(1.1f), r = __float2bfloat16(2.2f);
 
     INFO("Comparing 1.1f and 2.2f");
@@ -618,7 +626,7 @@ TEST_CASE("Unit_bf16_operators_host") {
     REQUIRE_FALSE(r != r);
   }
 
-  SECTION("Math operator") {
+  SECTION("bf16 - Math operator") {
     constexpr float fl = 1.5f, fr = 2.9f;
     auto l = __float2bfloat16(fl), r = __float2bfloat16(fr);
 
@@ -639,7 +647,7 @@ TEST_CASE("Unit_bf16_operators_host") {
     REQUIRE(approx_equal(r - l, fr - fl));
   }
 
-  SECTION("Unary") {
+  SECTION("bf16 - Unary") {
     constexpr float fl = 7.8f, fr = 9.9f;
     auto l = __float2bfloat16(fl), r = __float2bfloat16(fr);
 
@@ -652,10 +660,8 @@ TEST_CASE("Unit_bf16_operators_host") {
     REQUIRE((l + -l) == HIPRT_ZERO_BF16);
     REQUIRE((l / -l) == -HIPRT_ONE_BF16);
   }
-}
 
-TEST_CASE("Unit_bf162_operators_host") {
-  SECTION("Sanity with 1 and 0") {
+  SECTION("bf162 - Sanity with 1 and 0") {
     INFO("1+0 <-> 0+1");
     __hip_bfloat162 bf162_one = {HIPRT_ONE_BF16, HIPRT_ONE_BF16};
     __hip_bfloat162 bf162_zero = {HIPRT_ZERO_BF16, HIPRT_ZERO_BF16};
@@ -664,7 +670,7 @@ TEST_CASE("Unit_bf162_operators_host") {
     REQUIRE((bf162_one + bf162_zero) == (bf162_zero + bf162_one));
   }
 
-  SECTION("Compare") {
+  SECTION("bf162 - Compare") {
     __hip_bfloat162 l = {__float2bfloat16(1.1f), __float2bfloat16(1.1f)},
                     r = {__float2bfloat16(2.2f), __float2bfloat16(2.2f)};
 
@@ -686,7 +692,7 @@ TEST_CASE("Unit_bf162_operators_host") {
     REQUIRE_FALSE(r != r);
   }
 
-  SECTION("Unary") {
+  SECTION("bf162 - Unary") {
     constexpr float fl = 7.8f, fr = 9.9f;
     __hip_bfloat162 l = {__float2bfloat16(fl), __float2bfloat16(fr)},
                     r = {__float2bfloat16(fr), __float2bfloat16(fl)};
@@ -818,49 +824,6 @@ __global__ void bf16_shfl_sync(float* in, float* out, int size) {
   }
 }
 
-TEST_CASE("Unit_bf16_shfl") {
-  auto warp_size = getWarpSize();
-  std::vector<float> in;
-  for (size_t i = 1; i <= warp_size; i++) {
-    in.push_back(i);
-  }
-
-  float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * in.size()));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in.size()));
-
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
-
-  std::vector<float> out(warp_size, 0.0f);
-
-  SECTION("shfl_down") {
-    bf16_shfl_down<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
-    REQUIRE(out[0] == (warp_size * (warp_size + 1) / 2));
-  }
-
-  SECTION("shfl_up") {
-    bf16_shfl_up<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
-    REQUIRE(out[warp_size - 1] == (warp_size * (warp_size + 1) / 2));
-  }
-
-  SECTION("shfl_xor") {
-    bf16_shfl_xor<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
-    REQUIRE(out[0] == (warp_size * (warp_size + 1) / 2));
-  }
-
-  SECTION("shfl_sync") {
-    bf16_shfl_sync<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
-    REQUIRE(out[0] == (warp_size + 1));
-  }
-
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
-}
-
 __global__ void bf162_shfl_down(float2* in, float2* out, int size) {
   int i = threadIdx.x;
   if (i < size) {
@@ -903,8 +866,32 @@ __global__ void bf162_shfl_sync(float2* in, float2* out, int size) {
   }
 }
 
-TEST_CASE("Unit_bf162_shfl") {
-  auto warp_size = getWarpSize();
+// Helper function to run bf16 shuffle test
+template <typename KernelFunc>
+static void runBf16ShflTest(KernelFunc kernel, int warp_size, size_t expected_idx, float expected_val) {
+  std::vector<float> in;
+  for (size_t i = 1; i <= warp_size; i++) {
+    in.push_back(i);
+  }
+
+  float *d_in, *d_out;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * in.size()));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * in.size()));
+
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * in.size(), hipMemcpyHostToDevice));
+
+  kernel<<<1, warp_size>>>(d_in, d_out, warp_size);
+  std::vector<float> out(warp_size, 0.0f);
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
+  REQUIRE(out[expected_idx] == expected_val);
+
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+}
+
+// Helper function to run bf162 shuffle test
+template <typename KernelFunc>
+static void runBf162ShflTest(KernelFunc kernel, int warp_size, size_t expected_idx, float2 expected_val) {
   std::vector<float2> in;
   for (size_t i = 1; i <= warp_size; i++) {
     in.push_back(float2{i, i * 2});
@@ -916,46 +903,53 @@ TEST_CASE("Unit_bf162_shfl") {
 
   HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * in.size(), hipMemcpyHostToDevice));
 
+  kernel<<<1, warp_size>>>(d_in, d_out, warp_size);
   std::vector<float2> out(warp_size, float2{0.0f, 0.0f});
-
-  SECTION("shfl_down") {
-    bf162_shfl_down<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
-    auto res = (warp_size * (warp_size + 1) / 2);
-    INFO("Expected: x: " << res << " y: " << (res * 2));
-    INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
-    REQUIRE(out[0] == float2{res, res * 2});
-  }
-
-  SECTION("shfl_up") {
-    bf162_shfl_up<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
-    auto res = (warp_size * (warp_size + 1) / 2);
-    INFO("Expected: x: " << res << " y: " << (res * 2));
-    INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
-    REQUIRE(out[warp_size - 1] == float2{res, res * 2});
-  }
-
-  SECTION("shfl_xor") {
-    bf162_shfl_xor<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
-    auto res = (warp_size * (warp_size + 1) / 2);
-    INFO("Expected: x: " << res << " y: " << (res * 2));
-    INFO("Got:      x: " << out[0].x << " y: " << out[0].y);
-    REQUIRE(out[0] == float2{res, res * 2});
-  }
-
-  SECTION("shfl_sync") {
-    bf162_shfl_sync<<<1, warp_size>>>(d_in, d_out, warp_size);
-    HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
-    auto res = warp_size + 1;
-    INFO("Expected: x: " << res << " y: " << (res * 2));
-    INFO("Got:      x: " << out[warp_size - 1].x << " y: " << out[warp_size - 1].y);
-    REQUIRE(out[0] == float2{res, res * 2});
-  }
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float2) * out.size(), hipMemcpyDeviceToHost));
+  INFO("Expected: x: " << expected_val.x << " y: " << expected_val.y);
+  INFO("Got:      x: " << out[expected_idx].x << " y: " << out[expected_idx].y);
+  REQUIRE(out[expected_idx] == expected_val);
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+
+TEST_CASE("Unit_bf16_shfl") {
+  auto warp_size = getWarpSize();
+  const auto sum_result = (warp_size * (warp_size + 1) / 2);
+
+  SECTION("bf16 - shfl_down") {
+    runBf16ShflTest(bf16_shfl_down, warp_size, 0, sum_result);
+  }
+
+  SECTION("bf16 - shfl_up") {
+    runBf16ShflTest(bf16_shfl_up, warp_size, warp_size - 1, sum_result);
+  }
+
+  SECTION("bf16 - shfl_xor") {
+    runBf16ShflTest(bf16_shfl_xor, warp_size, 0, sum_result);
+  }
+
+  SECTION("bf16 - shfl_sync") {
+    runBf16ShflTest(bf16_shfl_sync, warp_size, 0, warp_size + 1);
+  }
+
+  SECTION("bf162 - shfl_down") {
+    runBf162ShflTest(bf162_shfl_down, warp_size, 0, float2{sum_result, sum_result * 2});
+  }
+
+  SECTION("bf162 - shfl_up") {
+    runBf162ShflTest(bf162_shfl_up, warp_size, warp_size - 1, float2{sum_result, sum_result * 2});
+  }
+
+  SECTION("bf162 - shfl_xor") {
+    runBf162ShflTest(bf162_shfl_xor, warp_size, 0, float2{sum_result, sum_result * 2});
+  }
+
+  SECTION("bf162 - shfl_sync") {
+    const auto sync_result = warp_size + 1;
+    runBf162ShflTest(bf162_shfl_sync, warp_size, 0, float2{sync_result, sync_result * 2});
+  }
 }
 
 __global__ void bf16_hrcp(float* in, float* out) {
@@ -1171,72 +1165,6 @@ __global__ void bf16_htrunc(float* in, float* out) {
   out[i] = htrunc(bf);
 }
 
-TEST_CASE("Unit_bf16_floor_ceil") {
-  constexpr size_t size = 32;
-  float *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
-
-  std::vector<float> in;
-  in.reserve(size);
-  for (size_t i = 1; i <= size; i++) {
-    float tmp = static_cast<float>(i);
-    if (i % 2 == 0)
-      in.push_back(tmp - 0.1f);
-    else
-      in.push_back(tmp + 0.1f);
-  }
-
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
-
-  SECTION("hceil") {
-    bf16_hceil<<<1, size>>>(d_in, d_out);
-    std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float rcp_res = std::ceil(in[i]);
-      INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
-
-  SECTION("hfloor") {
-    bf16_hfloor<<<1, size>>>(d_in, d_out);
-    std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float rcp_res = std::floor(in[i]);
-      INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
-
-  SECTION("hrint") {
-    bf16_hrint<<<1, size>>>(d_in, d_out);
-    std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float rcp_res = std::round(in[i]);
-      INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
-
-  SECTION("htrunc") {
-    bf16_htrunc<<<1, size>>>(d_in, d_out);
-    std::vector<float> res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float rcp_res = std::trunc(in[i]);
-      INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
-
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
-}
-
 __global__ void bf162_hfloor(float2* in, float2* out) {
   int i = threadIdx.x;
   __hip_bfloat162 bf{in[i].x, in[i].y};
@@ -1261,69 +1189,111 @@ __global__ void bf162_htrunc(float2* in, float2* out) {
   out[i] = h2trunc(bf);
 }
 
-TEST_CASE("Unit_bf162_floor_ceil") {
-  constexpr size_t size = 32;
-  float2 *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * size));
+// Helper function to generate bf16 input data
+static std::vector<float> generateBf16Input(size_t size) {
+  std::vector<float> in;
+  in.reserve(size);
+  for (size_t i = 1; i <= size; i++) {
+    float tmp = static_cast<float>(i);
+    in.push_back((i % 2 == 0) ? (tmp - 0.1f) : (tmp + 0.1f));
+  }
+  return in;
+}
 
+// Helper function to generate bf162 input data
+static std::vector<float2> generateBf162Input(size_t size) {
   std::vector<float2> in;
   in.reserve(size);
   for (size_t i = 0; i < size; i++) {
     float tmp = static_cast<float>(i);
     in.push_back(float2{tmp - 0.1f, tmp + 0.1f});
   }
+  return in;
+}
 
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * size, hipMemcpyHostToDevice));
+// Helper function to run bf16 floor/ceil test
+template <typename KernelFunc, typename CpuFunc>
+static void runBf16FloorCeilTest(KernelFunc kernel, CpuFunc cpu_func, const char* op_name) {
+  constexpr size_t size = 32;
+  auto in = generateBf16Input(size);
 
-  SECTION("hceil") {
-    bf162_hceil<<<1, size>>>(d_in, d_out);
-    std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float2 rcp_res{std::ceil(in[i].x), std::ceil(in[i].y)};
-      INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
-                     << " from cpu: " << rcp_res.x << ", " << rcp_res.y);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
+  float *d_in, *d_out;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
 
-  SECTION("hfloor") {
-    bf162_hfloor<<<1, size>>>(d_in, d_out);
-    std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float2 rcp_res{std::floor(in[i].x), std::floor(in[i].y)};
-      INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
-                     << " from cpu: " << rcp_res.x << ", " << rcp_res.y);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
 
-  SECTION("hrint") {
-    bf162_hrint<<<1, size>>>(d_in, d_out);
-    std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float2 rcp_res{std::round(in[i].x), std::round(in[i].y)};
-      INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
-                     << " from cpu: " << rcp_res.x << ", " << rcp_res.y);
-      REQUIRE(res[i] == rcp_res);
-    }
-  }
+  kernel<<<1, size>>>(d_in, d_out);
+  std::vector<float> res(size, 0.0f);
+  HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
 
-  SECTION("htrunc") {
-    bf162_htrunc<<<1, size>>>(d_in, d_out);
-    std::vector<float2> res(size);
-    HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      float2 rcp_res{std::trunc(in[i].x), std::trunc(in[i].y)};
-      INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
-                     << " from cpu: " << rcp_res.x << ", " << rcp_res.y);
-      REQUIRE(res[i] == rcp_res);
-    }
+  for (size_t i = 0; i < size; i++) {
+    float rcp_res = cpu_func(in[i]);
+    INFO("Input: " << in[i] << "from GPU : " << res[i] << " from cpu: " << rcp_res);
+    REQUIRE(res[i] == rcp_res);
   }
 
   HIP_CHECK(hipFree(d_in));
   HIP_CHECK(hipFree(d_out));
+}
+
+// Helper function to run bf162 floor/ceil test
+template <typename KernelFunc, typename CpuFunc>
+static void runBf162FloorCeilTest(KernelFunc kernel, CpuFunc cpu_func, const char* op_name) {
+  constexpr size_t size = 32;
+  auto in = generateBf162Input(size);
+
+  float2 *d_in, *d_out;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * size));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float2) * size));
+
+  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float2) * size, hipMemcpyHostToDevice));
+
+  kernel<<<1, size>>>(d_in, d_out);
+  std::vector<float2> res(size);
+  HIP_CHECK(hipMemcpy(res.data(), d_out, sizeof(float2) * size, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < size; i++) {
+    float2 rcp_res{cpu_func(in[i].x), cpu_func(in[i].y)};
+    INFO("Input: " << in[i].x << ", " << in[i].y << " from GPU : " << res[i].x << ", " << res[i].y
+                   << " from cpu: " << rcp_res.x << ", " << rcp_res.y);
+    REQUIRE(res[i] == rcp_res);
+  }
+
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+}
+
+TEST_CASE("Unit_bf16_floor_ceil") {
+  SECTION("bf16 - hceil") {
+    runBf16FloorCeilTest(bf16_hceil, [](float x) { return std::ceil(x); }, "hceil");
+  }
+
+  SECTION("bf16 - hfloor") {
+    runBf16FloorCeilTest(bf16_hfloor, [](float x) { return std::floor(x); }, "hfloor");
+  }
+
+  SECTION("bf16 - hrint") {
+    runBf16FloorCeilTest(bf16_hrint, [](float x) { return std::round(x); }, "hrint");
+  }
+
+  SECTION("bf16 - htrunc") {
+    runBf16FloorCeilTest(bf16_htrunc, [](float x) { return std::trunc(x); }, "htrunc");
+  }
+
+  SECTION("bf162 - hceil") {
+    runBf162FloorCeilTest(bf162_hceil, [](float x) { return std::ceil(x); }, "hceil");
+  }
+
+  SECTION("bf162 - hfloor") {
+    runBf162FloorCeilTest(bf162_hfloor, [](float x) { return std::floor(x); }, "hfloor");
+  }
+
+  SECTION("bf162 - hrint") {
+    runBf162FloorCeilTest(bf162_hrint, [](float x) { return std::round(x); }, "hrint");
+  }
+
+  SECTION("bf162 - htrunc") {
+    runBf162FloorCeilTest(bf162_htrunc, [](float x) { return std::trunc(x); }, "htrunc");
+  }
 }

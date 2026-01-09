@@ -108,8 +108,9 @@ std::vector<T> cpu_cvt_float_fp8_float_fnuz(const std::vector<T>& nums) {
   return ret;
 }
 
-// floats to fp8
-TEMPLATE_TEST_CASE("Unit_fp8_fnuz_compare_host_device", "", float, double) {
+// Helper function to run fp8_fnuz compare host device test for a specific type
+template <typename TestType>
+static void runFp8FnuzCompareHostDeviceTest() {
   FP8_FNUZ_SKIP_TEST
   std::vector<TestType> numbers = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                    3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -143,6 +144,14 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_compare_host_device", "", float, double) {
                       << " - gpu_result: " << result[i]);
     CHECK(cpu_result[i] == result[i]);
   }
+
+  HIP_CHECK(hipFree(d_numbers));
+}
+
+// floats to fp8
+TEST_CASE("Unit_fp8_fnuz_compare_host_device") {
+  SECTION("float") { runFp8FnuzCompareHostDeviceTest<float>(); }
+  SECTION("double") { runFp8FnuzCompareHostDeviceTest<double>(); }
 }
 
 __FP8_DEVICE__ void e4m3_fp8x2_fnuz_device(float2* val) {
@@ -664,7 +673,9 @@ __global__ void Type_to_fp8_fnuz_cvt(T* f, float* cvt1, float* cvt2, size_t size
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
+// Helper function to run fp8_fnuz correctness device test for a specific type
+template <typename TestType>
+static void runFp8FnuzCorrectnessDeviceTest() {
   FP8_FNUZ_SKIP_TEST
 
   SECTION("e4m3_fnuz") {
@@ -1096,4 +1107,9 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
     free(cvt1_host);
     free(cvt2_host);
   }
+}
+
+TEST_CASE("Unit_fp8_fnuz_correctness_device") {
+  SECTION("float") { runFp8FnuzCorrectnessDeviceTest<float>(); }
+  SECTION("double") { runFp8FnuzCorrectnessDeviceTest<double>(); }
 }
