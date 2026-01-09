@@ -258,9 +258,8 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
-NOISE_CLAMP_WARN_THRESHOLD = 0.001
-NOISE_CLAMP_CURRENT_METRIC = "unknown"
-_NOISE_CLAMP_WARNINGS: dict = {}
+NOISE_CLAMP_WARN_THRESHOLD = 0.01  # 1% - only warn on significant anomalies
+_NOISE_CLAMP_STATS = {"count": 0, "max_rel": 0.0}
 
 
 def to_noise_clamp(
@@ -268,14 +267,11 @@ def to_noise_clamp(
     reference: Union[pd.Series, float, np.ndarray],
 ) -> Union[pd.Series, float, np.ndarray]:
     """
-    Clamp negative values to 0 and record warnings for significant errors.
+    Clamp negative values to 0 from multi-pass counter variance.
 
-    Args:
-        difference: Result of counter subtraction (may be negative)
-        reference: Reference counter for calculating relative error
-
-    Returns:
-        Non-negative value (negatives clamped to 0)
+    Negative counts are physically impossible - they result from run-to-run
+    variance when counters are collected across multiple profiling passes.
+    We clamp to 0 and track if any exceed 1% relative error (anomaly detection).
     """
     # Handle scalar case
     if np.isscalar(difference):
@@ -284,7 +280,7 @@ def to_noise_clamp(
         safe_ref = reference if reference != 0 else np.nan
         rel_error = abs(difference) / abs(safe_ref) if safe_ref else 0
         if rel_error >= NOISE_CLAMP_WARN_THRESHOLD:
-            _record_warning(1, abs(difference), rel_error)
+            _record_clamp_stats(1, rel_error)
         return 0.0
 
     # Handle array/Series case
@@ -303,14 +299,13 @@ def to_noise_clamp(
     else:
         safe_ref = reference if reference != 0 else np.nan
 
-    # Get reference values for negative positions
+    # Calculate relative errors for negative values
     ref_vals = (
         safe_ref[negative_mask]
         if hasattr(safe_ref, "__getitem__") and not np.isscalar(safe_ref)
         else safe_ref
     )
-    abs_errors = np.abs(result[negative_mask])
-    rel_errors = abs_errors / np.abs(ref_vals)
+    rel_errors = np.abs(result[negative_mask]) / np.abs(ref_vals)
 
     # Clamp negatives to zero
     if is_series:
@@ -318,65 +313,41 @@ def to_noise_clamp(
     else:
         result[negative_mask] = 0
 
-    # Record warnings for values exceeding threshold
+    # Track significant deviations (>1%)
     warn_mask = rel_errors >= NOISE_CLAMP_WARN_THRESHOLD
     if np.any(warn_mask):
-        _record_warning(
-            int(np.sum(warn_mask)),
-            float(
-                np.max(
-                    abs_errors[warn_mask]
-                    if hasattr(warn_mask, "__iter__")
-                    else abs_errors
-                )
-            ),
-            float(
-                np.max(
-                    rel_errors[warn_mask]
-                    if hasattr(warn_mask, "__iter__")
-                    else rel_errors
-                )
-            ),
-        )
+        _record_clamp_stats(int(np.sum(warn_mask)), float(np.max(rel_errors)))
 
     return result
 
 
-def _record_warning(count: int, max_abs: float, max_rel: float) -> None:
-    """Record warning for current metric."""
-    metric = NOISE_CLAMP_CURRENT_METRIC
-    if metric not in _NOISE_CLAMP_WARNINGS:
-        _NOISE_CLAMP_WARNINGS[metric] = {"count": 0, "max_abs": 0.0, "max_rel": 0.0}
-    _NOISE_CLAMP_WARNINGS[metric]["count"] += count
-    _NOISE_CLAMP_WARNINGS[metric]["max_abs"] = max(
-        _NOISE_CLAMP_WARNINGS[metric]["max_abs"], max_abs
-    )
-    _NOISE_CLAMP_WARNINGS[metric]["max_rel"] = max(
-        _NOISE_CLAMP_WARNINGS[metric]["max_rel"], max_rel
-    )
+def _record_clamp_stats(count: int, max_rel: float) -> None:
+    """Track clamping statistics for summary."""
+    _NOISE_CLAMP_STATS["count"] += count
+    _NOISE_CLAMP_STATS["max_rel"] = max(_NOISE_CLAMP_STATS["max_rel"], max_rel)
 
 
 def clear_noise_clamp_warnings() -> None:
-    """Clear collected warnings."""
-    global _NOISE_CLAMP_WARNINGS
-    _NOISE_CLAMP_WARNINGS = {}
+    """Clear collected stats."""
+    global _NOISE_CLAMP_STATS
+    _NOISE_CLAMP_STATS = {"count": 0, "max_rel": 0.0}
 
 
 def get_noise_clamp_warnings() -> dict:
-    """Return collected warnings (for testing)."""
-    return _NOISE_CLAMP_WARNINGS.copy()
+    """Return collected stats (for testing)."""
+    return _NOISE_CLAMP_STATS.copy()
 
 
 def print_noise_clamp_summary() -> None:
-    """Print aggregated summary of noise clamping warnings."""
-    if not _NOISE_CLAMP_WARNINGS:
+    """Print summary if significant variance was detected."""
+    if _NOISE_CLAMP_STATS["count"] == 0:
         return
-    console_warning("Counter variance detected (negative values clamped to 0):")
-    for metric, data in sorted(_NOISE_CLAMP_WARNINGS.items()):
-        console_warning(
-            f"  • {metric}: {data['count']} dispatch(es) "
-            f"(max: {data['max_abs']:,.0f} counts, {data['max_rel'] * 100:.2f}%)"
-        )
+    count = _NOISE_CLAMP_STATS["count"]
+    max_pct = _NOISE_CLAMP_STATS["max_rel"] * 100
+    console_warning(
+        f"Counter variance corrected: {count} value(s) adjusted "
+        f"(max {max_pct:.1f}% deviation). Consider re-profiling if accuracy is critical."
+    )
 
 
 class CodeTransformer(ast.NodeTransformer):
@@ -1172,10 +1143,6 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
-        # Set current metric for NOISE_CLAMP warning tracking
-        global NOISE_CLAMP_CURRENT_METRIC
-        NOISE_CLAMP_CURRENT_METRIC = row_id
-
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
 

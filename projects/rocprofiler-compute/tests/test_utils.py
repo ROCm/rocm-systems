@@ -7862,60 +7862,27 @@ def test_noise_clamp_zero_reference():
 
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
-    """Warning recorded when relative error >= 0.1%."""
-    import utils.parser as parser_module
-    from utils.parser import (
-        clear_noise_clamp_warnings,
-        get_noise_clamp_warnings,
-        to_noise_clamp,
-    )
+    """Warning recorded when relative error >= 1%."""
+    from utils.parser import clear_noise_clamp_warnings, get_noise_clamp_warnings, to_noise_clamp
 
     clear_noise_clamp_warnings()
-    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Test Metric"
 
-    # 0.2% error (above 0.1% threshold)
-    to_noise_clamp(pd.Series([-2000.0]), pd.Series([1000000.0]))
+    # 2% error (above 1% threshold) - should record
+    to_noise_clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
 
-    warnings = get_noise_clamp_warnings()
-    assert "Test Metric" in warnings
-    assert warnings["Test Metric"]["count"] == 1
+    stats = get_noise_clamp_warnings()
+    assert stats["count"] == 1
+    assert stats["max_rel"] >= 0.01
 
 
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
-    """No warning when relative error < 0.1%."""
-    import utils.parser as parser_module
-    from utils.parser import (
-        clear_noise_clamp_warnings,
-        get_noise_clamp_warnings,
-        to_noise_clamp,
-    )
+    """No warning when relative error < 1%."""
+    from utils.parser import clear_noise_clamp_warnings, get_noise_clamp_warnings, to_noise_clamp
 
     clear_noise_clamp_warnings()
-    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Small Error"
 
-    # 0.05% error (below threshold) - still clamped, no warning
-    result = to_noise_clamp(pd.Series([-500.0]), pd.Series([1000000.0]))
+    # 0.5% error (below 1% threshold) - still clamped, no warning
+    result = to_noise_clamp(pd.Series([-5000.0]), pd.Series([1000000.0]))
     assert result.iloc[0] == 0.0
-    assert "Small Error" not in get_noise_clamp_warnings()
-
-
-@pytest.mark.noise_clamp
-def test_noise_clamp_warning_aggregation():
-    """Multiple calls aggregate warnings per metric."""
-    import utils.parser as parser_module
-    from utils.parser import (
-        clear_noise_clamp_warnings,
-        get_noise_clamp_warnings,
-        to_noise_clamp,
-    )
-
-    clear_noise_clamp_warnings()
-    parser_module.NOISE_CLAMP_CURRENT_METRIC = "Agg Metric"
-
-    to_noise_clamp(pd.Series([-5000.0, -3000.0]), pd.Series([1e6, 1e6]))
-    to_noise_clamp(pd.Series([-8000.0]), pd.Series([1e6]))
-
-    warnings = get_noise_clamp_warnings()
-    assert warnings["Agg Metric"]["count"] == 3
-    assert warnings["Agg Metric"]["max_abs"] == 8000.0
+    assert get_noise_clamp_warnings()["count"] == 0
