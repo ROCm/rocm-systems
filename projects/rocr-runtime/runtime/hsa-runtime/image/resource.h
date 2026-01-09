@@ -49,6 +49,7 @@
 
 #include "inc/hsa.h"
 #include "inc/hsa_ext_image.h"
+#include "addrlib/inc/addrinterface.h"
 
 #include "util.h"
 
@@ -97,20 +98,21 @@ typedef struct ImageProperty {
 
 /// @brief Structure to represent an HSA image object.
 typedef struct Image {
-private:
-  Image() {
+protected:
+  Image()
+      : data(nullptr),
+        row_pitch(0),
+        slice_pitch(0) {
     component.handle = 0;
     permission = HSA_ACCESS_PERMISSION_RO;
-    data = NULL;
     std::memset(srd, 0, sizeof(srd));
     std::memset(&desc, 0, sizeof(desc));
-    row_pitch = slice_pitch = 0;
     tile_mode = LINEAR;
   }
 
-  ~Image() {}
+  virtual ~Image() {}
 
-public:
+ public:
   typedef enum TileMode {
     LINEAR,
     TILED
@@ -127,7 +129,11 @@ public:
 
   /// @brief Convert from HSA handle to vendor representation.
   static Image* Convert(uint64_t handle) {
-    return reinterpret_cast<Image*>(handle - offsetof(Image, srd));
+    // Compute offset manually to avoid offsetof warning with virtual destructor
+    Image* dummy = nullptr;
+    const ptrdiff_t srd_offset =
+        reinterpret_cast<const char*>(&dummy->srd) - reinterpret_cast<const char*>(dummy);
+    return reinterpret_cast<Image*>(handle - srd_offset);
   }
 
   // Vendor specific image object.
@@ -201,6 +207,61 @@ public:
   // HSA sampler descriptor of the image object.
   hsa_ext_sampler_descriptor_v2_t desc;
 } Sampler;
+
+/// @brief Structure representing a mipmapped image array.
+typedef struct MipmappedArray : public Image {
+private:
+  MipmappedArray()
+      : size(0),
+        num_levels(0),
+        flags(0) {
+    component.handle = 0;
+    std::memset(srd, 0, sizeof(srd));
+    std::memset(&desc, 0, sizeof(desc));
+    permission = HSA_ACCESS_PERMISSION_RO;
+    std::memset(&addr_output, 0, sizeof(addr_output));
+    tile_mode = LINEAR;
+  }
+
+  ~MipmappedArray() {}
+
+public:
+ /// @brief Create a MipmappedArray.
+ /// Only internal metadata is allocated; image data must be provided by the user.
+ static MipmappedArray* Create(hsa_agent_t agent);
+
+ /// @brief Destroy a MipmappedArray.
+ static void Destroy(const MipmappedArray* array);
+
+ /// @brief Convert from vendor representation to HSA handle.
+ uint64_t Convert() const { return reinterpret_cast<uint64_t>(srd); }
+
+ /// @brief Convert from HSA handle to vendor representation.
+ static MipmappedArray* Convert(uint64_t handle) {
+   // Compute offset manually to avoid offsetof warning with virtual destructor
+   MipmappedArray* dummy = nullptr;
+   const ptrdiff_t srd_offset =
+       reinterpret_cast<const char*>(&dummy->srd) - reinterpret_cast<const char*>(dummy);
+   return reinterpret_cast<MipmappedArray*>(handle - srd_offset);
+ }
+
+  // Total size of the allocated memory.
+  size_t size;
+
+  // Number of mipmap levels.
+  uint32_t num_levels;
+
+  // Reserved
+  uint32_t flags;
+
+  // Cached surface info.
+  union {
+    ADDR_COMPUTE_SURFACE_INFO_OUTPUT addr1;   // Pre-GFX9 versions
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2;  // GFX9 and later
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3;  // GFX10 and later
+  } addr_output;
+
+} MipmappedArray;
 
 }  // namespace image
 }  // namespace rocr

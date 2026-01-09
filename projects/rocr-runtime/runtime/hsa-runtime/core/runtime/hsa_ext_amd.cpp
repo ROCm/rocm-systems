@@ -759,7 +759,7 @@ hsa_status_t hsa_amd_memory_lock(void* host_ptr, size_t size,
   }
 
   const AMD::MemoryRegion* system_region = static_cast<const AMD::MemoryRegion*>(
-      core::Runtime::runtime_singleton_->system_regions_coarse()[0]);
+      core::Runtime::runtime_singleton_->system_regions_coarse()[0].get());
 
   return system_region->Lock(num_agent, agents, host_ptr, size, 0, agent_ptr);
   CATCH;
@@ -799,7 +799,7 @@ hsa_status_t hsa_amd_memory_unlock(void* host_ptr) {
 
   const AMD::MemoryRegion* system_region =
       reinterpret_cast<const AMD::MemoryRegion*>(
-          core::Runtime::runtime_singleton_->system_regions_fine()[0]);
+          core::Runtime::runtime_singleton_->system_regions_fine()[0].get());
 
   return system_region->Unlock(host_ptr);
   CATCH;

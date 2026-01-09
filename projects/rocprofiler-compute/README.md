@@ -83,8 +83,6 @@ To build the binary we follow these steps:
 NOTE: Since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than 2.28.
 glibc version can be checked using `ldd --version` command.
 
-NOTE: libnss3.so shared library is required when using --roof-only option which generates roofline data in PDF format
-
 To test the standalone binary provide the `--call-binary` option to pytest.
 
 ## How to Cite
