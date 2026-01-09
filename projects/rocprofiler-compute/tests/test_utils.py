@@ -7863,7 +7863,11 @@ def test_noise_clamp_zero_reference():
 @pytest.mark.noise_clamp
 def test_noise_clamp_warning_above_threshold():
     """Warning recorded when relative error >= 1%."""
-    from utils.parser import clear_noise_clamp_warnings, get_noise_clamp_warnings, to_noise_clamp
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
 
     clear_noise_clamp_warnings()
 
@@ -7878,7 +7882,11 @@ def test_noise_clamp_warning_above_threshold():
 @pytest.mark.noise_clamp
 def test_noise_clamp_no_warning_below_threshold():
     """No warning when relative error < 1%."""
-    from utils.parser import clear_noise_clamp_warnings, get_noise_clamp_warnings, to_noise_clamp
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
 
     clear_noise_clamp_warnings()
 
@@ -7886,3 +7894,28 @@ def test_noise_clamp_no_warning_below_threshold():
     result = to_noise_clamp(pd.Series([-5000.0]), pd.Series([1000000.0]))
     assert result.iloc[0] == 0.0
     assert get_noise_clamp_warnings()["count"] == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_empty_input():
+    """Empty inputs should return empty without error."""
+    from utils.parser import to_noise_clamp
+
+    result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
+    assert len(result) == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_threshold_boundary():
+    """Exactly 1% error should trigger warning (>= not >)."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # Exactly 1% error: -10000 / 1000000 = 0.01
+    to_noise_clamp(pd.Series([-10000.0]), pd.Series([1000000.0]))
+    assert get_noise_clamp_warnings()["count"] == 1
