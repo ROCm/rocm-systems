@@ -8,7 +8,6 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-
 import os
 import sys
 import shutil

@@ -16,13 +16,8 @@ Note: OMPT backend is unavailable and tests are skipped if no GPU is available.
 """
 
 from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
-
 import pytest
+from pathlib import Path
 
 # OpenMP will not be traced if no GPU is available, this includes CPU-only
 pytestmark = [pytest.mark.gpu, pytest.mark.openmp]
@@ -322,7 +317,6 @@ class TestOpenMPVVHost:
             target=target_name,
             instrument_args=["-e", "-v", "1", "--label", "return", "args"],
             env=env,
-            timeout=180,
             no_check_target_arch=True,
         )
 

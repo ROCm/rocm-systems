@@ -6,20 +6,12 @@ Tests rocprof-sys binaries
 """
 
 from __future__ import annotations
-
-import sys
+import pytest
 from pathlib import Path
 import os
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-import pytest
-
 pytestmark = [pytest.mark.rocprof_binary]
 
-from rocprofsys import (
-    RocprofsysConfig,
-)
 
 # ============================================================================
 # Helper functions
@@ -126,7 +118,7 @@ class TestInstrumentBinary:
 
     def test_simulate_lib(
         self,
-        rocprof_config: RocprofsysConfig,
+        rocprof_config,
         run_test,
         assert_regex,
     ):
@@ -151,8 +143,8 @@ class TestInstrumentBinary:
 
     def test_simulate_lib_basename(
         self,
-        rocprof_config: RocprofsysConfig,
-        test_output_dir: Path,
+        rocprof_config,
+        test_output_dir,
         run_test,
         assert_regex,
     ):
@@ -288,7 +280,7 @@ class TestAvailBinary:
     def test_all_only_available_alphabetical(
         self,
         run_test,
-        test_output_dir: Path,
+        test_output_dir,
         assert_regex,
         assert_file_exists,
     ):
@@ -437,7 +429,7 @@ class TestAvailBinary:
     def test_write_config(
         self,
         run_test,
-        test_output_dir: Path,
+        test_output_dir,
         assert_regex,
         assert_file_exists,
     ):
@@ -483,7 +475,7 @@ class TestAvailBinary:
     def test_write_config_tweak(
         self,
         run_test,
-        test_output_dir: Path,
+        test_output_dir,
         assert_regex,
         assert_file_exists,
     ):
@@ -630,7 +622,7 @@ class TestRunBinary:
 
     def test_args(
         self,
-        test_output_dir: Path,
+        test_output_dir,
         run_test,
         assert_regex,
     ):

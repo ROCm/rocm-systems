@@ -5,6 +5,7 @@
 Tests for HIP stream API
 """
 
+from __future__ import annotations
 import pytest
 
 # =============================================================================

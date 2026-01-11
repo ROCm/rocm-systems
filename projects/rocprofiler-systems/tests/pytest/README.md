@@ -71,6 +71,17 @@ pytest tests/pytest/test_transpose.py::TestTranspose
 pytest tests/pytest/test_transpose.py::TestTranspose::test_sampling
 ```
 
+### Parallel Execution (pytest-xdist)
+
+Tests can be run in parallel using `pytest-xdist`:
+
+```bash
+pytest tests/pytest/ -n auto  # Use all available cores
+pytest tests/pytest/ -n 4     # Use 4 workers
+```
+
+> **Warning:** Running tests in parallel can cause timeouts due to resource contention, especially for `runtime_instrument` tests. If you experience unexpected timeouts, try reducing the number of workers or running sequentially.
+
 ### Custom Flags
 
 | Flag | Description |

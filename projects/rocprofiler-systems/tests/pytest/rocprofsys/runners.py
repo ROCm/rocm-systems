@@ -12,6 +12,7 @@ Provides classes for running tests with:
 - rocprof-sys-run wrapper
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import os

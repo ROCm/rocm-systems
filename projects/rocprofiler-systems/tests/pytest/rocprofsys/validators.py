@@ -17,7 +17,6 @@ This ensures consistency between pytest and CMake/CTest validation.
 """
 
 from __future__ import annotations
-
 import os
 import re
 import subprocess

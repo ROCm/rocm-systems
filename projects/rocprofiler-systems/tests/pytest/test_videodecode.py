@@ -5,6 +5,7 @@
 Tests for the videodecode example.
 """
 
+from __future__ import annotations
 import pytest
 
 pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.videodecode]

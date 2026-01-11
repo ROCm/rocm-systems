@@ -7,11 +7,10 @@ Tests for RCCL
 MPI is unsupported for RCCL tests.
 """
 
+from __future__ import annotations
 import pytest
 
 pytestmark = [pytest.mark.rccl]
-
-from pathlib import Path
 
 # =============================================================================
 # RCCL fixtures

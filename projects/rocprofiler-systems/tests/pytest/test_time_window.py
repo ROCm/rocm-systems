@@ -7,15 +7,6 @@ Equivalent to rocprof-sys-time-window-tests.cmake
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
-import sys
-from pathlib import Path
-from typing import Type
-
-# Add the pytest directory to Python path for rocprofsys package
-sys.path.insert(0, str(Path(__file__).parent))
-
 import pytest
 
 pytestmark = [pytest.mark.time_window]
@@ -98,6 +89,7 @@ class TestTraceTimeWindow:
             target="trace-time-window",
             instrument_args=self.RUNTIME_ARGS,
             env=env,
+            timeout=400,  # In xdist, it can take much longer
         )
 
         assert_regex(result)

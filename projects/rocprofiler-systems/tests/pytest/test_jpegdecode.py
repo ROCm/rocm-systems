@@ -4,8 +4,9 @@
 """
 Tests for the jpegdecode example.
 """
-
+from __future__ import annotations
 import pytest
+from pathlib import Path
 
 pytestmark = [pytest.mark.gpu, pytest.mark.decode, pytest.mark.jpegdecode]
 
@@ -13,8 +14,6 @@ from rocprofsys import (
     GPUInfo,
     RocprofsysConfig,
 )
-
-from pathlib import Path
 
 # =============================================================================
 # JPEG decode fixtures

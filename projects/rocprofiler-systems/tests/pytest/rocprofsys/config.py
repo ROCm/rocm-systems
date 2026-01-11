@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from __future__ import annotations
 from dataclasses import dataclass
 import getpass
 import os

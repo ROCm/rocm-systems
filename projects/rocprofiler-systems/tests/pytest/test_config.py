@@ -5,15 +5,12 @@
 General configuration file tests.
 """
 
+from __future__ import annotations
 import pytest
-
-pytestmark = [pytest.mark.rocprof_config]
-
 from pathlib import Path
-
 import shutil
 
-from rocprofsys import RocprofsysConfig
+pytestmark = [pytest.mark.rocprof_config]
 
 
 # ============================================================================
@@ -39,7 +36,7 @@ FOOBAR = ON
 
 
 @pytest.fixture
-def config_target(rocprof_config: RocprofsysConfig) -> str:
+def config_target(rocprof_config) -> str:
     """Get the target executable for config tests."""
     target_name = "parallel-overhead"
     try:
@@ -75,7 +72,7 @@ class TestConfig:
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=300,  # In xdist, it can take much longer
+            timeout=400,  # In xdist, it can take much longer
             fail_on_pass=True,  # Expected to fail
         )
 
