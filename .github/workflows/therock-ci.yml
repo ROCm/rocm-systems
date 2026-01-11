@@ -15,6 +15,15 @@ on:
       projects:
         type: string
         description: "Override: comma-separated list of projects to test (e.g., 'projects/clr,projects/rocminfo'). Leave blank for normal behavior (auto-detect from changes). Use 'all' to test all projects."
+        default: ""
+      linux_amdgpu_families:
+        type: string
+        description: "Comma-separated list of Linux GPU families to build and test (e.g., 'gfx94X,gfx1201')"
+        default: "gfx94X"
+      windows_amdgpu_families:
+        type: string
+        description: "Comma-separated list of Windows GPU families to build and test (e.g., 'gfx110X,gfx1201')"
+        default: "gfx110X"
 
 permissions:
   contents: read
@@ -32,6 +41,8 @@ jobs:
       external_source_checkout: true
       therock_ref: users/jayhawk-commits/deduplicate-ci
       projects: ${{ inputs.projects || '' }}
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || '' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
     permissions:
       contents: read
       id-token: write
