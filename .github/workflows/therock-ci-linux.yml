@@ -38,7 +38,6 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
 
       - name: Install python deps
         run: |
