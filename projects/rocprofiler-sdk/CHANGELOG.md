@@ -242,6 +242,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
 
 ### Added
-- Strix halo support for counter collection.
+- PTL (Peak Tops Limiter) unified control for MI300 GPUs
+- Strix Halo counter support
+- HSA Extension API v8 support
+- hipStreamCopyAttributes API implementation
+- Process attachment improvements
+- Quick reference guide for rocprofv3
+- Process attachment documentation
+- Installation steps and repository updates
 
-
+### Resolved issues
+- Fixed multi-GPU dimension mismatch
+- Device lock for dispatch counters
+- OMPT task scheduling null pointer exception
+- Stream ID errors for attachment
+- Dynamic code object loading fixes
