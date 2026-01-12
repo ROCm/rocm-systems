@@ -56,7 +56,14 @@ else()
     set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)
 
+    # Spdlog workaround for building static library
+    set(_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+
     FetchContent_MakeAvailable(spdlog)
+
+    set(BUILD_SHARED_LIBS ${_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP})
+    unset(_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP)
 
     if(TARGET spdlog)
         set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)

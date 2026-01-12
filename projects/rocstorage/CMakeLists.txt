@@ -30,6 +30,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ROCSTORAGE_BUILD_TESTS "Build unit tests" ON)
 option(ROCSTORAGE_BUILD_BENCHMARKS "Build performance benchmarks" ON)
+option(ROCSTORAGE_ENABLE_LOGGING "Enable logging" OFF)
 
 if(ROCSTORAGE_BUILD_TESTS)
     enable_testing()
@@ -51,6 +52,7 @@ set(rocstorage_VERSION
 # ------------------------------------------------------------ #
 
 add_library(rocstorage SHARED)
+
 add_subdirectory(source)
 
 # ------------------------------------------------------------ #
@@ -139,6 +141,22 @@ else()
         rocstorage
         PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
+    )
+endif()
+
+# ------------------------------------------------------------ #
+# Logging
+# ------------------------------------------------------------ #
+
+if(ROCSTORAGE_ENABLE_LOGGING)
+    target_compile_definitions(
+        rocstorage
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ROCSTORAGE_ENABLE_LOGGING=1>
+    )
+else()
+    target_compile_definitions(
+        rocstorage
+        PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ROCSTORAGE_ENABLE_LOGGING=0>
     )
 endif()
 

@@ -24,7 +24,6 @@
 
 #include "traits.hpp"
 
-#include <spdlog/spdlog.h>
 #include <sqlite3.h>
 
 #include <memory>
@@ -79,8 +78,7 @@ private:
   template <typename... Args>
   void validate_sqlite3_result(int sqlite3_error_code, const char *query,
                                Args &&...args) {
-    if (sqlite3_error_code == SQLITE_OK ||
-        sqlite3_error_code == SQLITE_DONE) {
+    if (sqlite3_error_code == SQLITE_OK || sqlite3_error_code == SQLITE_DONE) {
       return;
     }
 

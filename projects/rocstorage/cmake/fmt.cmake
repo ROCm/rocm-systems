@@ -45,8 +45,20 @@ else()
 
     set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
     set(FMT_TEST OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+    # fmt workaround for building static library
+    set(_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
 
     FetchContent_MakeAvailable(fmt)
+
+    set(BUILD_SHARED_LIBS ${_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP})
+    unset(_ROCSTORAGE_BUILD_SHARED_LIBS_BACKUP)
+
+    if(TARGET fmt)
+        set_target_properties(fmt PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
 
     if(NOT TARGET fmt::fmt)
         add_library(fmt::fmt ALIAS fmt)

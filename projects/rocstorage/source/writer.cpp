@@ -26,7 +26,7 @@
 #include "data_storage/insert_statements.hpp"
 #include "data_storage/table_insert_query.hpp"
 
-#include <spdlog/spdlog.h>
+#include "debug.hpp"
 
 #include <stdexcept>
 #include <unordered_map>
@@ -176,7 +176,7 @@ struct writer::impl {
                     std::optional<size_t> thread_id, const char *extdata) {
     if (m_data_identifiers->m_tracks.find(track_name) !=
         m_data_identifiers->m_tracks.end()) {
-      spdlog::error("Failed to add track '{}': already exists", track_name);
+      LOG_ERROR("Failed to add track '{}': already exists", track_name);
       return;
     }
 
@@ -211,9 +211,9 @@ struct writer::impl {
     auto it = m_data_identifiers->m_pmc_descriptor_map.find(
         {agent_id, pmc_descriptor});
     if (it == m_data_identifiers->m_pmc_descriptor_map.end()) {
-      spdlog::error("Insert PMC event failed: non-existing PMC description "
-                    "(agent_id: {}, pmc_name: {})",
-                    agent_id, pmc_descriptor);
+      LOG_ERROR("Insert PMC event failed: non-existing PMC description "
+                "(agent_id: {}, pmc_name: {})",
+                agent_id, pmc_descriptor);
       return;
     }
 
@@ -231,9 +231,9 @@ struct writer::impl {
       uint32_t is_constant, uint32_t is_derived, const char *extdata) {
     auto it = m_data_identifiers->m_pmc_descriptor_map.find({agent_id, name});
     if (it != m_data_identifiers->m_pmc_descriptor_map.end()) {
-      spdlog::error("Insert PMC description failed: PMC descriptor already "
-                    "exists (name: {}, agent_id: {})",
-                    name, agent_id);
+      LOG_ERROR("Insert PMC description failed: PMC descriptor already "
+                "exists (name: {}, agent_id: {})",
+                name, agent_id);
       return;
     }
     data_storage::queries::table_insert_query query_builder;
@@ -261,7 +261,7 @@ struct writer::impl {
                      const char *extdata) {
     auto it = m_data_identifiers->m_tracks.find(track);
     if (it == m_data_identifiers->m_tracks.end()) {
-      spdlog::error("Insert sample failed: track '{}' does not exist", track);
+      LOG_ERROR("Insert sample failed: track '{}' does not exist", track);
       return;
     }
     auto track_info = it->second;
@@ -360,10 +360,10 @@ struct writer::impl {
                             uint32_t arch_vgrp_count, uint32_t accum_vgrp_count,
                             const char *extdata) {
     m_insert_statements->m_insert_kernel_symbol_statement(
-        id, m_uuid_cstr, node_id, process_id, code_obj_id, name,
-        display_name, kernel_obj, kernarg_segmnt_size,
-        kernarg_segment_alignment, group_segment_size, private_segment_size,
-        sgrp_count, arch_vgrp_count, accum_vgrp_count, extdata);
+        id, m_uuid_cstr, node_id, process_id, code_obj_id, name, display_name,
+        kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment,
+        group_segment_size, private_segment_size, sgrp_count, arch_vgrp_count,
+        accum_vgrp_count, extdata);
   }
 
   void insert_code_object(size_t id, size_t node_id, size_t process_id,
@@ -371,8 +371,8 @@ struct writer::impl {
                           size_t ld_size, size_t ld_delta,
                           const char *storage_type, const char *extdata) {
     m_insert_statements->m_insert_code_object_statement(
-        id, m_uuid_cstr, node_id, process_id, agent_id, uri, ld_base,
-        ld_size, ld_delta, storage_type, extdata);
+        id, m_uuid_cstr, node_id, process_id, agent_id, uri, ld_base, ld_size,
+        ld_delta, storage_type, extdata);
   }
 
   void insert_args(size_t event_id, size_t position, const char *type,
@@ -389,13 +389,13 @@ struct writer::impl {
                            const char *extdata) {
     if (agent_id.has_value()) {
       m_insert_statements->m_insert_memory_alloc_statement(
-          m_uuid_cstr, node_id, process_id, thread_id, agent_id.value(),
-          type, level, start, end, address, size, queue_id, stream_id, event_id,
+          m_uuid_cstr, node_id, process_id, thread_id, agent_id.value(), type,
+          level, start, end, address, size, queue_id, stream_id, event_id,
           extdata);
     } else {
       m_insert_statements->m_insert_memory_alloc_no_agent_statement(
-          m_uuid_cstr, node_id, process_id, thread_id, type, level, start,
-          end, address, size, queue_id, stream_id, event_id, extdata);
+          m_uuid_cstr, node_id, process_id, thread_id, type, level, start, end,
+          address, size, queue_id, stream_id, event_id, extdata);
     }
   }
 

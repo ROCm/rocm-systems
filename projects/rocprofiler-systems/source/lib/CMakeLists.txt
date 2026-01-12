@@ -38,14 +38,6 @@ set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
 # ------------------------------------------------------------------------------#
 #
-# rocstorage library
-#
-# ------------------------------------------------------------------------------#
-
-add_subdirectory(rocstorage)
-
-# ------------------------------------------------------------------------------#
-#
 # rocprofiler-systems interface library
 #
 # ------------------------------------------------------------------------------#
@@ -55,8 +47,6 @@ add_library(
     rocprofiler-systems::rocprofiler-systems-interface-library
     ALIAS rocprofiler-systems-interface-library
 )
-
-add_dependencies(rocprofiler-systems-interface-library rocstorage)
 
 target_include_directories(
     rocprofiler-systems-interface-library

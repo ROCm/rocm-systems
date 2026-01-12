@@ -117,7 +117,7 @@ target_link_libraries(
 
 target_link_libraries(
     rocprofiler-systems-core-library
-    PRIVATE $<BUILD_INTERFACE:rocstorage>
+    PRIVATE rocprofiler-systems::rocprofiler-systems-rocstorage
 )
 
 target_link_libraries(
