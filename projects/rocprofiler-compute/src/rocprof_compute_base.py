@@ -444,6 +444,9 @@ class RocProfCompute:
             # Add node name to workload path
             if self.__args.subpath == "node_name":
                 self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add MPI rank to workload path if available
+            elif get_rank() is not None:
+                self.__args.path = str(Path(self.__args.path) / f"{get_rank()}")
             # OR, Add gpu model name to workload path
             else:
                 self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
