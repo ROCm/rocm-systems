@@ -242,18 +242,21 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
 
 ### Added
-- PTL (Peak Tops Limiter) unified control for MI300 GPUs
-- Counter collection support for gfx1150 and gfx1151 (strix halo)
-- HSA Extension API v8 support
-- hipStreamCopyAttributes API implementation
-- Process attachment improvements
-- [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html)
-- Process attachment documentation
-- Installation steps and repository updates
+- PTL (Peak Tops Limiter) unified control for MI300 GPUs.
+- Counter collection support for `gfx1150` and `gfx1151` (strix halo).
+- HSA Extension API v8 support.
+- `hipStreamCopyAttributes` API implementation.
+- Process attachment improvements.
+
+### Optimized
+
+- Process attachment documentation update.
+- [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
+- Updated the documentation for installation steps and updated the links to point to the latest repository.
 
 ### Resolved issues
-- Fixed multi-GPU dimension mismatch
-- Device lock for dispatch counters
-- OMPT task scheduling null pointer exception
-- Stream ID errors for attachment
-- Dynamic code object loading fixes
+- Fixed multi-GPU dimension mismatch.
+- Fixed device lock issue for dispatch counters.
+- OMPT task scheduling null pointer exception.
+- Fixed stream ID errors for process attachment.
+- Fixed issues during dynamic code object loading.
