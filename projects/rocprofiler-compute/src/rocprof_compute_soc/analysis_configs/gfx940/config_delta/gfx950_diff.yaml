@@ -901,14 +901,14 @@ Modification:
           title: L2-Fabric Read Stall (Cycles per normUnit)
           metrics:
             - ::_1:
-                ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
+                ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
       - metric_table:
           id: 1810
           title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
           metrics:
             - ::_1:
+                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
