@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -232,6 +233,23 @@ soc = test_utils.gpu_soc()
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
+
+
+class MockProfiler:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def run_profiling(self, *args, **kwargs):
+        pass
+
+    def sanitize(self, *args, **kwargs):
+        pass
+
+    def pre_processing(self, *args, **kwargs):
+        pass
+
+    def post_processing(self, *args, **kwargs):
+        pass
 
 
 def log_counter(file_dict, test_name):
@@ -748,6 +766,131 @@ def test_path_csv(
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_output_directory(binary_handler_profile_rocprof_compute):
+    """Test output directory creation"""
+    from rocprof_compute_base import RocProfCompute
+
+    workload_base_dir = test_utils.get_output_dir()
+
+    with patch(
+        "rocprof_compute_base.RocProfCompute.create_profiler",
+        return_value=MockProfiler(),
+    ):
+        # Check with hostname
+        hostname = "test_node"
+        with patch("socket.gethostname", return_value=hostname):
+            workload_dir = os.path.join(workload_base_dir, "%hostname%_output")
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = workload_dir.replace("%hostname%", hostname)
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+        # Check with gpumodel
+        gpumodel = "MIXXX"
+        gpuarch = "gfx000"
+
+        class MockMachineSpecs:
+            def __init__(self, model, arch):
+                self.gpu_model = model
+                self.gpu_arch = arch
+
+        class MockSoc:
+            def post_profiling(self, *args, **kwargs):
+                pass
+
+        def mock_load_soc_specs(self, sysinfo=None):
+            self._RocProfCompute__mspec = MockMachineSpecs(gpumodel, gpuarch)
+            self._RocProfCompute__soc[gpuarch] = MockSoc()
+
+        with patch.object(RocProfCompute, "load_soc_specs", new=mock_load_soc_specs):
+            workload_dir = os.path.join(workload_base_dir, "%gpumodel%_output")
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = workload_dir.replace("%gpumodel%", gpumodel)
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+        # Check for MPI rank
+        rank_env_vars = {
+            "SLURM_PROCID": None,
+            "FLUX_TASK_RANK": None,
+            "PMI_RANK": None,
+            "PMIX_RANK": None,
+            "MPI_RANK": None,
+            "MPI_LOCALRANKID": None,
+            "MPI_RANKID": None,
+            "MV2_COMM_WORLD_RANK": None,
+            "OMPI_COMM_WORLD_RANK": None,
+            "PALS_RANKID": None,
+        }
+
+        rank = "3"
+        with patch("os.environ.get", wraps=rank_env_vars.get):
+            # Check with no rank set
+            workload_dir = os.path.join(workload_base_dir, "%rank%_output")
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = workload_dir.replace("%rank%", "0")
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+            # Check with rank set
+            for key in rank_env_vars.keys():
+                rank_env_vars[key] = rank
+                workload_dir = os.path.join(workload_base_dir, "%rank%_output")
+                binary_handler_profile_rocprof_compute(config, workload_dir)
+                workload_dir = workload_dir.replace("%rank%", rank)
+                assert os.path.exists(workload_dir)
+                test_utils.clean_output_dir(config["cleanup"], workload_dir)
+                rank_env_vars[key] = None
+
+        def get_env(var, default=None):
+            if var == "ENV_1":
+                return "custom_env"
+            elif ("RANK" in var or "PROCID" in var) and rank_env_vars[var] is not None:
+                return rank_env_vars[var]
+            else:
+                return default
+
+        # Check with environment variable
+        with patch("os.environ.get", side_effect=get_env):
+            workload_dir = os.path.join(workload_base_dir, "%env{ENV_1}%")
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = workload_dir.replace("%env{ENV_1}%", "custom_env")
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+            # Check when environment variable is not set
+            workload_dir = os.path.join(workload_base_dir, "%env{ENV_2}%")
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = workload_dir.replace("%env{ENV_2}%", "")
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+        # Check with all patterns combined
+        with (
+            patch("socket.gethostname", return_value=hostname),
+            patch("os.environ.get", side_effect=get_env),
+            patch.object(RocProfCompute, "load_soc_specs", new=mock_load_soc_specs),
+        ):
+            rank_env_vars["OMPI_COMM_WORLD_RANK"] = rank
+            workload_dir = os.path.join(
+                workload_base_dir,
+                "%hostname%_%gpumodel%_%env{ENV_1}%_%rank%_output",
+            )
+            binary_handler_profile_rocprof_compute(config, workload_dir)
+            workload_dir = (
+                workload_dir.replace("%hostname%", hostname)
+                .replace("%gpumodel%", gpumodel)
+                .replace("%env{ENV_1}%", "custom_env")
+                .replace("%rank%", rank)
+            )
+            assert os.path.exists(workload_dir)
+            test_utils.clean_output_dir(config["cleanup"], workload_dir)
+            rank_env_vars["OMPI_COMM_WORLD_RANK"] = None
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
 
 
 @pytest.mark.roofline_1
