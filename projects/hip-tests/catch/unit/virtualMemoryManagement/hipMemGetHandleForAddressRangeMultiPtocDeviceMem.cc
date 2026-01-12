@@ -21,7 +21,7 @@ THE SOFTWARE.
 #include <hip_test_helper.hh>
 #include <utils.hh>
 
-#if __linx__
+#if __linux__
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <sys/wait.h>
