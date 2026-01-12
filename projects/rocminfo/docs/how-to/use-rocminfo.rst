@@ -11,9 +11,9 @@ The ROCmInfo command provides information about the Heterogenous System Architec
 
 The output has the following two sections:
 
-* HSA System Attributes - List of general information of the system.
+* HSA System Attributes: List of general information of the system.
 
-* HSA agents - List of devices in the system.
+* HSA agents: List of devices in the system.
 
 See the following example output of the ROCmInfo command on a system with MI300X:
 
