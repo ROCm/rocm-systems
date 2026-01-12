@@ -69,7 +69,7 @@ else()
     # gersemi: off
     FetchContent_Declare(
         sqlite3_amalgamation
-        URL "file://${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
+        URL "${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
         SOURCE_DIR ${SQLITE3_SOURCE_DIR}
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
