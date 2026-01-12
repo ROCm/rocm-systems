@@ -215,7 +215,8 @@ Examples:
             """\t\t\t   %%gpumodel%%: GPU model\n"""
             """\t\t\t   %%rank%%: MPI process rank\n"""
             """\t\t\t   %%env{NAME}%%: Environment variable 'NAME'\n"""
-            "\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>/%%gpumodel%%)\n"
+            "\t\t\t(DEFAULT: {Path.cwd()}/workloads/<name>/%%gpumodel%%) without MPI,\n"  # noqa: E501
+            "\t\t\t {Path.cwd()}/workloads/<name>/%%rank%%) with MPI.)\n"
             "\t\t\t(DEPRECATED) --path is deprecated. Use --output-directory or -p instead."  # noqa: E501
         ),
     )
