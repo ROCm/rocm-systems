@@ -49,11 +49,11 @@
 
 #include <array>
 #include <cassert>
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
@@ -88,14 +88,12 @@ static const std::map<XDNADeviceId, XDNADeviceType> supported_xdna_devices = {
     {{0x17f0}, XDNADeviceType::Stx},  // Strix Halo / Krackan
 };
 
-namespace fs = std::filesystem;
-
 /// @brief Devnode path for XDNA devices.
-static const fs::path devnodes_path = "/dev/accel";
+static constexpr std::string_view devnodes_path = "/dev/accel";
 /// @brief Sysfs path for XDNA devices.
-static const fs::path sysfs_path = "/sys/class/accel";
+static constexpr std::string_view sysfs_path = "/sys/class/accel";
 /// @brief Devnode prefix for XDNA devices.
-static const std::string devnode_prefix = "accel";
+static constexpr std::string_view devnode_prefix = "accel";
 /// @brief Maximum devnode minor number for XDNA devices.
 constexpr uint32_t devnode_max_minor_num = 64;
 
@@ -160,7 +158,7 @@ XdnaDriver::XdnaDriver(std::string devnode_name)
 
 hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   for (uint32_t i = 0; i < devnode_max_minor_num; ++i) {
-    auto tmp_driver = std::make_unique<XdnaDriver>(devnode_prefix + std::to_string(i));
+    auto tmp_driver = std::make_unique<XdnaDriver>(std::string(devnode_prefix) + std::to_string(i));
     if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
       if (tmp_driver->QueryKernelModeDriver(core::DriverQuery::GET_DRIVER_VERSION) ==
           HSA_STATUS_SUCCESS) {
@@ -195,7 +193,7 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t XdnaDriver::Open() {
-  const auto devnode_path = devnodes_path / devnode_name_;
+  const std::string devnode_path = std::string(devnodes_path) + "/" + devnode_name_;
   fd_ = open(devnode_path.c_str(), O_RDWR | O_CLOEXEC);
   if (fd_ < 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -231,19 +229,19 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
     return HSA_STATUS_ERROR;
   }
 
-  const auto sysfs_device_path = sysfs_path / devnode_name_ / "device";
+  const std::string sysfs_device_path = std::string(sysfs_path) + "/" + devnode_name_ + "/device";
 
   // Find device type.
   XDNADeviceType device_type = XDNADeviceType::Unknown;
   {
-    const auto device_id_file = sysfs_device_path / "device";
-    if (!fs::exists(device_id_file)) {
+    const std::string device_id_file = sysfs_device_path + "/device";
+    std::ifstream is(device_id_file);
+    if (!is.good()) {
       assert(false && "Device file not found in sysfs.");
       return HSA_STATUS_ERROR;
     }
 
     XDNADeviceId device_id = {};
-    std::ifstream is(device_id_file);
     // Device ID is in hex.
     if (!(is >> std::hex >> device_id.device)) {
       assert(false && "Failed to read device ID from sysfs.");
@@ -283,13 +281,13 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
 
   // Read device name from sysfs.
   {
-    const auto device_name_file = sysfs_device_path / "vbnv";
-    if (!fs::exists(device_name_file)) {
+    const std::string device_name_file = sysfs_device_path + "/vbnv";
+    std::ifstream is(device_name_file);
+    if (!is.good()) {
       assert(false && "Device file name not found in sysfs.");
       return HSA_STATUS_ERROR;
     }
     std::array<char, HSA_PUBLIC_NAME_SIZE> device_name = {};
-    std::ifstream is(device_name_file);
     if (!is.getline(device_name.data(), device_name.size() - 1)) {
       assert(false && "Failed to read device name from sysfs.");
       return HSA_STATUS_ERROR;
