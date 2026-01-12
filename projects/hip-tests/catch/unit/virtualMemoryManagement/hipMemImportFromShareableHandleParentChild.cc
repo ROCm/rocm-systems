@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     int sig = 0;
     REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
 
-    // receive message from parent provess
+    // receive message from parent process
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
 
