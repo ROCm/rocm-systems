@@ -115,6 +115,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/aqlprofile
       run: |
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
@@ -124,7 +125,7 @@ jobs:
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S $(pwd)/projects/aqlprofile/dashboard.cmake
+          -S $(pwd)/dashboard.cmake
 
   core-rpm:
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -168,7 +169,6 @@ jobs:
         ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
-
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -195,6 +195,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/aqlprofile
       run: |
         source ${{ env.PYTHON_VENV_ACTIVATE }}
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
@@ -206,4 +207,4 @@ jobs:
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S $(pwd)/projects/aqlprofile/dashboard.cmake
+          -S $(pwd)/dashboard.cmake
