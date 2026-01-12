@@ -30,6 +30,7 @@
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -399,7 +400,8 @@ save_line_info_impl(std::ostream&                           _ofs,
             _ofs << "    " << as_hex(_addr_off) << " [" << as_hex(_addr)
                  << "] :: " << itr.file;
             if(itr.line > 0) _ofs << ":" << itr.line;
-            if(!itr.func.empty()) _ofs << " [" << tim::demangle(itr.func) << "]";
+            if(!itr.func.empty())
+                _ofs << " [" << rocprofsys::utility::demangle(itr.func) << "]";
             _ofs << "\n";
 
             if(std::get<0>(_info))
@@ -408,7 +410,7 @@ save_line_info_impl(std::ostream&                           _ofs,
                 {
                     _ofs << "        " << ditr.file << ":" << ditr.line;
                     if(!ditr.func.empty())
-                        _ofs << " [" << tim::demangle(ditr.func) << "]";
+                        _ofs << " [" << rocprofsys::utility::demangle(ditr.func) << "]";
                     _ofs << "\n";
                 }
             }
@@ -608,14 +610,16 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                                     << " :: " << std::setw(5) << std::boolalpha
                                     << _is_eligible << " :: " << as_hex(itr.first) << " "
                                     << _linfo->location << ":" << _linfo->lineno << " ["
-                                    << demangle(_linfo->name) << "]\n";
+                                    << rocprofsys::utility::demangle(_linfo->name)
+                                    << "]\n";
                             for(const auto& iitr : _linfo->lineinfo.lines)
                             {
-                                _sample << "    " << std::setw(8) << itr.second
-                                        << " :: " << std::setw(5) << std::boolalpha
-                                        << _is_eligible << " :: " << as_hex(itr.first)
-                                        << " " << iitr.location << ":" << iitr.line
-                                        << " [" << demangle(iitr.name) << "]\n";
+                                _sample
+                                    << "    " << std::setw(8) << itr.second
+                                    << " :: " << std::setw(5) << std::boolalpha
+                                    << _is_eligible << " :: " << as_hex(itr.first) << " "
+                                    << iitr.location << ":" << iitr.line << " ["
+                                    << rocprofsys::utility::demangle(iitr.name) << "]\n";
                             }
                         }
                     }
@@ -839,8 +843,9 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                             as_hex(_lookup_addr).c_str(), as_hex(_addr).c_str(),
                             as_hex(_sym_addr).c_str(),
                             (_location.empty()) ? "" : _location.data(),
-                            demangle(itr.func).c_str(), itr.file.c_str(), itr.line,
-                            itr.address.as_string().c_str(), itr.address.size());
+                            rocprofsys::utility::demangle(itr.func).c_str(),
+                            itr.file.c_str(), itr.line, itr.address.as_string().c_str(),
+                            itr.address.size());
                     }
                 }
             }

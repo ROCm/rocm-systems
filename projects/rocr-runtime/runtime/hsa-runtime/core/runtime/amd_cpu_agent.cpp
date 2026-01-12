@@ -64,7 +64,6 @@ CpuAgent::CpuAgent(HSAuint32 node, const HsaNodeProperties& node_props,
 }
 
 CpuAgent::~CpuAgent() {
-  std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
 
@@ -87,17 +86,17 @@ void CpuAgent::InitRegionList() {
     if (system_prop != mem_props.end()) system_props = *system_prop;
 
     // Fine-Grain Memory
-    regions_.push_back(new MemoryRegion(true, false, is_apu_node, false, true, this, system_props));
+    regions_.push_back(std::make_shared<MemoryRegion>(true, false, is_apu_node, false, true, this, system_props));
 
     // Ext-Fine-Grain Memory
-    regions_.push_back(new MemoryRegion(false, false, is_apu_node, true, true, this, system_props));
+    regions_.push_back(std::make_shared<MemoryRegion>(false, false, is_apu_node, true, true, this, system_props));
 
     // Kernargs
-    regions_.push_back(new MemoryRegion(true, true, is_apu_node, false, true, this, system_props));
+    regions_.push_back(std::make_shared<MemoryRegion>(true, true, is_apu_node, false, true, this, system_props));
 
     if (!is_apu_node) {
       // Coarse Grain
-      regions_.push_back(new MemoryRegion(false, false, is_apu_node, false, true, this, system_props));
+      regions_.push_back(std::make_shared<MemoryRegion>(false, false, is_apu_node, false, true, this, system_props));
     }
   }
 }
@@ -150,12 +149,12 @@ hsa_status_t CpuAgent::VisitRegion(bool include_peer,
 }
 
 hsa_status_t CpuAgent::VisitRegion(
-    const std::vector<const core::MemoryRegion*>& regions,
+    const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
     hsa_status_t (*callback)(hsa_region_t region, void* data),
     void* data) const {
-  for (const core::MemoryRegion* region : regions) {
+  for (const std::shared_ptr<const rocr::core::MemoryRegion>& region : regions) {
     if (!region->user_visible()) continue;
-    hsa_region_t region_handle = core::MemoryRegion::Convert(region);
+    hsa_region_t region_handle = core::MemoryRegion::Convert(region.get());
     hsa_status_t status = callback(region_handle, data);
     if (status != HSA_STATUS_SUCCESS) {
       return status;

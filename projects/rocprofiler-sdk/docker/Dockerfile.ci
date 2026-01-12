@@ -21,7 +21,7 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
 RUN set-euo pipefail; \
     if [ -f /etc/debian_version ]; then \
         apt-get update && \
-        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common git cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common cmake g++-11 g++-12 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev && \
         add-apt-repository ppa:git-core/ppa && \
         mkdir -p /etc/apt/keyrings && \
         wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/latest/ubuntu/jammy/amdgpu-install_7.1.1.70101-1_all.deb && \
@@ -38,16 +38,16 @@ RUN set -euo pipefail; \
         dnf clean all || true; \
         dnf install -y perl-ExtUtils-MakeMaker python3-pip || true; \
         if [ $(grep -i "VERSION_ID=\"8.8\"" /etc/os-release | wc -l) -gt 0 ]; then \
-            wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
-            tar -xf git-2.51.0.tar.xz; \
-            cd git-2.51.0; \
+            wget https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.xz; \
+            tar -xf git-2.52.0.tar.xz; \
+            cd git-2.52.0; \
             rm -rf /etc/yum.repos.d/redhat-partner.repo || true; \
             dnf clean all; \
             dnf install -y perl-ExtUtils-MakeMaker || true; \
             export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
             make prefix=/usr all -j 32; \
             make prefix=/usr install; \
-            cd ..; rm -rf git-2.51.0*; \
+            cd ..; rm -rf git-2.52.0*; \
             echo -e "[ROCm-latest]\nname=ROCm\nbaseurl=https://repo.radeon.com/rocm/el8/latest/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
             echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.10/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
         else \
@@ -81,9 +81,9 @@ RUN set -euo pipefail; \
         source ~/.bashrc; \
         python3 -m pip install --upgrade pip || true; \
         python3 -m pip install --upgrade -r /root/requirements.txt || true; \
-        cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
-        tar -xf git-2.51.0.tar.xz; cd git-2.51.0; make prefix=/usr all -j 32; make prefix=/usr install; \
-        cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.51.0*; \
+        cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.xz; \
+        tar -xf git-2.52.0.tar.xz; cd git-2.52.0; make prefix=/usr all -j 32; make prefix=/usr install; \
+        cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.52.0*; \
     fi;
 
 # Nightly Tarball

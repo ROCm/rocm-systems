@@ -1,6 +1,6 @@
 ## What is this repository for? ###
 
-This repository provides unit tests for  [HIP](https://github.com/ROCm/HIP) implementation.
+This repository provides unit tests for  [HIP](../hip) implementation.
 
 ## DISCLAIMER
 

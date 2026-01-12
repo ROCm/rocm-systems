@@ -350,6 +350,9 @@ typedef struct _HsaNodeProperties
 
     HSAuint32       FamilyID;          // GPU family id
 
+    HSAuint32       CwsrSize;          // Size of the CWSR
+    HSAuint32       CtlStackSize;      // Size of the control stack
+
     HSAuint32       LuidLowPart;       // Windows Locally Unique Identifier Low 4 bytes
     HSAuint32       LuidHighPart;      // Windows Locally Unique Identifier High 4 bytes
 } HsaNodeProperties;
