@@ -44,8 +44,10 @@
 #include <timemory/utility/types.hpp>
 
 #include <csignal>
+#include <dlfcn.h>
 #include <ostream>
 #include <pthread.h>
+#include <string_view>
 #include <utility>
 
 namespace rocprofsys
@@ -62,9 +64,6 @@ namespace component
 {
 using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
-// The maximum limit for the number of threads is set at 4096. declared and stored in the
-// set_storage struct's `types.hpp` file.
-constexpr size_t allowed_max_threads = 4096;
 
 namespace
 {
@@ -185,7 +184,7 @@ pthread_create_gotcha::wrapper::operator()() const
     const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto& _info        = thread_info::init(m_config.offset);
     auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
-    if(static_cast<size_t>(_sequent_value) >= allowed_max_threads)
+    if(static_cast<size_t>(_sequent_value) >= ROCPROFSYS_MAX_THREADS)
     {
         static std::once_flag thread_limit_warning_flag;
         std::call_once(thread_limit_warning_flag, []() {
@@ -194,7 +193,7 @@ pthread_create_gotcha::wrapper::operator()() const
                 "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
                 "reached. Further thread creation and profiling will be "
                 "disabled to prevent resource exhaustion.\n",
-                allowed_max_threads);
+                static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
         });
         return m_routine(m_arg);
     }
@@ -540,11 +539,47 @@ pthread_create_gotcha::get_native_handles()
     return _v;
 }
 
+namespace
+{
+constexpr const char* rocm_internal_libraries[] = { "libhsa-runtime64",
+                                                    "librocprofiler-sdk", "libamdhip64" };
+
+bool
+is_rocm_internal_thread(void* func_ptr)
+{
+    if(!func_ptr) return false;
+
+    Dl_info info;
+    if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr)
+    {
+        ROCPROFSYS_VERBOSE(4, "dladdr failed or returned no filename for func_ptr=%p\n",
+                           func_ptr);
+        return false;
+    }
+
+    std::string_view lib_name{ info.dli_fname };
+
+    for(const auto* lib : rocm_internal_libraries)
+    {
+        if(lib_name.find(lib) != std::string_view::npos) return true;
+    }
+
+    return false;
+}
+}  // namespace
+
 // pthread_create
 int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                                   void* (*func)(void*), void*              arg) const
 {
+    // Bypass wrapper for internal ROCm threads to avoid interfering with their event
+    // loops
+    if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
+    {
+        return (*m_wrappee)(thread, attr, func, arg);
+    }
+
     auto        _tid          = utility::get_thread_index();
     auto        _thr_state    = get_thread_state();
     auto        _glob_state   = get_state();

@@ -126,6 +126,7 @@ if(ROCPROFSYS_OMPVV_HOST_TESTS)
               -e -v 1 --label return args
             SAMPLING_TIMEOUT 300
             REWRITE_TIMEOUT 300
+            RUNTIME_TIMEOUT 600
             ENVIRONMENT
               "${_ompt_environment};ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON"
             REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"

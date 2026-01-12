@@ -22,23 +22,42 @@
 
 #pragma once
 
-#include "common/defines.h"
+#include "core/concepts.hpp"
+#include "core/containers/stable_vector.hpp"
 
-#define ROCPROFSYS_METADATA(...) ::tim::manager::add_metadata(__VA_ARGS__)
+#include <cstdint>
+#include <functional>
 
-#if !defined(ROCPROFSYS_DEFAULT_OBJECT)
-#    define ROCPROFSYS_DEFAULT_OBJECT(NAME)                                              \
-        NAME()                           = default;                                      \
-        NAME(const NAME&)                = default;                                      \
-        NAME(NAME&&) noexcept            = default;                                      \
-        NAME& operator=(const NAME&)     = default;                                      \
-        NAME& operator=(NAME&&) noexcept = default;
-#endif
+namespace rocprofsys
+{
+using grow_functor_t = int64_t (*)(int64_t);
 
-#if !defined(ROCPROFSYS_DEFAULT_COPY_MOVE)
-#    define ROCPROFSYS_DEFAULT_COPY_MOVE(NAME)                                           \
-        NAME(const NAME&)                = default;                                      \
-        NAME(NAME&&) noexcept            = default;                                      \
-        NAME& operator=(const NAME&)     = default;                                      \
-        NAME& operator=(NAME&&) noexcept = default;
-#endif
+inline auto&
+grow_functors()
+{
+    static auto _v = container::stable_vector<grow_functor_t>{};
+    return _v;
+}
+
+inline auto&
+get_peak_num_threads_callback()
+{
+    static std::function<int64_t()> _v = []() -> int64_t {
+        return static_cast<int64_t>(max_supported_threads);
+    };
+    return _v;
+}
+
+inline int64_t
+get_current_peak_num_threads()
+{
+    return get_peak_num_threads_callback()();
+}
+
+inline void
+set_peak_num_threads_callback(std::function<int64_t()> _cb)
+{
+    get_peak_num_threads_callback() = std::move(_cb);
+}
+
+}  // namespace rocprofsys

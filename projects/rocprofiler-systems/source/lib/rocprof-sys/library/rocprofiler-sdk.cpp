@@ -213,6 +213,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     auto        counters_v   = counter_vec_t{};
     const auto* tool_agent_v = data->get_gpu_tool_agent(agent_id);
 
+    // Check if agent info is available (may not be for unsupported architectures)
+    auto agent_info_it = data->agent_counter_info.find(agent_id);
+    if(agent_info_it == data->agent_counter_info.end())
+    {
+        ROCPROFSYS_WARNING_F(0,
+                             "Skipping GPU agent %lu (device %lu) due to unsupported "
+                             "architecture or missing counter info\n",
+                             agent_id.handle, tool_agent_v->device_id);
+        data->agent_counter_profiles.emplace(agent_id, profile);
+        return counter_vec_t{};
+    }
+
     constexpr auto device_qualifier = std::string_view{ ":device=" };
     for(const auto& itr : counters)
     {
@@ -263,7 +275,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         }
 
         // search the gpu agent counter info for a counter with a matching name
-        for(const auto& citr : data->agent_counter_info.at(agent_id))
+        for(const auto& citr : agent_info_it->second)
         {
             if(name_v == std::string_view{ citr.name })
             {
@@ -280,11 +292,34 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto found_counters =
             timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
 
-        ROCPROFSYS_ABORT_F(
-            "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
+        // Determine which counters were not found
+        auto missing_counters = std::vector<std::string>{};
+        for(const auto& counter : counters)
+        {
+            if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
+                missing_counters.emplace_back(counter);
+        }
+        auto missing_counters_str = timemory::join::join(
+            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+
+        // In production, warn and continue with available counters
+        ROCPROFSYS_WARNING_F(0,
+                             "Unable to find all counters for agent %i (gpu-%li, %s). "
+                             "Requested: %s. Found: %s. Missing: %s. Continuing with "
+                             "available counters.\n",
+                             tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                             tool_agent_v->agent->name.c_str(),
+                             requested_counters.c_str(), found_counters.c_str(),
+                             missing_counters_str.c_str());
+
+        // In CI, throw to catch issues early
+        ROCPROFSYS_CI_THROW(
+            true,
+            "Unable to find all counters for agent %i (gpu-%li, %s). Requested: %s. "
+            "Found: %s. Missing: %s",
             tool_agent_v->agent->node_id, tool_agent_v->device_id,
             tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
-            found_counters.c_str());
+            found_counters.c_str(), missing_counters_str.c_str());
     }
 
     if(!counters_v.empty())
@@ -533,12 +568,22 @@ void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
              const rocprofiler_timestamp_t end_timestamp, const std::string& call_stack,
-             const std::string& args_str, const std::string& category)
+             const std::string& args_str, const std::string& category,
+             std::string_view name = {})
 
 {
-    auto callback_tracing_info =
-        trace_cache::get_metadata_registry().get_callback_tracing_info();
-    auto _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    // Use provided name if available, otherwise fall back to API operation name
+    std::string _name;
+    if(name.empty())
+    {
+        auto callback_tracing_info =
+            trace_cache::get_metadata_registry().get_callback_tracing_info();
+        _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    }
+    else
+    {
+        _name = std::string{ name };
+    }
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
         record->thread_id, _name.c_str(), record->correlation_id.internal,
@@ -814,7 +859,7 @@ tool_tracing_callback_stop(
         cache_add_thread_info(record.thread_id);
         std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
-                     trait::name<CategoryT>::value);
+                     trait::name<CategoryT>::value, _name);
     }
 }
 

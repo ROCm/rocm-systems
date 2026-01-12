@@ -308,7 +308,17 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
             });
 
+        _parser
+            .add_argument({ "-L", "--trace-legacy" },
+                          "Use legacy direct mode for tracing instead of deferred trace "
+                          "generation (higher overhead)")
+            .max_count(1)
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"));
+            });
+
         _data.processed_environs.emplace("trace");
+        _data.processed_environs.emplace("trace_legacy");
     }
 
     if(_data.environ_filter("profile", _data))
@@ -1061,6 +1071,23 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
         _data.processed_environs.emplace("cpu_events");
         _data.processed_environs.emplace("papi_events");
+    }
+
+    if(_data.environ_filter("gpu_events", _data))
+    {
+        _parser
+            .add_argument({ "-G", "--gpu-events" },
+                          "Set the GPU hardware counter events to record (ref: "
+                          "`rocprof-sys-avail -H -c GPU`)")
+            .min_count(1)
+            .dtype("[EVENT ...]")
+            .action([&](parser_t& p) {
+                auto _events = join(array_config_t{ "," }, p.get<strvec_t>("gpu-events"));
+                update_env(_data, "ROCPROFSYS_ROCM_EVENTS", _events);
+            });
+
+        _data.processed_environs.emplace("gpu_events");
+        _data.processed_environs.emplace("rocm_events");
     }
 
     add_group_arguments(_parser, "category", _data, true);

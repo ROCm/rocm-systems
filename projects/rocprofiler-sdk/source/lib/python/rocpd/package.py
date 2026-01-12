@@ -377,11 +377,7 @@ def create_metadata_file(db_files, output_path=".", metadata_filename="index.yam
                     rocpd_metadata_param_version: rocpd_package_version,
                     # "source": "rocprofv3",  # omitting source, not sure why we need this, and how we determine the source as rocprof-sys, for example.
                     "path": ".",
-                    "files": (
-                        rel_paths
-                        if len(rel_paths) > 1
-                        else (rel_paths[0] if rel_paths else "")
-                    ),
+                    "files": rel_paths,
                 }
             }
         }

@@ -35,6 +35,7 @@ and tweak the default sampling values.
 
    # ...
    ROCPROFSYS_TRACE                = true
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -340,6 +341,7 @@ Generating a default configuration file
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
    ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
@@ -497,7 +499,8 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
+   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
@@ -1346,6 +1349,7 @@ but do not override an existing value for the environment variable.
 
    # use fields
    ROCPROFSYS_TRACE                 = $ENABLE
+   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

@@ -47,6 +47,7 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 :::
 
 :::{grid-item-card} Conceptual
+* [Performance determinism](./conceptual/perf-determinism.md)
 * [Reliability, availability, serviceability](./conceptual/ras.md)
 :::
 

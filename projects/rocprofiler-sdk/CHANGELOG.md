@@ -238,3 +238,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Optimized
 - Improved the stability and robustness of the `rocpd` output.
+
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
+
+### Added
+- Strix halo support for counter collection.
+
+
