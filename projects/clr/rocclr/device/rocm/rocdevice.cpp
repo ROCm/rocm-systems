@@ -2330,6 +2330,11 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
   desc.agent_handle =
       access_location == VmmLocationType::kDevice ? getBackendDevice() : getCpuAgent();
 
+  amd::Memory* va_mem_obj = amd::MemObjMap::FindMemObj(va_addr);
+  if (va_mem_obj == nullptr) {
+    return false;
+  }
+
   if ((hsa_status = Hsa::vmem_set_access(va_addr, va_size, &desc, 1)) != HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_amd_vmem_set_access. Failed with status:%d \n", hsa_status);
     return false;
