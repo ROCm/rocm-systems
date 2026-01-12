@@ -17,10 +17,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
+#include <hip_test_common.hh>
 
-static __global__ void wg_split_barrier(float* out, float* in) {
+static __global__ void wg_split_barrier(float *out, float *in) {
   namespace cg = cooperative_groups;
 
   __shared__ float mid[32];
@@ -56,9 +56,11 @@ TEST_CASE("Unit_coop_thread_block_split_barrier") {
   }
 
   HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size));
-  HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(
+      hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
   wg_split_barrier<<<1, size>>>(d_out, d_in);
-  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size,
+                      hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipFree(d_out));
   HIP_CHECK(hipFree(d_in));
@@ -69,7 +71,7 @@ TEST_CASE("Unit_coop_thread_block_split_barrier") {
   }
 }
 
-static __global__ void grid_split_barrier(int* data, int* result, int N) {
+static __global__ void grid_split_barrier(int *data, int *result, int N) {
   namespace cg = cooperative_groups;
   cg::grid_group grid = cg::this_grid();
 
@@ -83,32 +85,39 @@ static __global__ void grid_split_barrier(int* data, int* result, int N) {
 
   if (grid.thread_rank() == 0) {
     int sum = 0;
-    for (int i = 0; i < N; i++) sum += data[i];
+    for (int i = 0; i < N; i++)
+      sum += data[i];
     *result = sum;
   }
 }
 
 TEST_CASE("Unit_coop_grids_split_barrier") {
-  int N = 1024;
-  const int threads = 128;
-  const int blocks = (N + threads - 1) / threads;
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
 
-  int *d_in, *d_out;
-  HIP_CHECK(hipMalloc(&d_in, N * sizeof(int)));
-  HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
+  if (prop.cooperativeLaunch != 0) {
+    int N = 1024;
+    const int threads = 128;
+    const int blocks = (N + threads - 1) / threads;
 
-  void* args[] = {&d_in, &d_out, &N};
+    int *d_in, *d_out;
+    HIP_CHECK(hipMalloc(&d_in, N * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_out, sizeof(int)));
 
-  dim3 grid(blocks);
-  dim3 block(threads);
+    void *args[] = {&d_in, &d_out, &N};
 
-  HIP_CHECK(hipLaunchCooperativeKernel((void*)grid_split_barrier, grid, block, args, 0, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+    dim3 grid(blocks);
+    dim3 block(threads);
 
-  int out = 0;
-  HIP_CHECK(hipMemcpy(&out, d_out, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipLaunchCooperativeKernel((void *)grid_split_barrier, grid,
+                                         block, args, 0, 0));
+    HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipFree(d_in));
-  HIP_CHECK(hipFree(d_out));
-  REQUIRE(out == ((N * (N + 1)) / 2));
+    int out = 0;
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(int), hipMemcpyDeviceToHost));
+
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+    REQUIRE(out == ((N * (N + 1)) / 2));
+  }
 }
