@@ -230,6 +230,10 @@ UCX profiling works transparently with applications that use UCX directly or ind
    export ROCPROFSYS_USE_UCX=ON
    mpirun -n 4 rocprof-sys-sample -- ./my_mpi_ucx_app
 
+.. note::
+
+   For MPI applications, the presence of UCX libraries alone does not ensure UCX is used at runtime. When MPI is launched with the UCX PML ( ``-mca pml ucx`` ), initialization may fail due to UCX version or transport capability mismatches, causing MPI to fall back to an alternative (non-UCX) communication path.
+
 UCX Profiling Output
 ---------------------
 
