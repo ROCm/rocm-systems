@@ -51,7 +51,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          projects/rocstorage/
 
     - name: Configure Env
       shell: bash

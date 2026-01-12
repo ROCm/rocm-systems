@@ -85,7 +85,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: projects/rocprofiler-systems/
+          sparse-checkout: |
+            projects/rocprofiler-systems/
+            projects/rocstorage/
 
       - name: Setup Environment
         id: setup_env

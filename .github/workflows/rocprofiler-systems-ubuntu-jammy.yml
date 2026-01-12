@@ -61,7 +61,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          projects/rocstorage/
 
     - name: Install Packages
       timeout-minutes: 25
@@ -217,7 +219,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          projects/rocstorage/
 
     - name: Install Packages
       timeout-minutes: 25
@@ -412,7 +416,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-systems/
+        sparse-checkout: |
+          projects/rocprofiler-systems/
+          projects/rocstorage/
 
     - name: Install Packages
       timeout-minutes: 25
