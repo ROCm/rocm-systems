@@ -172,7 +172,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     // receive message from parent provess
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
-    // import the sareable handle
+    // import the shareable handle
     HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
               reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
               hipMemHandleTypePosixFileDescriptor));
