@@ -61,7 +61,9 @@ void create_directory_for_database_file(const std::string &db_file) {
     rocstorage::common::makedir(_db_dirname);
   }
 }
-#if !defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+
+#if !defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) ||                         \
+    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD == 0
 std::string process_schema_template(std::string_view schema_content,
                                     const std::string &upid) {
   std::string query = std::string(schema_content);

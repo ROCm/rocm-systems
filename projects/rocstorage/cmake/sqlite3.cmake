@@ -62,26 +62,37 @@ else()
         "[rocstorage] Building SQLite3 from amalgamation source (version ${SQLITE3_VERSION})"
     )
 
-    include(FetchContent)
-
     set(SQLITE3_SOURCE_DIR "${PROJECT_BINARY_DIR}/external/sqlite3")
-
-    # gersemi: off
-    FetchContent_Declare(
-        sqlite3_amalgamation
-        URL "${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
-        SOURCE_DIR ${SQLITE3_SOURCE_DIR}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    set(SQLITE3_ZIP_FILE
+        "${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
     )
-    # gersemi: on
+    set(SQLITE3_EXTRACT_DIR "sqlite-amalgamation-${SQLITE3_VERSION}")
+    set(SQLITE3_SOURCE_FILE "${SQLITE3_SOURCE_DIR}/sqlite3.c")
 
-    FetchContent_MakeAvailable(sqlite3_amalgamation)
+    file(MAKE_DIRECTORY "${SQLITE3_SOURCE_DIR}")
 
-    add_library(
-        rocstorage-sqlite3-static
-        STATIC
-        ${SQLITE3_SOURCE_DIR}/sqlite3.c
+    add_custom_command(
+        OUTPUT ${SQLITE3_SOURCE_FILE}
+        COMMAND ${CMAKE_COMMAND} -E tar xzf "${SQLITE3_ZIP_FILE}"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            "${SQLITE3_SOURCE_DIR}/${SQLITE3_EXTRACT_DIR}/sqlite3.c"
+            "${SQLITE3_SOURCE_DIR}/sqlite3.c"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            "${SQLITE3_SOURCE_DIR}/${SQLITE3_EXTRACT_DIR}/sqlite3.h"
+            "${SQLITE3_SOURCE_DIR}/sqlite3.h"
+        WORKING_DIRECTORY ${SQLITE3_SOURCE_DIR}
+        COMMENT "Unpacking sqlite3-${SQLITE3_VERSION}.zip"
+        VERBATIM
     )
+
+    set_source_files_properties(
+        ${SQLITE3_SOURCE_FILE}
+        PROPERTIES GENERATED TRUE
+    )
+
+    add_library(rocstorage-sqlite3-static STATIC ${SQLITE3_SOURCE_FILE})
 
     target_include_directories(
         rocstorage-sqlite3-static
@@ -100,7 +111,7 @@ else()
             SQLITE_OMIT_SHARED_CACHE
     )
 
-    target_compile_options(rocstorage-sqlite3-static PRIVATE -O3 -fPIC)
+    target_compile_options(rocstorage-sqlite3-static PRIVATE -O2 -fPIC)
 
     set_target_properties(
         rocstorage-sqlite3-static
