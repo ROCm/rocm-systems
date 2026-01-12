@@ -66,14 +66,14 @@ else()
 
     set(SQLITE3_SOURCE_DIR "${PROJECT_BINARY_DIR}/external/sqlite3")
 
+    # gersemi: off
     FetchContent_Declare(
         sqlite3_amalgamation
-        URL
-            "file://${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
-            SOURCE_DIR
-            ${SQLITE3_SOURCE_DIR}
+        URL "file://${CMAKE_CURRENT_LIST_DIR}/sqlite3-${SQLITE3_VERSION}.zip"
+        SOURCE_DIR ${SQLITE3_SOURCE_DIR}
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
+    # gersemi: on
 
     FetchContent_MakeAvailable(sqlite3_amalgamation)
 
