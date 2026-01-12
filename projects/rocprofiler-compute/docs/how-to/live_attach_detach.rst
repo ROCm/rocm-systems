@@ -42,5 +42,6 @@ The analyze options for attach/detach are completely compatible with the non-att
 .. note::
 
   * Live Attach Detach feature is currently in BETA version. To enable Live/Attach Detach, you need to have the correct supported proper version of ROCprofiler-SDK and rocprofiler-register.
-  * To make the Live Attach/Detach feature work, you must use "--block" or a single path to limit the number of counter input files to one. This limitation will be removed in a later version with implementations such as Iteration Multiplexing.
+  * Live Attach/Detach does not work with --iteration-multiplexing option. This is because --iteration-multiplexing uses native counter collection tool which currently does not support attach/detach feature.
+  * To make the Live Attach/Detach feature work, you must restrict the number of counter input files (which determine number of application runs) to one. This can be achieved with options such as: "--block", "--set".
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.

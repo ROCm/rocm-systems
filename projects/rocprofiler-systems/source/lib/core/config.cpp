@@ -299,32 +299,27 @@ configure_settings(bool _init)
         get_env<size_t>("ROCPROFSYS_NUM_THREADS", 1), "threading", "performance",
         "sampling", "parallelism", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_CACHED",
-                              "Enable perfetto backend with deferred trace generation "
-                              "for minimal runtime overhead",
-                              _default_perfetto_v, "backend", "perfetto_caching");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
-                              "Enable perfetto backend (legacy, direct mode)", false,
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
+                              "Enable perfetto backend for tracing", _default_perfetto_v,
                               "backend", "perfetto");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE_LEGACY", false,
-                              "backend", "perfetto", "deprecated");
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_TRACE_LEGACY",
+                              "Use legacy direct mode for perfetto tracing instead of "
+                              "deferred trace generation. When false (default), uses "
+                              "cached mode with minimal runtime overhead.",
+                              false, "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_PERFETTO",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE_LEGACY", false,
+                              "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
                               "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_PROFILE", "Enable timemory backend",
-                              !(_config->get<bool>("ROCPROFSYS_TRACE_LEGACY") ||
-                                _config->get<bool>("ROCPROFSYS_TRACE_CACHED")),
-                              "backend", "timemory");
+                              !_config->get<bool>("ROCPROFSYS_TRACE"), "backend",
+                              "timemory");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_TIMEMORY",
-                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>("ROCPROFSYS_TRACE_LEGACY"), "backend",
-                              "timemory", "deprecated");
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_USE_TIMEMORY", "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
+        !_config->get<bool>("ROCPROFSYS_TRACE"), "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_CAUSAL",
                               "Enable causal profiling analysis", false, "backend",
@@ -838,6 +833,18 @@ configure_settings(bool _init)
         "starting with '_' or containing '::_M'.",
         true, "causal", "analysis", "advanced");
 
+    ROCPROFSYS_CONFIG_SETTING(int, "ROCPROFSYS_KILL_DELAY",
+                              "Delay (in seconds) before terminating the process "
+                              "after a kill signal is received.",
+                              0, "process", "advanced");
+
+    auto kill_delay_config = _config->find("ROCPROFSYS_KILL_DELAY")->second;
+    auto kill_delay_value  = kill_delay_config->get<int>().second;
+    if(kill_delay_value < 0)
+    {
+        kill_delay_config->set(0);
+    }
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -1068,8 +1075,7 @@ configure_settings(bool _init)
     handle_deprecated_setting("ROCPROFSYS_USE_THREAD_SAMPLING",
                               "ROCPROFSYS_USE_PROCESS_SAMPLING");
     handle_deprecated_setting("ROCPROFSYS_OUTPUT_FILE", "ROCPROFSYS_PERFETTO_FILE");
-    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE_LEGACY");
-    handle_deprecated_setting("ROCPROFSYS_TRACE", "ROCPROFSYS_TRACE_LEGACY");
+    handle_deprecated_setting("ROCPROFSYS_USE_PERFETTO", "ROCPROFSYS_TRACE");
     handle_deprecated_setting("ROCPROFSYS_USE_TIMEMORY", "ROCPROFSYS_PROFILE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
@@ -1136,8 +1142,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     if(get_mode() == Mode::Coverage)
     {
         set_default_setting_value("ROCPROFSYS_USE_CODE_COVERAGE", true);
-        _set("ROCPROFSYS_TRACE_LEGACY", false);
-        _set("ROCPROFSYS_TRACE_CACHED", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1150,8 +1155,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     else if(get_mode() == Mode::Causal)
     {
         _set("ROCPROFSYS_USE_CAUSAL", true);
-        _set("ROCPROFSYS_TRACE_LEGACY", false);
-        _set("ROCPROFSYS_TRACE_CACHED", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_SAMPLING", false);
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
@@ -1847,8 +1851,12 @@ get_verbose()
 bool&
 get_use_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
-    return static_cast<tim::tsettings<bool>&>(*_v).get();
+    static auto _trace_setting  = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _legacy_setting = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    auto&       _trace  = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
+    auto&       _legacy = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
+    static bool _v      = _trace && _legacy;
+    return _v;
 }
 
 bool&
@@ -2552,8 +2560,19 @@ get_use_rocpd()
 bool&
 get_caching_perfetto()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_TRACE_CACHED");
-    return static_cast<tim::tsettings<bool>&>(*_v).get();
+    static auto _trace_setting  = get_config()->at("ROCPROFSYS_TRACE");
+    static auto _legacy_setting = get_config()->at("ROCPROFSYS_TRACE_LEGACY");
+    auto&       _trace  = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
+    auto&       _legacy = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
+    static bool _v      = _trace && !_legacy;
+    return _v;
+}
+
+int
+get_kill_delay()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_KILL_DELAY");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
 tmp_file::tmp_file(std::string _v)

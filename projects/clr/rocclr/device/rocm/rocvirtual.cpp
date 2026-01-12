@@ -516,8 +516,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   auto temp_id = (current_id_ + 2) % signal_list_.size();
 
   // If GPU is still busy with processing, then add more signals to avoid more frequent stalls
-  if ((Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) ||
-      (signal_list_[temp_id]->ts_ == ts)) {
+  if (Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) {
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
     if ((signal != nullptr) && CreateSignal(signal.get())) {
       // Find valid new index
@@ -1273,7 +1272,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
   const size_t numPackets = packets.size();
-  size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  const size_t kMaxBatchSize = DEBUG_HIP_GRAPH_BATCH_SIZE;
   const size_t kGpuLagPackets = 16;
 
   // Staggered copy pattern: powers of 2 (1, 2, 4, 8.. to DEBUG_HIP_GRAPH_BATCH_SIZE
@@ -1281,9 +1280,15 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
   size_t batchSize = 1;
 
   // Allocate arrays once outside the loop to avoid repeated stack allocations
+#if IS_LINUX
   uint16_t validHeaders[kMaxBatchSize];
   uint16_t validSetups[kMaxBatchSize];
-
+#else
+  // Ensure we don't exceed reasonable stack allocation size on Windows
+  assert(kMaxBatchSize <= 1024 && "Batch size too large for stack allocation");
+  uint16_t* validHeaders = static_cast<uint16_t*>(_alloca(kMaxBatchSize * sizeof(uint16_t)));
+  uint16_t* validSetups = static_cast<uint16_t*>(_alloca(kMaxBatchSize * sizeof(uint16_t)));
+#endif
   while (processedPackets < numPackets) {
     uint64_t currentReadIndex = Hsa::queue_load_read_index_scacquire(gpu_queue_);
     uint64_t currentWriteIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
@@ -1778,6 +1783,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
+  // Release SDMA engine assignment for this VirtualGPU
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
+
   delete blitMgr_;
 
   if (tracking_created_) {
@@ -1983,6 +1992,14 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
   } else {
     return nullptr;
   }
+}
+
+// ================================================================================================
+void VirtualGPU::ReleaseSdmaEngines() {
+  // Release SDMA engine assignment when queue is idle
+  // This allows the engine to be reassigned to other active streams
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
 }
 
 // ================================================================================================

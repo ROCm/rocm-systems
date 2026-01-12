@@ -339,19 +339,17 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                                original_envs);
         });
     parser
-        .add_argument(
-            { "-T", "--trace" },
-            "Generate a detailed trace with deferred trace generation (perfetto output)")
+        .add_argument({ "-T", "--trace" }, "Generate a detailed trace (perfetto output)")
         .max_count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_CACHED",
-                                           p.get<bool>("trace"), update_mode::REPLACE,
-                                           ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
     parser
-        .add_argument(
-            { "-L", "--trace-legacy" },
-            "Generate a detailed trace with direct mode (perfetto output, legacy)")
+        .add_argument({ "-L", "--trace-legacy" },
+                      "Use legacy direct mode for tracing instead of deferred trace "
+                      "generation (higher overhead)")
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
@@ -835,6 +833,18 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpu-events"));
             rocprofsys::common::update_env(_env, "ROCPROFSYS_PAPI_EVENTS", _events,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+        });
+
+    parser
+        .add_argument({ "-G", "--gpu-events" },
+                      "Set the GPU hardware counter events to record (ref: "
+                      "`rocprof-sys-avail -H -c GPU`)")
+        .action([&](parser_t& p) {
+            auto _events =
+                join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });

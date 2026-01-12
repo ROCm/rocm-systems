@@ -43,6 +43,8 @@ enum hipRoundMode {
   hipRoundMinInf = 3,
 };
 
+#if defined(__clang__) && defined(__HIP__)
+
 namespace internal {
 __host__ __device__ static inline __amd_fp16_storage_t half_to_f16(const __half val) {
   __half_raw tmp = val;
@@ -71,4 +73,7 @@ __host__ __device__ static inline __amd_bf16x2_storage_t hipbf162_to_bf16x2(cons
   } u{val};
   return u.bf16;
 }
+
 }  // namespace internal
+
+#endif  // defined(__clang__) && defined(__HIP__)

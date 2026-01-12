@@ -41,7 +41,6 @@ endif()
 set(_roctx_environment
     "${_base_environment}"
     "ROCPROFSYS_TRACE_LEGACY=ON"
-    "ROCPROFSYS_TRACE_CACHED=OFF"
     "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch"
 )
 

@@ -34,8 +34,8 @@ and tweak the default sampling values.
 .. code-block:: shell
 
    # ...
-   ROCPROFSYS_TRACE_CACHED         = true   # Recommended: deferred trace generation for minimal overhead
-   # ROCPROFSYS_TRACE_LEGACY       = false  # Alternative: direct mode with higher overhead
+   ROCPROFSYS_TRACE                = true
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -340,7 +340,7 @@ Generating a default configuration file
 
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
-   ROCPROFSYS_TRACE_CACHED                             = true
+   ROCPROFSYS_TRACE                                    = true
    ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
@@ -499,9 +499,8 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE_CACHED                  | Enable perfetto backend with deferred...|
-   | ROCPROFSYS_TRACE_LEGACY                  | Enable perfetto backend (legacy, dir... |
-   | ROCPROFSYS_TRACE                         | [DEPRECATED] Renamed to ROCPROFSYS_T... |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
+   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
@@ -1349,8 +1348,8 @@ but do not override an existing value for the environment variable.
    $SAMPLE                         = OFF
 
    # use fields
-   ROCPROFSYS_TRACE_CACHED          = $ENABLE  # Recommended: deferred trace generation
-   ROCPROFSYS_TRACE_LEGACY          = OFF      # Legacy direct mode (higher overhead)
+   ROCPROFSYS_TRACE                 = $ENABLE
+   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

@@ -282,7 +282,7 @@ hsa_status_t PcsRuntime::PcSamplingCreateInternal(
     size_t interval, size_t latency, size_t buffer_size,
     hsa_ven_amd_pcs_data_ready_callback_t data_ready_cb, void* client_cb_data,
     hsa_ven_amd_pcs_t* handle, agent_pcs_create_fn_t agent_pcs_create_fn) {
-  ScopedAcquire<KernelMutex> lock(&pc_sampling_lock_);
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
 
   handle->handle = ++pc_sampling_id_;
   // create a new PcSamplingSession(agent, method, units, interval, latency, buffer_size,
@@ -305,7 +305,7 @@ hsa_status_t PcsRuntime::PcSamplingCreateInternal(
 }
 
 hsa_status_t PcsRuntime::PcSamplingDestroy(hsa_ven_amd_pcs_t handle) {
-  ScopedAcquire<KernelMutex> lock(&pc_sampling_lock_);
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
     debug_warning(false && "Cannot find PcSampling session");
@@ -319,7 +319,7 @@ hsa_status_t PcsRuntime::PcSamplingDestroy(hsa_ven_amd_pcs_t handle) {
 }
 
 hsa_status_t PcsRuntime::PcSamplingStart(hsa_ven_amd_pcs_t handle) {
-  ScopedAcquire<KernelMutex> lock(&pc_sampling_lock_);
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
     debug_warning(false && "Cannot find PcSampling session");
@@ -331,7 +331,7 @@ hsa_status_t PcsRuntime::PcSamplingStart(hsa_ven_amd_pcs_t handle) {
 }
 
 hsa_status_t PcsRuntime::PcSamplingStop(hsa_ven_amd_pcs_t handle) {
-  ScopedAcquire<KernelMutex> lock(&pc_sampling_lock_);
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
     debug_warning(false && "Cannot find PcSampling session");
@@ -343,7 +343,7 @@ hsa_status_t PcsRuntime::PcSamplingStop(hsa_ven_amd_pcs_t handle) {
 }
 
 hsa_status_t PcsRuntime::PcSamplingFlush(hsa_ven_amd_pcs_t handle) {
-  ScopedAcquire<KernelMutex> lock(&pc_sampling_lock_);
+  std::lock_guard<std::mutex> lock(pc_sampling_lock_);
   auto pcSamplingSessionIt = pc_sampling_.find(static_cast<uint64_t>(handle.handle));
   if (pcSamplingSessionIt == pc_sampling_.end()) {
     debug_warning(false && "Cannot find PcSampling session");
