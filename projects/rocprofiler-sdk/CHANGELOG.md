@@ -243,11 +243,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 - PTL (Peak Tops Limiter) unified control for MI300 GPUs
-- Strix Halo counter support
+- Counter collection support for gfx1150 and gfx1151 (strix halo)
 - HSA Extension API v8 support
 - hipStreamCopyAttributes API implementation
 - Process attachment improvements
-- Quick reference guide for rocprofv3
+- [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html)
 - Process attachment documentation
 - Installation steps and repository updates
 
