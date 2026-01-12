@@ -45,7 +45,7 @@ THE SOFTWARE.
  *  - 3) Do Read and Write operations Child process
  * Test source
  * ------------------------
- *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRangeMultiProcVirt.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.0

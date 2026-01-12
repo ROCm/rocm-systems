@@ -44,12 +44,12 @@ THE SOFTWARE.
  *  - 7) With Unmapped Virtual memory
  * Test source
  * ------------------------
- *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRangeMultiPtocDeviceMem.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_Negative") {
+TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultiProc_Negative") {
   int handle = -1;
   int* dptr = nullptr;
   constexpr int size = 10;
@@ -141,7 +141,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_Negative") {
  *  - 3) Do Read and Write operations Child process
  * Test source
  * ------------------------
- *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRange.cc
+ *  - unit/virtualMemoryManagement/hipMemGetHandleForAddressRangeMultiPtocDeviceMem.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.0
@@ -169,7 +169,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     int sig = 0;
     REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
 
-    // receive message from parent provess
+    // receive message from parent process
     checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
     hipMemGenericAllocationHandle_t imported_handle;
     // import the shareable handle
