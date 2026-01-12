@@ -8,10 +8,10 @@
 What is HIP?
 *******************************************************************************
 
-The Heterogeneous-computing Interface for Portability (HIP) API is a C++ runtime
-API and kernel language that lets developers create portable applications
-running in heterogeneous systems, using CPUs and AMD GPUs from a single source
-code.
+The Heterogeneous-computing Interface for Portability (HIP) API, part of AMD's
+ROCm platform, is a C++ runtime API and kernel language that lets developers
+create portable applications that run on heterogeneous systems, using CPUs and
+AMD GPUs from a single source code base.
 
 .. figure:: data/what_is_hip/hip.svg
     :alt: HIP in an application.
@@ -20,22 +20,21 @@ code.
 * HIP is a thin API with little or no performance impact over coding directly
   in AMD :doc:`ROCm <rocm:what-is-rocm>`.
 
-* HIP enables coding in a single-source C++ programming language including
+* HIP enables coding in a single-source C++ programming language, including
   features such as templates, C++11 lambdas, classes, namespaces, and more.
 
-* Developers can specialize for the platform to tune for performance or handle
-  tricky cases.
+* Developers can tune for performance or handle tricky cases via HIP.
 
 ROCm offers compilers (``clang``, ``hipcc``), code profilers (``rocprofv3``),
 debugging tools (``rocgdb``), libraries and HIP with the runtime
 API and kernel language, to create heterogeneous applications running on both
 CPUs and GPUs. ROCm provides marshalling libraries like
 :doc:`hipFFT <hipfft:index>` or :doc:`hipBLAS <hipblas:index>` that act as a
-thin programming layer over AMD ROCm and offer API compatiblity with CUDA
-equivalent library. These libraries offer pointer-based memory interfaces and
-are easily integrated into your applications.
+thin programming layer over AMD ROCm and offer API compatibility with the
+equivalent Nvidia CUDA libraries. These libraries provide pointer-based memory
+interfaces and can be easily integrated into your applications.
 
-HIP supports the ability to build and run on either AMD GPUs or NVIDIA GPUs.
+HIP supports the building and running on both AMD GPUs or NVIDIA GPUs.
 GPU Programmers familiar with NVIDIA CUDA or OpenCL will find the HIP API
 familiar and easy to use. You can quickly port your application to run on the
 available hardware while maintaining a single codebase. The :doc:`HIPify <hipify:index>`
