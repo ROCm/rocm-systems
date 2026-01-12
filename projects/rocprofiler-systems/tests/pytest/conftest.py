@@ -28,7 +28,7 @@ from rocprofsys import (
     GPUInfo,
     detect_gpu,
     lookup_gpu_category,
-    get_llvm_objdump,
+    get_offload_extractor,
     get_target_gpu_arch,
     TestResult,
     validate_regex,
@@ -227,10 +227,23 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     except Exception as e:
         return [f"rocprofiler-systems: GPU detection error - {e}"]
 
-    try:
-        llvm_objdump = get_llvm_objdump(rocprof_config.rocm_path)
-    except FileNotFoundError:
-        llvm_objdump = "Not found - Set ROCM_LLVM_OBJDUMP environment variable to the path to ROCm's llvm-objdump"
+    offload_msg = None
+    offload_extractor = get_offload_extractor(rocprof_config.rocm_path)
+    if offload_extractor:
+        tool_path, _, is_llvm_too_old = offload_extractor
+        if tool_path.name == "llvm-objdump":
+            offload_msg = f"{tool_path}"
+        elif tool_path.name == "roc-obj-ls":
+            if not is_llvm_too_old:
+                offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
+            else:
+                offload_msg = f"{tool_path}"
+
+    if not offload_msg:
+        offload_msg = (
+            "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
+            "or ROC_OBJ_LS to path of roc-obj-ls if llvm-objdump < v20"
+        )
 
     rocm_version = (
         ".".join(map(str, rocprof_config.rocm_version))
@@ -269,7 +282,7 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Avail:          {rocprof_config.rocprofsys_avail}",
         f"  Causal:         {rocprof_config.rocprofsys_causal}",
         f"  MPI exec:       {rocprof_config.mpiexec}",
-        f"  llvm-objdump:   {llvm_objdump}",
+        f"  Offload tool:   {offload_msg}",
         "=" * 70,
         "",
     ]

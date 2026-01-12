@@ -160,20 +160,30 @@ def lookup_gpu_category(arch: str) -> list[str]:
     return categories
 
 
+# Yes returning a bool in the tuple is ugly, but it prevents version check when reporting
+# message to user
 @lru_cache(maxsize=1)
-def get_llvm_objdump(rocm_path: Path) -> Path:
-    """Get the path to llvm-objdump.
+def get_offload_extractor(rocm_path: Path) -> tuple[Path, str | None, bool | None] | None:
+    """Get offload extractor path and cmd
+
+    An offload extractor is one of:
+    - llvm-objdump (only if version >= 20)
+    - roc-obj-ls (fallback, deprecated)
 
     Args:
         rocm_path: Path to the ROCm installation directory
 
     Returns:
-        Path to llvm-objdump
+            Path to the offload extractor
+            Flags required to extract archs (None if roc-obj-ls)
+            Bool representing whether found llvm-objdump's version < 20 (None if llvm-objdump not found)
+        OR
+            None (if no offload extractor found)
 
-    Raises:
-        FileNotFoundError: If llvm-objdump is not found
     """
-    llvm_objdump_candidates = []
+
+    is_llvm_too_old = None
+    offload_extractor = None
     if rocm_path:
         llvm_objdump_candidates = [
             rocm_path / "llvm" / "bin" / "llvm-objdump",
@@ -181,27 +191,55 @@ def get_llvm_objdump(rocm_path: Path) -> Path:
         ]
         for candidate in llvm_objdump_candidates:
             if candidate.exists():
-                return candidate
+                offload_extractor = candidate
+                break
 
     # Check env var - accepts either path to binary or directory containing it
     llvm_objdump_env = os.environ.get("ROCM_LLVM_OBJDUMP")
     if llvm_objdump_env:
         llvm_objdump_path = Path(llvm_objdump_env)
-        if llvm_objdump_path.is_file():
-            return llvm_objdump_path
+        if llvm_objdump_path.is_file() and llvm_objdump_path.exists():
+            offload_extractor = llvm_objdump_path
         elif llvm_objdump_path.is_dir():
             candidate = llvm_objdump_path / "llvm-objdump"
             if candidate.exists():
-                return candidate
+                offload_extractor = candidate
 
-    # We explicitly avoid checking PATH here as we require the llvm-objdump
-    # from the ROCm installation directory.
-    searched_paths = [f"  - {p}" for p in llvm_objdump_candidates]
-    searched_paths.append("  - ROCM_LLVM_OBJDUMP environment variable")
+    if offload_extractor:
+        try:
+            version_result = subprocess.run(
+                [str(offload_extractor), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            version_match = re.search(r"version\s+(\d+)", version_result.stdout)
+            if version_match:
+                major_version = int(version_match.group(1))
+                if major_version >= 20:
+                    is_llvm_too_old = False
+                    return (
+                        Path(offload_extractor).resolve(),
+                        "--offloading",
+                        is_llvm_too_old,
+                    )
+                else:
+                    is_llvm_too_old = True
+        except Exception:
+            pass
 
-    raise FileNotFoundError(
-        f"ROCm's llvm-objdump not found. Searched in:\n" + "\n".join(searched_paths)
-    )
+    # We cannot use llvm-objdump, use roc-obj-ls
+    offload_extractor = None
+    if rocm_path:
+        candidate = rocm_path / "bin" / "roc-obj-ls"
+        if candidate.exists():
+            offload_extractor = Path(candidate).resolve()
+    if not offload_extractor:
+        offload_extractor = shutil.which("roc-obj-ls")
+
+    if offload_extractor:
+        return Path(offload_extractor).resolve(), None, is_llvm_too_old
+    return None
 
 
 def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
@@ -215,31 +253,32 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
         List of GPU architectures the target was compiled for
 
     Raises:
-        FileNotFoundError: If llvm-objdump is not found
+        FileNotFoundError: If offload extractor is not found
     """
     import tempfile
 
     target_archs: set[str] = set()
 
-    # Find llvm-objdump
-    llvm_objdump = get_llvm_objdump(rocm_path)
+    result = get_offload_extractor(rocm_path)
+    if not result:
+        raise FileNotFoundError(
+            f"Could not find offload extractor in {rocm_path} "
+            "or environment variable ROCM_LLVM_OBJDUMP"
+        )
+    tool_path, extra_args, _ = result
 
-    if llvm_objdump:
-        abs_target_path = Path(target_path).resolve()
-
-        # llvm-objdump extracts files in same dir as input path
-        # Create symlink in temp directory to avoid permission issues
+    if "llvm-objdump" in tool_path.name:
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_symlink = Path(tmpdir) / abs_target_path.name
+            tmp_symlink = Path(tmpdir) / target_path.name
             try:
-                tmp_symlink.symlink_to(abs_target_path)
+                tmp_symlink.symlink_to(target_path)
             except OSError:
                 return list(target_archs)
 
             extracted_files: list[Path] = []
             try:
                 result = subprocess.run(
-                    [str(llvm_objdump), "--offloading", str(tmp_symlink)],
+                    [str(tool_path), extra_args, str(tmp_symlink)],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -267,5 +306,22 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                         extracted_file.unlink()
                 except OSError:
                     pass
+
+    elif "roc-obj-ls" in tool_path.name:
+        try:
+            result = subprocess.run(
+                [str(tool_path), *([extra_args] if extra_args else []), str(target_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    # Match any gfxXXXX pattern in the line
+                    match = re.search(r"(gfx[0-9a-fA-F]+)", line)
+                    if match:
+                        target_archs.add(match.group(1))
+        except (subprocess.TimeoutExpired, OSError):
+            pass
 
     return list(target_archs)

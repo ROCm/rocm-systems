@@ -41,7 +41,7 @@ from .gpu import (
     detect_gpu,
     lookup_gpu_category,
     get_target_gpu_arch,
-    get_llvm_objdump,
+    get_offload_extractor,
 )
 
 __all__ = [
@@ -69,5 +69,5 @@ __all__ = [
     "detect_gpu",
     "lookup_gpu_category",
     "get_target_gpu_arch",
-    "get_llvm_objdump",
+    "get_offload_extractor",
 ]
