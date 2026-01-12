@@ -165,8 +165,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // Set group and private memory apertures in amd_queue_.
   auto& regions = agent->regions();
 
-  for (auto region : regions) {
-    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region);
+  for (const auto& region : regions) {
+    const MemoryRegion* amdregion = static_cast<const AMD::MemoryRegion*>(region.get());
     uint64_t base = amdregion->GetBaseAddress();
 
     if (amdregion->IsLDS()) {
@@ -217,7 +217,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   }
 
   MAKE_NAMED_SCOPE_GUARD(EventGuard, [&]() {
-    ScopedAcquire<KernelMutex> _lock(&queue_lock());
+    std::lock_guard<std::mutex> _lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
       core::InterruptSignal::DestroyEvent(queue_event());
@@ -232,7 +232,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   });
 
   if (core::g_use_interrupt_wait) {
-    ScopedAcquire<KernelMutex> _lock(&queue_lock());
+    std::lock_guard<std::mutex> _lock(queue_lock());
     queue_count()++;
     if (queue_event() == nullptr) {
       assert(queue_count() == 1 && "Inconsistency in queue event reference counting found.\n");
@@ -387,7 +387,7 @@ AqlQueue::~AqlQueue() {
   FreeQueueMemory();
 
   if (core::g_use_interrupt_wait) {
-    ScopedAcquire<KernelMutex> lock(&queue_lock());
+    std::lock_guard<std::mutex> lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
       core::InterruptSignal::DestroyEvent(queue_event());
@@ -777,7 +777,7 @@ void AqlQueue::AsyncReclaimMainScratch() {
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Unmap the queue. CP will check amd_queue_ fields on re-map
   Suspend();
@@ -849,7 +849,7 @@ void AqlQueue::AsyncReclaimAltScratch() {
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // Unmap the queue. CP will check amd_queue_ fields on re-map
   Suspend();
@@ -1014,7 +1014,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   const uint64_t device_size = size_per_thread * lanes_per_wave * device_slots;
   const uint64_t dispatch_size = size_per_thread * lanes_per_wave * dispatch_slots;
 
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+  std::lock_guard<std::mutex> lock(scratch_lock_);
 
   // scratch.use_alt_limit will be 0 if alt scratch is not supported or disabled
   if (dispatch_size < scratch.use_alt_limit && dispatch_slots < device_slots) {
@@ -1393,7 +1393,7 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
   if ((mask.size() == mask_dwords) && (tail_mask != 0)) mask[mask_dwords - 1] &= tail_mask;
 
   // Apply mask if non-default or not queue initialization.
-  ScopedAcquire<KernelMutex> lock(&mask_lock_);
+  std::lock_guard<std::mutex> lock(mask_lock_);
   if ((!cu_mask_.empty()) || (num_cu_mask_count != 0) || (!global_mask.empty())) {
 
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
@@ -1414,7 +1414,7 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
 }
 
 hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) {
-  ScopedAcquire<KernelMutex> lock(&mask_lock_);
+  std::lock_guard<std::mutex> lock(mask_lock_);
   assert(!cu_mask_.empty() && "No current cu_mask!");
 
   uint32_t user_dword_count = num_cu_mask_count / 32;
@@ -1440,7 +1440,7 @@ void AqlQueue::SetProfiling(bool enabled) {
 void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
                           hsa_fence_scope_t releaseFence, hsa_signal_t* in_signal) {
   // pm4_ib_buf_ is a shared resource, so mutually exclude here.
-  ScopedAcquire<KernelMutex> lock(&pm4_ib_mutex_);
+  std::lock_guard<std::mutex> lock(pm4_ib_mutex_);
 
   // Obtain reference to any container queue.
   core::Queue* queue = core::Queue::Convert(public_handle());

@@ -93,18 +93,35 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
     {
         const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
 
-        ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-            _agent_id, counters_supported_callback, &_data));
+        auto status = rocprofiler_iterate_agent_supported_counters(
+            _agent_id, counters_supported_callback, &_data);
 
-        std::sort(_data.at(_agent_id).begin(), _data.at(_agent_id).end(),
-                  [](const auto& lhs, const auto& rhs) {
-                      return (lhs.id.handle < rhs.id.handle);
-                  });
-
-        for(auto& citr : _data.at(_agent_id))
+        if(status != ROCPROFILER_STATUS_SUCCESS)
         {
-            std::sort(citr.dimension_info.begin(), citr.dimension_info.end(),
-                      [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
+            ROCPROFSYS_WARNING_F(
+                0,
+                "rocprofiler_iterate_agent_supported_counters failed for agent %lu "
+                "with status %d (Agent HW architecture may not be supported)\n",
+                _agent_id.handle, static_cast<int>(status));
+            // Skip processing for this agent if it's not supported
+            continue;
+        }
+
+        // Only process if the agent was successfully added to the map
+        auto agent_it = _data.find(_agent_id);
+        if(agent_it != _data.end())
+        {
+            std::sort(agent_it->second.begin(), agent_it->second.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return (lhs.id.handle < rhs.id.handle);
+                      });
+
+            for(auto& citr : agent_it->second)
+            {
+                std::sort(
+                    citr.dimension_info.begin(), citr.dimension_info.end(),
+                    [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
+            }
         }
     }
 
@@ -131,9 +148,15 @@ client_data::initialize()
 void
 client_data::initialize_event_info()
 {
-    if(get_agent_manager_instance().get_agents().empty())
+    auto& agent_mngr = get_agent_manager_instance();
+
+    if(agent_mngr.get_agents().empty())
     {
         initialize();
+    }
+    else if(gpu_agents.empty() && cpu_agents.empty())
+    {
+        set_agents();
     }
 
     if(agent_counter_info.size() != gpu_agents.size())
@@ -154,7 +177,19 @@ client_data::initialize_event_info()
                                                    _device_qualifier_sym,
                                                    JOIN(" ", "Device", _dev_index) };
 
-            auto _counter_info = agent_counter_info.at(_agent_id);
+            // Check if agent info is available ( i.e., counters are supported)
+            auto agent_info_it = agent_counter_info.find(_agent_id);
+            if(agent_info_it == agent_counter_info.end())
+            {
+                ROCPROFSYS_WARNING_F(0,
+                                     "Skipping GPU device %lu (%s, handle=0x%lx) due to "
+                                     "counter not found for the specified architecture\n",
+                                     _dev_index, aitr.agent->name.c_str(),
+                                     aitr.agent->handle);
+                continue;
+            }
+
+            auto _counter_info = agent_info_it->second;
             std::sort(_counter_info.begin(), _counter_info.end(),
                       [](const rocprofiler_tool_counter_info_t& lhs,
                          const rocprofiler_tool_counter_info_t& rhs) {

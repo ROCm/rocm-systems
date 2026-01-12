@@ -286,11 +286,6 @@ namespace code {
       }
     }
 
-    AmdHsaCode::~AmdHsaCode()
-    {
-      for (Symbol* sym : symbols) { delete sym; }
-    }
-
     bool AmdHsaCode::PullElf()
     {
       uint32_t majorVersion, minorVersion;
@@ -330,7 +325,7 @@ namespace code {
       }
       for (size_t i = 0; i < img->symtab()->symbolCount(); ++i) {
         amd::elf::Symbol* elfsym = img->symtab()->symbol(i);
-        Symbol* sym = 0;
+        std::shared_ptr<Symbol> sym;
         switch (elfsym->type()) {
         case STT_AMDGPU_HSA_KERNEL: {
           amd::elf::Section* sec = elfsym->section();
@@ -347,12 +342,12 @@ namespace code {
             out << "Failed to get AMD Kernel Code for symbol " << elfsym->name() << std::endl;
             return false;
           }
-          sym = new KernelSymbol(elfsym, &akc);
+          sym = std::make_shared<KernelSymbol>(elfsym, &akc);
           break;
         }
         case STT_OBJECT:
         case STT_COMMON:
-          sym = new VariableSymbol(elfsym);
+          sym = std::make_shared<VariableSymbol>(elfsym);
           break;
         default:
           break; // Skip unknown symbols.
@@ -924,9 +919,9 @@ namespace code {
         std::string(module_name ? module_name : ""),
         std::string(symbol_name)
       );
-      for (Symbol* sym : symbols) {
+      for (const auto& sym : symbols) {
         if (sym->Name() == mname) {
-          *s = Symbol::ToHandle(sym);
+          *s = Symbol::ToHandle(sym.get());
           return HSA_STATUS_SUCCESS;
         }
       }
@@ -940,8 +935,8 @@ namespace code {
                                   void* data),
                                 void* data)
     {
-      for (Symbol* sym : symbols) {
-        hsa_code_symbol_t s = Symbol::ToHandle(sym);
+      for (const auto& sym : symbols) {
+        hsa_code_symbol_t s = Symbol::ToHandle(sym.get());
         hsa_status_t status = callback(code_object, s, data);
         if (status != HSA_STATUS_SUCCESS) { return status; }
       }
@@ -1144,8 +1139,8 @@ namespace code {
     {
       if (nullptr == img) { return nullptr; }
       if (!section) { section = HsaText(); }
-      symbols.push_back(new KernelSymbol(img->symtab()->addSymbol(section, name, 0, 0, type, binding, other), nullptr));
-      return symbols.back();
+      symbols.push_back(std::make_shared<KernelSymbol>(img->symtab()->addSymbol(section, name, 0, 0, type, binding, other), nullptr));
+      return symbols.back().get();
     }
 
     Symbol* AmdHsaCode::AddVariableSymbol(const std::string &name,
@@ -1157,8 +1152,8 @@ namespace code {
                                           uint64_t size)
     {
       if (nullptr == img) { return nullptr; }
-      symbols.push_back(new VariableSymbol(img->symtab()->addSymbol(section, name, value, size, type, binding, other)));
-      return symbols.back();
+      symbols.push_back(std::make_shared<VariableSymbol>(img->symtab()->addSymbol(section, name, value, size, type, binding, other)));
+      return symbols.back().get();
     }
 
     void AmdHsaCode::AddSectionSymbols()
@@ -1166,16 +1161,16 @@ namespace code {
       if (nullptr == img) { return; }
       for (size_t i = 0; i < dataSections.size(); ++i) {
         if (dataSections[i] && dataSections[i]->flags() & SHF_ALLOC) {
-          symbols.push_back(new VariableSymbol(img->symtab()->addSymbol(dataSections[i], "__hsa_section" + dataSections[i]->Name(), 0, 0, STT_SECTION, STB_LOCAL)));
+          symbols.push_back(std::make_shared<VariableSymbol>(img->symtab()->addSymbol(dataSections[i], "__hsa_section" + dataSections[i]->Name(), 0, 0, STT_SECTION, STB_LOCAL)));
         }
       }
     }
 
     Symbol* AmdHsaCode::GetSymbolByElfIndex(size_t index)
     {
-      for (auto &s : symbols) {
+      for (const auto &s : symbols) {
         if (s && index == s->Index()) {
-          return s;
+          return s.get();
         }
       }
       return nullptr;
@@ -1185,7 +1180,7 @@ namespace code {
     {
       for (auto &s : symbols) {
         if (s && n == s->Name()) {
-          return s;
+          return s.get();
         }
       }
       return nullptr;
@@ -1747,14 +1742,13 @@ namespace code {
       return false;
     }
 
-      AmdHsaCode* AmdHsaCodeManager::FromHandle(hsa_code_object_t c)
+      const std::shared_ptr<AmdHsaCode>& AmdHsaCodeManager::FromHandle(hsa_code_object_t c)
       {
         CodeMap::iterator i = codeMap.find(c.handle);
         if (i == codeMap.end()) {
-          AmdHsaCode* code = new AmdHsaCode();
+          std::shared_ptr<AmdHsaCode> code = std::make_shared<AmdHsaCode>();
           const void* buffer = reinterpret_cast<const void*>(c.handle);
           if (!code->InitAsBuffer(buffer, 0)) {
-            delete code;
             return 0;
           }
           codeMap[c.handle] = code;
@@ -1770,7 +1764,7 @@ namespace code {
           // Currently, we do not always create map entry for every code object buffer.
           return true;
         }
-        delete i->second;
+        i->second.reset();
         codeMap.erase(i);
         return true;
       }
@@ -1798,7 +1792,7 @@ namespace code {
       }
       for (size_t i = 0; i < img->getSymbolTable()->symbolCount(); ++i) {
         amd::elf::Symbol* elfsym = img->getSymbolTable()->symbol(i);
-        Symbol* sym = 0;
+        std::shared_ptr<Symbol> sym;
         switch (elfsym->type()) {
         case STT_AMDGPU_HSA_KERNEL: {
           amd::elf::Section* sec = elfsym->section();
@@ -1815,12 +1809,12 @@ namespace code {
             out << "Failed to get AMD Kernel Code for symbol " << elfsym->name() << std::endl;
             return false;
           }
-          sym = new KernelSymbolV2(elfsym, &akc);
+          sym = std::make_shared<KernelSymbolV2>(elfsym, &akc);
           break;
         }
         case STT_OBJECT:
         case STT_COMMON:
-          sym = new VariableSymbolV2(elfsym);
+          sym = std::make_shared<VariableSymbolV2>(elfsym);
           break;
         default:
           break; // Skip unknown symbols.

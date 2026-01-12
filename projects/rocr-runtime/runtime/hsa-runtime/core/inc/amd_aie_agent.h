@@ -82,7 +82,7 @@ public:
  /// @brief Override from core::Agent.
  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
- const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
+ const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override { return regions_; }
 
  /// @brief Getter for the AIE system allocator.
  const std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>&
@@ -101,7 +101,7 @@ private:
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
 
-  std::vector<const core::MemoryRegion *> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
   std::function<void *(size_t size, size_t align,
                        core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;

@@ -181,7 +181,7 @@ namespace code {
       std::vector<Segment*> dataSegments;
       std::vector<Section*> dataSections;
       std::vector<RelocationSection*> relocationSections;
-      std::vector<Symbol*> symbols;
+      std::vector<std::shared_ptr<Symbol>> symbols;
       bool combineDataSegments;
       Segment* hsaSegments[AMDGPU_HSA_SEGMENT_LAST][2];
       Section* hsaSections[AMDGPU_HSA_SECTION_LAST];
@@ -234,7 +234,7 @@ namespace code {
       uint32_t OsAbi() const { return img->OsAbi(); }
 
       AmdHsaCode(bool combineDataSegments = true);
-      virtual ~AmdHsaCode();
+      virtual ~AmdHsaCode() = default;
 
       std::string output() { return out.str(); }
       bool LoadFromFile(const std::string& filename);
@@ -347,7 +347,7 @@ namespace code {
       RelocationSection* GetRelocationSection(size_t i) { return relocationSections[i]; }
 
       size_t SymbolCount() { return symbols.size(); }
-      Symbol* GetSymbol(size_t i) { return symbols[i]; }
+      Symbol* GetSymbol(size_t i) { return symbols[i].get(); }
       Symbol* GetSymbolByElfIndex(size_t index);
       Symbol* FindSymbol(const std::string &n);
 
@@ -362,11 +362,11 @@ namespace code {
 
     class AmdHsaCodeManager {
     private:
-      typedef std::unordered_map<uint64_t, AmdHsaCode*> CodeMap;
+      typedef std::unordered_map<uint64_t, std::shared_ptr<AmdHsaCode>> CodeMap;
       CodeMap codeMap;
 
     public:
-      AmdHsaCode* FromHandle(hsa_code_object_t handle);
+      const std::shared_ptr<AmdHsaCode>& FromHandle(hsa_code_object_t handle);
       bool Destroy(hsa_code_object_t handle);
     };
 
