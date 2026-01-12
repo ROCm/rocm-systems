@@ -99,10 +99,9 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
 
         if(status != ROCPROFILER_STATUS_SUCCESS)
         {
-            ROCPROFSYS_WARNING_F(
-                0,
-                "rocprofiler_iterate_agent_supported_counters failed for agent %lu "
-                "with status %d (Agent HW architecture may not be supported)\n",
+            LOG_WARNING(
+                "rocprofiler_iterate_agent_supported_counters failed for agent {} "
+                "with status {} (Agent HW architecture may not be supported)",
                 _agent_id.handle, static_cast<int>(status));
             // Skip processing for this agent if it's not supported
             continue;
@@ -182,11 +181,9 @@ client_data::initialize_event_info()
             auto agent_info_it = agent_counter_info.find(_agent_id);
             if(agent_info_it == agent_counter_info.end())
             {
-                ROCPROFSYS_WARNING_F(0,
-                                     "Skipping GPU device %lu (%s, handle=0x%lx) due to "
-                                     "counter not found for the specified architecture\n",
-                                     _dev_index, aitr.agent->name.c_str(),
-                                     aitr.agent->handle);
+                LOG_WARNING("Skipping GPU device {} ({}, handle=0x{:X}) due to "
+                            "counter not found for the specified architecture",
+                            _dev_index, aitr.agent->name, aitr.agent->handle);
                 continue;
             }
 

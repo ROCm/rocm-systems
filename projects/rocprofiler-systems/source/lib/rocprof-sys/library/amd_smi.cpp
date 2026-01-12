@@ -1241,7 +1241,7 @@ setup()
                         if(iitr == supported.end())
                         {
                             LOG_CRITICAL("Unsupported amd-smi metric: {}", metric);
-                            ::rocprofsys ::set_state(::rocprofsys ::State ::Finalized);
+                            ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
                             std::exit(1);
                         }
                         LOG_DEBUG("Enabling amd-smi metric '{}' on device [{}]", metric,

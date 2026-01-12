@@ -87,7 +87,7 @@ rccl_type_size(ncclDataType_t datatype)
         default:
         {
             LOG_CRITICAL("Unsupported RCCL datatype: {}", static_cast<int>(datatype));
-            ::rocprofsys ::set_state(::rocprofsys ::State ::Finalized);
+            ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
             std::abort();
         }
     };
