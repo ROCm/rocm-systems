@@ -419,13 +419,15 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             update_env(_env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
             update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
             update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug");
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
