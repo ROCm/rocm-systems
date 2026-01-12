@@ -519,6 +519,9 @@ main(int argc, char** argv)
         } catch(std::runtime_error& _e)
         {
             verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
+        } catch(std::exception& _e)
+        {
+            verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
         }
         verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
                    _num_metrics);

@@ -1373,13 +1373,12 @@ def reverse_multi_index_df_pmc(
     return dfs, coll_levels
 
 
-def merge_counters_iteration_multiplex(
+def impute_counters_iteration_multiplex(
     df_multi_index: pd.DataFrame,
     policy: str,
 ) -> pd.DataFrame:
     """
-    For iteration multiplexing, this merges counter values for the kernel collected
-    over multiple iterations.
+    Perform data imputation for missing counter values due to iteration multiplexing.
     """
     non_counter_column_index = [
         "Dispatch_ID",
@@ -1396,25 +1395,17 @@ def merge_counters_iteration_multiplex(
         "End_Timestamp",
         "Kernel_ID",
     ]
-
     result_dfs: list[pd.DataFrame] = []
-
-    # TODO: will need to optimize to avoid this conversion to single index format
-    # and do merge directly on multi-index dataframe
     dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
 
     for df in dfs:
-        kernel_name_column_name = "Kernel_Name"
-        if "Kernel_Name" not in df and "Name" in df:
-            kernel_name_column_name = "Name"
-
-        # Find the values in Kernel_Name that occur more than once
+        # Group by unique kernel configurations
         unique_occurences = (
-            df.groupby(kernel_name_column_name)
+            df.groupby("Kernel_Name")
             if policy == "kernel"
             else df.groupby(
                 [
-                    kernel_name_column_name,
+                    "Kernel_Name",
                     "Grid_Size",
                     "Workgroup_Size",
                     "LDS_Per_Workgroup",
@@ -1423,64 +1414,69 @@ def merge_counters_iteration_multiplex(
             )
         )
 
-        # Define a list to store the merged rows
-        result_data: list[dict[str, Any]] = []
+        counter_columns = [
+            col for col in df.columns if col not in non_counter_column_index
+        ]
+        # Collect imputed groups as dataframes
+        group_dfs = []
 
-        pd.set_option("display.max_columns", None)
+        for _, group in unique_occurences:
+            # Identify counter buckets
+            counter_groups: set[frozenset[str]] = set()
+            for _, row in group.iterrows():
+                # Set of counter column names with non empty values
+                cols_frozenset = frozenset(
+                    row[counter_columns][row[counter_columns].notna()].index
+                )
+                # If no counters found for this dispatch, continue
+                if not cols_frozenset:
+                    continue
+                # Since counter buckets are repeated in round robin fashion,
+                # we can stop once we see a repeated bucket
+                if cols_frozenset in counter_groups:
+                    break
+                counter_groups.add(cols_frozenset)
 
-        # Reset Dispatch_ID
-        dispatch_id_counter = 0
+            # If no counters found for this group, continue
+            if not counter_groups:
+                continue
 
-        for name, group in unique_occurences:
-            # Create a dictionary to store the merged row for the current group
-            merged_row: dict[str, Any] = {}
+            # Iterate over subgroups of dispatches containing
+            # all counters and impute missing values
+            subgroup_size = len(counter_groups)
+            all_counters = {
+                counter for counter_group in counter_groups for counter in counter_group
+            }
+            # Collect imputed sub-groups as dataframes
+            subgroup_dfs = []
+            for i in range(0, len(group), subgroup_size):
+                subgroup = group.iloc[i : i + subgroup_size]
 
-            # Process non-counter columns
-            for col in non_counter_column_index:
-                if col == "End_Timestamp":
-                    # For End_Timestamp, calculate the median delta time
-                    delta_time = group[col] - group["Start_Timestamp"]
-                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
-                if col == "Dispatch_ID":
-                    # Assign new Dispatch_ID
-                    merged_row[col] = dispatch_id_counter
-                    dispatch_id_counter += 1
-                elif pd.api.types.is_numeric_dtype(group[col]):
-                    # For other non-counter numeric columns, take the median value
-                    merged_row[col] = group[col].median()
-                    if pd.api.types.is_integer_dtype(group[col]):
-                        merged_row[col] = merged_row[col].astype(int)
-                else:
-                    # For other non-counter non-numeric columns,
-                    # take the first occurrence (0th row)
-                    # Only Kernel_Name should be non-numeric here
-                    merged_row[col] = group.iloc[0][col]
+                # Build imputation mapping once for all counters in this subgroup
+                fill_values = {}
+                for counter in all_counters:
+                    valid_mask = subgroup[counter].notna()
+                    if valid_mask.any():
+                        # Get the first valid value for this counter
+                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
 
-            # Process counter columns (assumed to be all columns not in
-            # non_counter_column_index)
-            counter_columns = [
-                col for col in group.columns if col not in non_counter_column_index
-            ]
-            for counter_col in counter_columns:
-                # For counter columns, calculate median only across non-NaN values
-                # Preserve original data type
-                valid_values = group[counter_col].dropna()
-                if not valid_values.empty:
-                    median_value = valid_values.median()
-                    # Preserve original data type - check if all
-                    # non-null values are integers
-                    if (valid_values == valid_values.astype(int)).all():
-                        merged_row[counter_col] = int(median_value)
-                    else:
-                        merged_row[counter_col] = median_value
-                else:
-                    merged_row[counter_col] = None
+                # Apply all fills at once using vectorized fillna
+                if fill_values:
+                    subgroup = subgroup.fillna(fill_values)
 
-            # Append the merged row to the result list
-            result_data.append(merged_row)
+                subgroup_dfs.append(subgroup)
 
-        # Create a new DataFrame from the merged rows
-        result_dfs.append(pd.DataFrame(result_data))
+            # Concatenate all subgroups for this group
+            if subgroup_dfs:
+                # Add the imputed group dataframe
+                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+
+        # Create a new dataframe by concatenating all groups
+        result_dfs.append(
+            pd.concat(group_dfs, ignore_index=True)
+            if group_dfs
+            else pd.DataFrame(df.columns)
+        )
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df

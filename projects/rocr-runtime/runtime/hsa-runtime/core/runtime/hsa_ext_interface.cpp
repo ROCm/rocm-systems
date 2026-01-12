@@ -476,6 +476,39 @@ hsa_status_t hsa_ext_image_create_with_layout(
                                image);
 }
 
+hsa_status_t hsa_ext_image_data_get_info_v2(
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_data_info_t* image_data_info) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_data_get_info_v2_fn(agent, image_descriptor,
+                                         access_permission, image_data_info);
+}
+
+hsa_status_t hsa_ext_image_create_v2(hsa_agent_t agent,
+                                     const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                     const void* image_data,
+                                     hsa_access_permission_t access_permission,
+                                     hsa_ext_image_t* image) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_create_v2_fn(agent, image_descriptor, image_data,
+                                  access_permission, image);
+}
+
+hsa_status_t hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_destroy_v2_fn(agent, image);
+}
+
+hsa_status_t hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                                  const hsa_ext_image_t* mipmap_array,
+                                                  uint32_t mip_level,
+                                                  hsa_ext_image_t* level_view) {
+  return rocr::core::Runtime::runtime_singleton_->extensions_.image_api
+      .hsa_ext_image_mipmap_array_get_level_fn(agent, mipmap_array, mip_level,
+                                               level_view);
+}
+
 hsa_status_t HSA_API hsa_ven_amd_pcs_iterate_configuration(
     hsa_agent_t agent, hsa_ven_amd_pcs_iterate_configuration_callback_t configuration_callback,
     void* callback_data) {

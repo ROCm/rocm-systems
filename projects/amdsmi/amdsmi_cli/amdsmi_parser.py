@@ -1019,6 +1019,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         pending_help = "Displays all pending retired pages"
         retired_help = "Displays retired pages"
         un_res_help = "Displays unreservable pages"
+        hex_help = "Displays page addresses and sizes in hexadecimal format"
 
         # Create bad_pages subparser
         bad_pages_parser = subparsers.add_parser('bad-pages', help=bad_pages_help, description=bad_pages_subcommand_help)
@@ -1030,6 +1031,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bad_pages_parser.add_argument('-p', '--pending', action='store_true', required=False, help=pending_help)
         bad_pages_parser.add_argument('-r', '--retired', action='store_true', required=False, help=retired_help)
         bad_pages_parser.add_argument('-u', '--un-res', action='store_true', required=False, help=un_res_help)
+        bad_pages_parser.add_argument('-x', '--hex', action='store_true', required=False, help=hex_help)
 
         # Add Universal Arguments
         self._add_device_arguments(bad_pages_parser, required=False)
