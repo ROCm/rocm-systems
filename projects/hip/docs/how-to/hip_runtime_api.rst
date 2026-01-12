@@ -11,7 +11,7 @@ Using HIP runtime API
 The HIP runtime API provides C and C++ functionalities to manage event, stream,
 and memory on GPUs. The HIP runtime uses :doc:`Compute Language Runtime (CLR) <../understand/amd_clr>`.
 
-**CLR** contains source code for AMD ROCm's compute language runtimes: ``HIP`` and
+CLR contains source code for AMD ROCm's compute language runtimes: ``HIP`` and
 ``OpenCL™``. CLR includes the ``HIP`` implementation on the AMD ROCm
 platform: `hipamd <https://github.com/ROCm/rocm-systems/tree/develop/projects/clr/hipamd>`_ and the
 ROCm Compute Language Runtime (``rocclr``). ``rocclr`` is a

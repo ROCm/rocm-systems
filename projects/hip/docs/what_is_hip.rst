@@ -34,7 +34,7 @@ thin programming layer over AMD ROCm and offer API compatibility with the
 equivalent Nvidia CUDA libraries. These libraries provide pointer-based memory
 interfaces and can be easily integrated into your applications.
 
-HIP supports the building and running on both AMD GPUs or NVIDIA GPUs.
+HIP supports building and running on both AMD GPUs or NVIDIA GPUs.
 GPU Programmers familiar with NVIDIA CUDA or OpenCL will find the HIP API
 familiar and easy to use. You can quickly port your application to run on the
 available hardware while maintaining a single codebase. The :doc:`HIPify <hipify:index>`
