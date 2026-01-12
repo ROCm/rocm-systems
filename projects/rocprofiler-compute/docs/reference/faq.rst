@@ -45,6 +45,29 @@ This dual-issue capability can be further investigated via:
 
 When ROCm Compute Profiler detects values exceeding their theoretical peaks, it displays a warning message indicating this behavior.
 
+What does "Counter variance corrected" mean?
+=============================================
+
+When profiling, you may see a warning like:
+
+.. code-block:: text
+
+   WARNING: Counter variance corrected: 5 value(s) adjusted (max 2.3% deviation from multi-pass collection).
+
+This indicates that ROCm Compute Profiler detected and corrected negative values in derived metrics. This is expected behavior, not an error.
+
+**Why does this happen?**
+
+Hardware performance counters are collected across multiple profiling passes. When calculating derived metrics that involve subtraction (such as ``A - B``), small run-to-run variance can occasionally produce negative results. Since negative event counts are physically impossible, these values are automatically clamped to zero.
+
+**When should I be concerned?**
+
+* **Deviation < 1%**: Normal hardware variance. No action needed.
+* **Deviation ≥ 1%**: The warning is displayed. Results are still valid, but variance was higher than typical.
+* **Deviation > 5%**: Consider investigating profiling conditions (system load, cache state, etc.).
+
+This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic.
+
 How can I SSH tunnel in MobaXterm?
 ==================================
 

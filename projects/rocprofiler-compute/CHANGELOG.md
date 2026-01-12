@@ -35,6 +35,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Negative values are clamped to 0 (eliminates physically impossible negative counts)
   * Warnings issued only when relative error exceeds 1% (anomaly detection)
   * Added unit tests for noise clamping logic (`@pytest.mark.noise_clamp`)
+  * Added FAQ documentation explaining the "Counter variance corrected" warning
 
 * Fixed the meaning of --dispatch option in profile mode in argparser to convey the fact that it control which iterations of the kernel to profile and not which dispatch ids to profile.
 

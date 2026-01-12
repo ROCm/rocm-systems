@@ -258,7 +258,7 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
-NOISE_CLAMP_WARN_THRESHOLD = 0.01  # 1% - only warn on significant anomalies
+NOISE_CLAMP_WARN_THRESHOLD = 0.01
 _NOISE_CLAMP_STATS = {"count": 0, "max_rel": 0.0}
 
 
@@ -313,7 +313,7 @@ def to_noise_clamp(
     else:
         result[negative_mask] = 0
 
-    # Track significant deviations (>1%)
+    # Track large deviations
     warn_mask = rel_errors >= NOISE_CLAMP_WARN_THRESHOLD
     if np.any(warn_mask):
         _record_clamp_stats(int(np.sum(warn_mask)), float(np.max(rel_errors)))
