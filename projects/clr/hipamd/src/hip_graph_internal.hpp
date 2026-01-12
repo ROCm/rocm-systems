@@ -1856,16 +1856,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
     size_t dOffset = 0;
     amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    
-    hip::MemcpyType memType = hipHostToHost;
-    if (srcMemory != nullptr && dstMemory == nullptr) {
-        memType = ihipGetMemcpyType(srcMemory, dst_);
-    } else if (srcMemory == nullptr && dstMemory != nullptr) {
-        memType = ihipGetMemcpyType(src_, dstMemory);
-    } else if (srcMemory != nullptr && dstMemory != nullptr) {
-        memType = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-    }
-
+    hip::MemcpyType memType = ihipGetMemcpyType(src_, dst_, kind_);
     switch (memType) {
       case hipCopyBuffer:
         // D2H/H2D source/dst is pinned memory
@@ -1923,24 +1914,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
     if (!AMD_DIRECT_DISPATCH) {
       WorkerThreadLock_.lock();
     }
-
-    hip::MemcpyType type;
-    size_t dOffset, sOffset;
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-    if (dstMemory != nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, srcMemory, count_, kind_, *stream, dOffset,
-                                 sOffset);
-      type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-    } else if (dstMemory == nullptr && srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dst_, srcMemory, count_, kind_, *stream, sOffset);
-      type = ihipGetMemcpyType(srcMemory, dst_);
-    } else if (dstMemory != nullptr && srcMemory == nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, src_, count_, kind_, *stream, dOffset);
-      type = ihipGetMemcpyType(src_, dstMemory);
-    }
-
+    status = ihipMemcpyCommand(command, dst_, src_, count_, kind_, *stream);
+    hip::MemcpyType type = ihipGetMemcpyType(src_, dst_, kind_);
     if (type == hipCopyBuffer) {
       amd::CopyMemoryCommand* cpycmd = reinterpret_cast<amd::CopyMemoryCommand*>(command);
       amd::CopyMetadata copyMetadata = cpycmd->copyMetadata();
@@ -2089,18 +2064,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   }
   virtual bool GraphCaptureEnabled() override {
     if (parentGraph_ != nullptr && parentGraph_->IsSegmentSchedulingEnabled()) {
-      hip::MemcpyType type;
-
-      size_t dOffset, sOffset;
-      amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-      amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-      // The case below is only interested in hipCopyBuffer,
-      // which is only valid for device to device copies.
-      if (dstMemory != nullptr && srcMemory != nullptr) {
-        type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
-      }
-
+      hip::MemcpyType type = ihipGetMemcpyType(src_, dst_, kind_);
       switch (type) {
         case hipCopyBuffer:
           return true;
@@ -2147,21 +2111,7 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     if (status != hipSuccess) {
       return status;
     }
-
-    size_t devOffset, dOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
-
-    if (devMemory == nullptr) {
-        return hipErrorInvalidValue;
-    }
-
-    if (dstMemory != nullptr) {
-      status = ihipMemcpyCommand(command, dstMemory, devMemory, count_, kind_, *stream, dOffset, devOffset);
-    } else {
-      status = ihipMemcpyCommand(command, dst_, devMemory, count_, kind_, *stream, devOffset);
-    }
-
+    status = ihipMemcpyCommand(command, dst_, device_ptr, count_, kind_, *stream);
     if (status != hipSuccess) {
       return status;
     }
@@ -2256,21 +2206,7 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
     if (status != hipSuccess) {
       return status;
     }
-
-    size_t devOffset, sOffset;
-    amd::Memory* devMemory = getMemoryObject(device_ptr, devOffset);
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-
-    if (devMemory == nullptr) {
-        return hipErrorInvalidValue;
-    }
-
-    if (srcMemory != nullptr) {
-      status = ihipMemcpyCommand(command, devMemory, srcMemory, count_, kind_, *stream, devOffset, sOffset);
-    } else {
-      status = ihipMemcpyCommand(command, devMemory, src_, count_, kind_, *stream, devOffset);
-    }
-
+    status = ihipMemcpyCommand(command, device_ptr, src_, count_, kind_, *stream);
     if (status != hipSuccess) {
       return status;
     }
