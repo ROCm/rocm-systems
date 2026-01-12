@@ -575,7 +575,6 @@ class Hsa : public amd::AllStatic {
     hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor, const void* image_data,
     hsa_access_permission_t access_permission, hsa_ext_image_data_layout_t image_data_layout,
     size_t image_data_row_pitch, size_t image_data_slice_pitch, hsa_ext_image_t* image) {
-    assert(image_descriptor->mipmap_levels == 1);
     return ROCR_DYN(hsa_ext_image_create_with_layout)(
         agent, reinterpret_cast<const hsa_ext_image_descriptor_t*>(image_descriptor),
         image_data, access_permission, image_data_layout,
