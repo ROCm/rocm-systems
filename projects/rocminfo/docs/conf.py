@@ -21,9 +21,9 @@ with open('../CMakeLists.txt', encoding='utf-8') as f:
 
 version = version_number
 release = version_number
-html_title = f"rocminfo {version} Documentation"
+html_title = f"ROCmInfo {version} Documentation"
 project = "rocminfo"
 author = "Advanced Micro Devices, Inc."
 copyright = (
-    "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+    "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 )
