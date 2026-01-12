@@ -115,8 +115,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      working-directory: projects/aqlprofile
-      run: |
+      run:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"
@@ -125,7 +124,7 @@ jobs:
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S $(pwd)/dashboard.cmake
+          -S $(pwd)/projects/aqlprofile/dashboard.cmake
 
   core-rpm:
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
@@ -195,8 +194,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      working-directory: projects/aqlprofile
-      run: |
+      run:
         source ${{ env.PYTHON_VENV_ACTIVATE }}
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
@@ -207,4 +205,4 @@ jobs:
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S $(pwd)/dashboard.cmake
+          -S $(pwd)/projects/aqlprofile/dashboard.cmake
