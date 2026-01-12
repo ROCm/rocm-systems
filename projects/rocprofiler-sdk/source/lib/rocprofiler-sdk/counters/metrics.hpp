@@ -30,6 +30,7 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
