@@ -7677,8 +7677,8 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
-def test_merge_counters_iteration_multiplex():
-    """Test merge_counters_iteration_multiplex with sample DataFrame."""
+def test_impute_counters_iteration_multiplex():
+    """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
     data = {
@@ -7695,24 +7695,33 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
-
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
+    assert len(result) == 3  # Ensure same number of rows
+    # Assert Counter1 and Counter2 imputed for first two dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 500
+    assert result[("file1", "Counter1")].iloc[1] == 100
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -7728,17 +7737,23 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
     # Test multi_kernel
     data = {
@@ -7755,24 +7770,35 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
 # =============================================================================
