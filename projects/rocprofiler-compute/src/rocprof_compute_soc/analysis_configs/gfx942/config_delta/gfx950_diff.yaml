@@ -28,6 +28,9 @@ Addition:
             - L2 Wr Lat:
                 value: |
                   ROUND(AVG(((TCP_TCC_WRITE_REQ_LATENCY_sum / (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else None)), 0)
+            - VL1 Lat:
+                value: |
+                  ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum != 0) else None)), 0)
     metric_descriptions:
       L2 Rd Lat:
           plain: |
@@ -39,6 +42,11 @@ Addition:
             Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
           rst: |
             Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+      VL1 Lat:
+          plain: |
+            Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
+          rst: |
+            Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
   - Panel Config:
       id: 400
       title: Roofline
@@ -702,25 +710,25 @@ Modification:
           title: System Speed-of-Light
           metrics:
             - MFMA FLOPs (BF16):
-                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
-            - MFMA FLOPs (F16):
                 peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            - MFMA FLOPs (F16):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             - MFMA FLOPs (F64):
-                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
             - MFMA FLOPs (F8):
-                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
-            - MFMA IOPs (Int8):
                 peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+            - MFMA IOPs (Int8):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
   - Panel Config:
       id: 300
       title: Memory Chart
@@ -815,25 +823,25 @@ Modification:
           title: Compute Speed-of-Light
           metrics:
             - MFMA FLOPs (BF16):
-                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
-            - MFMA FLOPs (F16):
                 peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            - MFMA FLOPs (F16):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             - MFMA FLOPs (F64):
-                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
             - MFMA FLOPs (F8):
-                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
-            - MFMA IOPs (INT8):
                 peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+            - MFMA IOPs (INT8):
                 pop: |
                   ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+                peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
       - metric_table:
           id: 1103
           title: Arithmetic Operations
@@ -867,13 +875,6 @@ Modification:
                   MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
                 min: |
                   MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
-            - Remote Read Traffic:
-                avg: |
-                  AVG((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-                max: |
-                  MAX((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-                min: |
-                  MIN((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
       - metric_table:
           id: 1706
           title: L2 - Fabric interface detailed metrics
@@ -899,14 +900,14 @@ Modification:
           title: L2-Fabric Read Stall (Cycles per normUnit)
           metrics:
             - ::_1:
+                ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
                 ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
-                ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
       - metric_table:
           id: 1810
           title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
           metrics:
             - ::_1:
-                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
                 ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+                ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))

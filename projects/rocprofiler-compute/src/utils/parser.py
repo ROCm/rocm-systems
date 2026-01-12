@@ -111,6 +111,8 @@ SUPPORTED_CALL: dict[str, str] = {
     "MOD": "to_mod",
     # Concat operation from the memory chart "active cus"
     "CONCAT": "to_concat",
+    # Threshold-based clamping for multi-pass profiling noise
+    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
@@ -256,6 +258,98 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
 
 
+NOISE_CLAMP_WARN_THRESHOLD = 0.01
+_NOISE_CLAMP_STATS = {"count": 0, "max_rel": 0.0}
+
+
+def to_noise_clamp(
+    difference: Union[pd.Series, float, np.ndarray],
+    reference: Union[pd.Series, float, np.ndarray],
+) -> Union[pd.Series, float, np.ndarray]:
+    """
+    Clamp negative values to 0 from multi-pass counter variance.
+
+    Negative counts are physically impossible - they result from run-to-run
+    variance when counters are collected across multiple profiling passes.
+    We clamp to 0 and track if any exceed 1% relative error (anomaly detection).
+    """
+    # Handle scalar case
+    if np.isscalar(difference):
+        if difference >= 0:
+            return difference
+        safe_ref = reference if reference != 0 else np.nan
+        rel_error = abs(difference) / abs(safe_ref) if safe_ref else 0
+        if rel_error >= NOISE_CLAMP_WARN_THRESHOLD:
+            _record_clamp_stats(1, rel_error)
+        return 0.0
+
+    # Handle array/Series case
+    is_series = isinstance(difference, pd.Series)
+    result = difference.copy()
+
+    negative_mask = result < 0
+    if not np.any(negative_mask):
+        return result
+
+    # Safe reference for division
+    if isinstance(reference, pd.Series):
+        safe_ref = reference.replace(0, np.nan)
+    elif isinstance(reference, np.ndarray):
+        safe_ref = np.where(reference == 0, np.nan, reference)
+    else:
+        safe_ref = reference if reference != 0 else np.nan
+
+    # Calculate relative errors for negative values
+    ref_vals = (
+        safe_ref[negative_mask]
+        if hasattr(safe_ref, "__getitem__") and not np.isscalar(safe_ref)
+        else safe_ref
+    )
+    rel_errors = np.abs(result[negative_mask]) / np.abs(ref_vals)
+
+    # Clamp negatives to zero
+    if is_series:
+        result.loc[negative_mask] = 0
+    else:
+        result[negative_mask] = 0
+
+    # Track large deviations
+    warn_mask = rel_errors >= NOISE_CLAMP_WARN_THRESHOLD
+    if np.any(warn_mask):
+        _record_clamp_stats(int(np.sum(warn_mask)), float(np.max(rel_errors)))
+
+    return result
+
+
+def _record_clamp_stats(count: int, max_rel: float) -> None:
+    """Track clamping statistics for summary."""
+    _NOISE_CLAMP_STATS["count"] += count
+    _NOISE_CLAMP_STATS["max_rel"] = max(_NOISE_CLAMP_STATS["max_rel"], max_rel)
+
+
+def clear_noise_clamp_warnings() -> None:
+    """Clear collected stats."""
+    global _NOISE_CLAMP_STATS
+    _NOISE_CLAMP_STATS = {"count": 0, "max_rel": 0.0}
+
+
+def get_noise_clamp_warnings() -> dict:
+    """Return collected stats (for testing)."""
+    return _NOISE_CLAMP_STATS.copy()
+
+
+def print_noise_clamp_summary() -> None:
+    """Print summary if significant variance was detected."""
+    if _NOISE_CLAMP_STATS["count"] == 0:
+        return
+    count = _NOISE_CLAMP_STATS["count"]
+    max_pct = _NOISE_CLAMP_STATS["max_rel"] * 100
+    console_warning(
+        f"Counter variance corrected: {count} value(s) adjusted "
+        f"(max {max_pct:.1f}% deviation from multi-pass collection)."
+    )
+
+
 class CodeTransformer(ast.NodeTransformer):
     """
     Python AST visitor to transform user defined equation string to df format
@@ -346,6 +440,7 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
+                "to_noise_clamp": to_noise_clamp,
             })
 
             eval_result = eval(
@@ -580,7 +675,8 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
         return visited, counters
     try:
         tree = ast.parse(
-            formula.replace("$normUnit", "SQ_WAVES")
+            formula
+            .replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
@@ -1015,6 +1111,9 @@ def eval_metric(
     builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
+    # Clear any previous noise clamp warnings before this analysis
+    clear_noise_clamp_warnings()
+
     # Create metric evaluator
     metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
@@ -1046,6 +1145,10 @@ def eval_metric(
     for df_id, row_id, col, expr in exprs_to_eval:
         eval_result = metric_evaluator.eval_expression(expr)
         dfs[df_id].loc[row_id, col] = eval_result
+
+    # Print aggregated summary of any noise clamping warnings
+    print_noise_clamp_summary()
+
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
 
@@ -1606,9 +1709,9 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     df["instruction"] = (
         df["inst_index"].apply(
-            lambda x: pc_sample_instructions[x]
-            if x < len(pc_sample_instructions)
-            else None
+            lambda x: (
+                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
+            )
         )
         if pc_sample_instructions
         else None
@@ -1618,9 +1721,11 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
     df["source_line"] = (
         df["inst_index"].apply(
-            lambda x: f".../{Path(pc_sample_comments[x]).name}"
-            if x < len(pc_sample_comments)
-            else None
+            lambda x: (
+                f".../{Path(pc_sample_comments[x]).name}"
+                if x < len(pc_sample_comments)
+                else None
+            )
         )
         if pc_sample_comments
         else None
@@ -1719,7 +1824,8 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df.groupby("Instruction_Comment")
+            merged_df
+            .groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),

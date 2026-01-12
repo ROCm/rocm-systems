@@ -157,6 +157,74 @@ const char *CopyDwordIsa =
         s_endpgm
 )";
 
+const char *CopyWordsIsa =
+    SHADER_START
+    SHADER_MACROS_FLAT
+    R"(
+        v_mov_b32 v2, s0
+        v_mov_b32 v3, s1
+
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] slc
+        .endif
+        s_waitcnt vmcnt(0) & lgkmcnt(0)
+
+        .if (.amdgcn.gfx_generation_number >= 10)
+            v_add_nc_u32 v4, 8, v2
+        .else
+            v_add_u32 v4, 8, v2
+        .endif
+
+        v_mov_b32 v5, v3
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORDX2_NSS  v[6:7], v[4:5] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORDX2_NSS v[6:7], v[4:5] slc
+        .endif
+        s_waitcnt vmcnt(0) & lgkmcnt(0)
+
+        v_mov_b32 v8, s2
+        v_mov_b32 v9, s3
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORD_NSS v10, v[8:9] scope:SCOPE_DEV
+        .else
+            FLAT_LOAD_DWORD_NSS v10, v[8:9] slc
+        .endif
+        s_waitcnt vmcnt(0) & lgkmcnt(0)
+        v_mov_b32 v8, v10
+
+        v_mov_b32 v9, 0
+
+        LOOP:
+        .if (.amdgcn.gfx_generation_number >= 12)
+            FLAT_LOAD_DWORD_NSS v10, v[0:1] scope:SCOPE_SYS
+            s_wait_loadcnt 0
+            FLAT_STORE_DWORD_NSS v[6:7], v10 scope:SCOPE_SYS
+        .else
+            FLAT_LOAD_DWORD_NSS v10, v[0:1] glc slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
+            FLAT_STORE_DWORD_NSS v[6:7], v10 glc slc
+        .endif
+
+        .if (.amdgcn.gfx_generation_number >= 10)
+            v_add_nc_u32 v0, 4, v0
+            v_add_nc_u32 v6, 4, v6
+            v_add_nc_u32 v9, 1, v9
+        .else
+            v_add_u32 v0, 4, v0
+            v_add_u32 v6, 4, v6
+
+            v_add_u32 v9, 1, v9
+        .endif
+
+        v_cmp_lt_u32 v9, v8
+        s_cbranch_vccnz LOOP
+
+        s_endpgm
+)";
+
 const char *InfiniteLoopIsa =
     SHADER_START
     R"(
