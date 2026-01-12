@@ -208,8 +208,8 @@ an Instinct MI210 vs an Instinct MI250.
    Additionally, you will notice a few extra files. An SoC parameters file,
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
-   results are stored in ``roofline.csv`` and roofline plots are outputted into PDFs as
-   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].pdf`` where data types requested through
+   results are stored in ``roofline.csv`` and roofline plots are outputted into HTMLs as
+   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].html`` where data types requested through
    ``--roofline-data-type`` option are listed in the file name.
 
 .. code-block:: shell-session
@@ -556,7 +556,7 @@ Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option 
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
 This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
-	a) If found, uses the data files with the provided arguments to create another roofline PDF output; otherwise,
+	a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
 	b) Profile mode runs but is limited to collecting only roofline performance counters.
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
@@ -580,13 +580,13 @@ Roofline options
    utility. See :ref:`profiling-kernel-filtering`.
 
 ``--roofline-data-type <datatype>``
-   Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
+   Allows you to specify data types that you want plotted in the roofline HTML output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
 
 .. note::
 
   For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
 
-Each kernel in your ``.pdf`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline PDF includes an integrated multi-subplot layout with:
+Each kernel in your ``.html`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline HTML includes an integrated multi-subplot layout with:
 
 1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
 2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
@@ -633,14 +633,14 @@ The following example demonstrates profiling roofline data only:
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
    ...
-An inspection of our workload output folder shows ``.pdf`` plots were generated
+An inspection of our workload output folder shows ``.html`` plots were generated
 successfully.
 
 .. code-block:: shell-session
 
    $ ls workloads/occupancy/MI300X_A1
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.pdf
+   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.html
    drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
    -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
    -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
@@ -649,9 +649,9 @@ successfully.
 
 .. note::
 
-   * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
+   * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the HTML outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same HTML. To generate results in separate HTML for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
 
-The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
+The following image is a sample ``empirRoof_gpu-0_FP32.html`` roofline
 plot.
 
 .. image:: ../../data/profile/sample-roof-plot.jpg
