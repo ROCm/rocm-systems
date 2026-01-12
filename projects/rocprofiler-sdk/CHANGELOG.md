@@ -257,6 +257,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 - Fixed multi-GPU dimension mismatch.
 - Fixed device lock issue for dispatch counters.
-- OMPT task scheduling null pointer exception.
+- Addressed OMPT task scheduling null pointer exception.
 - Fixed stream ID errors for process attachment.
 - Fixed issues during dynamic code object loading.
