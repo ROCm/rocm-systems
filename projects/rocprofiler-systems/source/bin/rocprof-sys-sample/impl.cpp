@@ -305,7 +305,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
-    parser.add_argument({ "--debug" }, "[DEPRICATED Use --log-level=debug] Debug output")
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"),
@@ -318,7 +318,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         });
     parser
         .add_argument({ "-v", "--verbose" },
-                      "[DEPRICATED Use --log-level=trace] Verbose output")
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");

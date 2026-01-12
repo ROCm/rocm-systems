@@ -252,7 +252,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     {
         _parser
             .add_argument({ "--debug" },
-                          "[DEPRICATED Use --log-level=debug] Debug output")
+                          "[DEPRECATED Use --log-level=debug] Debug output")
             .max_count(1)
             .action(
                 [&](parser_t&) { update_env(_data, "ROCPROFSYS_LOG_LEVEL", "debug"); });
@@ -264,7 +264,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     {
         _parser
             .add_argument({ "-v", "--verbose" },
-                          "[DEPRICATED Use --log-level=trace] Verbose output")
+                          "[DEPRECATED Use --log-level=trace] Verbose output")
             .count(1)
             .dtype("integral")
             .action([&](parser_t& p) {
