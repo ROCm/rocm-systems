@@ -8,7 +8,11 @@ Building ROCmInfo
 
 Use the standard cmake build procedure to build ROCmInfo. The location of ROCm root (parent directory containing ROCM headers and libraries) must be provided as a CMake argument using the standard ``CMAKE_PREFIX_PATH`` CMake variable.
 
-After cloning the ROCmInfo Git repository, you must perform a ``git-fetch --tags`` to get the tags residing on the repository. These tags are used for versioning.
+After cloning the `ROCmInfo Git repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_, you must perform a ``git-fetch --tags`` to get the tags residing on the repository. These tags are used for versioning.
+
+.. note::
+
+  The ROCmInfo repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocminfo>`_.
 
 For example,
 

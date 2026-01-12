@@ -10,6 +10,10 @@ ROCmInfo is a ROCm application for reporting system information. It is a tool sh
 
 You can access ROCmInfo code at `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
 
+.. note::
+
+  The ROCmInfo repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocminfo>`_.
+
 .. grid:: 2
   :gutter: 3
 
