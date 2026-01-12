@@ -35,19 +35,17 @@ template <typename TestType> static void runAtomicExchSystemPeerGPUsTest() {
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType));
-    }
+  DYNAMIC_SECTION("Same address " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType));
+  }
 
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size,
-                                                                  sizeof(TestType));
-    }
+  DYNAMIC_SECTION("Adjacent addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size,
+                                                                sizeof(TestType));
+  }
 
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size);
-    }
+  DYNAMIC_SECTION("Scattered addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size);
   }
 }
 
@@ -57,20 +55,18 @@ template <typename TestType> static void runAtomicExchSystemHostAndGPUTest() {
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, 1, sizeof(TestType), 4);
-    }
+  DYNAMIC_SECTION("Same address " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, 1, sizeof(TestType), 4);
+  }
 
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, sizeof(TestType),
-                                                                  4);
-    }
+  DYNAMIC_SECTION("Adjacent addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, sizeof(TestType),
+                                                                4);
+  }
 
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, cache_line_size,
-                                                                  4);
-    }
+  DYNAMIC_SECTION("Scattered addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, cache_line_size,
+                                                                4);
   }
 }
 
@@ -80,20 +76,18 @@ template <typename TestType> static void runAtomicExchSystemHostAndPeerGPUsTest(
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType), 4);
-    }
+  DYNAMIC_SECTION("Same address " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType), 4);
+  }
 
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, sizeof(TestType),
-                                                                  4);
-    }
+  DYNAMIC_SECTION("Adjacent addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, sizeof(TestType),
+                                                                4);
+  }
 
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size,
-                                                                  4);
-    }
+  DYNAMIC_SECTION("Scattered addresses " << current) {
+    AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size,
+                                                                4);
   }
 }
 
