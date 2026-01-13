@@ -1769,3 +1769,47 @@ def get_panel_alias() -> dict[str, str]:
     return {
         panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
     }
+
+
+def get_rank() -> Optional[str]:
+    rank_env_vars = [
+        "SLURM_PROCID",
+        "FLUX_TASK_RANK",
+        "PMI_RANK",
+        "PMIX_RANK",
+        "MPI_RANK",
+        "MPI_LOCALRANKID",
+        "MPI_RANKID",
+        "MV2_COMM_WORLD_RANK",
+        "OMPI_COMM_WORLD_RANK",
+        "PALS_RANKID",
+    ]
+    for env_var in rank_env_vars:
+        value = os.environ.get(env_var)
+        if value is not None:
+            return value
+
+
+def replace_rank(name: str) -> str:
+    def rank(match: re.Match[str]) -> str:
+        value = get_rank()
+        if value is not None:
+            return value
+        else:
+            return "0"  # Default rank if no MPI environment variable is found
+
+    # Replace %rank% with MPI process rank
+    pattern = re.compile(r"%rank%")
+
+    return pattern.sub(rank, name)
+    
+
+def replace_env(name: str) -> str:
+    def env(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, "")  # Default to empty string if not found
+    
+    # Replace %env{VAR}% with environment variable values
+    pattern = re.compile(r"%env{([^}]+)}%")
+
+    return pattern.sub(env, name)
