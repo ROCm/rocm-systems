@@ -30,11 +30,6 @@ Launch the standalone GUI analyzer
 To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
 desired analysis command.
 
-.. note::
-
-   Any dispatch filters selected in GUI will override kernel filters, since each
-   dispatch id corresponds to a unique kernel.
-
 For example:
 
 .. code-block:: shell-session
