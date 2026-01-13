@@ -930,6 +930,10 @@ bool UncommitMemory(void* addr, size_t size) {
                 0) != MAP_FAILED;
 }
 
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
+}
+
 uint64_t HostTotalPhysicalMemory() {
   static uint64_t totalPhys = 0;
 

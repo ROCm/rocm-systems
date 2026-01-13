@@ -668,7 +668,7 @@ add_custom_target(
 set(STANDALONEBINARY_EXTRACT_DIR
     "/tmp"
     CACHE PATH
-    "Prefix path for standalone binary extraction"
+    "Absolute path to where the standalone binary will extract its contents"
 )
 
 # Standalone binary creation
@@ -677,7 +677,7 @@ add_custom_target(
     # Change working directory to src
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     # Install nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
+    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka==2.6
     # Install patchelf
     COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
     # Check nuitka
@@ -700,8 +700,7 @@ add_custom_target(
         --include-data-files=src/lib/helper.hpp=lib/helper.hpp --include-package=dash_svg
         --include-package-data=dash_svg --include-package=dash_bootstrap_components
         --include-package-data=dash_bootstrap_components --include-package=plotly
-        --include-package-data=plotly --include-package=kaleido
-        --include-package-data=kaleido --include-package=rocprof_compute_analyze
+        --include-package-data=plotly --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
         --include-package=rocprof_compute_profile
         --include-package-data=rocprof_compute_profile
@@ -748,6 +747,7 @@ if(INSTALL_TESTS)
             tests/hip_dynamic_shared
             tests/laplace_eqn
             tests/mat_mul_max
+            tests/rocflop
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )

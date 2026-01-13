@@ -68,6 +68,7 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -88,7 +89,7 @@ CSVS = sorted([
 ])
 
 ROOF_ONLY_FILES = sorted([
-    "empirRoof_gpu-0_FP32.pdf",
+    "empirRoof_gpu-0_FP32.html",
     "pmc_perf.csv",
     "roofline.csv",
     "sysinfo.csv",
@@ -565,13 +566,16 @@ def are_deterministic_counters_equal(test_dfs, baseline_df):
     if not all(baseline_group_keys == keys for keys in tests_group_keys):
         return False
 
+    # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
     deterministic_counter_patterns = list(
         map(
             re.compile,
             [
                 "SQ_INSTS_.*",
                 "SPI_CS\\d_NUM_THREADGROUPS",
+                "SPI_CSN_NUM_THREADGROUPS",
                 "SPI_CS\\d_WAVE",
+                "SPI_CSN_WAVE",
                 "SQ_WAVES",
             ],
         )
@@ -634,6 +638,29 @@ def test_path(binary_handler_profile_rocprof_compute):
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_path_rocflop(
+    binary_handler_profile_rocprof_compute,
+):
+    # Test whether multiprocess workloads like rocflop are handled correctly
+    workload_dir = test_utils.get_output_dir()
+    options = ["--block", "2.1.1"]
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="rocflop",
+    )
+    pmc_perf_df = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)[
+        "pmc_perf.csv"
+    ]
+    # Ensure non zero length of df
+    assert len(pmc_perf_df) > 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -786,9 +813,9 @@ def test_path_csv(
 @pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
-    Test basic roofline PDF generation with full validation pipeline.
+    Test basic roofline HTML generation with full validation pipeline.
     This test runs the complete validation flow including counter logging
-    and metric comparison (if enabled in config). Validates that roofline PDFs
+    and metric comparison (if enabled in config). Validates that roofline HTMLs
     are generated with the integrated multi-subplot layout (roofline plot +
     plot points table + kernel names table).
     """
@@ -1107,9 +1134,9 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
 
     assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) == 0, (
-        "No roofline PDF should be generated when no kernels match"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) == 0, (
+        "No roofline HTML should be generated when no kernels match"
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1185,12 +1212,12 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     [
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            ["empirRoof_gpu-0_FP32.pdf"],
+            ["empirRoof_gpu-0_FP32.html"],
             "FP32_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            ["empirRoof_gpu-0_FP16.pdf"],
+            ["empirRoof_gpu-0_FP16.html"],
             "FP16_datatype",
         ),
         (
@@ -1578,12 +1605,12 @@ def test_roofline_bound_status_calculation():
 @pytest.mark.roofline_2
 def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
     """
-    Test roofline PDF generation with many kernels (10+) to verify:
+    Test roofline HTML generation with many kernels (10+) to verify:
     - Dynamic height calculation works
-    - PDF is generated successfully
+    - HTML is generated successfully
     - File size is reasonable
 
-    Note: This test uses a regular workload but validates the PDF structure
+    Note: This test uses a regular workload but validates the HTML structure
     can handle the multi-subplot layout properly.
     """
     if soc in ("MI100"):
@@ -1599,19 +1626,19 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
 
     assert returncode == 0, "Roofline profiling should succeed"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) > 0, "At least one roofline PDF should be generated"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, "At least one roofline HTML should be generated"
 
-    for pdf_file in pdf_files:
-        assert pdf_file.exists(), f"PDF file {pdf_file} should exist"
-        file_size = pdf_file.stat().st_size
+    for html_file in html_files:
+        assert html_file.exists(), f"HTML file {html_file} should exist"
+        file_size = html_file.stat().st_size
 
-        # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
+        # HTML should be larger than 10KB (has content) but less than 50MB (reasonable)
         assert file_size > 10000, (
-            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+            f"HTML {html_file} too small ({file_size} bytes), may be malformed"
         )
         assert file_size < 50000000, (
-            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+            f"HTML {html_file} too large ({file_size} bytes), may have issues"
         )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
@@ -2621,15 +2648,31 @@ def test_iteration_multiplexing_kernel_launch_params(
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
 ):
+    # These metrics should cover the deterministic counters being checked
+    options = ["--block", "6.1.5", "6.1.6", "7.2.2", "10.1"]
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
     )
     counters_no_multiplexing = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    options = ["--iteration-multiplexing", "kernel"]
+    options = [
+        "--block",
+        "6.1.5",
+        "6.1.6",
+        "7.2.2",
+        "10.1",
+        "--iteration-multiplexing",
+        "kernel",
+    ]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -2642,8 +2685,17 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     counters_kernel = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    options = [
+        "--block",
+        "6.1.5",
+        "6.1.6",
+        "7.2.2",
+        "10.1",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -2656,25 +2708,90 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     counters_kernel_launch_params = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.iteration_multiplexing_stochastic
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
 ):
-    workload_dir = test_utils.get_output_dir(param_id="no_mplx")
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    # These metrics should cover the L1 cache stochastic counters
+    options = ["--block", "16.1", "16.3"]
     _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, check_success=True, roof=False, app_name="app_laplace_eqn"
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
     )
     counters_no_multiplexing = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = ["--block", "16.1", "16.3", "--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = [
+        "--block",
+        "16.1",
+        "16.3",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    assert are_stochastic_counters_similar(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+
+# Not part of automated test runs since testing all counters is expensive
+def test_iteration_multiplexing_all_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel"]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
@@ -2689,6 +2806,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     counters_kernel = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
@@ -2703,9 +2821,11 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     counters_kernel_launch_params = test_utils.check_csv_files(
         workload_dir, num_devices, num_kernels
     )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+    assert are_deterministic_counters_equal(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)

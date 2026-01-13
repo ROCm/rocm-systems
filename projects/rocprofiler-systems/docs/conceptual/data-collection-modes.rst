@@ -176,17 +176,13 @@ Primary collection modes
 Trace mode (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_MODE=trace`` or by enabling one of the trace backend options.
+Tracing mode generates comprehensive, deterministic traces of every event and measurement during application execution. This mode can be enabled using ``ROCPROFSYS_TRACE=true``, ``ROCPROFSYS_MODE=trace``, or by using the ``--trace`` / ``-T`` CLI flag.
 
-ROCm Systems Profiler provides two trace backend modes:
+ROCm Systems Profiler provides two tracing implementations:
 
-- **Cached Mode (default, recommended)**: ``ROCPROFSYS_TRACE_CACHED=true`` or ``--trace`` / ``-T`` enables deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
+- **Cached Mode (default)**: By default, when tracing is enabled, ROCm Systems Profiler uses deferred trace generation with minimal runtime overhead. Trace data is buffered during execution and written after the application completes, significantly reducing performance impact during profiling.
 
 - **Legacy Mode**: ``ROCPROFSYS_TRACE_LEGACY=true`` or ``--trace-legacy`` / ``-L`` enables direct mode where trace data is written immediately during execution. This mode provides real-time trace generation but has higher runtime overhead compared to cached mode.
-
-.. note::
-
-   The ``ROCPROFSYS_TRACE`` environment variable is deprecated and has been renamed to ``ROCPROFSYS_TRACE_LEGACY``. For new workflows, use ``ROCPROFSYS_TRACE_CACHED`` (default) or ``ROCPROFSYS_TRACE_LEGACY`` explicitly.
 
 Additional configuration options to control the tracing behavior include:
 

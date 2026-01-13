@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+list(APPEND CMAKE_MESSAGE_CONTEXT "rccl-tests")
 
 project(rocprofiler-systems-rccl-example LANGUAGES CXX)
 
@@ -35,89 +36,109 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     endif()
 endif()
 
-function(rccl_message _MSG_TYPE)
-    if(
-        "${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
-        AND "$ENV{ROCPROFSYS_CI}"
-        AND "${_MSG_TYPE}" MATCHES "WARNING"
-    )
-        set(_MSG_TYPE STATUS) # don't generate warnings during CI
-    endif()
-    if("${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems")
-        rocprofiler_systems_message(${_MSG_TYPE} ${ARGN})
-    else()
-        message(${_MSG_TYPE} ${ARGN})
-    endif()
-endfunction()
-
-find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-
+# Find HIP
+find_package(hip HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 if(NOT hip_FOUND)
-    rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
+    message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
     return()
 endif()
 
-if(
-    "${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
-    AND ("$ENV{ROCPROFSYS_CI}" OR ROCPROFSYS_CI OR ROCPROFSYS_BUILD_CI)
-)
-    # avoid generating warning in CI
-    find_package(rccl HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
-else()
-    find_package(rccl HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm)
-endif()
-
+# Find RCCL
+find_package(rccl HINTS ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm QUIET)
 if(NOT rccl_FOUND)
-    rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RCCL...")
+    message(AUTHOR_WARNING "rccl-tests skipped. Missing RCCL...")
     return()
+else()
+    message(STATUS "RCCL found: ${RCCL_INCLUDE_DIRS}")
+    message(STATUS "RCCL library: ${RCCL_LIBRARIES}")
+    message(STATUS "RCCL version: ${RCCL_VERSION}")
 endif()
 
+# Build rccl-tests
 if(hip_FOUND AND rccl_FOUND)
-    # Use existing rccl-tests source in the project binary directory
+    # Setup source and build directories
     set(rccl-tests_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rccl-tests")
     set(rccl-tests_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-tests")
-    file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
     if(NOT EXISTS "${rccl-tests_SOURCE_DIR}")
-        rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing rccl-tests source at ${rccl-tests_SOURCE_DIR}")
+        message(
+            AUTHOR_WARNING
+            "rccl-tests skipped. Missing rccl-tests source at ${rccl-tests_SOURCE_DIR}"
+        )
         return()
     endif()
 
-    get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIR}" DIRECTORY)
+    # Copy source to build directory
+    file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
-    rccl_message(STATUS "Building rccl-tests...")
-    execute_process(
-        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
+    # Get RCCL root directory
+    get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
+
+    # Create a custom target that builds rccl-tests at build-time
+    add_custom_target(
+        build-rccl-tests
+        ALL
+        COMMAND make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
-        RESULT_VARIABLE _RCCL_BUILD_RET
-        ERROR_VARIABLE _RCCL_BUILD_ERR
-        OUTPUT_VARIABLE _RCCL_BUILD_OUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE
+        COMMENT
+            "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
+        BYPRODUCTS
+            ${rccl-tests_BUILD_DIR}/build/all_gather_perf
+            ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoall_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoallv_perf
+            ${rccl-tests_BUILD_DIR}/build/broadcast_perf
+            ${rccl-tests_BUILD_DIR}/build/gather_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
     )
 
-    if(NOT _RCCL_BUILD_RET EQUAL 0)
-        rccl_message(${_RCCL_BUILD_OUT})
-        rccl_message(AUTHOR_WARNING "Failed to build rccl-tests: ${_RCCL_BUILD_ERR}")
-    else()
-        file(GLOB RCCL_TEST_EXECUTABLES ${rccl-tests_BUILD_DIR}/build/*_perf)
-        set(_RCCL_TEST_TARGETS)
+    # Define the expected test executables
+    set(RCCL_TEST_NAMES
+        all_gather_perf
+        all_reduce_perf
+        alltoall_perf
+        alltoallv_perf
+        broadcast_perf
+        gather_perf
+        reduce_perf
+        reduce_scatter_perf
+        scatter_perf
+        sendrecv_perf
+    )
 
-        foreach(_EXE ${RCCL_TEST_EXECUTABLES})
-            get_filename_component(_EXE_NAME "${_EXE}" NAME)
-            execute_process(
-                COMMAND
-                    ${CMAKE_COMMAND} -E copy ${_EXE}
-                    ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
-            )
-            add_executable(rccl-tests::${_EXE_NAME} IMPORTED GLOBAL)
-            set_property(
-                TARGET rccl-tests::${_EXE_NAME}
-                PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}
-            )
-            list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
-        endforeach()
+    set(_RCCL_TEST_TARGETS)
+    foreach(_EXE_NAME ${RCCL_TEST_NAMES})
+        set(_EXE_SRC_PATH "${rccl-tests_BUILD_DIR}/build/${_EXE_NAME}")
+        set(_EXE_DEST_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}")
 
-        set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
-    endif()
+        # Copy executable from build dir to binary dir at build-time
+        add_custom_command(
+            OUTPUT ${_EXE_DEST_PATH}
+            COMMAND
+                ${CMAKE_COMMAND} -E copy_if_different ${_EXE_SRC_PATH} ${_EXE_DEST_PATH}
+            DEPENDS build-rccl-tests
+            COMMENT "Copying ${_EXE_NAME} to ${CMAKE_CURRENT_BINARY_DIR}"
+        )
+
+        # Create a target for this specific executable that gets built with ALL
+        add_custom_target(copy-${_EXE_NAME} ALL DEPENDS ${_EXE_DEST_PATH})
+        add_dependencies(copy-${_EXE_NAME} build-rccl-tests)
+
+        # Create imported executable target
+        add_executable(rccl-tests::${_EXE_NAME} IMPORTED GLOBAL)
+        set_property(
+            TARGET rccl-tests::${_EXE_NAME}
+            PROPERTY IMPORTED_LOCATION ${_EXE_DEST_PATH}
+        )
+
+        # Make sure the imported target depends on the copy operation
+        add_dependencies(rccl-tests::${_EXE_NAME} copy-${_EXE_NAME})
+
+        list(APPEND _RCCL_TEST_TARGETS "rccl-tests::${_EXE_NAME}")
+    endforeach()
+
+    set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
 endif()
