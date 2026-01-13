@@ -5,6 +5,18 @@ pr:
       - develop
       - release/rocm-rel-7.1
       - release/rocm-rel-7.2
+      - users/dsclear/shorten_workflows_test_*
+  paths:
+    exclude:
+      - '**/*.md'
+      - '**/*.rtf'
+      - '**/*.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - '**/.wordlist.txt'
+      - 'docs/**'
+      - 'projects/*/docs/**'
   drafts: false
 
 variables:
