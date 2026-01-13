@@ -64,9 +64,9 @@ Hardware performance counters are collected across multiple profiling passes. Wh
 
 * **Deviation < 1%**: Normal hardware variance. No action needed.
 * **Deviation ≥ 1%**: The warning is displayed. Results are still valid, but variance was higher than typical.
-* **Deviation > 5%**: Consider investigating profiling conditions (system load, cache state, etc.).
+* **Deviation > 5%**: Consider investigating profiling conditions (system load, thermal throttling, non-deterministic application behavior, etc.).
 
-This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic.
+This correction primarily affects L2 cache metrics where counter subtraction is used to derive values like remote read/write traffic, but run-to-run variations may impact the accuracy of a number of derived metrics in ROCm Compute Profiler.
 
 How can I SSH tunnel in MobaXterm?
 ==================================
