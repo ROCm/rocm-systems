@@ -28,13 +28,13 @@ on:
       - release-staging/rocm-rel-7.*
       - users/dsclear/shorten_workflows_test*
     paths-ignore:  # Do not trigger full tests on documentation-only changes
-      - '**/*.txt'
       - '**/*.md'
       - '**/*.rtf'
       - '**/*.rst'
       - '**/.markdownlint-ci2.yaml'
       - '**/.readthedocs.yaml'
       - '**/.spellcheck.local.yaml'
+      - '**/.wordlist.txt'
       - 'docs/**'
       - 'projects/*/docs/**'
 

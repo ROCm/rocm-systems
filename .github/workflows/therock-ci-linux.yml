@@ -126,5 +126,5 @@ jobs:
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm-frac"
       platform: "linux"

@@ -8,13 +8,13 @@ on:
       - develop
     paths:
       - 'projects/rocprofiler-systems/docker/**'
-      - '!**/*.txt'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
       - '!**/.markdownlint-ci2.yaml'
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
     tags:
@@ -24,16 +24,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-cpack.yml'
       - 'projects/rocprofiler-systems/docker/**'
-    paths-ignore:  # Do not trigger on documentation-only changes
-      - '**/*.txt'
-      - '**/*.md'
-      - '**/*.rtf'
-      - '**/*.rst'
-      - '**/.markdownlint-ci2.yaml'
-      - '**/.readthedocs.yaml'
-      - '**/.spellcheck.local.yaml'
-      - 'docs/**'
-      - 'projects/*/docs/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
