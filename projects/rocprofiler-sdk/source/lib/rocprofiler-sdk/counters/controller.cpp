@@ -107,13 +107,14 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
     ctx.device_counter_collection->agent_data.back().cb       = cb;
     ctx.device_counter_collection->agent_data.back().buffer   = buffer_id;
 
-    // OLD behavior: Lock the device at configuration time instead of context start
+    // OLD behavior: Lock the device and disable PTL at configuration time instead of context start
     if(rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false))
     {
         if(counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
         }
+        counters::counter_collection_ptl_disable(rocprofiler::agent::get_agent(agent_id));
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
