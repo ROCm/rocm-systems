@@ -251,7 +251,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Improved the process attachment process and updated the corresponding documentation.
 - Improved [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
-- Updated the documentation for installation steps and updated the links to point to the latest repository.
+- Updated the documentation for installation steps and links to point to the latest repository
 
 ### Resolved issues
 - Fixed multi-GPU dimension mismatch.
