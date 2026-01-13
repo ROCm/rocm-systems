@@ -27,8 +27,7 @@ from pathlib import Path
 from typing import Any, Union
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap, CommentedSeq
-from ruamel.yaml.scalarstring import FoldedScalarString, LiteralScalarString
+from ruamel.yaml.comments import CommentedMap
 
 # --- Round-trip YAML (for writing) ---
 RT_YAML = YAML(typ="rt")
@@ -64,31 +63,6 @@ def save_yaml(data: Any, filepath: Union[str, Path]) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         RT_YAML.dump(data, f)
-
-
-def ensure_commented_map(obj: Any) -> CommentedMap:
-    if isinstance(obj, CommentedMap):
-        return obj
-    if isinstance(obj, dict):
-        cm = CommentedMap()
-        for k, v in obj.items():
-            cm[k] = ensure_commented_map(v)
-        return cm
-    if isinstance(obj, list):
-        cs = CommentedSeq()
-        for item in obj:
-            cs.append(ensure_commented_map(item))
-        return cs
-    return obj
-
-
-def make_preserved_multiline_scalar(
-    text: str, folded: bool = False
-) -> Union[LiteralScalarString, FoldedScalarString]:
-    if text.endswith("\n"):
-        text = text[:-1]
-
-    return FoldedScalarString(text) if folded else LiteralScalarString(text)
 
 
 def strip_existing_header(yaml_data) -> None:
