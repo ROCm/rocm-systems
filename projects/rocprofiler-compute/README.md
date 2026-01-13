@@ -4,14 +4,13 @@
 
 ROCm Compute Profiler is a system performance profiling tool for machine
 learning/HPC workloads running on AMD MI GPUs. The tool presently
-targets usage on MI100, MI200, and MI300 accelerators.
+targets usage on MI100, MI200, MI300, and MI350 series accelerators.
 
 * For more information on available features, installation steps, and
 workload profiling and analysis, please refer to the online
 [documentation](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-* ROCm Compute Profiler is an AMD open source research project and is not supported
-as part of the ROCm software stack. We welcome contributions and
+* ROCm Compute Profiler is an AMD open source tool that is part of the ROCm software stack. We welcome contributions and
 feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our
 contribution process.
@@ -124,11 +123,11 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {ROCm/rocprofiler-compute: v3.1.0 (12 February 2025)},
-  month        = February,
-  year         = 2025,
+  title        = {ROCm/rocprofiler-compute: v3.4.0 (12 January 2026)},
+  month        = January,
+  year         = 2026,
   publisher    = {Zenodo},
-  version      = {v3.1.0},
+  version      = {v3.4.0},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
