@@ -70,13 +70,20 @@ def pytest_addoption(parser):
 def binary_handler_profile_rocprof_compute(request):
     def _handler(
         config,
-        workload_dir,
+        workload_dir=None,
         options=[],
         check_success=True,
         roof=False,
         app_name="app_1",
         attach_detach_para=None,
+        skip_app_name=False,
+        default_workload_dir=None,
     ):
+        if workload_dir is None and default_workload_dir is None:
+            if check_success:
+                return False
+            return 1
+
         if request.config.getoption("--rocprofiler-sdk-tool-path"):
             options.extend(
                 [
@@ -88,16 +95,21 @@ def binary_handler_profile_rocprof_compute(request):
             baseline_opts = [
                 "build/rocprof-compute.bin",
                 "profile",
-                "-n",
-                app_name,
                 "-VVV",
             ]
+            if not skip_app_name:
+                baseline_opts.extend(["-n", app_name])
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = (
-                baseline_opts + options + ["--output-directory", workload_dir]
-            )
+            command_rocprof_compute = baseline_opts + options
+
+            if workload_dir is not None:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--output-directory",
+                    workload_dir,
+                ]
+
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
@@ -112,6 +124,16 @@ def binary_handler_profile_rocprof_compute(request):
                         "--attach-duration-msec",
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
+
+            if workload_dir is None and default_workload_dir is not None:
+                # Create workload directory if it does not exist
+                p = Path(default_workload_dir)
+                if not p.exists():
+                    try:
+                        p.mkdir(parents=True, exist_ok=False)
+                    except FileExistsError:
+                        sys.exit(1)
+                os.chdir(default_workload_dir)
 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -125,16 +147,21 @@ def binary_handler_profile_rocprof_compute(request):
             baseline_opts = [
                 "rocprof-compute",
                 "profile",
-                "-n",
-                app_name,
                 "-VVV",
             ]
+            if not skip_app_name:
+                baseline_opts.extend(["-n", app_name])
             if not roof:
                 baseline_opts.append("--no-roof")
 
-            command_rocprof_compute = (
-                baseline_opts + options + ["--output-directory", workload_dir]
-            )
+            command_rocprof_compute = baseline_opts + options
+
+            if workload_dir is not None:
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--output-directory",
+                    workload_dir,
+                ]
+
             if not attach_detach_para:
                 command_rocprof_compute = (
                     command_rocprof_compute + ["--"] + config[app_name]
@@ -149,6 +176,16 @@ def binary_handler_profile_rocprof_compute(request):
                         "--attach-duration-msec",
                         str(attach_detach_para["attach-duration-msec"]),
                     ]
+
+            if workload_dir is None and default_workload_dir is not None:
+                # Create workload directory if it does not exist
+                p = Path(default_workload_dir)
+                if not p.exists():
+                    try:
+                        p.mkdir(parents=True, exist_ok=False)
+                    except FileExistsError:
+                        sys.exit(1)
+                os.chdir(default_workload_dir)
 
             with pytest.raises(SystemExit) as e:
                 with patch(
