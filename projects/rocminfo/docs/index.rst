@@ -5,14 +5,10 @@
 ROCmInfo documentation
 *************************
 
-ROCmInfo is a ROCm application for reporting system information. It is a tool shipped to enumerate GPU agents available on a working ROCm stack.
+ROCmInfo is a ROCm application that reports system information and enumerates GPU agents available on a working ROCm stack.
 
 
-You can access ROCmInfo code at `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
-
-.. note::
-
-  The ROCmInfo repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocminfo>`_.
+You can access the ROCmInfo source code on `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
 
 .. grid:: 2
   :gutter: 3
