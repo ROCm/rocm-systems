@@ -86,7 +86,11 @@ build-release()
     shift
     local DOCKER_ARGS=""
     tty -s && DOCKER_ARGS="-it" || DOCKER_ARGS=""
-    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/rocprofiler-systems --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --env IS_DOCKER=1 ${CONTAINER} /home/rocprofiler-systems/scripts/build-release.sh ${@}
+    local ROCSTORAGE_MOUNT=""
+    if [ -d "${PWD}/../rocstorage" ]; then
+        ROCSTORAGE_MOUNT="-v ${PWD}/../rocstorage:/home/rocstorage"
+    fi
+    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/rocprofiler-systems ${ROCSTORAGE_MOUNT} --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --env IS_DOCKER=1 ${CONTAINER} /home/rocprofiler-systems/scripts/build-release.sh ${@}
 }
 
 reset-last()

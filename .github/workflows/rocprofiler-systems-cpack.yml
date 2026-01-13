@@ -116,6 +116,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
+            projects/rocstorage
             .github
           submodules: recursive
 
