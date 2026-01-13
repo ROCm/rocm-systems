@@ -3644,9 +3644,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   devKernel->FindLocalWorkSize(sizes.dimensions(), sizes.global(), local_size);
 
   uint16_t local[3] = {1, 1, 1};
-  uint32_t global[3] = {1, 1, 1};
+  size_t global[3] = {1, 1, 1};
   for (uint i = 0; i < sizes.dimensions(); i++) {
-    global[i] = static_cast<uint32_t>(sizes.global()[i]);
+    global[i] = static_cast<size_t>(sizes.global()[i]);
     local[i] = static_cast<uint16_t>(local_size[i]);
   }
   uint64_t spVA = 0;
@@ -3766,13 +3766,13 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountX:
-        WriteAqlArgAt(hidden_arguments, global[0] / local[0], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[0] / local[0]), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountY:
-        WriteAqlArgAt(hidden_arguments, global[1] / local[1], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[1] / local[1]), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountZ:
-        WriteAqlArgAt(hidden_arguments, global[2] / local[2], it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[2] / local[2]), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeX:
         WriteAqlArgAt(hidden_arguments, local[0], it.size_, it.offset_);

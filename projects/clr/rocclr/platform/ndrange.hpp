@@ -129,8 +129,8 @@ struct LaunchParams {
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
   bool validConfig_;         //!< Flag will be set to false when config is not correct.
 
-  LaunchParams(uint32_t globalX, uint32_t globalY, uint32_t globalZ, uint32_t localX,
-               uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes)
+  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, size_t localX,
+               size_t localY, size_t localZ, uint32_t sharedMemBytes)
       : global_(globalX, globalY, globalZ),
         local_(localX, localY, localZ),
         sharedMemBytes_(sharedMemBytes),
@@ -142,16 +142,16 @@ struct LaunchParams {
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
 struct HIPLaunchParams : public LaunchParams {
  public:
-  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
+  HIPLaunchParams(size_t gridX, size_t gridY, size_t gridZ, uint32_t blockX, uint32_t blockY,
                   uint32_t blockZ, uint32_t sharedMemBytes,
-                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0)
-      : LaunchParams(static_cast<uint32_t>(gridX) * blockX + globalX_remainder, static_cast<uint32_t>(gridY) * blockY +
-                     globalY_remainder, static_cast<uint32_t>(gridZ) * blockZ + globalZ_remainder, blockX, blockY, blockZ,
+                  size_t globalX_remainder = 0, size_t globalY_remainder = 0, size_t globalZ_remainder = 0)
+      : LaunchParams(gridX * blockX + globalX_remainder, gridY * blockY +
+                     globalY_remainder, gridZ * blockZ + globalZ_remainder, blockX, blockY, blockZ,
                      sharedMemBytes) {
     if (global_[0] > std::numeric_limits<uint32_t>::max() ||
         global_[1] > std::numeric_limits<uint32_t>::max() ||
         global_[2] > std::numeric_limits<uint32_t>::max()) {
-      validConfig_ = false;
+      //validConfig_ = false;
     }
   }
 };
