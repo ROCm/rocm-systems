@@ -259,6 +259,12 @@ def get_views() -> list[TextClause]:
             func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                 "duration_ns_sum"
             ),
+            func.min(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_min"
+            ),
+            func.max(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
+                "duration_ns_max"
+            ),
             median_calc.c.duration_ns_median,
             func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                 "duration_ns_mean"
