@@ -1516,6 +1516,7 @@ typedef union
     struct
     {
         unsigned int requiresVAddr : 1;  // Requires virtual address
+        unsigned int kmtHandle     : 1;  // Handle is a KMT handle
     } ui32;
 } HSA_REGISTER_MEM_FLAGS;
 

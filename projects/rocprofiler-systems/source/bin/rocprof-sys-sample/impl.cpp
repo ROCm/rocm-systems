@@ -837,6 +837,18 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                            original_envs);
         });
 
+    parser
+        .add_argument({ "-G", "--gpu-events" },
+                      "Set the GPU hardware counter events to record (ref: "
+                      "`rocprof-sys-avail -H -c GPU`)")
+        .action([&](parser_t& p) {
+            auto _events =
+                join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+        });
+
     parser.start_group("MISCELLANEOUS OPTIONS", "");
     parser
         .add_argument({ "-i", "--inlines" },
