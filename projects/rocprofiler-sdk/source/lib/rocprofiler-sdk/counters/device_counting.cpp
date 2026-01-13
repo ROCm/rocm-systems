@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -94,6 +95,15 @@ submitPacket(hsa_queue_t* queue, const void* packet)
 
 namespace
 {
+// Returns true if device lock should be acquired at configuration time (OLD behavior).
+// Returns false if device lock should be acquired at context start time (NEW behavior, default).
+bool
+use_device_lock_at_start()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    return value;
+}
+
 uint16_t
 header_pkt(hsa_packet_type_t type)
 {
@@ -440,7 +450,8 @@ start_agent_ctx(const context::context* ctx)
         }
 
         // Lock the device for profiling (non-fatal if it fails)
-        if(counters::counter_collection_has_device_lock())
+        // Only lock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
         }
@@ -586,7 +597,8 @@ stop_agent_ctx(const context::context* ctx)
         counters::counter_collection_ptl_enable(agent->get_rocp_agent());
 
         // Unlock the device (non-fatal if it fails)
-        if(counters::counter_collection_has_device_lock())
+        // Only unlock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_unlock(agent->get_rocp_agent());
         }
