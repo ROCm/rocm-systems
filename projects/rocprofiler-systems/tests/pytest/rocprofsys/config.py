@@ -169,6 +169,17 @@ class RocprofsysConfig:
                 f"  - PATH"
             )
 
+    def get_fundamental_environment(self) -> dict[str, str]:
+        """Get fundamental environment variables inherited from parent process."""
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "USER": os.environ.get("USER", ""),
+            "SHELL": os.environ.get("SHELL", ""),
+            "TERM": os.environ.get("TERM", ""),
+            "LANG": os.environ.get("LANG", ""),
+        }
+
     def get_base_environment(self) -> dict[str, str]:
         """Get base environment variables for test execution."""
         return {

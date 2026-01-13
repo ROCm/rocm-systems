@@ -53,17 +53,14 @@ _output_printed_key: StashKey[bool] = StashKey()
 
 
 # ============================================================================
-# Pytest Configuration
+#
+# Pytest Hooks (Placed in the general order they are called)
+#
 # ============================================================================
 
-
-@lru_cache(maxsize=1)
-def get_rocprof_config() -> RocprofsysConfig:
-    """Return the rocprofiler-systems configuration."""
-    try:
-        return discover_build_config()
-    except Exception as e:
-        raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
+# ----------------------------------------------------------------------------
+# Initialization hooks
+# ----------------------------------------------------------------------------
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -76,16 +73,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Show runner output on test pass",
     )
     group.addoption(
-        "--no-output",
-        action="store_true",
-        default=False,
-        help="Suppress all output including failure details",
-    )
-    group.addoption(
         "--show-output-on-subtest-fail",
         action="store_true",
         default=False,
         help="Show runner output only when subtests fail",
+    )
+    group.addoption(
+        "--show-config",
+        action="store_true",
+        default=False,
+        help="Show the test configuration at the beginning of the session",
     )
     group.addoption(
         "--output-log",
@@ -94,10 +91,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Write log output to the specified file",
     )
     group.addoption(
+        "--print-env",
+        action="store_true",
+        default=False,
+        help="Print the environment variables used by the test",
+    )
+    group.addoption(
         "--monochrome",
         action="store_true",
         default=False,
-        help="Runners use ROCPROFSYS_MONOCHROME=ON",
+        help="Runners use ROCPROFSYS_MONOCHROME=ON and pytest color output is disabled",
     )
     group.addoption(
         "--ctest-integration",
@@ -108,11 +111,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
-    # Disable color output by default for cleaner log files
-    config.option.color = "no"
+    """Register custom markers and configure pytest"""
 
-    rocprof_config = get_rocprof_config()
+    is_monochrome = config.getoption("--monochrome", default=False)
+    if is_monochrome:
+        config.option.color = "no"
 
     # Functional markers (use arguments or do more than just label a test)
 
@@ -166,16 +169,7 @@ def pytest_configure(config: pytest.Config) -> None:
     for label in label_list:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
 
-    # Other logic that needs to occur here
-
-    # Log file path configuration - store path for pytest_sessionstart
-    log_file = config.getoption(
-        "--output-log", default="@test_output_dir@/pytest-output.txt"
-    )
-    log_file = log_file.replace("@test_output_dir@", str(rocprof_config.test_output_dir))
-    config._output_log_path = Path(log_file)
-
-    pytest._no_output_flag = config.getoption("--no-output", default=False)
+    # Save flags to pytest
     pytest._show_output_flag = config.getoption("--show-output", default=False)
     pytest._show_output_on_subtest_fail_flag = config.getoption(
         "--show-output-on-subtest-fail", default=False
@@ -183,15 +177,27 @@ def pytest_configure(config: pytest.Config) -> None:
     pytest._ctest_integration_flag = config.getoption(
         "--ctest-integration", default=False
     )
+
     # Store config reference for hooks that need terminal reporter access
     pytest._config_ref = config
+
+
+# ----------------------------------------------------------------------------
+# Session start hooks
+# ----------------------------------------------------------------------------
 
 
 def pytest_sessionstart(session):
     """Set up terminal output redirection after plugins are loaded."""
     config = session.config
-    if not hasattr(config, "_output_log_path"):
-        return
+
+    # Log file path config - use function, not fixture (fixtures don't work in hooks)
+    rocprof_config = get_rocprof_config()
+    log_file = config.getoption(
+        "--output-log", default="@test_output_dir@/pytest-output.txt"
+    )
+    log_file = log_file.replace("@test_output_dir@", str(rocprof_config.test_output_dir))
+    config._output_log_path = Path(log_file)
 
     log_path = config._output_log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,9 +220,11 @@ def pytest_sessionstart(session):
         tw.write = redirect_to_file
 
 
-# Debug helper
-def pytest_report_header(config: pytest.Config) -> list[str]:
+def pytest_report_header(config) -> list[str]:
     """Add test configuration to pytest header output."""
+    if not config.getoption("--show-config", default=False):
+        return []
+
     try:
         rocprof_config = get_rocprof_config()
     except Exception as e:
@@ -283,15 +291,22 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
         f"  Causal:         {rocprof_config.rocprofsys_causal}",
         f"  MPI exec:       {rocprof_config.mpiexec}",
         f"  Offload tool:   {offload_msg}",
-        "=" * 70,
-        "",
+        "-" * 70,
+        "System Environment:",
     ]
+    fundamental_env = rocprof_config.get_fundamental_environment()
+    for key, value in sorted(fundamental_env.items()):
+        lines.append(f"  {key}={value}")
+    lines.extend(["=" * 70, ""])
     return lines
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+# ----------------------------------------------------------------------------
+# Collection hooks
+# ----------------------------------------------------------------------------
+
+
+def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
     gpu_info = detect_gpu()
     rocprof_config = get_rocprof_config()
@@ -348,6 +363,89 @@ def pytest_collection_modifyitems(
                 )
 
 
+# ----------------------------------------------------------------------------
+# Test execution hooks
+# ----------------------------------------------------------------------------
+
+
+@pytest.hookimpl(hookwrapper=True)  # Allows yield
+def pytest_runtest_makereport(item, call):
+    """Track test results (cleanup decisions) and inject runner if needed."""
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+
+    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    show_on_fail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
+    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
+
+    should_show = show_output_flag or (
+        show_on_fail_flag and (rep.failed or has_subtest_failures)
+    )
+
+    # Only act on call phase
+    if not (should_show) or rep.when != "call":
+        return
+
+    # Prevent duplicate output (only print once per test function)
+    if item.stash.get(_output_printed_key, False):
+        return
+
+    results = item.stash.get(_results_key, [])
+    if not results:
+        return
+
+    config = getattr(pytest, "_config_ref", None)
+    print_env_flag = bool(config and config.getoption("--print-env", default=False))
+
+    output_parts = []
+    for result in results:
+        cmd = " ".join(str(c) for c in getattr(result, "command", []))
+        if cmd:
+            output_parts.append(f"{'='*70}")
+            output_parts.append(f"Command: {cmd}")
+            output_parts.append(f"{'='*70}")
+        if print_env_flag:
+            result_env = getattr(result, "environment", None)
+            if isinstance(result_env, dict) and result_env:
+                env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
+                output_parts.append(
+                    "Environment (via --print-env):\n\n" + "\n".join(env_lines) + "\n"
+                )
+                output_parts.append(f"{'='*70}")
+        output_parts.append("Test Output:\n")
+        test_out = getattr(result, "test_output", "")
+        if test_out:
+            output_parts.append(test_out)
+
+    if not output_parts:
+        return
+    item.stash[_output_printed_key] = True
+
+    output_text = "\n".join(output_parts) + "\n\n"
+    rep.sections.append(("Runner Output", output_text))
+
+
+def pytest_runtest_logreport(report):
+    """Handle output display for passing tests."""
+    # Determine if we should show runner output
+    show_output_flag = getattr(pytest, "_show_output_flag", False)
+    if show_output_flag and report.when == "call" and report.passed:
+        config = getattr(pytest, "_config_ref", None)
+        terminal = config.pluginmanager.get_plugin("terminalreporter") if config else None
+        if terminal:
+            for section_name, section_content in report.sections:
+                if section_name == "Runner Output":
+                    terminal.write_line(f"\n--- {section_name} ---")
+                    for line in section_content.splitlines():
+                        terminal.write_line(line)
+
+
+# ----------------------------------------------------------------------------
+# Session End hooks
+# ----------------------------------------------------------------------------
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Code that runs after all tests complete
 
@@ -399,6 +497,13 @@ def pytest_unconfigure(config):
         config._log_file_handle.close()
 
 
+# ============================================================================
+#
+# Helper functions
+#
+# ============================================================================
+
+
 @lru_cache(maxsize=1)
 def check_use_rocpd() -> bool:
     """Whether ROCpd is available for tests.
@@ -436,218 +541,13 @@ def check_use_perfetto() -> bool:
         return False
 
 
-# ============================================================================
-# Session-scoped Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session", autouse=True)
-def is_xdist_used(request) -> bool:
-    """Whether xdist is actively being used (parallel mode) for the test session."""
-    # workerinput only exists on xdist worker processes
-    return hasattr(request.config, "workerinput")
-
-
-@pytest.fixture(scope="session")
-def rocprof_config() -> RocprofsysConfig:
-    """Session-wide rocprofiler-systems configuration.
-
-    Discovers build directory and creates configuration object.
-    Can be overridden with ROCPROFSYS_BUILD_DIR environment variable.
-    """
-    return get_rocprof_config()
-
-
-@pytest.fixture(scope="session")
-def gpu_info() -> GPUInfo:
-    """Session-wide GPU information.
-
-    Detects available GPUs and their capabilities.
-    """
-    return detect_gpu()
-
-
-@pytest.fixture(scope="session")
-def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
-    """Path to tests directory."""
-    return rocprof_config.rocprofsys_tests_dir
-
-
-@pytest.fixture(scope="session")
-def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
-    """Path to validation rules directory."""
-    return rocprof_config.rocpd_validation_rules
-
-
-# ============================================================================
-# Module-scoped Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="module")
-def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
-    """Base directory for test outputs (module-scoped).
-
-    All test outputs for a module are stored under this directory.
-    """
-    output_dir = rocprof_config.test_output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
-
-
-# ============================================================================
-# Function-scoped Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-def collect_result(request) -> Callable:
-    """Fixture to collect test results for display.
-
-    Handled by the `run_test` fixture
-
-    Manual usage in tests:
-        result = runner.run()
-        collect_result(result)
-    """
-
-    def _collect(result):
-        request.node.stash.setdefault(_results_key, []).append(result)
-
-    return _collect
-
-
-@pytest.fixture
-def test_output_dir(
-    test_output_base: Path,
-    request: pytest.FixtureRequest,
-) -> Generator[Path, None, None]:
-    """Unique output directory for each test.
-
-    Creates a directory named after the test and cleans up on success.
-    On failure, the directory is preserved for debugging.
-
-    Cleanup Order:
-        1. Test setup: Directory is created
-        2. Test body: Runner executes, output files are written
-        3. Test body: Validation happens on output files
-        4. Test body: Assertions complete
-        5. Test teardown: This fixture cleans up the directory (AFTER yield)
-
-    This ensures validation always has access to output files.
-    """
-    class_name = request.node.cls.__name__ if request.node.cls else None
-    test_name = request.node.name
-    full_name = f"{class_name}__{test_name}" if class_name else test_name
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in full_name)
-    output_dir = test_output_base / safe_name
-
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True)
-
-    yield output_dir  # Test body executes here (including validation)
-
-    # === CLEANUP PHASE (runs AFTER test body completes) ===
-    # Cleanup on success unless ROCPROFSYS_KEEP_TEST_OUTPUT is set
-    keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1"
-    test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
-
-    if not keep_output and not test_failed and output_dir.exists():
-        shutil.rmtree(output_dir)
-
-
-@pytest.fixture
-def base_env(rocprof_config: RocprofsysConfig) -> dict[str, str]:
-    """Base environment variables for test execution."""
-    return rocprof_config.get_base_environment()
-
-
-@pytest.fixture
-def flat_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Environment variables for flat profile tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "ROCPROFSYS_FLAT_PROFILE": "ON",
-        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
-        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
-        "ROCPROFSYS_SAMPLING_FREQ": "50",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
-
-
-@pytest.fixture
-def perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Environment variables for perfetto-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "OFF",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
-        "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
-
-
-@pytest.fixture
-def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
-    """Environment variables for timemory-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "OFF",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
-
-
-@pytest.fixture(scope="function", autouse=True)
-def apply_rocpd_marker(request):
-    """Automatically add ROCpd env vars based on marker.
-
-    Usage:
-        @pytest.mark.rocpd("<env name>")
-    """
-    if not check_use_rocpd():
-        return
-
-    marker = request.node.get_closest_marker("rocpd")
-    if not marker or not marker.args:
-        return
-
-    # First arg is fixture name
-    env_fixture_name = marker.args[0]
-
+@lru_cache(maxsize=1)
+def get_rocprof_config() -> RocprofsysConfig:
+    """Return the rocprofiler-systems configuration."""
     try:
-        env = request.getfixturevalue(env_fixture_name)
-    except pytest.FixtureLookupError:
-        return
-
-    # Add ROCpd base env
-    env["ROCPROFSYS_USE_ROCPD"] = "ON"
-
-
-# ============================================================================
-# Cleanup Functions - pytest_sessionfinish hook also uses these
-# ============================================================================
+        return discover_build_config()
+    except Exception as e:
+        raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
 
 
 def _cleanup_temp_patterns() -> list[str]:
@@ -730,6 +630,138 @@ def _safe_remove_directory(dirpath: Path, remove_if_empty: bool = True) -> None:
         pass
 
 
+# ============================================================================
+#
+# Fixtures
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Environment Fixtures
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def base_env(rocprof_config) -> dict[str, str]:
+    """Get base environment variables for test execution."""
+    return rocprof_config.get_base_environment()
+
+
+@pytest.fixture
+def flat_env(base_env: dict[str, str]) -> dict[str, str]:
+    """Environment variables for flat profile tests."""
+    return {
+        "ROCPROFSYS_TRACE": "ON",
+        "ROCPROFSYS_PROFILE": "ON",
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_COUT_OUTPUT": "ON",
+        "ROCPROFSYS_FLAT_PROFILE": "ON",
+        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
+        "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
+        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
+        "ROCPROFSYS_SAMPLING_FREQ": "50",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+        "OMP_PROC_BIND": "spread",
+        "OMP_PLACES": "threads",
+        "OMP_NUM_THREADS": "2",
+        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
+    }
+
+
+@pytest.fixture
+def perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
+    """Environment variables for perfetto-only tests."""
+    return {
+        "ROCPROFSYS_TRACE": "ON",
+        "ROCPROFSYS_PROFILE": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
+        "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
+        "OMP_PROC_BIND": "spread",
+        "OMP_PLACES": "threads",
+        "OMP_NUM_THREADS": "2",
+        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
+    }
+
+
+@pytest.fixture
+def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
+    """Environment variables for timemory-only tests."""
+    return {
+        "ROCPROFSYS_TRACE": "OFF",
+        "ROCPROFSYS_PROFILE": "ON",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+        "OMP_PROC_BIND": "spread",
+        "OMP_PLACES": "threads",
+        "OMP_NUM_THREADS": "2",
+        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
+    }
+
+
+# ----------------------------------------------------------------------------
+# Session-scoped Fixtures
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def is_xdist_used(request) -> bool:
+    """Whether xdist is actively being used (parallel mode) for the test session."""
+    # workerinput only exists on xdist worker processes
+    return hasattr(request.config, "workerinput")
+
+
+@pytest.fixture(scope="session")
+def rocprof_config() -> RocprofsysConfig:
+    """Session-wide rocprofiler-systems configuration.
+
+    Discovers build directory and creates configuration object.
+    Can be overridden with ROCPROFSYS_BUILD_DIR environment variable.
+    """
+    return get_rocprof_config()
+
+
+@pytest.fixture(scope="session")
+def gpu_info() -> GPUInfo:
+    """Session-wide GPU information.
+
+    Detects available GPUs and their capabilities.
+    """
+    return detect_gpu()
+
+
+@pytest.fixture(scope="session")
+def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
+    """Path to tests directory."""
+    return rocprof_config.rocprofsys_tests_dir
+
+
+@pytest.fixture(scope="session")
+def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
+    """Path to validation rules directory."""
+    return rocprof_config.rocpd_validation_rules
+
+
+# ----------------------------------------------------------------------------
+# Module-scoped Fixtures
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
+    """Base directory for test outputs (module-scoped).
+
+    All test outputs for a module are stored under this directory.
+    """
+    output_dir = rocprof_config.test_output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_module_temp_files(
     rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest, is_xdist_used
@@ -768,6 +800,94 @@ def cleanup_module_temp_files(
                 _safe_remove_file(Path(filepath))
 
 
+# ----------------------------------------------------------------------------
+# Function-scoped Fixtures
+# ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def collect_result(request) -> Callable:
+    """Fixture to collect test results for display.
+
+    Handled by the `run_test` fixture
+
+    Manual usage in tests:
+        result = runner.run()
+        collect_result(result)
+    """
+
+    def _collect(result):
+        request.node.stash.setdefault(_results_key, []).append(result)
+
+    return _collect
+
+
+@pytest.fixture
+def test_output_dir(
+    test_output_base: Path,
+    request: pytest.FixtureRequest,
+) -> Generator[Path, None, None]:
+    """Unique output directory for each test.
+
+    Creates a directory named after the test and cleans up on success.
+    On failure, the directory is preserved for debugging.
+
+    Cleanup Order:
+        1. Test setup: Directory is created
+        2. Test body: Runner executes, output files are written
+        3. Test body: Validation happens on output files
+        4. Test body: Assertions complete
+        5. Test teardown: This fixture cleans up the directory (AFTER yield)
+
+    This ensures validation always has access to output files.
+    """
+    class_name = request.node.cls.__name__ if request.node.cls else None
+    test_name = request.node.name
+    full_name = f"{class_name}__{test_name}" if class_name else test_name
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in full_name)
+    output_dir = test_output_base / safe_name
+
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+
+    yield output_dir  # Test body executes here (including validation)
+
+    # === CLEANUP PHASE (runs AFTER test body completes) ===
+    # Cleanup on success unless ROCPROFSYS_KEEP_TEST_OUTPUT is set
+    keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1"
+    test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
+
+    if not keep_output and not test_failed and output_dir.exists():
+        shutil.rmtree(output_dir)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def apply_rocpd_marker(request):
+    """Automatically add ROCpd env vars based on marker.
+
+    Usage:
+        @pytest.mark.rocpd("<env name>")
+    """
+    if not check_use_rocpd():
+        return
+
+    marker = request.node.get_closest_marker("rocpd")
+    if not marker or not marker.args:
+        return
+
+    # First arg is fixture name
+    env_fixture_name = marker.args[0]
+
+    try:
+        env = request.getfixturevalue(env_fixture_name)
+    except pytest.FixtureLookupError:
+        return
+
+    # Add ROCpd base env
+    env["ROCPROFSYS_USE_ROCPD"] = "ON"
+
+
 @pytest.fixture
 def cleanup_instrumented_binary(
     rocprof_config: RocprofsysConfig,
@@ -799,86 +919,7 @@ def cleanup_instrumented_binary(
         _safe_remove_file(inst_file)
 
 
-# ============================================================================
-# Pytest Hooks
-# ============================================================================
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_logreport(report):
-    """Handle output display for passing tests and suppress details when --no-output."""
-    if getattr(pytest, "_no_output_flag", False):
-        # Don't modify longrepr for skipped tests - pytest expects tuple format for skip reason
-        if not report.skipped:
-            report.longrepr = ""
-        return
-
-    # Determine if we should show runner output
-    show_output_flag = getattr(pytest, "_show_output_flag", False)
-    if show_output_flag and report.when == "call" and report.passed:
-        config = getattr(pytest, "_config_ref", None)
-        terminal = config.pluginmanager.get_plugin("terminalreporter") if config else None
-        if terminal:
-            for section_name, section_content in report.sections:
-                if section_name == "Runner Output":
-                    terminal.write_line(f"\n--- {section_name} ---")
-                    for line in section_content.splitlines():
-                        terminal.write_line(line)
-
-
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    """Track test results (cleanup decisions) and inject runner if needed."""
-    outcome = yield
-    rep = outcome.get_result()
-    setattr(item, f"rep_{rep.when}", rep)
-
-    show_output_flag = getattr(pytest, "_show_output_flag", False)
-    show_on_fail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
-    has_subtest_failures = len(item.stash.get(_subtest_failures_key, [])) > 0
-
-    should_show = show_output_flag or (
-        show_on_fail_flag and (rep.failed or has_subtest_failures)
-    )
-
-    # Only act on call phase
-    if not (should_show) or rep.when != "call":
-        return
-
-    # Prevent duplicate output (only print once per test function)
-    if item.stash.get(_output_printed_key, False):
-        return
-
-    results = item.stash.get(_results_key, [])
-    if not results:
-        return
-
-    output_parts = []
-    for result in results:
-        cmd = " ".join(str(c) for c in getattr(result, "command", []))
-        if cmd:
-            output_parts.append(f"{'='*70}")
-            output_parts.append(f"Command: {cmd}")
-            output_parts.append(f"{'='*70}")
-        test_out = getattr(result, "test_output", "")
-        if test_out:
-            output_parts.append(test_out)
-
-    if not output_parts:
-        return
-    item.stash[_output_printed_key] = True
-
-    output_text = "\n".join(output_parts) + "\n\n"
-    rep.sections.append(("Runner Output", output_text))
-
-
-# ============================================================================
-# Test run and assertion fixtures
-# ============================================================================
-
-
 # This is needed for pytest-subtests plugin compatibility when pytest < 9.0.0
-# (TheRock uses 8.3.5)
 @pytest.fixture
 def record_subtest_failure(request):
     """Fixture to record subtest failures for --show-output-on-subtest-fail.
@@ -892,9 +933,21 @@ def record_subtest_failure(request):
     return _record
 
 
+# ============================================================================
+# Test run and assertion fixtures
+# ============================================================================
+
+
 @pytest.fixture
-def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir):
+def run_test(
+    request,
+    collect_result,
+    rocprof_config,
+    gpu_info,
+    test_output_dir,
+):
     """Unified fixture to run any test runner type and handle pytest logic.
+    If a rocprof-sys binary is provided, uses "base_binary_environment" instead of "base_environment".
 
     Args:
         runner_type: One of "baseline", "sampling", "binary_rewrite",
@@ -911,6 +964,7 @@ def run_test(request, collect_result, rocprof_config, gpu_info, test_output_dir)
         fail_on_pass: If True, pytest.fail on success and pytest.pass on failure (default: False)
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
+        no_base_env: If true, don't use the base environment (default: False)
         **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
 
     Returns:

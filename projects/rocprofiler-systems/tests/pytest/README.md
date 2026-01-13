@@ -20,7 +20,7 @@ Runs tests using binaries from your build directory.
 
 ```bash
 cd <path to rocprofiler-systems>
-pytest tests/pytest/
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/
 ```
 
 Default output directory: `<build-dir>/rocprof-sys-pytest-output/`
@@ -32,10 +32,10 @@ If auto detection of the build directory fails, specify `ROCPROFSYS_BUILD_DIR=<p
 Runs tests using binaries from your install location.
 
 ```bash
-ROCPROFSYS_INSTALL_DIR=<install prefix> pytest tests/pytest/
+ROCPROFSYS_INSTALL_DIR=<install prefix> pytest <build-dir>/share/rocprofiler-systems/tests/pytest/
 
 # Using /opt/rocprofiler-systems
-ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest tests/pytest/
+ROCPROFSYS_INSTALL_DIR=/opt/rocprofiler-systems pytest <build-dir>/share/rocprofiler-systems/tests/pytest/
 ```
 
 Default output directory: `/tmp/$USER/rocprof-sys-pytest-output/`
@@ -59,16 +59,19 @@ Default output directory: `/tmp/$USER/rocprof-sys-pytest-output/`
 
 ```bash
 # Run all tests
-pytest tests/pytest/
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/
 
 # Run a specific test file
-pytest tests/pytest/test_transpose.py
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/test_transpose.py
 
 # Run a specific test class
-pytest tests/pytest/test_transpose.py::TestTranspose
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/test_transpose.py::TestTranspose
 
 # Run a specific test function
-pytest tests/pytest/test_transpose.py::TestTranspose::test_sampling
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/test_transpose.py::TestTranspose::test_sampling
+
+# Goto test command
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n auto -v --show-output-on-subtest-fail --show-config --monochrome
 ```
 
 ### Parallel Execution (pytest-xdist)
@@ -76,8 +79,8 @@ pytest tests/pytest/test_transpose.py::TestTranspose::test_sampling
 Tests can be run in parallel using `pytest-xdist`:
 
 ```bash
-pytest tests/pytest/ -n auto  # Use all available cores
-pytest tests/pytest/ -n 4     # Use 4 workers
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n auto  # Use all available cores
+pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4     # Use 4 workers
 ```
 
 > **Warning:** Running tests in parallel can cause timeouts due to resource contention, especially for `runtime_instrument` tests. If you experience unexpected timeouts, try reducing the number of workers or running sequentially.
@@ -86,10 +89,14 @@ pytest tests/pytest/ -n 4     # Use 4 workers
 
 | Flag | Description |
 |------|-------------|
+| `--show-config` | Show test configuration in the pytest header |
 | `--show-output` | Show runner output when tests **pass** |
 | `--show-output-on-subtest-fail` | Show runner output only when **subtests** fail |
-| `--no-output` | Suppress all output (only show pass/fail) |
 | `--output-log=<path>` | Write pytest output to the specified file (default: `<test_output_dir>/pytest-output.txt`) |
+| `--print-env` | Prepend environment variables to runner output (tied to runner output) |
+| `--monochrome` | Disable colored output and set `ROCPROFSYS_MONOCHROME=ON` for runners |
+
+**Tip:** Use `--tb=short` to hide source code in tracebacks, or `--tb=no` for no output.
 
 #### Output Display Logic
 
@@ -146,6 +153,7 @@ Tests for the <feature> example.
 """
 
 # 3. Imports
+from __future__ import annotations # Required for python 3.7/3.8
 import pytest
 from pathlib import Path
 
@@ -180,7 +188,7 @@ Testing occurs in two distinct phases:
 
 The `run_test` fixture is a unified interface for all runner types. It handles:
 
-- Runner creation and execution
+- Runner creation, base environment injection and execution
 - Result collection for output display
 - Automatic failure/skip on errors
 - GPU architecture validation (for `@pytest.mark.gpu` tests)

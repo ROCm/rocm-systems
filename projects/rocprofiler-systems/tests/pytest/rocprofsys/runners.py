@@ -170,7 +170,8 @@ class BaseRunner(ABC):
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
         self.working_directory = working_directory or config.rocprofsys_build_dir
-        self.env = config.get_base_environment()
+        self.env = config.get_fundamental_environment()
+        self.env.update(config.get_base_environment())
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
             self.env.update(env)
@@ -228,8 +229,6 @@ class BaseRunner(ABC):
 
         command = self.build_command()
         command = self._wrap_with_mpi(command)
-        full_env = os.environ.copy()
-        full_env.update(self.env)
 
         start_time = time.time()
 
@@ -240,7 +239,7 @@ class BaseRunner(ABC):
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=self.timeout,
-                env=full_env,
+                env=self.env,
                 cwd=self.working_directory,
             )
 
@@ -309,7 +308,8 @@ class BaselineRunner(BaseRunner):
 
         # If target is a rocprof-sys binary, use binary environment instead
         if target in self.ROCPROFSYS_BINARIES:
-            self.env = config.get_base_binary_environment()
+            self.env = config.get_fundamental_environment()
+            self.env.update(config.get_base_binary_environment())
             self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
             # Re-apply any custom env passed via kwargs
             if "env" in kwargs and kwargs["env"]:
@@ -401,9 +401,6 @@ class BinaryRewriteRunner(BaseRunner):
             + ["--", str(self.target_exe)]
         )
 
-        full_env = os.environ.copy()
-        full_env.update(self.env)
-
         start_time = time.time()
 
         try:
@@ -413,7 +410,7 @@ class BinaryRewriteRunner(BaseRunner):
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=self.timeout,
-                env=full_env,
+                env=self.env,
                 cwd=self.config.rocprofsys_build_dir,
             )
 

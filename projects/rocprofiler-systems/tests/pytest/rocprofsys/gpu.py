@@ -160,8 +160,8 @@ def lookup_gpu_category(arch: str) -> list[str]:
     return categories
 
 
-# Yes returning a bool in the tuple is ugly, but it prevents version check when reporting
-# message to user
+# Yes returning a bool in the tuple is ugly, but it prevents version check
+# when used in pytest_report_header
 @lru_cache(maxsize=1)
 def get_offload_extractor(rocm_path: Path) -> tuple[Path, str | None, bool | None] | None:
     """Get offload extractor path and cmd
