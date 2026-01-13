@@ -27,6 +27,10 @@
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
+#ifdef MPI_VERSION
+#include <mpi.h>
+#define USING_MPI
+#endif // MPI_VERSION
 
 // Helper macro for HIP error checking
 #define HIP_CHECK(call)                                                        \
@@ -100,34 +104,63 @@ __global__ void jacobi_iteration(float *__restrict__ U_new,
 }
 
 int main(int argc, char *argv[]) {
+  #ifdef USING_MPI
+    // Initialize MPI 
+    MPI_Init(&argc, &argv);
+
+    // Get the rank of the process
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  #endif // USING_MPI
+
   int iter = 1000;
   std::vector<int> launch_order;
 
-  for (int i = 0; i < argc; i++) {
-    if (std::string(argv[i]) == "-i" && i + 1 < argc) {
-      iter = std::atoi(argv[i + 1]);
-    } else if (std::string(argv[i]) == "-o" && i + 1 < argc) {
-      int n_order = std::atoi(argv[i + 1]);
-      if ((i + n_order + 1) >= argc) {
-        std::cerr << "Insufficient arguments for -o option" << std::endl;
-        return EXIT_FAILURE;
-      } else {
-        for (int j = 0; j < n_order; j++) {
-          int kernel_id = std::atoi(argv[i + 2 + j]);
-          if (kernel_id < 0 || kernel_id > 2) {
-            std::cerr << "Invalid kernel ID: " << kernel_id << std::endl;
+  #ifdef USING_MPI
+    if (rank == 0) {
+  #endif // USING_MPI
+      // Parse command-line arguments
+      for (int i = 0; i < argc; i++) {
+        if (std::string(argv[i]) == "-i" && i + 1 < argc) {
+          iter = std::atoi(argv[i + 1]);
+        } else if (std::string(argv[i]) == "-o" && i + 1 < argc) {
+          int n_order = std::atoi(argv[i + 1]);
+          if ((i + n_order + 1) >= argc) {
+            std::cerr << "Insufficient arguments for -o option" << std::endl;
             return EXIT_FAILURE;
+          } else {
+            for (int j = 0; j < n_order; j++) {
+              int kernel_id = std::atoi(argv[i + 2 + j]);
+              if (kernel_id < 0 || kernel_id > 2) {
+                std::cerr << "Invalid kernel ID: " << kernel_id << std::endl;
+                return EXIT_FAILURE;
+              }
+              launch_order.push_back(kernel_id);
+            }
+            i += n_order;
           }
-          launch_order.push_back(kernel_id);
         }
-        i += n_order;
       }
-    }
-  }
 
-  if (launch_order.empty()) {
-    launch_order = {0, 1, 2};
-  }
+      if (launch_order.empty()) {
+        launch_order = {0, 1, 2};
+      }
+  #ifdef USING_MPI
+    }
+
+    // Broadcast number of iterations to all processes
+    MPI_Bcast(&iter, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Broadcast launch_order size and data to all processes
+    int order_size = launch_order.size();
+    MPI_Bcast(&order_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank != 0)
+      launch_order.resize(order_size);
+
+    MPI_Bcast(launch_order.data(), order_size, MPI_INT, 0, MPI_COMM_WORLD);
+  #endif // USING_MPI
+
 
   // Problem size
   const int n_small = 1024;
@@ -212,6 +245,11 @@ int main(int argc, char *argv[]) {
   delete[] h_U_small;
   delete[] h_U_mid;
   delete[] h_U_large;
+
+  #ifdef USING_MPI
+    // Finalize MPI
+    MPI_Finalize();
+  #endif // USING_MPI
 
   return 0;
 }
