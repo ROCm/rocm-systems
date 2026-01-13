@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "rocprof-sys-instrument.hpp"
+#include "common/common_utils.hpp"
 #include "common/defines.h"
 #include "common/join.hpp"
 #include "common/path.hpp"
@@ -479,7 +480,30 @@ main(int argc, char** argv)
     // it is unrecognized, then set the errflag to report an error.  When we come to a
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
-    parser_t parser("rocprof-sys-instrument");
+
+    const auto* _desc = R"(
+Binary instrumentation tool for profiling and tracing applications.
+QUICK REFERENCE:
+  Presets:  --quick (fast), --profile-only, --trace-hpc (HPC/MPI), --trace-ai (GPU/ML)
+  Modes:    Binary rewrite (-o file.inst) or runtime (no -o)
+  Output:   Results saved to rocprof-sys-output/ directory
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-instrument --quick -- ./myapp
+  Workload-Specific Presets:
+    rocprof-sys-instrument --trace-hpc -o myapp.inst -- ./myapp  # HPC/MPI/OpenMP
+    rocprof-sys-instrument --trace-ai -- python train.py         # AI/ML/GPU
+    rocprof-sys-instrument --profile-only -o myapp.inst -- ./myapp
+  Custom Configuration:
+    rocprof-sys-instrument -R '^compute_' -o myapp.inst -- ./myapp
+    rocprof-sys-instrument -ME '^(libhsa|libamdhip64)' -- ./myapp
+    rocprof-sys-instrument -o myapp.inst -- ./myapp && rocprof-sys-run -- ./myapp.inst
+INSTRUMENTATION MODES:
+  Binary Rewrite:  rocprof-sys-instrument -o app.inst -- ./app && rocprof-sys-run -- ./app.inst
+  Runtime:         rocprof-sys-instrument -- ./app
+)";
+
+    parser_t parser("rocprof-sys-instrument", _desc);
     string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();
@@ -604,6 +628,83 @@ main(int argc, char** argv)
             "Print the instructions for each basic-block in the JSON/XML outputs")
         .max_count(1)
         .action([](parser_t& p) { instr_print = p.get<bool>("print-instructions"); });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[PRESET MODES]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument(
+            { "--quick" },
+            "Quick instrumentation preset: runtime instrumentation with sensible "
+            "defaults for immediate profiling")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("quick"))
+            {
+                instr_mode = "trace";
+                // use_stubs  = false;
+                // Runtime instrumentation mode
+                binary_rewrite = false;
+            }
+        });
+    parser
+        .add_argument(
+            { "--profile-only" },
+            "Profile-only preset: binary rewrite optimized for profiling without "
+            "detailed trace (lower overhead)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("profile-only"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+                // use_stubs      = false;
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-only" },
+            "Trace-only preset: binary rewrite optimized for detailed tracing and "
+            "analysis")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-only"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+                // use_stubs      = false;
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-hpc" },
+            "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+            "applications (enables binary rewrite)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-hpc"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = true;
+            }
+        });
+    parser
+        .add_argument({ "--trace-ai" },
+                      "AI/ML workload preset: optimized for PyTorch, TensorFlow, JAX "
+                      "(enables runtime instrumentation with GPU tracing)")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) {
+            if(p.get<bool>("trace-ai"))
+            {
+                instr_mode     = "trace";
+                binary_rewrite = false;  // Runtime instrumentation for Python interop
+            }
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[MODE OPTIONS]" }, "");
@@ -1089,6 +1190,30 @@ main(int argc, char** argv)
         std::cerr << err << std::endl;
         parser.print_help(extra_help);
         return -1;
+    }
+
+    std::vector<std::string> active_presets;
+
+    if(parser.exists("quick") && parser.get<bool>("quick"))
+        active_presets.emplace_back("--quick");
+    if(parser.exists("profile-only") && parser.get<bool>("profile-only"))
+        active_presets.emplace_back("--profile-only");
+    if(parser.exists("trace-only") && parser.get<bool>("trace-only"))
+        active_presets.emplace_back("--trace-only");
+    if(parser.exists("trace-hpc") && parser.get<bool>("trace-hpc"))
+        active_presets.emplace_back("--trace-hpc");
+    if(parser.exists("trace-ai") && parser.get<bool>("trace-ai"))
+        active_presets.emplace_back("--trace-ai");
+
+    if(rocprofsys::common_utils::validate_preset_modes(active_presets) != EXIT_SUCCESS)
+    {
+        return EXIT_FAILURE;
+    }
+
+    if(!active_presets.empty() && verbose_level >= 0)
+    {
+        rocprofsys::common_utils::print_pre_execution_info("instrument",
+                                                           active_presets[0]);
     }
 
     if(parser.exists("config"))

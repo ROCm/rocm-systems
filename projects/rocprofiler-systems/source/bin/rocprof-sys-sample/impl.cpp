@@ -22,6 +22,7 @@
 
 #include "rocprof-sys-sample.hpp"
 
+#include "common/common_utils.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 
@@ -227,7 +228,30 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
     auto _omni_libpath = path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
-    auto parser = parser_t(argv[0]);
+    const auto* _desc = R"(
+Call-stack sampling profiler for applications without binary instrumentation.
+QUICK REFERENCE:
+  Presets:  --quick (fast), --simple (minimal), --trace-hpc (HPC/MPI), --trace-ai (GPU/ML)
+  Output:   Results saved to rocprof-sys-output/ directory
+  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
+EXAMPLES:
+  Quick Start:
+    rocprof-sys-sample --quick -- ./myapp
+  Workload-Specific Presets:
+    rocprof-sys-sample --trace-hpc -- ./hpc_app    # HPC/MPI/OpenMP
+    rocprof-sys-sample --trace-ai -- python train.py  # AI/ML/GPU
+    rocprof-sys-sample --simple -- ./myapp          # Minimal overhead
+  Custom Configuration:
+    rocprof-sys-sample -f 100 --trace --hip-trace -- ./myapp
+    rocprof-sys-sample -o ./results myrun -- ./myapp
+    mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+PROFILING WORKFLOW:
+  1. Profile:   rocprof-sys-sample --quick -- ./app
+  2. Analyze:   cat rocprof-sys-output/wall_clock.txt
+  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev
+)";
+
+    auto parser = parser_t(argv[0], _desc);
 
     parser.on_error([](parser_t&, const parser_err_t& _err) {
         stream(std::cerr, color::fatal()) << _err << "\n";
@@ -335,6 +359,224 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL",
                                            log_levels[index], update_mode::REPLACE, ":",
                                            updated_envs, original_envs);
+        });
+
+    parser.start_group("PRESET MODES",
+                       "Simplified profiling presets for common use cases");
+    parser
+        .add_argument({ "--quick" },
+                      "Quick profiling mode: enables tracing and sampling at 50Hz with "
+                      "default metrics for immediate insights")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("quick"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--simple" },
+            "Simple profiling mode: flat profile only with minimal overhead, no "
+            "detailed trace")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("simple"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               false, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_FLAT_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--detailed" },
+            "Detailed profiling mode: full trace, profile, hardware counters, and "
+            "process sampling")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("detailed"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-hpc" },
+            "HPC workload preset: optimized for MPI, OpenMP, and compute-intensive "
+            "applications with hardware counter collection")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-hpc"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_OMPT", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_RCCL", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_KOKKOSP", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_MPIP", "true",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                    "scratch_memory",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PAPI_EVENTS",
+                                               "PAPI_TOT_INS,PAPI_TOT_CYC,PAPI_L3_TCM",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+            }
+        });
+    parser
+        .add_argument(
+            { "--trace-ai" },
+            "AI/ML workload preset: optimized for PyTorch, TensorFlow, JAX with "
+            "GPU tracing and Python profiling")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            if(p.get<bool>("trace-ai"))
+            {
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", false,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_MPIP", "true",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                    "scratch_memory",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                rocprofsys::common::update_env(
+                    _env, "ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
+                if(hip_visible_devices && strlen(hip_visible_devices) > 0)
+                {
+                    rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_GPUS",
+                                                   std::string(hip_visible_devices),
+                                                   update_mode::REPLACE, ":",
+                                                   updated_envs, original_envs);
+                }
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCTRACER", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_HIP_API", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_HIP_ACTIVITY",
+                                               true, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_RCCL", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCPD", true,
+                                               update_mode::REPLACE, ":", updated_envs,
+                                               original_envs);
+                rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
+                                               2048000, update_mode::REPLACE, ":",
+                                               updated_envs, original_envs);
+            }
         });
 
     parser.start_group("GENERAL OPTIONS",
@@ -930,6 +1172,33 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     if(parser.exists("profile") && parser.exists("flat-profile"))
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
+
+    std::vector<std::string> active_presets;
+    if(parser.exists("quick") && parser.get<bool>("quick"))
+        active_presets.emplace_back("--quick");
+    if(parser.exists("simple") && parser.get<bool>("simple"))
+        active_presets.emplace_back("--simple");
+    if(parser.exists("detailed") && parser.get<bool>("detailed"))
+        active_presets.emplace_back("--detailed");
+    if(parser.exists("trace-hpc") && parser.get<bool>("trace-hpc"))
+        active_presets.emplace_back("--trace-hpc");
+    if(parser.exists("trace-ai") && parser.get<bool>("trace-ai"))
+        active_presets.emplace_back("--trace-ai");
+
+    if(rocprofsys::common_utils::validate_preset_modes(active_presets) != EXIT_SUCCESS)
+    {
+        exit(EXIT_FAILURE);
+    }
+
+    if(parser.exists("hip-trace") && parser.get<bool>("hip-trace"))
+    {
+        rocprofsys::common_utils::warn_if_hip_trace_without_rocm(true, "sample");
+    }
+
+    if(!active_presets.empty() && verbose >= 0)
+    {
+        rocprofsys::common_utils::print_pre_execution_info("sample", active_presets[0]);
+    }
 
     return _outv;
 }

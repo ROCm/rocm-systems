@@ -220,6 +220,56 @@ rocprof-sys-sample <rocprof-sys-options> -- <exe> <exe-options>
 rocprof-sys-sample -f 1000 -- ls -la
 ```
 
+### Workload-Specific Presets
+
+Instead of manually configuring numerous options, use preset modes optimized for common workloads:
+
+- **`--quick`** - Fast profiling with sensible defaults for immediate insights
+- **`--simple`** - Flat profile only, minimal overhead
+- **`--detailed`** - Full trace with hardware counters
+- **`--trace-hpc`** - Optimized for HPC/MPI/OpenMP applications
+  - Automatically enables OMPT, MPIP, and relevant hardware counters
+- **`--trace-ai`** - Optimized for AI/ML/GPU workloads (PyTorch, TensorFlow, JAX)
+  - Automatically enables GPU tracing, RCCL, and increases buffer sizes
+
+**Example:**
+
+```bash
+# HPC application with MPI
+mpirun -n 4 rocprof-sys-sample --trace-hpc -- ./mpi_app
+
+# AI/ML application
+rocprof-sys-sample --trace-ai -- python train.py
+
+# Quick profiling any application
+rocprof-sys-sample --quick -- ./myapp
+```
+
+### Pre-Execution Information
+
+When using preset modes, ROCm Systems Profiler displays helpful information before execution:
+
+- Which preset is active
+- Where results will be saved
+- How to visualize the results
+- Warnings about potential issues (e.g., unwritable output directory)
+
+### Smart Validation
+
+The tools now validate your command-line options and provide clear guidance:
+
+- **Preset conflict detection**: Warns if multiple conflicting presets are specified
+- **Clear error messages**: Contextual help when problems occur
+- **Actionable solutions**: Step-by-step troubleshooting for common issues
+
+### Enhanced Help Text
+
+All binaries now feature structured help organized by skill level:
+
+- **Quick Start**: Get profiling immediately with minimal configuration
+- **Workload-Specific**: Use presets optimized for your application type
+- **Custom Configuration**: Advanced options for fine-grained control
+
 ### Binary instrumentation
 
 The `rocprof-sys-instrument` executable is used to instrument an existing binary. Call-stack sampling can be enabled alongside
