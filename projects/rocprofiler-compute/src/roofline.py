@@ -1133,14 +1133,17 @@ class Roofline:
     def cli_generate_plot(
         self,
         dtype: str,
-        workload: Optional[schema.Workload] = None,
-        config: Optional[dict[str, Any]] = None,
-        arch_config: Optional[schema.ArchConfig] = None,
+        workload: schema.Workload,
+        config: dict[str, Any],
+        arch_config: schema.ArchConfig,
     ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
         :param dtype: The datatype to be profiled
+        :param workload: Complete dataframe
+        :param config: Profiling configuration from profiling_config.yaml
+        :param arch_config: Archetype-specific configurations
         :type method: str
         :return: Build the current figure using plot.build(),
         or None if datatype is not valid for the architecture
@@ -1200,33 +1203,13 @@ class Roofline:
             console_warning("roofline", "Skipping plot generation")
             return None
 
-        # if workload is detected, utilize Roofline yamls.
-        # If not, fallback to legacy calc_ai
-        if workload and config and arch_config:
-            self.__ai_data = calc_ai_analyze(
-                workload=workload,
-                mspec=self.__mspec,
-                sort_type=str(self.__run_parameters.get("sort_type")),
-                config=config,
-                arch_config=arch_config,
-            )
-
-        else:
-            pmc_perf_csv = base_path / "pmc_perf.csv"
-            if not pmc_perf_csv.is_file():
-                console_error("roofline", f"{pmc_perf_csv} does not exist")
-
-            t_df = OrderedDict()
-            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
-
-            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-            if profiling_config.get("format_rocprof_output") == "rocpd":
-                t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
-
-            t_df = self.validate_apply_kernel_filter(df=t_df, path_str=str(base_path))
-            self.__ai_data = calc_ai_profile(
-                self.__mspec, self.__run_parameters["sort_type"], t_df
-            )
+        self.__ai_data = calc_ai_analyze(
+            workload=workload,
+            mspec=self.__mspec,
+            sort_type=str(self.__run_parameters.get("sort_type")),
+            config=config,
+            arch_config=arch_config,
+        )
 
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters, dtype=dtype
