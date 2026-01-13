@@ -141,6 +141,18 @@ tools/config_management/.config_hashes.json
 ```
 
 ## Contributor Quick Start
+
+> [!NOTE]
+> **Required Python Dependency**
+> This configuration management system requires the `ruamel.yaml` Python package.
+> It is used to safely modify YAML files while preserving comments, ordering,
+> and formatting. The workflow scripts will not function correctly without it.
+>
+> Install it via:
+> ```bash
+> pip install ruamel.yaml
+> ```
+
 ### 1. Validate the current state
 
 Before making **any** config changes:
