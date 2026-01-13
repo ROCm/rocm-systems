@@ -457,7 +457,11 @@ start_agent_ctx(const context::context* ctx)
         }
 
         // Disable PTL (non-fatal if it fails)
-        counters::counter_collection_ptl_disable(agent->get_rocp_agent());
+        // Only disable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_disable(agent->get_rocp_agent());
+        }
 
         callback_data.set_profile = false;
 
@@ -594,7 +598,11 @@ stop_agent_ctx(const context::context* ctx)
                                                           HSA_WAIT_STATE_ACTIVE);
 
         // Re-enable PTL (non-fatal if it fails)
-        counters::counter_collection_ptl_enable(agent->get_rocp_agent());
+        // Only re-enable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_enable(agent->get_rocp_agent());
+        }
 
         // Unlock the device (non-fatal if it fails)
         // Only unlock here if using NEW behavior (lock at context start, not at configuration)
