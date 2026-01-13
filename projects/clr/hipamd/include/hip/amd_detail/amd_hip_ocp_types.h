@@ -30,14 +30,14 @@ THE SOFTWARE.
 #define __OCP_FP_DEVICE_STATIC__ __OCP_FP_DEVICE__ static __inline__ __attribute__((always_inline))
 #define __OCP_FP_HOST_DEVICE_STATIC__ __OCP_FP_HOST_DEVICE__ static
 
-static_assert(sizeof(unsigned int) == 4);
-static_assert(sizeof(float) == 4);
-static_assert(sizeof(unsigned short) == 2);
+static_assert(sizeof(unsigned int) == 4, "");
+static_assert(sizeof(float) == 4, "");
+static_assert(sizeof(unsigned short) == 2, "");
 
 #if (defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)) ||                          \
     (defined(__GNUC__) && (__GNUC__ > 13))
-static_assert(sizeof(__bf16) == 2);
-static_assert(sizeof(_Float16) == 2);
+static_assert(sizeof(__bf16) == 2, "");
+static_assert(sizeof(_Float16) == 2, "");
 #endif
 
 // Although we do have some abstractions of half and bfloat16, since this will be a standalone
@@ -87,5 +87,5 @@ typedef short __attribute__((vector_size(4))) __amd_shortx2_storage_t;
 
 #if (defined(__clang__) && (__clang_major__ > 17) && defined(__HIP__)) ||                          \
     (defined(__GNUC__) && (__GNUC__ > 13))
-static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8x8_storage_t));
+static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8x8_storage_t), "");
 #endif
