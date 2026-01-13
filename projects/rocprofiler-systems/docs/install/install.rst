@@ -100,6 +100,7 @@ Required third-party packages
 
 * `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
 * `SQLite <https://github.com/sqlite/sqlite>`_ for database output
+* rocstorage for rocpd database output (built automatically via FetchContent from the monorepo)
 
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
@@ -113,6 +114,7 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
    "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
+   "rocstorage", "", "ROCm Systems Profiler", "Built via FetchContent (see :ref:`rocstorage-config`)"
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
@@ -302,8 +304,35 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
+
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
+.. _rocstorage-config:
+
+rocstorage configuration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocstorage is a library for storing profiling data in rocpd (SQLite) database format.
+By default, rocstorage is built automatically via CMake's FetchContent from the monorepo
+(``../rocstorage`` relative to rocprofiler-systems).
+
+The following CMake options configure rocstorage:
+
+.. csv-table::
+   :header: "CMake Option", "Default", "Description"
+   :widths: 30, 10, 60
+
+   "``ROCPROFSYS_USE_EXTERNAL_ROCSTORAGE``", "OFF", "Use an externally installed rocstorage library via ``find_package()``"
+   "``ROCPROFSYS_ROCSTORAGE_SOURCE_DIR``", "``../rocstorage``", "Path to rocstorage source when building from source"
+   "``ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY``", """""", "Git repository URL for rocstorage (leave empty to use local path)"
+   "``ROCPROFSYS_ROCSTORAGE_GIT_TAG``", "``develop``", "Git tag/branch when fetching from a repository"
+   "``ROCPROFSYS_ROCSTORAGE_ENABLE_LOGGING``", "OFF", "Enable rocstorage debug logging"
+
+To use an externally installed rocstorage:
+
+.. code-block:: shell
+
+   cmake -B build -DROCPROFSYS_USE_EXTERNAL_ROCSTORAGE=ON -S rocprofiler-systems
 
 ROCm Systems Profiler without ROCm
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

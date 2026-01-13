@@ -1,6 +1,14 @@
 include_guard(GLOBAL)
 
-include(FetchContent)
+# ------------------------------------------------------------------------------
+# Options
+# ------------------------------------------------------------------------------
+
+option(
+    ROCPROFSYS_USE_EXTERNAL_ROCSTORAGE
+    "Use externally installed rocstorage library instead of building from source"
+    OFF
+)
 
 set(ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY
     ""
@@ -8,7 +16,7 @@ set(ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY
     "Git repository URL for rocstorage (leave empty to use local path)"
 )
 
-set(ROCPROFSYS_ROCSTORAGE_GIT_TAG "main" CACHE STRING "Git tag/branch for rocstorage")
+set(ROCPROFSYS_ROCSTORAGE_GIT_TAG "develop" CACHE STRING "Git tag/branch for rocstorage")
 
 set(ROCPROFSYS_ROCSTORAGE_SOURCE_DIR
     "${PROJECT_SOURCE_DIR}/../rocstorage"
@@ -16,15 +24,34 @@ set(ROCPROFSYS_ROCSTORAGE_SOURCE_DIR
     "Local path to rocstorage source directory"
 )
 
-set(ROCSTORAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(ROCSTORAGE_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-
 option(ROCPROFSYS_ROCSTORAGE_ENABLE_LOGGING "Enable rocstorage logging" OFF)
-set(ROCSTORAGE_ENABLE_LOGGING ${ROCPROFSYS_ROCSTORAGE_ENABLE_LOGGING} CACHE BOOL "" FORCE)
 
-# TODO: check if this is needed at all
-if(ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY)
-    message(STATUS "Fetching rocstorage from ${ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY}")
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+
+if(ROCPROFSYS_USE_EXTERNAL_ROCSTORAGE)
+    find_package(rocstorage REQUIRED)
+    message(STATUS "[rocstorage] Using external installation: ${rocstorage_DIR}")
+
+    set(_ROCSTORAGE_TARGET rocstorage::rocstorage)
+    set(_ROCSTORAGE_IS_EXTERNAL TRUE)
+elseif(ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY)
+    include(FetchContent)
+
+    set(ROCSTORAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ROCSTORAGE_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(ROCSTORAGE_ENABLE_LOGGING
+        ${ROCPROFSYS_ROCSTORAGE_ENABLE_LOGGING}
+        CACHE BOOL
+        ""
+        FORCE
+    )
+
+    message(
+        STATUS
+        "[rocstorage] Fetching from Git: ${ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY} (${ROCPROFSYS_ROCSTORAGE_GIT_TAG})"
+    )
     FetchContent_Declare(
         rocstorage
         GIT_REPOSITORY ${ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY}
@@ -36,8 +63,23 @@ if(ROCPROFSYS_ROCSTORAGE_GIT_REPOSITORY)
         SUBBUILD_DIR
         ${PROJECT_BINARY_DIR}/external/rocstorage/subbuild
     )
+    FetchContent_MakeAvailable(rocstorage)
+
+    set(_ROCSTORAGE_TARGET rocstorage)
+    set(_ROCSTORAGE_IS_EXTERNAL FALSE)
 else()
-    message(STATUS "Using local rocstorage from ${ROCPROFSYS_ROCSTORAGE_SOURCE_DIR}")
+    include(FetchContent)
+
+    set(ROCSTORAGE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ROCSTORAGE_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(ROCSTORAGE_ENABLE_LOGGING
+        ${ROCPROFSYS_ROCSTORAGE_ENABLE_LOGGING}
+        CACHE BOOL
+        ""
+        FORCE
+    )
+
+    message(STATUS "[rocstorage] Using local source: ${ROCPROFSYS_ROCSTORAGE_SOURCE_DIR}")
     FetchContent_Declare(
         rocstorage
         SOURCE_DIR
@@ -47,19 +89,24 @@ else()
         SUBBUILD_DIR
         ${PROJECT_BINARY_DIR}/external/rocstorage/subbuild
     )
+    FetchContent_MakeAvailable(rocstorage)
+
+    set(_ROCSTORAGE_TARGET rocstorage)
+    set(_ROCSTORAGE_IS_EXTERNAL FALSE)
 endif()
 
-FetchContent_MakeAvailable(rocstorage)
+# ------------------------------------------------------------------------------
+# Interface target
+# ------------------------------------------------------------------------------
 
-if(NOT TARGET rocprofiler-systems-rocstorage)
-    add_library(rocprofiler-systems-rocstorage INTERFACE)
-    add_library(
-        rocprofiler-systems::rocprofiler-systems-rocstorage
-        ALIAS rocprofiler-systems-rocstorage
-    )
+add_library(rocprofiler-systems-rocstorage INTERFACE)
+add_library(
+    rocprofiler-systems::rocprofiler-systems-rocstorage
+    ALIAS rocprofiler-systems-rocstorage
+)
+target_link_libraries(rocprofiler-systems-rocstorage INTERFACE ${_ROCSTORAGE_TARGET})
 
-    target_link_libraries(rocprofiler-systems-rocstorage INTERFACE rocstorage)
-
+if(NOT _ROCSTORAGE_IS_EXTERNAL)
     target_include_directories(
         rocprofiler-systems-rocstorage
         SYSTEM
