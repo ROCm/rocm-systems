@@ -37,7 +37,6 @@ target_link_libraries(
         benchmark::benchmark
         benchmark::benchmark_main
         pthread
-        fmt::fmt
         spdlog::spdlog
         rocstorage-sqlite3
 )

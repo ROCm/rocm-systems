@@ -107,13 +107,6 @@ include(spdlog)
 target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:spdlog::spdlog>)
 
 # ------------------------------------------------------------ #
-# fmt
-# ------------------------------------------------------------ #
-
-include(fmt)
-target_link_libraries(rocstorage PRIVATE $<BUILD_INTERFACE:fmt::fmt>)
-
-# ------------------------------------------------------------ #
 # Schema from rocprofiler-sdk-rocpd
 # ------------------------------------------------------------ #
 

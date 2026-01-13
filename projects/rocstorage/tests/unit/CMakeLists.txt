@@ -41,7 +41,6 @@ target_link_libraries(
         GTest::gtest_main
         GTest::gmock
         rocstorage-sqlite3
-        fmt::fmt
         spdlog::spdlog
 )
 
