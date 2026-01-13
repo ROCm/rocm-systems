@@ -386,11 +386,11 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_memory_unlock)(host_ptr);
   }
   static hsa_status_t interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
-    amd::Os::FileDesc interop_handle,
-    uint32_t flags, size_t* size,
-    void** ptr, size_t* metadata_size, const void** metadata) {
-    return ROCR_DYN(hsa_amd_interop_map_buffer)(num_agents, agents, interop_handle, flags, size,
-                                                ptr, metadata_size, metadata);
+                                         hsa_handle_t interop_handle, uint32_t flags,
+                                         size_t* size, void** ptr, size_t* metadata_size,
+                                         const void** metadata) {
+    return ROCR_DYN(hsa_amd_interop_map_buffer)(num_agents, agents, interop_handle, flags, size, ptr,
+                                                metadata_size, metadata);
   }
   static hsa_status_t interop_unmap_buffer(void* ptr) {
     return ROCR_DYN(hsa_amd_interop_unmap_buffer)(ptr);
