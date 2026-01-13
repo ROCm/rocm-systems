@@ -7706,7 +7706,11 @@ class AMDSMICommands():
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
-                    proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    is_mi300a = isinstance(market_name, str) and "MI300A" in market_name.upper()
+                    if is_mi300a:
+                        proc_info_dict['vram'] = "N/A"
+                    else:
+                        proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     # Handle cu_occupancy conversion safely
                     try:
