@@ -43,7 +43,7 @@ SOC_ROOT = REPO_ROOT / "src" / "rocprof_compute_soc"
 ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
 TEMPLATE_FILE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
-HASH_JSON = SCRIPT_DIR / ".config_hashes.json"
+HASH_JSON = REPO_ROOT / "src" / "utils" / ".config_hashes.json"
 BACKUP_DIR = SCRIPT_DIR / "backups"
 
 PYTHON = sys.executable
@@ -52,7 +52,7 @@ VERIFY_SCRIPT = TOOLS_DIR / "verify_against_config_template.py"
 PARSE_TEMPLATE_SCRIPT = TOOLS_DIR / "parse_config_template.py"
 GENERATE_DELTAS_SCRIPT = TOOLS_DIR / "generate_config_deltas.py"
 APPLY_DELTAS_SCRIPT = TOOLS_DIR / "apply_config_deltas.py"
-HASH_CHECKER_SCRIPT = TOOLS_DIR / "hash_checker.py"
+HASH_CHECKER_SCRIPT = REPO_ROOT / "src" / "utils" / "hash_checker.py"
 HASH_MANAGER_SCRIPT = TOOLS_DIR / "hash_manager.py"
 
 

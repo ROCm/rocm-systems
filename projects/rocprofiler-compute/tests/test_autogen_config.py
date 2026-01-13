@@ -29,8 +29,9 @@ from pathlib import Path
 
 import pytest
 
-HASH_DB = Path("tools/config_management/.config_hashes.json")
-ANALYSIS_CONFIGS = Path("src/rocprof_compute_soc/analysis_configs")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+HASH_DB = PROJECT_ROOT / "src/utils/.config_hashes.json"
+ANALYSIS_CONFIGS = PROJECT_ROOT / "src/rocprof_compute_soc/analysis_configs"
 
 
 def md5(path: Path) -> str:

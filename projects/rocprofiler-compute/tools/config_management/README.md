@@ -31,15 +31,17 @@ rocprofiler-compute/
 │       ├── gfx950/                      # latest_arch
 │       └── gfx9_config_template.yaml    # single source of truth
 │
+├── src/util/
+│   ├── hash_checker.py
+│   ├── .config_hashes.json
+│
 └── tools/config_management/
     ├── master_config_workflow_script.py
     ├── parse_config_template.py
     ├── verify_against_config_template.py
     ├── generate_config_deltas.py
     ├── apply_config_deltas.py
-    ├── hash_checker.py
     ├── hash_manager.py
-    ├── .config_hashes.json
     ├── TESTING.md
     └── README.md
 ```
@@ -79,7 +81,7 @@ analysis_configs/<older_arch>/config_delta/
 
 - Stored at:
 ```bash
-tools/config_management/.config_hashes.json
+src/utils/.config_hashes.json
 ```
 - Records:
   - md5 hashes of panel YAMLs per arch

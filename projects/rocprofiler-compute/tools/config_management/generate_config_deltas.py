@@ -48,16 +48,6 @@ def load_yaml_roundtrip(path: Path) -> Any:
     return cm_utils.load_yaml(path, round_trip=True)
 
 
-def get_metric_tables(data: dict) -> list[dict]:
-    """Extract all metric tables from data source."""
-    tables: list[dict] = []
-    for item in data.get("Panel Config", {}).get("data source", []):
-        mt = item.get("metric_table")
-        if isinstance(mt, dict):
-            tables.append(mt)
-    return tables
-
-
 def diff_metric_fields(base_fields, new_fields) -> Optional[CommentedMap]:
     out = CommentedMap()
 
