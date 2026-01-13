@@ -236,13 +236,14 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
   Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
 
   static constexpr int MaxMetadataSizeDwords = 64;
+  static constexpr uint32_t DeviceIdVendorShift = 16u;
   amdImageDesc_ =
-      reinterpret_cast<hsa_amd_image_descriptor_t*>(new char[(MaxMetadataSizeDwords + 2) * sizeof(int)]());
+      reinterpret_cast<hsa_amd_image_descriptor_t*>(new int[MaxMetadataSizeDwords + 2]());
   if (amdImageDesc_ == nullptr) {
     return false;
   }
   amdImageDesc_->version = 1;
-  amdImageDesc_->deviceID = (AmdVendor << 16) | id;
+  amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
 
   hsa_handle_t handle;
   int offset;
