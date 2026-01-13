@@ -1,14 +1,14 @@
 .. meta::
-  :description: Install ROCmInfo
+  :description: Install rocminfo
   :keywords: install, rocminfo, AMD, ROCm
 
-ROCmInfo documentation
+rocminfo documentation
 *************************
 
-ROCmInfo is a ROCm application that reports system information and enumerates GPU agents available on a working ROCm stack.
+rocminfo is a ROCm application that reports system information and enumerates GPU agents available on a working ROCm stack.
 
 
-You can access the ROCmInfo source code on `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
+You can access the rocminfo source code on `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
 
 .. grid:: 2
   :gutter: 3
