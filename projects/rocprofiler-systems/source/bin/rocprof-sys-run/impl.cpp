@@ -24,6 +24,7 @@
 
 #include "common/defines.h"
 #include "common/environment.hpp"
+#include "common/output.hpp"
 #include "common/path.hpp"
 #include "core/argparse.hpp"
 #include "core/timemory.hpp"
@@ -59,19 +60,11 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
 namespace path     = rocprofsys::common::path;
+namespace output   = rocprofsys::common::output;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
-
-namespace std
-{
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
-}
-}  // namespace std
 
 namespace
 {
@@ -145,13 +138,7 @@ auto initial_suppression = toggle_suppression({ true, true });
 void
 print_command(const parser_data_t& _data, std::string_view _prefix)
 {
-    auto        verbose = _data.verbose;
-    const auto& _argv   = _data.command;
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
+    output::print_command(_data.command, _data.verbose, _prefix);
 }
 
 void
@@ -198,52 +185,7 @@ void
 print_updated_environment(parser_data_t& _data, std::string_view _prefix)
 {
     auto _verbose = get_verbose(_data);
-
-    if(_verbose < 0) return;
-
-    auto        _env          = _data.current;
-    const auto& _updated_envs = _data.updated;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : _updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(_verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || _verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
+    output::print_updated_environment(_data.current, _data.updated, _verbose, _prefix);
 }
 
 parser_data_t&

@@ -24,6 +24,7 @@
 
 #include "common/defines.h"
 #include "common/environment.hpp"
+#include "common/output.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
@@ -57,21 +58,13 @@ namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
+namespace output   = rocprofsys::common::output;
 using namespace ::timemory::join;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
 using ::tim::get_env;
 using ::tim::log::monochrome;
 using ::tim::log::stream;
-
-namespace std
-{
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
-}
-}  // namespace std
 
 namespace
 {
@@ -161,11 +154,7 @@ diagnose_status(pid_t _pid, int _status)
 void
 print_command(const std::vector<char*>& _argv, std::string_view _prefix)
 {
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << _prefix << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
-
-    std::cerr << color::end() << std::flush;
+    output::print_command(_argv, verbose, _prefix);
 }
 
 std::vector<char*>
@@ -252,48 +241,8 @@ prepare_environment_for_run(std::vector<char*>& _env)
 void
 print_updated_environment(std::vector<char*> _env, std::string_view _prefix)
 {
-    if(get_verbose() < 0) return;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << _prefix << itr << "\n";
-
-    std::cerr << color::end() << std::flush;
+    output::print_updated_environment(std::move(_env), updated_envs, get_verbose(),
+                                      _prefix);
 }
 
 template <typename Tp>

@@ -23,6 +23,7 @@
 #include "rocprof-sys-sample.hpp"
 
 #include "common/environment.hpp"
+#include "common/output.hpp"
 #include "common/path.hpp"
 
 #include <timemory/environment.hpp>
@@ -41,8 +42,9 @@
 #include <unistd.h>
 #include <vector>
 
-namespace color = tim::log::color;
-namespace path  = rocprofsys::common::path;
+namespace color  = tim::log::color;
+namespace path   = rocprofsys::common::path;
+namespace output = rocprofsys::common::output;
 using namespace timemory::join;
 using rocprofsys::common::remove_env;
 using rocprofsys::common::update_mode;
@@ -93,9 +95,7 @@ auto clock_id_choices = []() {
 void
 print_command(const std::vector<char*>& _argv)
 {
-    if(verbose >= 1)
-        stream(std::cout, color::info())
-            << "Executing '" << join(array_config{ " " }, _argv) << "'...\n";
+    output::print_command(_argv, verbose);
 }
 
 std::vector<char*>
@@ -151,48 +151,8 @@ get_initial_environment()
 void
 print_updated_environment(std::vector<char*> _env)
 {
-    if(get_env<int>("ROCPROFSYS_VERBOSE", 0) < 0) return;
-
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    std::vector<char*> _updates = {};
-    std::vector<char*> _general = {};
-
-    for(auto* itr : _env)
-    {
-        if(itr == nullptr) continue;
-
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
-
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
-    }
-
-    if(_general.size() + _updates.size() == 0 || verbose < 0) return;
-
-    std::cerr << std::endl;
-
-    for(auto& itr : _general)
-        stream(std::cerr, color::source()) << itr << "\n";
-    for(auto& itr : _updates)
-        stream(std::cerr, color::source()) << itr << "\n";
-
-    std::cerr << std::endl;
+    auto _verbose = get_env<int>("ROCPROFSYS_VERBOSE", verbose);
+    output::print_updated_environment(std::move(_env), updated_envs, _verbose);
 }
 
 std::vector<char*>
