@@ -276,6 +276,9 @@ write_perfetto(
             auto _namess = std::stringstream{};
             auto agent_index_info =
                 tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            ROCP_WARNING_IF(qitr.handle == 0) << fmt::format(
+                "Queue ID handle should be a positive int greater than 0, but it is {}",
+                qitr.handle);
             _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
                     << "] QUEUE [" << (qitr.handle > 0 ? qitr.handle - 1 : 0) << "] ";
             _namess << agent_index_info.type;
