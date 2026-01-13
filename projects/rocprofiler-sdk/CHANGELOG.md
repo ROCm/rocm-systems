@@ -246,17 +246,16 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Counter collection support for `gfx1150` and `gfx1151` (strix halo).
 - HSA Extension API v8 support.
 - `hipStreamCopyAttributes` API implementation.
-- Process attachment improvements.
 
 ### Optimized
 
-- Process attachment documentation update.
-- [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
+- Improved the process attachment process and updated the corresponding documentation.
+- Improved [ Quick reference guide for rocprofv3 ] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
 - Updated the documentation for installation steps and updated the links to point to the latest repository.
 
 ### Resolved issues
 - Fixed multi-GPU dimension mismatch.
 - Fixed device lock issue for dispatch counters.
 - Addressed OMPT task scheduling null pointer exception.
-- Fixed stream ID errors for process attachment.
-- Fixed issues during dynamic code object loading.
+- Fixed stream ID errors arising during process attachment.
+- Fixed issues arising during dynamic code object loading.
