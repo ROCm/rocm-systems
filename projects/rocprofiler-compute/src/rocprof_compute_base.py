@@ -57,6 +57,9 @@ from utils.utils import (
     get_version_display,
     parse_sets_yaml,
     set_locale_encoding,
+    get_rank,
+    replace_rank,
+    replace_env,
 )
 
 
@@ -169,6 +172,49 @@ class RocProfCompute:
             )
             self.__args.format_rocprof_output = "csv"
 
+    def replace_parameters_in_output_directory(self) -> None:
+        add_Rank = False
+        # Add --name to workload path if --path is not given
+        if self.__args.path == str(Path.cwd() / "workloads"):
+            self.__args.path = str(Path(self.__args.path) / self.__args.name)
+
+            # Deprecated behavior: append subpath to workload path
+            # Append gpu model to workload path in future releases
+
+            # Add node name to workload path
+            if self.__args.subpath == "node_name":
+                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
+            # OR, Add MPI rank to workload path if available
+            elif get_rank() is not None:
+                self.__args.path = str(Path(self.__args.path) / f"{get_rank()}")
+            # OR, Add gpu model name to workload path
+            else:
+                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
+        elif self.__args.name is not None:
+            console_warning(
+                "--name is ignored when -p or --path or --output-directory "
+                "is explicitly specified."
+            )
+        else:
+            if "%rank%" not in self.__args.path and get_rank() is not None:
+                add_Rank = True
+
+        # Replace parameters with actual values in workload path
+        self.__args.path = self.__args.path.replace(
+            "%hostname%", socket.gethostname()
+        ).replace("%gpumodel%", self.__mspec.gpu_model)
+
+        # Replace environment variables in workload path
+        self.__args.path = replace_env(self.__args.path)
+
+        # Replace %rank% with actual rank value in workload path
+        self.__args.path = replace_rank(self.__args.path)
+
+        if add_Rank:
+            self.__args.path = str(
+                Path(self.__args.path) / f"{get_rank()}"
+            )
+
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
@@ -176,6 +222,9 @@ class RocProfCompute:
         if self.__args and self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
+
+        if self.__mode == "profile":
+            self.replace_parameters_in_output_directory()
 
         arch = self.__mspec.gpu_arch
         soc_module = importlib.import_module(f"rocprof_compute_soc.soc_{arch}")
@@ -415,81 +464,6 @@ class RocProfCompute:
         # instantiate desired profiler
         profiler = self.create_profiler()
         profiler.sanitize()
-
-        def get_rank() -> Optional[str]:
-            rank_env_vars = [
-                "SLURM_PROCID",
-                "FLUX_TASK_RANK",
-                "PMI_RANK",
-                "PMIX_RANK",
-                "MPI_RANK",
-                "MPI_LOCALRANKID",
-                "MPI_RANKID",
-                "MV2_COMM_WORLD_RANK",
-                "OMPI_COMM_WORLD_RANK",
-                "PALS_RANKID",
-            ]
-            for env_var in rank_env_vars:
-                value = os.environ.get(env_var)
-                if value is not None:
-                    return value
-
-        add_Rank = False
-        # Add --name to workload path if --path is not given
-        if self.__args.path == str(Path.cwd() / "workloads"):
-            self.__args.path = str(Path(self.__args.path) / self.__args.name)
-
-            # Deprecated behavior: append subpath to workload path
-            # Append gpu model to workload path in future releases
-
-            # Add node name to workload path
-            if self.__args.subpath == "node_name":
-                self.__args.path = str(Path(self.__args.path) / socket.gethostname())
-            # OR, Add MPI rank to workload path if available
-            elif get_rank() is not None:
-                self.__args.path = str(Path(self.__args.path) / f"{get_rank()}")
-            # OR, Add gpu model name to workload path
-            else:
-                self.__args.path = str(Path(self.__args.path) / self.__mspec.gpu_model)
-        elif self.__args.name is not None:
-            console_warning(
-                "--name is ignored when -p or --path or --output-directory "
-                "is explicitly specified."
-            )
-        else:
-            if "%rank%" not in self.__args.path and get_rank() is not None:
-                add_Rank = True
-
-        # Replace parameters with actual values in workload path
-        self.__args.path = self.__args.path.replace(
-            "%hostname%", socket.gethostname()
-        ).replace("%gpumodel%", self.__mspec.gpu_model)
-
-        # Replace %env{VAR}% with environment variable values
-        pattern = re.compile(r"%env{([^}]+)}%")
-
-        def replace_env(match: re.Match[str]) -> str:
-            var_name = match.group(1)
-            return os.environ.get(var_name, "")  # Default to empty string if not found
-
-        self.__args.path = pattern.sub(replace_env, self.__args.path)
-
-        # Replace %rank% with MPI process rank
-        pattern_rank = re.compile(r"%rank%")
-
-        def replace_rank(match: re.Match[str]) -> str:
-            value = get_rank()
-            if value is not None:
-                return value
-            else:
-                return "0"  # Default rank if no MPI environment variable is found
-
-        self.__args.path = pattern_rank.sub(replace_rank, self.__args.path)
-
-        if add_Rank:
-            self.__args.path = str(
-                Path(self.__args.path) / f"{get_rank()}"
-            )
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
