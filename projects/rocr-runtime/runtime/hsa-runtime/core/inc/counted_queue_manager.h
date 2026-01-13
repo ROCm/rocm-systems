@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef HSA_RUNTME_CORE_INC_COUNTED_QUEUE_MANAGER_H_
-#define HSA_RUNTME_CORE_INC_COUNTED_QUEUE_MANAGER_H_
+#ifndef HSA_RUNTIME_CORE_INC_COUNTED_QUEUE_MANAGER_H_
+#define HSA_RUNTIME_CORE_INC_COUNTED_QUEUE_MANAGER_H_
 
 
 #include "hsa.h"
@@ -59,10 +59,10 @@ class CountedQueuePoolManager {
   std::map<HSA::hsa_amd_queue_priority_internal_t, std::vector<core::Queue*>> hw_queue_pools_;
 
   // Map from unique handle to CountedQueue (hw queue, metadata per acquire request)
-  std::map<hsa_queue_t*, CountedQueue*> counted_queues_;
+  std::map<hsa_queue_t*, std::unique_ptr<CountedQueue>> counted_queues_;
 };
 
 }  // namespace core
 }  // namespace rocr
 
-#endif  // HSA_RUNTME_CORE_INC_COUNTED_QUEUE_MANAGER_H_
+#endif  // HSA_RUNTIME_CORE_INC_COUNTED_QUEUE_MANAGER_H_

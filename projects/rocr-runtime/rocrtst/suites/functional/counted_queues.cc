@@ -280,7 +280,7 @@ void CountedQueuesTest::CountedQueuesAllPrioritiesLimitTest() {
   EXPECT_NE(low_id1, high_id1);
 
   // Verify use counts of first two HW queues
-  uint32_t low_use1 = 0, low_use2 = 0, low_use3;
+  uint32_t low_use1 = 0, low_use2 = 0, low_use3 = 0;
   uint32_t norm_use1 = 0, norm_use2 = 0, norm_use3 = 0;
   uint32_t high_use1 = 0, high_use2 = 0, high_use3 = 0;
 
@@ -470,7 +470,7 @@ void CountedQueuesTest::CountedQueuesDispatchTest() {
     queue_aql_packet->completion_signal = completion_signal;
 
     // Write header for packet
-    uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    uint32_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
     header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
     header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
     __atomic_store_n(reinterpret_cast<uint16_t*>(&queue_aql_packet->header), header,
@@ -624,7 +624,7 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
       hsa_kernel_dispatch_packet_t* queue_aql_packet = &(
           reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address))[index & queue_mask];
       ASSERT_EQ(queue_aql_packet,
-                reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address) + index);
+                reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address) + (index & queue_mask));
 
       // Fill packet fields
       queue_aql_packet->setup = 1;
@@ -641,7 +641,7 @@ void CountedQueuesTest::CountedQueuesMultithreadedDispatchTest() {
       queue_aql_packet->completion_signal = local_signal;
 
       // Write header for packet
-      uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      uint32_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
       header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
       header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
       __atomic_store_n(reinterpret_cast<uint16_t*>(&queue_aql_packet->header), header,
@@ -807,7 +807,7 @@ void CountedQueuesTest::CountedQueuesOverflowWrapAroundTest() {
       queue_aql_packet->completion_signal = local_signal;
 
       // Write header for packet
-      uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      uint32_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
       header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
       header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
       __atomic_store_n(reinterpret_cast<uint16_t*>(&queue_aql_packet->header), header,

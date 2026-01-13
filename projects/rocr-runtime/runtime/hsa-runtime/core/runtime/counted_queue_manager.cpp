@@ -28,7 +28,7 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
   if (!core_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   // Create unique SharedQueue structure and store the unique handle in it
-  SharedQueue* shared_queue = new SharedQueue();
+  SharedQueue* shared_queue = new (std::nothrow) SharedQueue();
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   // Copy amd_queue from HW queue
@@ -41,8 +41,8 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
   hsa_queue_t* unique_handle = &shared_queue->amd_queue.hsa_queue;
 
   // Track metadata
-  CountedQueue* counted_q = new CountedQueue(core_queue, callback, data);
-  counted_queues_[unique_handle] = counted_q;
+  auto counted_q = std::make_unique<CountedQueue>(core_queue, callback, data);
+  counted_queues_[unique_handle] = std::move(counted_q);
 
   // Increment use count
   core_queue->use_count++;
@@ -96,14 +96,21 @@ hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   auto it = counted_queues_.find(queue);
   if (it == counted_queues_.end()) return HSA_STATUS_ERROR;
 
-  CountedQueue* counted_q = it->second;
+  CountedQueue* counted_q = it->second.get();
 
   // Decrement internal ref count inside core::Queue object
   if (counted_q->hw_queue->use_count > 0) {
     counted_q->hw_queue->use_count--;
     
     // Remove unique handle from map when it is no longer in use by an application
-    if (counted_q->hw_queue->use_count == 0) counted_queues_.erase(queue);
+    if (counted_q->hw_queue->use_count == 0) {
+      counted_queues_.erase(queue);
+
+      // free the associated shared_queue when removing the counted_queue
+      SharedQueue* shared = reinterpret_cast<SharedQueue*>(
+        reinterpret_cast<char*>(queue) - offsetof(SharedQueue, amd_queue.hsa_queue));
+      delete shared;
+    }
   }
 
   return HSA_STATUS_SUCCESS;
@@ -125,9 +132,6 @@ void CountedQueuePoolManager::Cleanup() {
 
   // Clean up counted and shared queues
   for (auto& cq : counted_queues_) {
-    CountedQueue* counted_q = cq.second;
-    delete counted_q;
-
     // Recover SharedQueue from unique handle and free memory
     hsa_queue_t* queue_handle = cq.first;
     SharedQueue* shared = reinterpret_cast<SharedQueue*>(
