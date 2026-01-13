@@ -3797,13 +3797,15 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
   #if defined(__linux__)
-    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-      void* mapped_ptr =
-        mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
-             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-      if (mapped_ptr != va)
-        return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      // CPU cannot access GPU VRAM on WSL due to platform restrictions
+      return HSA_STATUS_ERROR;
     }
+    void* mapped_ptr =
+      mmap(va, size, PermissionsToMmapFlags(perms), MAP_SHARED | MAP_FIXED, mappedHandle->drm_fd,
+            reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
+    if (mapped_ptr != va)
+      return HSA_STATUS_ERROR;
   } else {
     hsa_status_t status = targetAgent->driver().Map(
         shareable_handle, va, mappedHandle->offset, size, perms);
@@ -3821,16 +3823,20 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
 #if defined(__linux__)
-      if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
-
-        /* We need to keep the CPU mapping. So change it to PROT_NONE */
-        void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
-                  mappedHandle->drm_fd,
-                  reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
-        if (mapped_ptr != va)
-          return HSA_STATUS_ERROR;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        // CPU cannot access GPU VRAM on WSL due to platform restrictions
+        return HSA_STATUS_ERROR;
       }
+
+      if (munmap(va, size) != 0) return HSA_STATUS_ERROR;
+
+      /* We need to keep the CPU mapping. So change it to PROT_NONE */
+      void* mapped_ptr = mmap(va, mappedHandle->size, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                mappedHandle->drm_fd,
+                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr));
+      if (mapped_ptr != va)
+        return HSA_STATUS_ERROR;
+
       permissions = HSA_ACCESS_PERMISSION_NONE;
 #else
       assert(!"Unimplemented!");
@@ -3851,6 +3857,10 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
     size(size), drm_fd(drm_fd), drm_cpu_addr(drm_cpu_addr),
     shareable_handle(shareable_handle)
 {
+#if defined(__linux__)
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
+#endif
+
   /* Create a CPU mapping with PROT_NONE */
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
