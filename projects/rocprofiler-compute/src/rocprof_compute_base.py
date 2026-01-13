@@ -402,7 +402,7 @@ class RocProfCompute:
         elif self.__args.name is None and self.__args.path == str(
             Path.cwd() / "workloads"
         ):
-            sys.exit("Either --output-directory or --name is required")
+            console_error("Either --output-directory or --name is required")
 
         if self.__args.subpath != "gpu_model":
             console_warning(
