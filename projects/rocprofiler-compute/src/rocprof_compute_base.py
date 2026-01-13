@@ -434,6 +434,7 @@ class RocProfCompute:
                 if value is not None:
                     return value
 
+        add_Rank = False
         # Add --name to workload path if --path is not given
         if self.__args.path == str(Path.cwd() / "workloads"):
             self.__args.path = str(Path(self.__args.path) / self.__args.name)
@@ -455,6 +456,9 @@ class RocProfCompute:
                 "--name is ignored when -p or --path or --output-directory "
                 "is explicitly specified."
             )
+        else:
+            if "%rank%" not in self.__args.path and get_rank() is not None:
+                add_Rank = True
 
         # Replace parameters with actual values in workload path
         self.__args.path = self.__args.path.replace(
@@ -481,6 +485,11 @@ class RocProfCompute:
                 return "0"  # Default rank if no MPI environment variable is found
 
         self.__args.path = pattern_rank.sub(replace_rank, self.__args.path)
+
+        if add_Rank:
+            self.__args.path = str(
+                Path(self.__args.path) / f"{get_rank()}"
+            )
 
         # Create workload directory if it does not exist
         p = Path(self.__args.path)
