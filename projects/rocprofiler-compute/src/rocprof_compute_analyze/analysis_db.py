@@ -167,15 +167,22 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
+            # Optimize: Pre-group values by (metric_id, kernel_name) for O(1) lookups
+            values_df = self._values_data_per_workload.get(
+                workload_path, pd.DataFrame()
+            )
+            values_grouped = {}
+            if not values_df.empty:
+                for value in values_df.itertuples():
+                    key = (value.metric_id, value.kernel_name)
+                    if key not in values_grouped:
+                        values_grouped[key] = []
+                    values_grouped[key].append(value)
+
             for metric in self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame()
             ).itertuples():
-                kernel_names = (
-                    self._dispatch_data_per_workload[workload_path]["kernel_name"]
-                    .unique()
-                    .tolist()
-                )
-                for kernel_name in kernel_names:
+                for kernel_name in kernel_objs.keys():
                     metric_obj = orm.Metric(
                         name=metric.name,
                         metric_id=metric.metric_id,
@@ -186,20 +193,17 @@ class db_analysis(OmniAnalyze_Base):
                         kernel=kernel_objs[kernel_name],
                     )
                     Database.get_session().add(metric_obj)
-                    for value in self._values_data_per_workload.get(
-                        workload_path, pd.DataFrame()
-                    ).itertuples():
-                        if (
-                            value.metric_id == metric.metric_id
-                            and value.kernel_name == kernel_name
-                        ):
-                            Database.get_session().add(
-                                orm.Value(
-                                    metric=metric_obj,
-                                    value_name=value.value_name,
-                                    value=value.value,
-                                )
+
+                    # Direct lookup instead of iterating through all values
+                    key = (metric.metric_id, kernel_name)
+                    for value in values_grouped.get(key, []):
+                        Database.get_session().add(
+                            orm.Value(
+                                metric=metric_obj,
+                                value_name=value.value_name,
+                                value=value.value,
                             )
+                        )
 
             version = get_version(rocprof_compute_home)
             Database.get_session().add(

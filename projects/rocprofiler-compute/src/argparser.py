@@ -501,7 +501,7 @@ Examples:
         type=str,
         default=["FP32"],
         help=(
-            "\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
             "\t\t\t   FP4\n"
             "\t\t\t   FP6\n"
             "\t\t\t   FP8\n"
@@ -692,7 +692,7 @@ Examples:
         type=str,
         default=["FP32"],
         help=(
-            "\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n"
+            "\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
             "\t\t\t   FP4\n"
             "\t\t\t   FP6\n"
             "\t\t\t   FP8\n"
