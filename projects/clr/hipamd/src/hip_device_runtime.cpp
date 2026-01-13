@@ -777,12 +777,14 @@ hipError_t hipSetDevice(int device) {
 
   hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
-  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
+  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device
+      && hip::tls.device_->GetActiveStatus() == true) {
     HIP_RETURN(hipSuccess);
   }
 
   if (static_cast<unsigned int>(device) < g_devices.size()) {
     hip::setCurrentDevice(device);
+    hip::getCurrentDevice()->SetActiveStatus();
 
     HIP_RETURN(hipSuccess);
   } else if (g_devices.empty()) {

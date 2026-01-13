@@ -25,30 +25,20 @@
 
 from typing import Any
 
-import colorlover  # type: ignore
 import pandas as pd
 import plotly.express as px  # type: ignore
-from dash import dash_table, html  # type: ignore
+from dash import dash_table  # type: ignore
 
-from utils import schema
 from utils.logger import console_error
 
 pd.set_option(
     "mode.chained_assignment", None
 )  # ignore SettingWithCopyWarning pandas warning
 
-IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 
-
-##################
-# HELPER FUNCTIONS
-##################
-def filter_df(column: str, df: pd.DataFrame, filt: list[str]) -> pd.DataFrame:
-    if not filt:
-        return df
-    return df.loc[df[schema.PMC_PERF_FILE_PREFIX][column].astype(str).isin(filt)]
-
-
+####################
+# GRAPHICAL ELEMENTS
+####################
 def multi_bar_chart(
     table_id: int, display_df: pd.DataFrame
 ) -> dict[str, dict[str, Any]]:
@@ -69,68 +59,6 @@ def multi_bar_chart(
     return nested_bar
 
 
-def discrete_background_color_bins(
-    df: pd.DataFrame, n_bins: int = 5, columns: str | list[str] = "all"
-) -> tuple[list[dict[str, Any]], html.Div]:
-    bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
-
-    if columns == "all":
-        df_numeric_columns = (
-            df.select_dtypes("number").drop(["id"], axis=1)
-            if "id" in df.columns
-            else df.select_dtypes("number")
-        )
-    else:
-        df_numeric_columns = df[columns]
-
-    df_max = df_numeric_columns.max().max()
-    df_min = df_numeric_columns.min().min()
-    ranges = [((df_max - df_min) * i) + df_min for i in bounds]
-
-    styles: list[dict[str, Any]] = []
-    legend: list[html.Div] = []
-
-    for i in range(1, len(bounds)):
-        min_bound = ranges[i - 1]
-        max_bound = ranges[i]
-        background_color = colorlover.scales[str(n_bins)]["seq"]["Blues"][i - 1]
-        color = "white" if i > len(bounds) / 2.0 else "inherit"
-
-        for column in df_numeric_columns.columns:
-            filter_query = f"{{{column}}} >= {min_bound}" + (
-                f" && {{{column}}} < {max_bound}" if i < len(bounds) - 1 else ""
-            )
-            styles.append({
-                "if": {
-                    "filter_query": filter_query,
-                    "column_id": column,
-                },
-                "backgroundColor": background_color,
-                "color": color,
-            })
-
-        legend.append(
-            html.Div(
-                style={"display": "inline-block", "width": "60px"},
-                children=[
-                    html.Div(
-                        style={
-                            "backgroundColor": background_color,
-                            "borderLeft": "1px rgb(50, 50, 50) solid",
-                            "height": "10px",
-                        }
-                    ),
-                    html.Small(round(min_bound, 2), style={"paddingLeft": "2px"}),
-                ],
-            )
-        )
-
-    return styles, html.Div(legend, style={"padding": "5px 0 5px 0"})
-
-
-####################
-# GRAPHICAL ELEMENTS
-####################
 def create_instruction_mix_bar_chart(display_df: pd.DataFrame, df_unit: str) -> px.bar:
     display_df = display_df.copy()
     display_df["Avg"] = display_df["Avg"].apply(lambda x: int(x) if x != "" else 0)
@@ -294,9 +222,6 @@ def build_bar_chart(
 def get_dark_mode_styles() -> tuple[
     dict[str, Any], dict[str, Any], list[dict[str, Any]]
 ]:
-    if not IS_DARK:
-        return {}, {}, []
-
     style_header = {
         "backgroundColor": "rgb(30, 30, 30)",
         "color": "white",
