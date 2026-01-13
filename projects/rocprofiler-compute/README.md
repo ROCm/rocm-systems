@@ -114,7 +114,7 @@ This software can be cited using a Zenodo
 style reference is provided below for convenience:
 
 ```
-@software{xiaomin_lu_2022_7314631
+@misc{xiaomin_lu_2022_7314631
   author       = {Xiaomin Lu and
                   Cole Ramos and
                   Fei Zheng and
@@ -123,12 +123,7 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {ROCm Compute Profiler: v3.4.0 (12 January 2026)},
-  month        = January,
-  year         = 2026,
-  publisher    = {Zenodo},
-  version      = {v3.4.0},
-  doi          = {10.5281/zenodo.7314631},
-  url          = {https://doi.org/10.5281/zenodo.7314631}
+  title        = {rocprofiler-compute},
+  url          = {https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute}
 }
 ```
