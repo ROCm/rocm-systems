@@ -27,7 +27,7 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.0.0"
+  ROCM_VERSION: "7.1.1"
   PYTHON_VENV_PATH: "aqlprofile"
   PYTHON_VENV_ACTIVATE: "aqlprofile/bin/activate"
   navi3_EXCLUDE_TESTS_REGEX: ""
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: |
+        system:
           - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
           - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm-frac', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
@@ -168,7 +168,6 @@ jobs:
         ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
-
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -196,7 +195,6 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        source ${{ env.PYTHON_VENV_ACTIVATE }}
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure -DCTEST_SOURCE_DIRECTORY="$(pwd)"

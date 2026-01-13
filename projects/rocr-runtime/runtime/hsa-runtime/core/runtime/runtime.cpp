@@ -868,24 +868,21 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
-                                 hsa_handle_t interop_handle,
-                                 uint32_t flags,
-                                 size_t* size, void** ptr,
+hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
+                                 hsa_interop_map_flag_t flags, size_t* size, void** ptr,
                                  size_t* metadata_size, const void** metadata) {
-  static const int tinyArraySize=8;
+  constexpr int tinyArraySize = 8;
   HsaGraphicsResourceInfo info;
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
 
-  static_assert(sizeof(HSAint64) >= sizeof(interop_handle),
-                "HSAint64 too small for interop_handle");
+  static_assert(sizeof(HSAint64) >= sizeof(handle), "HSAint64 too small for interop_handle");
   HSAint64 resource_handle =
 #ifdef _WIN32
-      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(interop_handle));
+      static_cast<HSAint64>(reinterpret_cast<uintptr_t>(handle));
 #else
-      static_cast<HSAint64>(interop_handle);
+      static_cast<HSAint64>(handle);
 #endif
 
   if (num_agents > tinyArraySize) {
@@ -903,9 +900,12 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
   }
 
-  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(resource_handle, &info, num_agents,
-                                          nodes)) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  const HSA_REGISTER_MEM_FLAGS reg_flags = {
+      .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
+
+  auto status =
+      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
+  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
   auto& driver = agents[0]->driver();
@@ -3810,11 +3810,13 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
-        return HSA_STATUS_ERROR;
-      }
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+#endif
+
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                            reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+      return HSA_STATUS_ERROR;
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
@@ -3829,12 +3831,11 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+#if defined(__linux__)
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+#endif
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
-      if (!rocr::os::UnmapMemory(va, size)) {
-        return HSA_STATUS_ERROR;
-      }
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+      if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
         return HSA_STATUS_ERROR;
       }
       permissions = perms;
@@ -3855,17 +3856,19 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
 {
   /* Create a CPU mapping with PROT_NONE */
   #if defined(__linux__)
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
+  #endif
+
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
-                       std::forward_as_tuple(cpu_agent),
-                       std::forward_as_tuple(this, cpu_agent, va,
-                                             size, HSA_ACCESS_PERMISSION_NONE))
+                      std::forward_as_tuple(cpu_agent),
+                      std::forward_as_tuple(this, cpu_agent, va,
+                                            size, HSA_ACCESS_PERMISSION_NONE))
                       .first;
 
   auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
   if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
-  #endif
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held

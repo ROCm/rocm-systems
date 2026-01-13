@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <unistd.h>
 #include "OutCapture.hh"
 
 /**

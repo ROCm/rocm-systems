@@ -992,19 +992,15 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
   CATCH;
 }
 
-hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents,
-                                        hsa_handle_t interop_handle,
-                                        uint32_t flags, size_t* size,
-                                        void** ptr, size_t* metadata_size,
-                                        const void** metadata) {
-  static const int tinyArraySize=8;
+hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                        hsa_handle_t interop_handle, uint32_t flags, size_t* size,
+                                        void** ptr, size_t* metadata_size, const void** metadata) {
+  static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
   IS_BAD_PTR(agents);
   IS_BAD_PTR(size);
   IS_BAD_PTR(ptr);
-  if (flags != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (num_agents == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   core::Agent* short_agents[tinyArraySize];
@@ -1025,8 +1021,8 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
   }
 
   auto ret = core::Runtime::runtime_singleton_->InteropMap(
-      num_agents, core_agents, interop_handle, flags, size, ptr, metadata_size,
-      metadata);
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
+      ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
