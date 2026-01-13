@@ -123,7 +123,7 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {ROCm/rocprofiler-compute: v3.4.0 (12 January 2026)},
+  title        = {ROCm Compute Profiler: v3.4.0 (12 January 2026)},
   month        = January,
   year         = 2026,
   publisher    = {Zenodo},
