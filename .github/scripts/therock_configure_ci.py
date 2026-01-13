@@ -88,15 +88,16 @@ SKIPPABLE_PATH_PATTERNS = [
     "docs/*",
     ".gitignore",
     "*.md",
+    "*.rtf",
     "*.rst",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
     "projects/*/docs/*",
     "projects/*/.gitignore",
-    "projects/*/*.md",
-    "projects/*/*.rst",
     "shared/*/docs/*",
     "shared/*/.gitignore",
-    "shared/*/*.md",
-    "shared/*/*.rst",
 ]
 
 

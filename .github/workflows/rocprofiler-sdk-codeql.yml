@@ -6,9 +6,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
   push:
     branches:
@@ -16,9 +22,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
 env:
   ROCM_PATH: "/opt/rocm"

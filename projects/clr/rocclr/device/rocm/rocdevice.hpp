@@ -602,9 +602,16 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  void getSdmaRWMasks(uint32_t* readMask, uint32_t* writeMask) const;
   bool isXgmi() const override { return isXgmi_; }
 
+  //! SDMA engine allocation for per-stream affinity
+  uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
+                              hsa_agent_t dstAgent, hsa_agent_t srcAgent) const {
+    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, dstAgent, srcAgent);
+  }
+  void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
+    sdma_engine_allocator_.ReleaseEngine(vgpu);
+  }
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
   //! Adds a kernel to the kernel map
@@ -705,6 +712,27 @@ class Device : public NullDevice {
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
+
+  //! SDMA engine allocator for per-stream affinity
+  struct SdmaEngineAllocator {
+    amd::Monitor lock_;  //!< Protects the allocation state
+    std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
+    const Device& device_;  //!< Reference to parent device for accessing masks
+
+    SdmaEngineAllocator(const Device& device)
+        : lock_(true), device_(device) {}
+
+    //! Allocate an SDMA engine for a VirtualGPU
+    //! Queries HSA for engine status and preferred engines, then allocates
+    //! For inter-GPU copies, strongly prefers recommended engines even if already allocated
+    uint32_t AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
+                           hsa_agent_t dstAgent, hsa_agent_t srcAgent);
+
+    //! Release engine allocation for a VirtualGPU
+    void ReleaseEngine(VirtualGPU* vgpu);
+  };
+  mutable SdmaEngineAllocator sdma_engine_allocator_;
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

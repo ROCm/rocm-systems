@@ -516,8 +516,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   auto temp_id = (current_id_ + 2) % signal_list_.size();
 
   // If GPU is still busy with processing, then add more signals to avoid more frequent stalls
-  if ((Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) ||
-      (signal_list_[temp_id]->ts_ == ts)) {
+  if (Hsa::signal_load_relaxed(signal_list_[temp_id]->signal_) > 0) {
     std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
     if ((signal != nullptr) && CreateSignal(signal.get())) {
       // Find valid new index
@@ -1784,6 +1783,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
 
 // ================================================================================================
 VirtualGPU::~VirtualGPU() {
+  // Release SDMA engine assignment for this VirtualGPU
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
+
   delete blitMgr_;
 
   if (tracking_created_) {
@@ -1989,6 +1992,14 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
   } else {
     return nullptr;
   }
+}
+
+// ================================================================================================
+void VirtualGPU::ReleaseSdmaEngines() {
+  // Release SDMA engine assignment when queue is idle
+  // This allows the engine to be reassigned to other active streams
+  dev().ReleaseSdmaEngine(this);
+  ClearAssignedSdmaEngine();
 }
 
 // ================================================================================================

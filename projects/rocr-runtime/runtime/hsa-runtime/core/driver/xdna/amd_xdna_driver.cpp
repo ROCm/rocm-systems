@@ -155,12 +155,6 @@ hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   return HSA_STATUS_ERROR;
 }
 
-uint64_t XdnaDriver::GetSystemMemoryByteSize() {
-  const long pagesize = sysconf(_SC_PAGESIZE);
-  const long page_count = sysconf(_SC_PHYS_PAGES);
-  return pagesize * page_count;
-}
-
 uint64_t XdnaDriver::GetDevHeapByteSize() {
   return dev_heap_size;
 }

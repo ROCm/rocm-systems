@@ -17,6 +17,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - By default, tracing uses deferred trace generation (cached mode) for improved performance and minimal runtime overhead.
 - `--trace` / `-T` CLI flag enables tracing with cached mode by default.
 - `--trace-legacy` / `-L` CLI flag enables legacy direct mode for tracing.
+- Changed thread storage allocation from a hard-coded 4096-element array to a compile-time computed size derived from the ROCPROFSYS_MAX_THREADS configuration flag.
+
+### Resolved issues
+
+- Fixed application termination with segfault when thread creation surpasses ROCPROFSYS_MAX_THREADS configuration.
 
 ### Removed
 

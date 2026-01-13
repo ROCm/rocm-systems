@@ -109,6 +109,12 @@ enum vhsakmt_ccmd_query_type {
   VHSAKMT_CCMD_QUERY_TILE_CONFIG,
   VHSAKMT_CCMD_QUERY_NANO_TIME,
   VHSAKMT_CCMD_QUERY_GET_RUNTIME_CAPS,
+  VHSAKMT_CCMD_QUERY_AMDGPU_DEVICE_HANDLE,
+  VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ,
+  VHSAKMT_CCMD_QUERY_SET_XNACK_MODE,
+  VHSAKMT_CCMD_QUERY_SPM_ACQUIRE,
+  VHSAKMT_CCMD_QUERY_SPM_RELEASE,
+  VHSAKMT_CCMD_QUERY_SPM_SET_DST_BUFFER,
 };
 
 #define QUERY_PTR_INFO_MAX_MAPPED_NODES 3
@@ -153,6 +159,15 @@ typedef struct _query_open_kfd_args {
 } query_open_kfd_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_query_open_kfd_args)
 
+typedef struct _query_spm_set_dst_buffer_args {
+  uint32_t PreferredNode;
+  uint32_t SizeInBytes;
+  uint32_t timeout;
+  uint32_t res_id;
+  uint64_t DestMemoryAddress;
+} query_spm_set_dst_buffer_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_spm_set_dst_buffer_args)
+
 typedef struct _query_open_kfd_rsp {
   uint64_t vm_start;
   uint64_t vm_size;
@@ -163,6 +178,27 @@ typedef struct _query_nano_time_rsp {
   uint64_t nano_time;
 } query_nano_time_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_query_nano_time_rsp)
+
+typedef struct _query_drm_cmd_write_read_args {
+   uint64_t fd;
+   uint64_t drmCommandIndex;
+   uint64_t size;
+} query_drm_cmd_write_read_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_drm_cmd_write_read_args)
+
+typedef struct _query_device_handle_rsp {
+  uint64_t amdgpu_device_handle;
+  uint64_t fd;
+} query_device_handle_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_device_handle_rsp)
+
+typedef struct _query_spm_set_dst_buffer_rsp {
+  uint32_t SizeCopied;
+  uint32_t timeout;
+  uint8_t IsTileDataLoss;
+  uint8_t pad[7];
+} query_spm_set_dst_buffer_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_query_spm_set_dst_buffer_rsp)
 
 struct vhsakmt_ccmd_query_info_req {
   struct vhsakmt_ccmd_req hdr;
@@ -178,6 +214,9 @@ struct vhsakmt_ccmd_query_info_req {
     query_req_node_io_link_args node_io_link_args;
     query_tile_config tile_config_args;
     query_open_kfd_args open_kfd_args;
+    query_drm_cmd_write_read_args drm_cmd_write_read_args;
+    query_spm_set_dst_buffer_args spm_set_dst_buffer_args;
+    HSAint32 xnack_mode;
   };
 
   uint8_t payload[];
@@ -186,8 +225,9 @@ VHSAKMT_DEFINE_CAST(vhsakmt_ccmd_req, vhsakmt_ccmd_query_info_req)
 VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_query_info_req)
 #define VHSAKMT_CCMD_QUERY_MAX_TILE_CONFIG 128
 #define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_MEM_PROP 128
-#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_CACHE_PROP 128
-#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_IO_LINK_PROP 128
+#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_CACHE_PROP 512
+#define VHSAKMT_CCMD_QUERY_MAX_GET_NOD_IO_LINK_PROP 512
+#define VHSAKMT_CCMD_QUERY_DRM_CMD_WRITE_READ_MAX_SIZE 128
 
 struct vhsakmt_ccmd_query_info_rsp {
   struct vhsakmt_ccmd_rsp hdr;
@@ -203,6 +243,8 @@ struct vhsakmt_ccmd_query_info_rsp {
     HsaNodeProperties node_props;
     int32_t xnack_mode;
     HsaClockCounters clock_counters;
+    query_device_handle_rsp device_handle_rsp;
+    query_spm_set_dst_buffer_rsp spm_set_dst_buffer_rsp;
     uint32_t caps;
     uint64_t pad[9];
   };
@@ -319,13 +361,29 @@ enum vhsakmt_ccmd_memory_type {
   VHSAKMT_CCMD_MEMORY_REG_MEM_WITH_FLAG,
   VHSAKMT_CCMD_MEMORY_DEREG_MEM,
   VHSAKMT_CCMD_MEMORY_MAP_USERPTR,
+  VHSAKMT_CCMD_MEMORY_EXPORT_DMABUF,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_IMPORT,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_EXPORT,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_VA_OP,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_FREE,
+  VHSAKMT_CCMD_MEMORY_SHARE_MEMORY,
+  VHSAKMT_CCMD_MEMORY_REGISTER_SHARED_HANDLE,
+  VHSAKMT_CCMD_MEMORY_SET_MEM_POLICY,
+  VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
+  VHSAKMT_CCMD_MEMORY_SVM_SET_ATTR,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_QUERY_INFO,
+  VHSAKMT_CCMD_MEMORY_AMDGPU_BO_SET_METADATA,
 };
+
+#define VHSAKMT_MEMORY_MAX_NODES 32
+#define VHSAKMT_MEMORY_MAX_NATTR 32
 
 typedef struct _memory_req_alloc_args {
   uint32_t PreferredNode;
   HsaMemFlags MemFlags;
   uint64_t SizeInBytes;
   uint64_t MemoryAddress;
+  uint64_t Alignment;
 } memory_req_alloc_args;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_req_alloc_args)
 
@@ -362,16 +420,87 @@ typedef struct _memory_reg_mem_with_flag {
 } memory_reg_mem_with_flag;
 VHSAKMT_STATIC_ASSERT_SIZE(_memory_reg_mem_with_flag)
 
+typedef struct _memory_amdgpu_import_args {
+  int64_t dev;
+  uint32_t type;
+  uint32_t shared_handle;
+} memory_amdgpu_import_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_import_args)
+
+typedef struct _memory_amdgpu_export_args {
+  uint64_t buf_handle;
+  uint32_t type;
+  uint32_t pad;
+} memory_amdgpu_export_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_export_args)
+
+typedef struct _memory_amdgpu_va_op_args {
+  uint64_t bo;
+  uint64_t offset;
+  uint64_t size;
+  uint64_t addr;
+  uint64_t flags;
+  uint32_t ops;
+  uint32_t pad;
+} memory_amdgpu_va_op_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_amdgpu_va_op_args)
+
+typedef struct _memory_export_dmabuf_args {
+  uint64_t MemoryAddress;
+  uint64_t MemorySizeInBytes;
+} memory_export_dmabuf_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_export_dmabuf_args)
+
+typedef struct _memory_share_memory_args {
+  uint64_t MemoryAddress;
+  uint64_t MemorySizeInBytes;
+} memory_share_memory_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_share_memory_args)
+
+typedef struct _memory_register_shared_handle_args {
+  HsaSharedMemoryHandle SharedMemoryHandle;
+  uint64_t NumberOfNodes;
+} memory_register_shared_handle_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_register_shared_handle_args)
+
+typedef struct _memory_set_mem_policy_args {
+  uint32_t Node;
+  uint32_t DefaultPolicy;
+  uint32_t AlternatePolicy;
+  uint32_t pad;
+  uint64_t MemoryAddressAlternate;
+  uint64_t MemorySizeInBytes;
+} memory_set_mem_policy_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_set_mem_policy_args)
+
+typedef struct _memory_svm_attr_args {
+  uint64_t start_addr;
+  uint64_t size;
+  uint32_t nattr;
+  uint32_t pad;
+} memory_svm_attr_args;
+VHSAKMT_STATIC_ASSERT_SIZE(_memory_svm_attr_args)
+
 struct vhsakmt_ccmd_memory_req {
   struct vhsakmt_ccmd_req hdr;
   union {
     uint64_t MemoryAddress;
+    uint64_t buf_handle;
     uint32_t Node;
     memory_req_alloc_args alloc_args;
     memory_req_map_to_GPU_nodes_args map_to_GPU_nodes_args;
     memory_req_free_args free_args;
     memory_map_mem_to_gpu_args map_to_GPU_args;
     memory_reg_mem_with_flag reg_mem_with_flag;
+    memory_export_dmabuf_args export_dmabuf_args;
+    memory_amdgpu_import_args amdgpu_import_args;
+    memory_amdgpu_export_args amdgpu_export_args;
+    memory_amdgpu_va_op_args amdgpu_va_op_args;
+    memory_share_memory_args share_memory_args;
+    memory_register_shared_handle_args register_shared_handle_args;
+    memory_set_mem_policy_args set_mem_policy_args;
+    memory_svm_attr_args svm_attr_args;
+    struct amdgpu_bo_metadata amdgpu_bo_metadata;
   };
   uint64_t blob_id;
   uint32_t type;
@@ -388,14 +517,43 @@ typedef struct _vhsakmt_ccmd_memory_map_userptr_rsp {
 } vhsakmt_ccmd_memory_map_userptr_rsp;
 VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_map_userptr_rsp)
 
+typedef struct _vhsakmt_ccmd_memory_export_dmabuf_rsp {
+  int64_t dmabuf_fd;
+  uint64_t offset;
+} vhsakmt_ccmd_memory_export_dmabuf_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_export_dmabuf_rsp)
+
+typedef struct _vhsakmt_ccmd_memory_amdgpu_import_rsp
+{
+  struct amdgpu_bo_import_result output;
+}vhsakmt_ccmd_memory_amdgpu_import_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_amdgpu_import_rsp)
+
+typedef struct _vhsakmt_ccmd_memory_share_memory_rsp {
+  HsaSharedMemoryHandle SharedMemoryHandle;
+} vhsakmt_ccmd_memory_share_memory_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_share_memory_rsp)
+
+typedef struct _vhsakmt_ccmd_memory_register_shared_handle_rsp {
+  uint64_t memory_handle;
+  uint64_t size;
+} vhsakmt_ccmd_memory_register_shared_handle_rsp;
+VHSAKMT_STATIC_ASSERT_SIZE(_vhsakmt_ccmd_memory_register_shared_handle_rsp)
+
 struct vhsakmt_ccmd_memory_rsp {
   struct vhsakmt_ccmd_rsp hdr;
   int32_t ret;
   union {
     vhsakmt_ccmd_memory_map_userptr_rsp map_userptr_rsp;
+    vhsakmt_ccmd_memory_export_dmabuf_rsp export_dmabuf_rsp;
     uint64_t memory_handle;
     uint64_t alternate_vagpu;
     uint64_t available_bytes;
+    vhsakmt_ccmd_memory_amdgpu_import_rsp amdgpu_import_rsp;
+    uint32_t shared_handle;
+    vhsakmt_ccmd_memory_share_memory_rsp share_memory_rsp;
+    vhsakmt_ccmd_memory_register_shared_handle_rsp register_shared_handle_rsp;
+    struct amdgpu_bo_info query_bo_info;
   };
   uint8_t payload[];
 };
@@ -407,7 +565,14 @@ VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_memory_rsp)
 enum vhsakmt_ccmd_queue_type {
   VHSAKMT_CCMD_QUEUE_CREATE,
   VHSAKMT_CCMD_QUEUE_DESTROY,
+  VHSAKMT_CCMD_QUEUE_UPDATE,
+  VHSAKMT_CCMD_QUEUE_GET_INFO,
+  VHSAKMT_CCMD_QUEUE_SET_CU_MASK,
+  VHSAKMT_CCMD_QUEUE_ALLOC_GWS,
 };
+
+#define VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE 128
+#define VHSAKMT_CCMD_QUEUE_MAX_GWS_SIZE 128
 
 typedef struct _vHsaQueueResource {
   HsaQueueResource r;
@@ -437,11 +602,24 @@ typedef struct _queue_req_create {
 } queue_req_create;
 VHSAKMT_STATIC_ASSERT_SIZE(_queue_req_create)
 
+typedef struct _queue_req_update {
+  HSA_QUEUEID QueueId;
+  uint32_t QueuePercentage;
+  uint32_t pad;
+  HSA_QUEUE_PRIORITY Priority;
+  uint64_t QueueAddress;
+  uint64_t QueueSizeInBytes;
+} queue_req_update;
+VHSAKMT_STATIC_ASSERT_SIZE(_queue_req_update)
+
 struct vhsakmt_ccmd_queue_req {
   struct vhsakmt_ccmd_req hdr;
   union {
     HSA_QUEUEID QueueId;
     queue_req_create create_queue_args;
+    queue_req_update update_queue_args;
+    uint32_t CUMaskCount;
+    uint32_t nGWS;
   };
   uint64_t blob_id;          /* For queue create, queue resource */
   uint64_t rw_ptr_blob_id;   /* For queue create, r/w ptr memory mapping */
@@ -459,6 +637,8 @@ struct vhsakmt_ccmd_queue_rsp {
   struct vhsakmt_ccmd_rsp hdr;
   int32_t ret;
   vHsaQueueResource vqueue_res;
+  uint32_t pad;
+  HsaQueueInfo queue_info;
   uint8_t payload[];
 };
 VHSAKMT_STATIC_ASSERT_SIZE(vhsakmt_ccmd_queue_rsp)
@@ -474,7 +654,7 @@ typedef struct _gl_inter_req_reg_ghd_to_nodes {
   uint64_t GraphicsResourceHandle;
   uint64_t NumberOfNodes;  // NodeArray in payload
   uint32_t res_handle;
-  uint32_t pad;
+  uint32_t flag;
 } gl_inter_req_reg_ghd_to_nodes;
 VHSAKMT_STATIC_ASSERT_SIZE(_gl_inter_req_reg_ghd_to_nodes)
 

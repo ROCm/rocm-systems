@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <vector>
 #include "BaseQueue.hpp"
+#include "PM4Queue.hpp"
+#include "SDMAQueue.hpp"
 #include "Dispatch.hpp"
 #include "SDMAPacket.hpp"
 
@@ -272,6 +274,48 @@ HSAuint64 GetSystemTickCountInMicroSec() {
     struct timeval t;
     gettimeofday(&t, 0);
     return t.tv_sec * 1000000ULL + t.tv_usec;
+}
+
+bool GPUMemCopy(void* dst, void* src, size_t size, unsigned int node, bool useSdma) {
+    if (useSdma) {
+        SDMAQueue sdmaQueue;
+        if (sdmaQueue.Create(node) != HSAKMT_STATUS_SUCCESS)
+            return false;
+        sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(), dst, src, size));
+        sdmaQueue.Wait4PacketConsumption();
+        sdmaQueue.Destroy();
+        return true;
+    } else {
+        PM4Queue pm4Queue;
+        if (pm4Queue.Create(node) != HSAKMT_STATUS_SUCCESS)
+            return false;
+
+        HsaNodeProperties nodeProperties;
+        if (hsaKmtGetNodeProperties(node, &nodeProperties) != HSAKMT_STATUS_SUCCESS)
+            return false;
+        Assembler pAsm(GetGfxVersion(&nodeProperties));
+
+        HsaMemoryBuffer isaBuffer(PAGE_SIZE, node, true, false, true);
+        if (pAsm.RunAssembleBuf(CopyWordsIsa, isaBuffer.As<char*>()) != HSAKMT_STATUS_SUCCESS)
+            return false;
+
+        HsaMemoryBuffer addrBuffer(PAGE_SIZE, node);
+        void **localBufAddr = addrBuffer.As<void **>();
+        localBufAddr[0] = src;
+        localBufAddr[1] = dst;
+
+        HsaMemoryBuffer sizeBuffer(PAGE_SIZE, node);
+        unsigned int *pSize = sizeBuffer.As<unsigned int *>();
+        *pSize = static_cast<unsigned int>(size / sizeof(unsigned int));
+
+        Dispatch dispatch(isaBuffer);
+        dispatch.SetArgs(localBufAddr, pSize);
+        dispatch.SetDim(1, 1, 1);
+        dispatch.Submit(pm4Queue);
+        dispatch.Sync();
+        pm4Queue.Destroy();
+        return true;
+    }
 }
 
 const HsaMemoryBuffer HsaMemoryBuffer::Null;

@@ -209,8 +209,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
                 assert len(file_dict[file].index) >= num_devices
             elif "sysinfo" not in file and "ps_file" not in file:
                 assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
+        elif file.endswith(".html"):
+            file_dict[file] = "html"
         elif file.endswith(".json"):
             file_dict[file] = "json"
     return file_dict
@@ -2497,7 +2497,14 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
         "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
     )
 
-    mock_df = pd.DataFrame({"Dispatch_ID": [0], "GPU_ID": [0], "Kernel_Name": ["test"]})
+    mock_df = pd.DataFrame({
+        "Dispatch_ID": [0],
+        "GPU_ID": [0],
+        "Kernel_Name": ["test"],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "LDS_Per_Workgroup": [1024],
+    })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -2729,6 +2736,10 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
         "Dispatch_ID": [0],
         "Start_Timestamp": [100],
         "End_Timestamp": [200],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "Kernel_Name": ["test_kernel"],
+        "LDS_Per_Workgroup": [1024],
     })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
@@ -2800,9 +2811,9 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     csv_content = (
         "Agent_Type,Node_Id,Wave_Front_Size,Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,"
         "Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,"
-        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Start_Timestamp,"
+        "Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,LDS_Per_Workgroup,Start_Timestamp,"
         "End_Timestamp,Counter_Name,Counter_Value\n"
-        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,0,1,SQ_WAVES,100"
+        "GPU,0,0,0,0,0,0,0,0,0,0,test_kernel,0,0,0,0,0,0,1024,0,1,SQ_WAVES,100"
     )
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
@@ -3094,7 +3105,14 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils.Path", path_side_effect)
 
-    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
+    dummy_df = pd.DataFrame({
+        "Dispatch_ID": [0],
+        "A": [1],
+        "Kernel_Name": ["test"],
+        "Grid_Size": [1024],
+        "Workgroup_Size": [64],
+        "LDS_Per_Workgroup": [1024],
+    })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
@@ -7659,8 +7677,8 @@ def test_amdsmi_get_gpu_memory_partition():
 # =============================================================================
 
 
-def test_merge_counters_iteration_multiplex():
-    """Test merge_counters_iteration_multiplex with sample DataFrame."""
+def test_impute_counters_iteration_multiplex():
+    """Test impute_counters_iteration_multiplex with sample DataFrame."""
     import pandas as pd
 
     data = {
@@ -7677,24 +7695,33 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
-
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 1  # Only one unique kernel_name 'kernel_a'
+    assert len(result) == 3  # Ensure same number of rows
+    # Assert Counter1 and Counter2 imputed for first two dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 500
+    assert result[("file1", "Counter1")].iloc[1] == 100
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -7710,17 +7737,23 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
     # Test multi_kernel
     data = {
@@ -7737,24 +7770,35 @@ def test_merge_counters_iteration_multiplex():
         ("file1", "Start_Timestamp"): [1000, 1200, 1400],
         ("file1", "End_Timestamp"): [1500, 1700, 1900],
         ("file1", "Kernel_ID"): [1, 1, 1],
-        ("file1", "Counter1"): [100, 200, 300],
-        ("file1", "Counter2"): [400, 500, 600],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
     }
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
+    assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
-    result = utils.merge_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
 # =============================================================================
