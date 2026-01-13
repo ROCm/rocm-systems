@@ -8,19 +8,29 @@ on:
     branches: [ develop ]
     paths:
       - 'projects/rocprofiler-sdk/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -120,6 +130,7 @@ jobs:
         id: submods
         shell: bash
         run: |
+          git --version
           git config --global --add safe.directory '*'
           git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -324,6 +335,8 @@ jobs:
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
+            -DROCPROFILER_BUILD_FMT=OFF \
+            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
@@ -449,6 +462,7 @@ jobs:
         id: submods
         shell: bash
         run: |
+          git --version
           git config --global --add safe.directory '*'
           git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -630,6 +644,8 @@ jobs:
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
+            -DROCPROFILER_BUILD_FMT=OFF \
+            -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             -DPython3_EXECUTABLE=$(which python3) \
@@ -693,6 +709,7 @@ jobs:
       id: submods
       shell: bash
       run: |
+        git --version
         git config --global --add safe.directory '*'
         git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
         echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -843,6 +860,8 @@ jobs:
           --memcheck ${{ matrix.system.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
+          -DROCPROFILER_BUILD_FMT=OFF \
+          -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
