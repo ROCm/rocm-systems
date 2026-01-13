@@ -34,6 +34,50 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**. 
+  - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
+  - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl  (0-1)`.
+  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+ ```
+ 
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
   - Added `--base-board-temps` option to `amd-smi monitor` command for base board temperature sensors

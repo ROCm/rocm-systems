@@ -32,6 +32,7 @@ extern const std::vector<const char*> ShaderList;
 /* Common */
 extern const char *NoopIsa;
 extern const char *CopyDwordIsa;
+extern const char *CopyWordsIsa;
 extern const char *InfiniteLoopIsa;
 extern const char *AtomicIncIsa;
 

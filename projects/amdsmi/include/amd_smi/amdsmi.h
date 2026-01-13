@@ -7756,6 +7756,114 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 
 /** @} End tagCPUAuxillary */
 
+/**
+ *  @brief Set the CPU Rail Isofrequency Policy
+ *
+ *  This API configures the frequency policy for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, this setting has no effect.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *  this policy enables or disables independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1).
+ *
+ *  Policy values:
+ *  - 0: Disable independent control (all cores on both rails have the same frequency limit)
+ *  - 1: Enable independent control (each rail has an independent frequency limit)
+ *
+ *  @ingroup tagCpuISOFreqPolicy
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to query
+ *
+ *  @param[in] input   Input policy value indicating the isofrequency setting:
+ *                     - 0: Enable independent control - each rail has its own independent frequency limit.
+ *                     - 1: Disable independent control - all cores on both rails share the same frequency limit.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   uint8_t input);
+
+/**
+ *  @brief Get the CPU Rail Isofrequency Policy.
+ *
+ *  This API retrieves the current frequency policy configuration for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, the effective policy may be overridden.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *    this policy indicates whether independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1) are enabled or disabled.
+ *
+ *  Cpu rail iso policy values returned:
+ *  - 0: Independent control disabled (all cores on both rails have the same frequency limit)
+ *  - 1: Independent control enabled (each rail has an independent frequency limit)
+ *
+ *  @ingroup tagCpuISOFreqPolicy
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]  cpurailiso to receive the current policy state
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   uint8_t *cpurailiso);
+
+/** @} End tagCpuISOFreqPolicy */
+
+/**
+ *  @brief Set the DFCState enabling control.
+ *
+ *  DFCState is a low power state used for I/O Die (IOD).
+ *
+ *  Note:
+ *  - This feature cannot be enabled unless it was enabled by the BIOS during POST.
+ *  - Use this API to enable or disable DFCState control.
+ *
+ *  DFCState control values for setting:
+ *  - 0: Disable DFC control
+ *  - 1: Enable DFC control
+ *
+ *  @ingroup tagDFCEnableControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in] processor_handle Cpu socket handle to query
+ *
+ *  @param[in] dfc_ctrl        indicating whether to enable (1) or disable (0) DFC control
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_set_dfc_ctrl(amdsmi_processor_handle processor_handle, bool dfc_ctrl);
+
+/**
+ *  @brief Get the current DFCState enabling control status.
+ *
+ *  DFCState is a low power state used for I/O Die (IOD).
+ *
+ *  Note:
+ *  - This feature can only be enabled if it was enabled by the BIOS during POST.
+ *  - This API retrieves whether DFC control is currently enabled or disabled.
+ *
+ *  Returned DFCState control values:
+ *  - 0: DFC control is disabled
+ *  - 1: DFC control is enabled
+ *
+ *  @ingroup tagDFCEnableControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket handle to query
+ *
+ *  @param[in,out]  dfc_ctrl to receive the current DFCState control status
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle, uint8_t *dfc_ctrl);
+
+/** @} End tagDFCEnableControl */
+
 #endif
 
 #ifdef __cplusplus

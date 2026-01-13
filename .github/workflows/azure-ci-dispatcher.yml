@@ -26,6 +26,16 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
+    paths-ignore:  # Do not trigger full tests on documentation-only changes
+      - '**/*.md'
+      - '**/*.rtf'
+      - '**/*.rst'
+      - '**/.markdownlint-ci2.yaml'
+      - '**/.readthedocs.yaml'
+      - '**/.spellcheck.local.yaml'
+      - '**/.wordlist.txt'
+      - 'docs/**'
+      - 'projects/*/docs/**'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
