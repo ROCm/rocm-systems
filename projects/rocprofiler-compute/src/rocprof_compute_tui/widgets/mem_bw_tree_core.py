@@ -199,23 +199,26 @@ class TreeCanvas(Static):
         return top, mid, bot, inner_w
 
     def _node_style(self, node: TreeNode) -> str:
-        # Selected has top priority.
+        # Selection always wins
         if node is self.selected:
             return "bold cyan"
 
-        # Decision-engine tags.
-        if "warn" in node.tags:
+        # BFS evaluation states
+        if "eval_error" in node.tags:
             return "bold yellow"
-        if "active" in node.tags:
+        if "eval_true" in node.tags:
             return "bold green"
-        if "dim" in node.tags:
-            return "dim"
+        if "eval_false" in node.tags:
+            return "bold red"
+        if "eval_no_rule" in node.tags:
+            return "bold"
 
-        # Existing collapsed style.
+        # Collapsed subtree
         if (not node.expanded and node.children):
             return "dim"
 
         return ""
+
 
     def _draw_node(
         self, canvas: list[list[tuple[str, str]]], node: TreeNode, ox: int

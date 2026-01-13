@@ -25,7 +25,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+# ============================================================================
+# Metric snapshot
+# ============================================================================
 
 
 @dataclass(frozen=True)
@@ -38,27 +43,70 @@ class MetricMeta:
 
 @dataclass
 class MetricSnapshot:
+    """
+    A point-in-time view of metrics for a single kernel dispatch.
+    """
+
     values: dict[str, float]  # Metric_ID -> value
-    meta: dict[str, MetricMeta]  # Metric_ID -> meta
-    missing: list[str]  # list[Metric_ID]
+    meta: dict[str, MetricMeta]  # Metric_ID -> metadata
+    missing: list[str]  # Metric_IDs not found in kernel data
+
+
+# ============================================================================
+# Predicate evaluation result
+# ============================================================================
 
 
 @dataclass(frozen=True)
 class PredicateResult:
+    """
+    Result of evaluating a single predicate.
+    """
+
     passed: bool
-    expression: str  # short human explanation
-    details: str  # verbose detail
-    inputs: dict[str, float]  # metric_id -> value used
+    expression: str  # Short, human-readable expression
+    details: str  # Verbose explanation
+    inputs: dict[str, float]  # Metric_ID -> value used
+
+
+# ============================================================================
+# Node-level evaluation
+# ============================================================================
+
+
+class EvalStatus(str, Enum):
+    """
+    Final evaluation status for a node.
+    """
+
+    TRUE = "true"  # Predicate evaluated successfully and passed
+    FALSE = "false"  # Predicate evaluated successfully and failed
+    ERROR = "error"  # Exception during evaluation
+    NO_RULE = "no_rule"  # Node reached but no predicate attached
 
 
 @dataclass
 class NodeEvaluation:
+    """
+    Evaluation result for a single tree node.
+    """
+
     node_id: str
-    passed: bool
+    status: EvalStatus
     predicate_results: list[PredicateResult]
+    error: Optional[str] = None
+
+
+# ============================================================================
+# Decision result (engine output)
+# ============================================================================
 
 
 @dataclass
 class DecisionResult:
-    active_path: list[str]  # list[node_id]
+    """
+    Output of the DecisionEngine BFS evaluation.
+    """
+
+    reached: list[str]  # BFS order of reached nodes
     node_eval: dict[str, NodeEvaluation]  # node_id -> evaluation

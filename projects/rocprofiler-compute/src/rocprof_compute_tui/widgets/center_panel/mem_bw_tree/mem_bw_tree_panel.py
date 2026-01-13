@@ -35,11 +35,11 @@ from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.engine import Decision
 from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.metric_extract import (
     MetricExtractor,
 )
-from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.tree_spec import (
-    PATHS,
-    TREE_DICT,
+from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.tree_spec import TREE_DICT
+from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.ui_model import (
+    DecisionResult,
+    EvalStatus,
 )
-from rocprof_compute_tui.widgets.center_panel.mem_bw_tree.ui_model import DecisionResult
 from rocprof_compute_tui.widgets.mem_bw_tree_core import (
     NodeSelected,
     TreeCanvas,
@@ -49,12 +49,13 @@ from rocprof_compute_tui.widgets.mem_bw_tree_core import (
 
 class MemBwTreePanel(Static):
     """
-    Center tab panel hosting the Mem BW decision tree (beta v1).
+    Center tab panel hosting the Mem BW decision tree (BFS engine).
 
-    Beta v1 features:
-      - Evaluate a metric-driven rule set (ID-based)
-      - Highlight an active path when the rule passes
-      - Provide a click-to-explain details panel for the selected node
+    Features:
+      - BFS traversal of the decision tree
+      - Every reached node is highlighted
+      - Node status: TRUE / FALSE / ERROR / NO_RULE
+      - Click-to-explain predicate details
     """
 
     DEFAULT_CSS = """
@@ -67,11 +68,15 @@ class MemBwTreePanel(Static):
         width: 1fr;
     }
 
-    #mem-bw-details {
+    #mem-bw-details-scroll {
         height: 12;
         border: solid $border;
-        padding: 1 1;
+        padding: 0;
         margin-top: 1;
+    }
+
+    #mem-bw-details {
+        padding: 1 1;
     }
 
     .details-title {
@@ -98,20 +103,25 @@ class MemBwTreePanel(Static):
         self._kernel_data: Optional[dict[str, Any]] = None
 
         self._engine = DecisionEngine()
-        self._last_decision: Optional[DecisionResult] = None  # DecisionResult
+        self._last_decision: Optional[DecisionResult] = None
+        self._last_snapshot = None
         self._details: Optional[Static] = None
 
+    # ------------------------------------------------------------------
+    # UI composition
+    # ------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         self._root = TreeNode.from_dict(TREE_DICT)
 
         with ScrollableContainer(id="mem-bw-tree-scroll"):
             yield TreeCanvas(self._root)
 
-        self._details = Static("", id="mem-bw-details")
-        yield self._details
+        with ScrollableContainer(id="mem-bw-details-scroll"):
+            self._details = Static("", id="mem-bw-details")
+            yield self._details
 
     # ------------------------------------------------------------------
-    # Kernel-selection API for MainView / KernelView
+    # Kernel-selection API
     # ------------------------------------------------------------------
     def set_kernel(
         self,
@@ -121,19 +131,21 @@ class MemBwTreePanel(Static):
         self._current_kernel = kernel_name
         self._kernel_data = kernel_data or {}
 
-        # 1) Extract required metrics by ID
+        # 1) Extract required metrics
         required = self._engine.required_metric_ids()
         snap = MetricExtractor.extract(self._kernel_data, required)
 
-        # 2) Evaluate rules -> decision result (active path + explanations)
-        decision = self._engine.evaluate(snap, PATHS)
-        self._last_decision = (decision, snap)
+        # 2) BFS evaluate the tree
+        assert self._root is not None
+        decision = self._engine.evaluate(snap, self._root)
 
-        # 3) Apply decision to tree node tags + metadata
-        if self._root is not None:
-            self._apply_decision_to_tree(self._root, decision)
+        self._last_decision = decision
+        self._last_snapshot = snap
 
-        # 4) Update details to match current selected node
+        # 3) Apply decision results to tree nodes
+        self._apply_decision_to_tree(self._root, decision)
+
+        # 4) Update details panel for current selection
         self._update_details_for_selected()
 
         # 5) Redraw
@@ -143,39 +155,40 @@ class MemBwTreePanel(Static):
         return self._current_kernel
 
     # ------------------------------------------------------------------
-    # Decision -> UI mapping
+    # Decision → UI mapping
     # ------------------------------------------------------------------
     def _apply_decision_to_tree(
-        self, root: TreeNode, decision: Optional[DecisionResult] = None
+        self,
+        root: TreeNode,
+        decision: Optional[DecisionResult],
     ) -> None:
-        active_ids = set(decision.active_path or [])
-
-        # If we have an active path, dim everything else for clarity.
-        has_active = bool(active_ids)
-
+        """
+        Apply EvalStatus-based tags to each reached node.
+        """
+        # Clear all tags first
         for n in root.walk():
             n.tags.clear()
-            n.metadata = (
-                ""  # beta: keep boxes clean; details panel shows full explanation
-            )
+            n.metadata = ""
 
-            if has_active:
-                if n.node_id in active_ids:
-                    n.tags.add("active")
-                else:
-                    n.tags.add("dim")
+        if decision is None:
+            return
 
-        # If a rule exists for a node and it failed due to missing metrics, mark warn
         for node_id, ev in decision.node_eval.items():
-            if not ev.passed:
-                # If missing metrics, show warn; otherwise keep dim/default.
-                # We'll infer missing from details text for now (beta).
-                if root.find_by_id(node_id):
-                    # Tag warn even if dim, so it stands out when selected.
-                    root.find_by_id(node_id).tags.add("warn")  # type: ignore[union-attr]
+            node = root.find_by_id(node_id)
+            if node is None:
+                continue
+
+            if ev.status == EvalStatus.TRUE:
+                node.tags.add("eval_true")
+            elif ev.status == EvalStatus.FALSE:
+                node.tags.add("eval_false")
+            elif ev.status == EvalStatus.ERROR:
+                node.tags.add("eval_error")
+            elif ev.status == EvalStatus.NO_RULE:
+                node.tags.add("eval_no_rule")
 
     # ------------------------------------------------------------------
-    # Node selection -> details
+    # Node selection → details panel
     # ------------------------------------------------------------------
     @on(NodeSelected)
     def _on_node_selected(self, event: NodeSelected) -> None:
@@ -190,37 +203,52 @@ class MemBwTreePanel(Static):
         if self._details is None:
             return
 
-        title = f"[b]Mem BW Tree[/b]  |  Kernel: {self._current_kernel or 'N/A'}\n"
-        title += f"[b]Selected Node:[/b] {node_id}\n\n"
+        title = (
+            f"[b]Mem BW Tree[/b]  |  Kernel: {self._current_kernel or 'N/A'}\n"
+            f"[b]Selected Node:[/b] {node_id}\n\n"
+        )
 
-        if self._last_decision is None:
+        if self._last_decision is None or self._last_snapshot is None:
             self._details.update(
-                title + "No decision data yet. Run analysis / open Mem BW Tree."
+                title + "No decision data yet. Run analysis to evaluate the tree."
             )
             return
 
-        decision, snap = self._last_decision
+        decision = self._last_decision
+        snap = self._last_snapshot
 
         ev = decision.node_eval.get(node_id)
         if ev is None:
-            # No rule attached to this node in beta
-            self._details.update(
-                title
-                + "No rule attached to this node (beta).\n"
-                + "As we scale, we’ll attach rule logic to more nodes."
-            )
+            self._details.update(title + "Node was not reached during BFS evaluation.")
             return
 
-        status = "PASS" if ev.passed else "FAIL"
-        status_class = "details-pass" if ev.passed else "details-fail"
+        # --------------------------------------------------------------
+        # Status header
+        # --------------------------------------------------------------
+        if ev.status == EvalStatus.TRUE:
+            status = "[details-pass]PASS[/details-pass]"
+        elif ev.status == EvalStatus.FALSE:
+            status = "[details-fail]FAIL[/details-fail]"
+        elif ev.status == EvalStatus.ERROR:
+            status = "[details-warn]ERROR[/details-warn]"
+        else:  # NO_RULE
+            status = "[b]REACHED (no rule)[/b]"
 
-        lines = [title, f"[{status_class}]{status}[/{status_class}]\n"]
+        lines = [title, f"{status}\n\n"]
 
+        # --------------------------------------------------------------
+        # Error details
+        # --------------------------------------------------------------
+        if ev.status == EvalStatus.ERROR and ev.error:
+            lines.append(f"[details-warn]{ev.error}[/details-warn]\n")
+
+        # --------------------------------------------------------------
+        # Predicate details
+        # --------------------------------------------------------------
         for pr in ev.predicate_results:
             lines.append(f"[b]Expression[/b]: {pr.expression}\n")
-            lines.append(f"{pr.details}\n")
+            lines.append(f"{pr.details}\n\n")
 
-            # Inputs with provenance (panel/table)
             lines.append("[b]Inputs[/b]:\n")
             for mid, val in pr.inputs.items():
                 mm = snap.meta.get(mid)
@@ -233,10 +261,14 @@ class MemBwTreePanel(Static):
                     )
                 else:
                     lines.append(f"  - {mid}: {val:.6g}\n")
+            lines.append("\n")
 
+        # --------------------------------------------------------------
+        # Missing metrics
+        # --------------------------------------------------------------
         if snap.missing:
             lines.append(
-                "\n[details-warn]Missing metrics "
+                "[details-warn]Missing metrics "
                 "(not found in kernel data):[/details-warn]\n"
             )
             for mid in snap.missing:

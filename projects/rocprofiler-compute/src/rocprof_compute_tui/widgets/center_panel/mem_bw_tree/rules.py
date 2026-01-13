@@ -31,7 +31,6 @@ from .predicates import (
     AlwaysTrue,
     AnyOf,
     Compare,
-    Dominates,
     Predicate,
 )
 
@@ -66,10 +65,7 @@ METRICS_NON_TEMPORAL_SET = ()
 
 METRICS_HIGH_TC_TA_BP = ("16.3.21",)
 
-METRICS_HIGH_TA_VMEM_BP = (
-    "15.1.1",
-    "11.2.6",
-)
+METRICS_HIGH_TA_VMEM_BP = ()
 
 METRICS_HIGH_VL1D_SET_FULL_STALL = ("16.3.22",)
 
@@ -80,18 +76,15 @@ METRICS_TAGRAM_HOTSPOTTING = (
     "16.3.13",
 )
 
-METRICS_UTCL1_STALL = ("16.5.2",)
+METRICS_UTCL1_STALL = ()
 
-METRICS_UTCL1_LATENCY = ("16.6.7",)
+METRICS_UTCL1_LATENCY = ()
 
-METRICS_L2_CHANNEL_HOTSPOTTING = ("18",)
+METRICS_L2_CHANNEL_HOTSPOTTING = ()
 
-METRICS_L2_HIT_LOW = ("17.1.2",)
+METRICS_L2_HIT_LOW = ()
 
-METRICS_WRITE_TRAFFIC = (
-    "17.2.5",
-    "17.2.6",
-)
+METRICS_WRITE_TRAFFIC = ()
 
 
 @dataclass(frozen=True)
@@ -129,18 +122,30 @@ RULES: list[Rule] = [
         predicate=Compare("16.3.21", 10, ">"),
     ),
     Rule(
+        # "The TCP capacity stall is measurable via TCP_SET_FULL_STALL_RATE."
         node_id=NODE_HIGH_VL1D_SET_FULL_STALL,
         metric_ids=METRICS_HIGH_VL1D_SET_FULL_STALL,
         predicate=Compare("16.3.22", 10, ">"),
     ),
     Rule(
+        # "The unbalanced TCP miss traffic can point to tagram hotspotting,
+        # when ratio between the hottest and coldest tagram accesses is
+        # more than five times."
         node_id=NODE_TAGRAM_HOTSPOTTING,
         metric_ids=METRICS_TAGRAM_HOTSPOTTING,
         predicate=AnyOf([
-            Dominates("16.3.10", ["16.3.11, 16.3.12, 16.3.13"]),
-            Dominates("16.3.11", ["16.3.10, 16.3.12, 16.3.13"]),
-            Dominates("16.3.12", ["16.3.10, 16.3.11, 16.3.13"]),
-            Dominates("16.3.13", ["16.3.10, 16.3.11, 16.3.12"]),
+            Compare("16.3.10", "16.3.11 * 5", ">="),
+            Compare("16.3.10", "16.3.12 * 5", ">="),
+            Compare("16.3.10", "16.3.13 * 5", ">="),
+            Compare("16.3.11", "16.3.10 * 5", ">="),
+            Compare("16.3.11", "16.3.12 * 5", ">="),
+            Compare("16.3.11", "16.3.13 * 5", ">="),
+            Compare("16.3.12", "16.3.10 * 5", ">="),
+            Compare("16.3.12", "16.3.11 * 5", ">="),
+            Compare("16.3.12", "16.3.13 * 5", ">="),
+            Compare("16.3.13", "16.3.10 * 5", ">="),
+            Compare("16.3.13", "16.3.11 * 5", ">="),
+            Compare("16.3.13", "16.3.12 * 5", ">="),
         ]),
     ),
 ]

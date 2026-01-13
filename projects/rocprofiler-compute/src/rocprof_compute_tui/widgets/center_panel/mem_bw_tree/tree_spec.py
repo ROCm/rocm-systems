@@ -183,6 +183,3 @@ TREE_DICT: dict[str, Any] = {
         }
     ],
 }
-
-# Path lookup used by DecisionEngine
-PATHS: dict[str, list[str]] = build_paths(TREE_DICT)

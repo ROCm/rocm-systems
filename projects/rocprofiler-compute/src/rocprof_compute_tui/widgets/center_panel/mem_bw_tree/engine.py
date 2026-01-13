@@ -24,59 +24,119 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
+from rocprof_compute_tui.widgets.mem_bw_tree_core import TreeNode
+
 from .rules import RULES
-from .ui_model import DecisionResult, MetricSnapshot, NodeEvaluation
+from .ui_model import DecisionResult, EvalStatus, MetricSnapshot, NodeEvaluation
 
 
 @dataclass(frozen=True)
 class EngineConfig:
-    # For beta: “first passing rule wins”
-    pass
+    """
+    Engine behavior flags.
+
+    block_children_on_error:
+        If True, a node evaluating to ERROR prevents its children from
+        being evaluated. Default False (per current requirement).
+    """
+
+    block_children_on_error: bool = False
 
 
 class DecisionEngine:
     def __init__(self, config: Optional[EngineConfig] = None) -> None:
         self.config = config or EngineConfig()
 
+        # Pre-index rules by node_id for O(1) lookup during traversal
+        self._rule_by_node: dict[str, object] = {r.node_id: r for r in RULES}
+
     def required_metric_ids(self) -> list[str]:
+        """
+        Collect all metric IDs required by predicates.
+        """
         out: set[str] = set()
         for r in RULES:
             out.update(r.metric_ids)
         return sorted(out)
 
     def evaluate(
-        self, snap: MetricSnapshot, path_lookup: dict[str, list[str]]
+        self,
+        snap: MetricSnapshot,
+        root: TreeNode,
     ) -> DecisionResult:
+        """
+        Evaluate the decision tree using BFS traversal.
+
+        Semantics:
+          - Root is always evaluated as NO_RULE (for now).
+          - Any reached node is highlighted.
+          - Predicate TRUE / FALSE / ERROR are all terminal states
+            for the node itself.
+          - Children are evaluated if the parent is reached.
+          - ERROR does not block children unless configured.
+        """
+
         node_eval: dict[str, NodeEvaluation] = {}
-        passing: list[str] = []
+        reached: list[str] = []
 
-        # 1) Evaluate all rules
-        for rule in RULES:
-            pr = rule.predicate.evaluate(snap)
+        q: deque[TreeNode] = deque([root])
 
-            node_eval[rule.node_id] = NodeEvaluation(
-                node_id=rule.node_id,
-                passed=pr.passed,
-                predicate_results=[pr],
-            )
+        while q:
+            node = q.popleft()
+            node_id = node.node_id
+            reached.append(node_id)
 
-            if pr.passed:
-                passing.append(rule.node_id)
+            rule = self._rule_by_node.get(node_id)
 
-        # 2) Choose deepest passing node (longest path)
-        active_path: list[str] = []
-        if passing:
-            # Guard against missing PATHS entries
-            best_node = max(
-                passing,
-                key=lambda nid: len(path_lookup.get(nid, [])),
-            )
-            active_path = path_lookup.get(best_node, [best_node])
+            # ----------------------------------------------------------
+            # Case 1: No rule attached to this node
+            # ----------------------------------------------------------
+            if rule is None:
+                node_eval[node_id] = NodeEvaluation(
+                    node_id=node_id,
+                    status=EvalStatus.NO_RULE,
+                    predicate_results=[],
+                    error=None,
+                )
+
+                # Root and non-rule nodes never block traversal
+                q.extend(node.children)
+                continue
+
+            # ----------------------------------------------------------
+            # Case 2: Rule exists, evaluate predicate
+            # ----------------------------------------------------------
+            try:
+                pr = rule.predicate.evaluate(snap)
+
+                status = EvalStatus.TRUE if pr.passed else EvalStatus.FALSE
+
+                node_eval[node_id] = NodeEvaluation(
+                    node_id=node_id,
+                    status=status,
+                    predicate_results=[pr],
+                    error=None,
+                )
+
+                # Predicate outcome does not gate children
+                q.extend(node.children)
+
+            except Exception as e:
+                node_eval[node_id] = NodeEvaluation(
+                    node_id=node_id,
+                    status=EvalStatus.ERROR,
+                    predicate_results=[],
+                    error=f"{type(e).__name__}: {e}",
+                )
+
+                if not self.config.block_children_on_error:
+                    q.extend(node.children)
 
         return DecisionResult(
-            active_path=active_path,
+            reached=reached,
             node_eval=node_eval,
         )
