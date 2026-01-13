@@ -11,6 +11,22 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-rocattach REQUIRED)
 
+# TODO: sanitizer tests do not cooperate with attachment code injection
+set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
+                               "ThreadSanitizer")
+
+if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
+
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    set(LOG_LEVEL "warning") # info produces memory leak
+else()
+    set(LOG_LEVEL "trace")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,8 +46,9 @@ add_test(NAME rocattach-parallel-attach-test-execute
 set(rocattach-test-env
     "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "ROCP_TOOL_ATTACH=1"
-    "ROCPROFILER_REGISTER_LOG_LEVEL=trace"
-    "ROCPROFILER_LOG_LEVEL=trace"
+    "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCATTACH_LOG_LEVEL=${LOG_LEVEL}"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 

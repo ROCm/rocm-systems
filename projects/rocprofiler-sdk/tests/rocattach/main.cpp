@@ -125,7 +125,6 @@ main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
-        setenv("ROCATTACH_LOG_LEVEL", "trace", true);
 
         ROCATTACH_CALL(rocattach_attach(pid1));
         ROCATTACH_CALL(rocattach_attach(pid2));
