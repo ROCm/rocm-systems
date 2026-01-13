@@ -28,13 +28,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .predicates import (
-    AllOf,
     AlwaysTrue,
     AnyOf,
     Compare,
     Dominates,
     Predicate,
-    RankedHigher,
 )
 
 # Node IDs (stable)
@@ -55,41 +53,31 @@ NODE_WRITE_TRAFFIC = "write_traffic"
 
 # Metric IDs (canonical)
 METRICS_HIGH_EA_L2_BP = (
-    "17.3.9",  # Misses (L2 Cache - L2 Cache Accesses)
-    "17.2.9",  # Read Latency (L2 Cache - L2-Fabric interface metrics)
-    "17.2.10",  # Write and Atomic Latency (L2 Cache - L2-Fabric interface metrics)
-    "16.3.5",  # Cache Hit Rate (Vector L1 Data Cache - vL1D cache access metrics)
+    "4.1.10",
+    "17.2.0",
+    "17.2.4",
 )
 
-METRICS_HIGH_TCR_TCP_BP = (
-    "16.2.1",
-    "16.2.2",
-)
+METRICS_HIGH_TCR_TCP_BP = ("16.3.20",)
 
 METRICS_VL1D_HIT_LOW = ("16.3.5",)
 
 METRICS_NON_TEMPORAL_SET = ()
 
-METRICS_HIGH_TC_TA_BP = (
-    "15.1.1",
-    "15.1.2",
-)
+METRICS_HIGH_TC_TA_BP = ("16.3.21",)
 
 METRICS_HIGH_TA_VMEM_BP = (
+    "15.1.1",
     "11.2.6",
-    "11.2.11",
 )
 
-METRICS_HIGH_VL1D_SET_FULL_STALL = (
-    "16.2.3",
-    "16.2.4",
-)
+METRICS_HIGH_VL1D_SET_FULL_STALL = ("16.3.22",)
 
 METRICS_TAGRAM_HOTSPOTTING = (
+    "16.3.10",
     "16.3.11",
     "16.3.12",
     "16.3.13",
-    "16.3.14",
 )
 
 METRICS_UTCL1_STALL = ("16.5.2",)
@@ -114,54 +102,36 @@ class Rule:
 
 
 RULES: list[Rule] = [
+    # Rules references doc "AMD Instinct™ MI300 GPU Memory Bandwidth"
     Rule(
+        #
         node_id=NODE_HIGH_EA_L2_BP,
         metric_ids=METRICS_HIGH_EA_L2_BP,
-        predicate=AllOf([
-            Compare("17.2.9", "17.2.10", ">="),  # read >= write+atomic latency
-            Dominates("17.3.9", ["16.3.5"]),  # L2 misses dominates vL1D hit-rate signal
-            RankedHigher(
-                "17.3.9", ["16.3.5"]
-            ),  # L2 miss pressure higher than vL1D hit-rate
-        ]),
+        predicate=Compare("17.2.0 + 17.2.4", "4.1.10 * 0.75", ">="),
     ),
     Rule(
-        node_id=NODE_VL1D_HIT_LOW,
-        metric_ids=METRICS_HIGH_EA_L2_BP,
-        predicate=AllOf([
-            Compare("17.2.9", "17.2.10", ">="),  # read >= write+atomic latency
-            Dominates("17.3.9", ["16.3.5"]),  # L2 misses dominates vL1D hit-rate signal
-            RankedHigher(
-                "17.3.9", ["16.3.5"]
-            ),  # L2 miss pressure higher than vL1D hit-rate
-        ]),
-    ),
-    Rule(
+        # "A high GL2-GL1 stall rate, e.g., over 10%,
+        # could clearly indicate that GL2 is a potential bottleneck."
         node_id=NODE_HIGH_TCR_TCP_BP,
         metric_ids=METRICS_HIGH_TCR_TCP_BP,
-        predicate=AllOf([
-            Dominates("17.3.9", ["16.3.5"]),
-            RankedHigher("17.3.9", ["16.3.5"]),
-        ]),
+        predicate=Compare("16.3.20", 10, "<"),
     ),
     Rule(
         node_id=NODE_NON_TEMPORAL_SET,
         metric_ids=METRICS_NON_TEMPORAL_SET,
-        predicate=AlwaysTrue("Testing"),
+        predicate=AlwaysTrue("Assuming workload is Non-Temporal."),
     ),
     Rule(
+        # "On the TA-TCP interface, the key metric TCP_TA_ADDR_STALL_RATE
+        # allows identifying whether TCP is a bottleneck"
         node_id=NODE_HIGH_TC_TA_BP,
         metric_ids=METRICS_HIGH_TC_TA_BP,
-        predicate=AllOf([
-            Dominates("15.1.1", ["11.2.6"]),
-        ]),
+        predicate=Compare("16.3.21", 10, ">"),
     ),
     Rule(
         node_id=NODE_HIGH_VL1D_SET_FULL_STALL,
         metric_ids=METRICS_HIGH_VL1D_SET_FULL_STALL,
-        predicate=AllOf([
-            Dominates("15.1.1", ["11.2.6"]),
-        ]),
+        predicate=Compare("16.3.22", 10, ">"),
     ),
     Rule(
         node_id=NODE_TAGRAM_HOTSPOTTING,

@@ -205,6 +205,36 @@ Panel Config:
           min: MIN((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
           max: MAX((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
           unit: (Cycles + $normUnit)
+        TCP_TCR_TCP_STALL_RATE:
+          avg: AVG(((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          min: MIN(((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          max: MAX(((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          unit: pct
+        TCP_TA_ADDR_STALL_RATE:
+          avg: AVG(((100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          min: MIN(((100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          max: MAX(((100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          unit: pct
+        TCP_SET_FULL_STALL_RATE:
+          avg: AVG(((100 * (TCP_READ_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum)) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          min: MIN(((100 * (TCP_READ_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum)) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          max: MAX(((100 * (TCP_READ_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum +
+            TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum)) / TCP_GATE_EN2_sum)
+            if (TCP_GATE_EN2_sum != 0) else None)
+          unit: pct
   - metric_table:
       id: 1604
       title: L1D - L2 Transactions

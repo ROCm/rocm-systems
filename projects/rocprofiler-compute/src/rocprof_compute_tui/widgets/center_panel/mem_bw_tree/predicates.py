@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Union
 
 from .ui_model import MetricSnapshot, PredicateResult
 
@@ -40,26 +40,88 @@ def _name(snap: MetricSnapshot, mid: str) -> str:
     return f"{mid} ({meta.metric_name})" if meta else mid
 
 
+_SUPPORTED_OPS = {
+    "+": lambda a, b: a + b,
+    "*": lambda a, b: a * b,
+}
+
+
+def _resolve_value_expr(
+    expr: Union[str, int, float],
+    snap: MetricSnapshot,
+) -> tuple[float | None, str, dict[str, float], bool]:
+    """
+    Resolves a value expression into:
+      value, display_expr, inputs, missing
+    """
+
+    # ---- constant ----
+    if isinstance(expr, (int, float)):
+        v = float(expr)
+        return v, f"{v:.2f}", {"<const>": v}, False
+
+    # ---- simple metric id ----
+    if expr in snap.values:
+        v = snap.values.get(expr)
+        return (
+            v,
+            _name(snap, expr),
+            {expr: v if v is not None else float("nan")},
+            v is None,
+        )
+
+    # ---- binary metric expression (e.g. "11.7.2 + 11.7.1") ----
+    tokens = expr.split()
+    if len(tokens) != 3 or tokens[1] not in _SUPPORTED_OPS:
+        raise ValueError(f"Unsupported value expression: {expr}")
+
+    left, op, right = tokens
+
+    a = snap.values.get(left)
+    b = snap.values.get(right)
+
+    inputs = {
+        left: a if a is not None else float("nan"),
+        right: b if b is not None else float("nan"),
+    }
+
+    if a is None or b is None:
+        return None, expr, inputs, True
+
+    value = _SUPPORTED_OPS[op](a, b)
+    display = f"{_name(snap, left)} {op} {_name(snap, right)}"
+
+    return value, display, inputs, False
+
+
 @dataclass(frozen=True)
 class Compare:
-    lhs: str
-    rhs: str
+    lhs: Union[str, int, float]
+    rhs: Union[str, int, float]
     op: str  # ">", ">=", "<", "<="
 
     def evaluate(self, snap: MetricSnapshot) -> PredicateResult:
-        a = snap.values.get(self.lhs)
-        b = snap.values.get(self.rhs)
-        inputs = {
-            self.lhs: a if a is not None else float("nan"),
-            self.rhs: b if b is not None else float("nan"),
-        }
-        expr = f"{_name(snap, self.lhs)} {self.op} {_name(snap, self.rhs)}"
+        # ---- resolve both sides ----
+        a, lhs_expr, lhs_inputs, lhs_missing = _resolve_value_expr(self.lhs, snap)
+        b, rhs_expr, rhs_inputs, rhs_missing = _resolve_value_expr(self.rhs, snap)
 
-        if a is None or b is None:
+        inputs = {
+            **lhs_inputs,
+            **rhs_inputs,
+        }
+
+        expr = f"{lhs_expr} {self.op} {rhs_expr}"
+
+        # ---- missing handling ----
+        if lhs_missing or rhs_missing:
             return PredicateResult(
-                False, expr, "Missing metric(s) for comparison.", inputs
+                passed=False,
+                expression=expr,
+                details="Missing metric(s) for comparison.",
+                inputs=inputs,
             )
 
+        # ---- comparison ----
         ok = {
             ">": a > b,
             ">=": a >= b,
