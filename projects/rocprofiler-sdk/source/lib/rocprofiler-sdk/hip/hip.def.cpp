@@ -650,6 +650,10 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetParamInfo, hipKernelGetParamInfo, hipKernelGetParamInfo_fn, kernel, paramIndex, paramOffset, paramSize);
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 21
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetP2PAtomicCapabilities, hipDeviceGetP2PAtomicCapabilities, hipDeviceGetP2PAtomicCapabilities_fn, capabilities, operations, count, srcDevice, dstDevice);
+#endif
+
 // clang-format on
 
 #else

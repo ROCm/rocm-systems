@@ -645,6 +645,7 @@ global:
     hipOccupancyAvailableDynamicSMemPerBlock;
     hipGetProcAddress_spt;
     hipKernelGetParamInfo;
+    hipDeviceGetP2PAtomicCapabilities;
 local:
     *;
 } hip_7.1;

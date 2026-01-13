@@ -91,6 +91,25 @@ hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* link
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation** operations,
+                                             unsigned int count, int src_device, int dst_device) {
+  HIP_INIT_API(hipDeviceGetP2PAtomicCapabilities, capabilities, operations, count, src_device,
+               dst_device);
+
+  if (capabilities == nullptr || operations == nullptr || count == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (src_device == dst_device || src_device < 0 || dst_device < 0 ||
+      src_device >= static_cast<int>(g_devices.size()) ||
+      dst_device >= static_cast<int>(g_devices.size())) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice) {
   HIP_INIT_API(hipDeviceGetP2PAttribute, value, attr, srcDevice, dstDevice);

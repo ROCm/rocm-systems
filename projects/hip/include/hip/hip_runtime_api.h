@@ -688,7 +688,8 @@ typedef enum hipDeviceP2PAttr {
   hipDevP2PAttrPerformanceRank = 0,
   hipDevP2PAttrAccessSupported,
   hipDevP2PAttrNativeAtomicSupported,
-  hipDevP2PAttrHipArrayAccessSupported
+  hipDevP2PAttrHipArrayAccessSupported,
+  hipDevP2PAttrOnlyPartialNativeAtomicSupported
 } hipDeviceP2PAttr;
 typedef enum hipDriverEntryPointQueryResult {
   hipDriverEntryPointSuccess = 0,
@@ -915,7 +916,7 @@ enum hipLimit_t {
 #define hipHostRegisterMapped 0x2
 
 /** The passed memory pointer is treated as pointing to some memory-mapped I/O space, e.g.
- * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and 
+ * belonging to a third-party PCIe device, and it will be marked as non cache-coherent and
  * contiguous.
  * */
 #define hipHostRegisterIoMemory 0x4
@@ -2030,6 +2031,38 @@ typedef enum hipMemRangeFlags {
   hipMemRangeFlagsMax = 0x7fffffff
 } hipMemRangeFlags;
 
+/**
+ * Atomic Operation types.
+ */
+typedef enum hipAtomicOperation {
+  hipAtomicOperationIntegerAdd = 0,
+  hipAtomicOperationIntegerMin = 1,
+  hipAtomicOperationIntegerMax = 2,
+  hipAtomicOperationIntegerIncrement = 3,
+  hipAtomicOperationIntegerDecrement = 4,
+  hipAtomicOperationAnd = 5,
+  hipAtomicOperationOr = 6,
+  hipAtomicOperationXOR = 7,
+  hipAtomicOperationExchange = 8,
+  hipAtomicOperationCAS = 9,
+  hipAtomicOperationFloatAdd = 10,
+  hipAtomicOperationFloatMin = 11,
+  hipAtomicOperationFloatMax = 12
+} hipAtomicOperation;
+
+/**
+ * Atomic Operation capabilities.
+ */
+typedef enum hipAtomicOperationCapability {
+  hipAtomicCapabilitySigned = 1u << 0,
+  hipAtomicCapabilityUnsigned = 1u << 1,
+  hipAtomicCapabilityReduction = 1u << 2,
+  hipAtomicCapabilityScalar32 = 1u << 3,
+  hipAtomicCapabilityScalar64 = 1u << 4,
+  hipAtomicCapabilityScalar128 = 1u << 5,
+  hipAtomicCapabilityVector32x4 = 1u << 6,
+} hipAtomicOperationCapability;
+
 // Doxygen end group GlobalDefs
 /**
  * @}
@@ -2131,6 +2164,19 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
  * #hipErrorDeinitialized
  */
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
+/**
+ * @brief Returns the atomic capabilities of the link between two devices
+ * @param [out] capabilities Returned capability details of each requested operation
+ * @param [in] operations Requested operations
+ * @param [in] count Count of requested operations and size of capabilities
+ * @param [in] src_device The source device of the target link
+ * @param [in] dst_device The destination device of the target link
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
+ */
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation** operations,
+                                             unsigned int count, int src_device, int dst_device);
 /**
  * @brief Returns a value for attribute of link between two devices
  * @param [out] value Pointer of the value for the attrubute

@@ -230,6 +230,12 @@ hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device) {
 hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
   return hip::GetHipDispatchTable()->hipDeviceGetName_fn(name, len, device);
 }
+hipError_t hipDeviceGetP2PAtomicCapabilities(unsigned int* capabilities,
+                                             const hipAtomicOperation** operations,
+                                             unsigned int count, int src_device, int dst_device) {
+  return hip::GetHipDispatchTable()->hipDeviceGetP2PAtomicCapabilities_fn(
+      capabilities, operations, count, src_device, dst_device);
+}
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice) {
   return hip::GetHipDispatchTable()->hipDeviceGetP2PAttribute_fn(value, attr, srcDevice, dstDevice);

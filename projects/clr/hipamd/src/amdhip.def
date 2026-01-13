@@ -33,6 +33,7 @@ hipDeviceGetTexture1DLinearMaxWidth
 hipDeviceGetUuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
+hipDeviceGetP2PAtomicCapabilities
 hipDeviceGetP2PAttribute
 hipExternalMemoryGetMappedMipmappedArray
 hipDevicePrimaryCtxGetState

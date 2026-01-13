@@ -406,6 +406,14 @@ typedef union rocprofiler_hip_api_args_t
     } hipDeviceGetName;
     struct
     {
+        unsigned int*              capabilities;
+        const hipAtomicOperation** operations;
+        unsigned int               count;
+        int                        srcDevice;
+        int                        dstDevice;
+    } hipDeviceGetP2PAtomicCapabilities;
+    struct
+    {
         int*             value;
         hipDeviceP2PAttr attr;
         int              srcDevice;
