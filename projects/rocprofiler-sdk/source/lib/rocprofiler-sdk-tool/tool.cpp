@@ -2101,7 +2101,8 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
-void reset_output_thread(auto& thread_ptr)
+void
+reset_output_thread(std::unique_ptr<std::thread>& thread_ptr)
 {
     ROCP_INFO << "finalize output thread started...";
     if(thread_ptr)
@@ -2119,9 +2120,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             void* /*tool_data*/)
 {
     // reset any existing output thread from prior tool usage
-    ::output_generation_thread.wlock([](auto& thread_ptr) {
-        reset_output_thread(thread_ptr);
-    });
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     // save the existing config for comparison
     auto original_config = tool::get_config();
@@ -3193,9 +3192,7 @@ tool_fini(void* /*tool_data*/)
     client_finalizer  = nullptr;
 
     // Join the cleanup thread if it exists and is active
-    ::output_generation_thread.wlock([](auto& thread_ptr) {
-        reset_output_thread(thread_ptr);
-    });
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
