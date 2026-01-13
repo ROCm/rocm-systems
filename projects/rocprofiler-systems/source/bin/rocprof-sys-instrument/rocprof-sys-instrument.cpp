@@ -1192,23 +1192,18 @@ INSTRUMENTATION MODES:
         return -1;
     }
 
-    std::vector<std::string> active_presets;
+    auto active_presets = rocprofsys::common_utils::collect_active_presets(
+        parser, { "quick", "profile-only", "trace-only", "trace-hpc", "trace-ai" });
 
-    if(parser.exists("quick") && parser.get<bool>("quick"))
-        active_presets.emplace_back("--quick");
-    if(parser.exists("profile-only") && parser.get<bool>("profile-only"))
-        active_presets.emplace_back("--profile-only");
-    if(parser.exists("trace-only") && parser.get<bool>("trace-only"))
-        active_presets.emplace_back("--trace-only");
-    if(parser.exists("trace-hpc") && parser.get<bool>("trace-hpc"))
-        active_presets.emplace_back("--trace-hpc");
-    if(parser.exists("trace-ai") && parser.get<bool>("trace-ai"))
-        active_presets.emplace_back("--trace-ai");
+    const auto are_valid_presets =
+        rocprofsys::common_utils::validate_preset_modes(active_presets);
 
-    if(rocprofsys::common_utils::validate_preset_modes(active_presets) != EXIT_SUCCESS)
+    if(!are_valid_presets)
     {
         return EXIT_FAILURE;
     }
+
+    rocprofsys::common_utils::warn_if_gpu_preset_without_rocm(active_presets);
 
     if(!active_presets.empty() && verbose_level >= 0)
     {

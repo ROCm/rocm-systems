@@ -24,10 +24,12 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofsys
@@ -37,7 +39,7 @@ namespace common_utils
 inline std::string
 get_output_directory(const char* env_var = "ROCPROFSYS_OUTPUT_PATH")
 {
-    const char* output_path = getenv(env_var);
+    const char* output_path = std::getenv(env_var);
     if(output_path && strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
@@ -68,81 +70,73 @@ check_directory_writable(const std::string& dir)
 }
 
 inline std::string
-get_preset_description(const std::string& preset_mode)
+get_preset_description(std::string_view preset_mode)
 {
-    if(preset_mode == "--quick")
+    static const std::unordered_map<std::string_view, std::string> descriptions = {
+        { "--quick", "Fast profiling with sensible defaults\n"
+                     "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                     "  ├─ Profiling:       ON (call-stack based)\n"
+                     "  ├─ CPU Sampling:    ON @ 50 Hz\n"
+                     "  └─ Process Metrics: ON (CPU freq, memory)" },
+        { "--simple", "Minimal overhead flat profiling\n"
+                      "  ├─ Tracing:         OFF\n"
+                      "  ├─ Profiling:       ON (flat profile)\n"
+                      "  ├─ CPU Sampling:    ON @ 100 Hz\n"
+                      "  └─ Process Metrics: OFF" },
+        { "--detailed", "Comprehensive profiling with full system metrics\n"
+                        "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                        "  ├─ Profiling:       ON (call-stack based)\n"
+                        "  ├─ CPU Sampling:    ON @ 100 Hz (all CPUs)\n"
+                        "  └─ Process Metrics: ON (CPU freq, memory)" },
+        { "--trace-hpc", "Optimized for HPC/MPI/OpenMP applications\n"
+                         "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                         "  ├─ Profiling:       ON (call-stack based)\n"
+                         "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
+                         "  ├─ Process Metrics: ON\n"
+                         "  ├─ OpenMP (OMPT):   ON\n"
+                         "  ├─ MPI (MPIP):      ON\n"
+                         "  ├─ Kokkos:          ON\n"
+                         "  ├─ RCCL:            ON\n"
+                         "  ├─ PAPI Events:     PAPI_TOT_INS, PAPI_TOT_CYC, PAPI_L3_TCM\n"
+                         "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
+                         "  └─ GPU Metrics:     busy, temp, power, mem_usage" },
+        { "--trace-ai", "Optimized for AI/ML workloads (PyTorch, TensorFlow, JAX)\n"
+                        "  ├─ Tracing:         ON (Perfetto timeline)\n"
+                        "  ├─ Profiling:       ON (call-stack based)\n"
+                        "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
+                        "  ├─ Process Metrics: ON\n"
+                        "  ├─ ROCtracer:       ON\n"
+                        "  ├─ HIP API Trace:   ON\n"
+                        "  ├─ HIP Activity:    ON (kernel timing)\n"
+                        "  ├─ RCCL:            ON (collective comms)\n"
+                        "  ├─ rocPD:           ON (PyTorch dispatcher)\n"
+                        "  ├─ MPI (MPIP):      ON\n"
+                        "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
+                        "  ├─ GPU Metrics:     busy, temp, power, mem_usage\n"
+                        "  └─ Buffer Size:     2 GB (for long traces)" }
+    };
+
+    auto it = descriptions.find(preset_mode);
+    if(it != descriptions.end())
     {
-        return "Fast profiling with sensible defaults\n"
-               "  ├─ Tracing:         ON (Perfetto timeline)\n"
-               "  ├─ Profiling:       ON (call-stack based)\n"
-               "  ├─ CPU Sampling:    ON @ 50 Hz\n"
-               "  └─ Process Metrics: ON (CPU freq, memory)";
-    }
-    else if(preset_mode == "--simple")
-    {
-        return "Minimal overhead flat profiling\n"
-               "  ├─ Tracing:         OFF\n"
-               "  ├─ Profiling:       ON (flat profile)\n"
-               "  ├─ CPU Sampling:    ON @ 100 Hz\n"
-               "  └─ Process Metrics: OFF";
-    }
-    else if(preset_mode == "--detailed")
-    {
-        return "Comprehensive profiling with full system metrics\n"
-               "  ├─ Tracing:         ON (Perfetto timeline)\n"
-               "  ├─ Profiling:       ON (call-stack based)\n"
-               "  ├─ CPU Sampling:    ON @ 100 Hz (all CPUs)\n"
-               "  └─ Process Metrics: ON (CPU freq, memory)";
-    }
-    else if(preset_mode == "--trace-hpc")
-    {
-        return "Optimized for HPC/MPI/OpenMP applications\n"
-               "  ├─ Tracing:         ON (Perfetto timeline)\n"
-               "  ├─ Profiling:       ON (call-stack based)\n"
-               "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
-               "  ├─ Process Metrics: ON\n"
-               "  ├─ OpenMP (OMPT):   ON\n"
-               "  ├─ MPI (MPIP):      ON\n"
-               "  ├─ Kokkos:          ON\n"
-               "  ├─ RCCL:            ON\n"
-               "  ├─ PAPI Events:     PAPI_TOT_INS, PAPI_TOT_CYC, PAPI_L3_TCM\n"
-               "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
-               "  └─ GPU Metrics:     busy, temp, power, mem_usage";
-    }
-    else if(preset_mode == "--trace-ai")
-    {
-        return "Optimized for AI/ML workloads (PyTorch, TensorFlow, JAX)\n"
-               "  ├─ Tracing:         ON (Perfetto timeline)\n"
-               "  ├─ Profiling:       ON (call-stack based)\n"
-               "  ├─ CPU Sampling:    OFF (reduced overhead)\n"
-               "  ├─ Process Metrics: ON\n"
-               "  ├─ ROCtracer:       ON\n"
-               "  ├─ HIP API Trace:   ON\n"
-               "  ├─ HIP Activity:    ON (kernel timing)\n"
-               "  ├─ RCCL:            ON (collective comms)\n"
-               "  ├─ rocPD:           ON (PyTorch dispatcher)\n"
-               "  ├─ MPI (MPIP):      ON\n"
-               "  ├─ ROCm Domains:    HIP API, kernels, memory, scratch\n"
-               "  ├─ GPU Metrics:     busy, temp, power, mem_usage\n"
-               "  └─ Buffer Size:     2 GB (for long traces)";
+        return it->second;
     }
     return "";
 }
 
 inline void
-print_pre_execution_info(const std::string& tool_name,
-                         const std::string& preset_mode = "")
+print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode = "")
 {
     auto output_dir = get_output_directory();
 
-    if(!preset_mode.empty())
+    if(!preset_mode.empty() && !tool_name.empty())
     {
-        constexpr size_t  box_width       = 60;
-        constexpr size_t  box_inner_width = box_width - 2;
-        const std::string box_line =
+        constexpr size_t           box_width       = 60;
+        constexpr size_t           box_inner_width = box_width - 2;
+        constexpr std::string_view box_line =
             "════════════════════════════════════════════════════════════";
-        const std::string prefix  = "ROCm Systems Profiler - ";
-        const size_t      padding = box_inner_width - prefix.size() - tool_name.size();
+        constexpr std::string_view prefix = "ROCm Systems Profiler - ";
+        const size_t padding = box_inner_width - prefix.size() - tool_name.size();
 
         std::cout << "\n"
                   << "╔" << box_line << "╗\n"
@@ -178,55 +172,22 @@ print_pre_execution_info(const std::string& tool_name,
               << "\n";
 }
 
-inline void
-print_error_with_guidance(const std::string& error_msg, const std::string& tool_name)
+template <typename ParserT>
+std::vector<std::string>
+collect_active_presets(ParserT& parser, std::initializer_list<const char*> preset_names)
 {
-    std::cerr << "\nERROR: " << error_msg << "\n\n";
-
-    if(error_msg.find("output") != std::string::npos ||
-       error_msg.find("write") != std::string::npos)
+    std::vector<std::string> active_presets;
+    for(const auto* name : preset_names)
     {
-        std::cerr << "Possible solutions:\n"
-                  << "  1. Specify writable output: rocprof-sys-" << tool_name
-                  << " -o /tmp/profile -- ./app\n"
-                  << "  2. Check permissions: ls -ld ./\n"
-                  << "  3. Set environment: export ROCPROFSYS_OUTPUT_PATH=/tmp/profile\n";
+        if(parser.exists(name) && parser.template get<bool>(name))
+        {
+            active_presets.emplace_back(std::string("--") + name);
+        }
     }
-    else if(error_msg.find("HIP") != std::string::npos ||
-            error_msg.find("GPU") != std::string::npos ||
-            error_msg.find("ROCm") != std::string::npos)
-    {
-        std::cerr << "GPU/ROCm troubleshooting:\n"
-                  << "  1. Verify ROCm installation: hipconfig\n"
-                  << "  2. Check devices: rocminfo\n"
-                  << "  3. Ensure ROCm in PATH: which hipcc\n"
-                  << "  4. Source environment: source /opt/rocm/setup.sh\n";
-    }
-    else if(error_msg.find("command") != std::string::npos ||
-            error_msg.find("executable") != std::string::npos)
-    {
-        std::cerr << "Command troubleshooting:\n"
-                  << "  1. Check executable exists: ls -l ./app\n"
-                  << "  2. Verify it's executable: chmod +x ./app\n"
-                  << "  3. Try absolute path: rocprof-sys-" << tool_name
-                  << " -- $(pwd)/app\n";
-    }
-    else
-    {
-        std::cerr << "General troubleshooting:\n"
-                  << "  1. Check help: rocprof-sys-" << tool_name << " --help\n"
-                  << "  2. Enable verbose mode: rocprof-sys-" << tool_name
-                  << " -v -- ./app\n"
-                  << "  3. Try quick preset: rocprof-sys-" << tool_name
-                  << " --quick -- ./app\n";
-    }
-
-    std::cerr << "\nDocumentation: /opt/rocprofiler-systems/share/docs/\n"
-              << "Online help: https://rocm.docs.amd.com/projects/rocprofiler-systems/\n"
-              << "\n";
+    return active_presets;
 }
 
-inline int
+inline bool
 validate_preset_modes(const std::vector<std::string>& active_presets)
 {
     if(active_presets.size() > 1)
@@ -251,31 +212,42 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
             << "Choose one preset or use manual options for custom configuration.\n";
         std::cerr << "See --help for all options.\n\n";
 
-        return EXIT_FAILURE;
+        return false;
     }
-    return EXIT_SUCCESS;
+    return true;
 }
 
 inline bool
 check_rocm_available()
 {
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
+    return false;
+#else
     return (system("which hipconfig > /dev/null 2>&1") == 0 ||
             access("/opt/rocm/bin/hipconfig", X_OK) == 0);
+#endif
 }
 
 inline void
-warn_if_hip_trace_without_rocm(bool hip_trace_requested, const std::string& /*tool_name*/)
+warn_if_rocm_unavailable()
 {
-    if(hip_trace_requested && !check_rocm_available())
+    if(!check_rocm_available())
     {
-        std::cerr << "\nWARNING: HIP tracing requested but ROCm may not be available\n\n";
-        std::cerr << "Verify ROCm installation:\n";
-        std::cerr << "  $ hipconfig\n";
-        std::cerr << "  $ rocminfo\n\n";
-        std::cerr << "If ROCm is installed, ensure it's in your PATH:\n";
-        std::cerr << "  $ export PATH=/opt/rocm/bin:$PATH\n";
-        std::cerr << "  $ export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH\n\n";
-        std::cerr << "Continuing without GPU tracing...\n\n";
+        std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
+        std::cerr << "GPU features will be disabled.\n\n";
+    }
+}
+
+inline void
+warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
+{
+    for(const auto& preset : active_presets)
+    {
+        if(preset == "--trace-ai" || preset == "--trace-hpc")
+        {
+            warn_if_rocm_unavailable();
+            return;
+        }
     }
 }
 

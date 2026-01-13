@@ -536,22 +536,18 @@ INSTRUMENTATION WORKFLOW:
 
     tim::log::monochrome() = _parser_data.monochrome;
 
-    std::vector<std::string> active_presets;
-    if(parser.exists("quick") && parser.get<bool>("quick"))
-        active_presets.emplace_back("--quick");
-    if(parser.exists("simple") && parser.get<bool>("simple"))
-        active_presets.emplace_back("--simple");
-    if(parser.exists("detailed") && parser.get<bool>("detailed"))
-        active_presets.emplace_back("--detailed");
-    if(parser.exists("trace-hpc") && parser.get<bool>("trace-hpc"))
-        active_presets.emplace_back("--trace-hpc");
-    if(parser.exists("trace-ai") && parser.get<bool>("trace-ai"))
-        active_presets.emplace_back("--trace-ai");
+    auto active_presets = rocprofsys::common_utils::collect_active_presets(
+        parser, { "quick", "simple", "detailed", "trace-hpc", "trace-ai" });
 
-    if(rocprofsys::common_utils::validate_preset_modes(active_presets) != EXIT_SUCCESS)
+    const auto are_valid_presets =
+        rocprofsys::common_utils::validate_preset_modes(active_presets);
+
+    if(!are_valid_presets)
     {
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("Multiple presets specified");
     }
+
+    rocprofsys::common_utils::warn_if_gpu_preset_without_rocm(active_presets);
 
     if(!active_presets.empty() && _parser_data.verbose >= 0)
     {
