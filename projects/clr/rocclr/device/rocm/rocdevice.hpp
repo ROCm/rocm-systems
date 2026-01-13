@@ -89,6 +89,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   Flags flags_;
 
+  //! Cached timing data - populated when signal completes, avoids repeated HSA calls
+  struct CachedTiming {
+    uint64_t start_ = 0;   //!< Cached start timestamp from HSA
+    uint64_t end_ = 0;     //!< Cached end timestamp from HSA
+    bool valid_ = false;   //!< True if timing data has been cached
+  };
+  CachedTiming cached_timing_;
+
   ProfilingSignal()
       : ts_(nullptr),
         engine_(HwQueueEngine::Compute),
@@ -101,6 +109,27 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   virtual ~ProfilingSignal();
   amd::Monitor& LockSignalOps() { return lock_; }
+
+  //! Cache timing data from HSA for this signal (called once when signal completes)
+  void CacheTimingData(hsa_agent_t gpu_device);
+
+  //! Reset cached timing for signal reuse
+  void ResetCachedTiming() {
+    amd::ScopedLock lock(lock_);
+    cached_timing_.start_ = 0;
+    cached_timing_.end_ = 0;
+    cached_timing_.valid_ = false;
+  }
+
+  //! Check if timing is already cached
+  bool IsTimingCached() const { return cached_timing_.valid_; }
+
+  //! Get cached timing values
+  void GetCachedTiming(uint64_t& start, uint64_t& end) {
+    amd::ScopedLock lock(lock_);
+    start = cached_timing_.start_;
+    end = cached_timing_.end_;
+  }
 };
 
 class Sampler : public device::Sampler {
@@ -573,9 +602,16 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  void getSdmaRWMasks(uint32_t* readMask, uint32_t* writeMask) const;
   bool isXgmi() const override { return isXgmi_; }
 
+  //! SDMA engine allocation for per-stream affinity
+  uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
+                              hsa_agent_t dstAgent, hsa_agent_t srcAgent) const {
+    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, dstAgent, srcAgent);
+  }
+  void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
+    sdma_engine_allocator_.ReleaseEngine(vgpu);
+  }
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
   //! Adds a kernel to the kernel map
@@ -585,6 +621,9 @@ class Device : public NullDevice {
 
   // Returns the number of allocated normal queues on this device
   uint32_t NumNormalQueues() const { return num_normal_queues_.load(); }
+
+  //! Returns true if PM4 emulation is enabled
+  bool IsPm4Emulation() const { return pm4_emulation_; }
 
  private:
   bool create();
@@ -672,6 +711,28 @@ class Device : public NullDevice {
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
+  bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
+
+  //! SDMA engine allocator for per-stream affinity
+  struct SdmaEngineAllocator {
+    amd::Monitor lock_;  //!< Protects the allocation state
+    std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
+    const Device& device_;  //!< Reference to parent device for accessing masks
+
+    SdmaEngineAllocator(const Device& device)
+        : lock_(true), device_(device) {}
+
+    //! Allocate an SDMA engine for a VirtualGPU
+    //! Queries HSA for engine status and preferred engines, then allocates
+    //! For inter-GPU copies, strongly prefers recommended engines even if already allocated
+    uint32_t AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
+                           hsa_agent_t dstAgent, hsa_agent_t srcAgent);
+
+    //! Release engine allocation for a VirtualGPU
+    void ReleaseEngine(VirtualGPU* vgpu);
+  };
+  mutable SdmaEngineAllocator sdma_engine_allocator_;
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

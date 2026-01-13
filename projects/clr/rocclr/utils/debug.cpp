@@ -40,13 +40,14 @@
 namespace amd {
 
 FILE* outFile = stderr;
-const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
 
 // ================================================================================================
 void truncate_log_file() {
   if (outFile != stderr) {
     fseek(outFile, 0, SEEK_END);
     long size = ftell(outFile);
+
+    const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
     if (size > maxLogSize) {
       if (nullptr == freopen(NULL, "w", outFile)) {
         outFile = stderr;

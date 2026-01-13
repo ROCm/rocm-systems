@@ -52,7 +52,9 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
       hip::PlatformState::instance().setDynamicLibraryHandle(static_cast<void*>(hinst));
       break;
     case DLL_PROCESS_DETACH:
-      hip::ihipDestroyDevice();
+      if (GPU_ENABLE_PAL != 0) {
+        hip::ihipDestroyDevice();
+      }
       break;
     case DLL_THREAD_DETACH:
       break;

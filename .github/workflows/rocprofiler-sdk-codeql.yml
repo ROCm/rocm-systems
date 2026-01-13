@@ -6,9 +6,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
   push:
     branches:
@@ -16,9 +22,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-sdk-codeql.yml'
       - 'projects/rocprofiler-sdk/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '!projects/rocprofiler-sdk/*.md'
 
 env:
   ROCM_PATH: "/opt/rocm"
@@ -26,7 +38,7 @@ env:
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
-  ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "false"
 
 jobs:
   analyze:

@@ -74,10 +74,9 @@ bool Stream::Create() { return create(); }
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
   stream->device().removeFromActiveQueues(stream);
-  stream->device_->RemoveStream(stream);
+  stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
   stream->release();
-  stream = nullptr;
 }
 
 // ================================================================================================
@@ -207,7 +206,6 @@ static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
 }
 
 // ================================================================================================
-
 stream_per_thread::stream_per_thread() {
   m_streams.resize(g_devices.size());
   for (auto& stream : m_streams) {
@@ -215,15 +213,21 @@ stream_per_thread::stream_per_thread() {
   }
 }
 
+// ================================================================================================
 stream_per_thread::~stream_per_thread() {
   for (auto& stream : m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
-      hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      // @note: Global variables in hip runtime will be destroyed after ROCR's global variables.
+      // Any calls to rocr may cause invalid object access. Hence, avoid the stream destruction.
+      if (IS_LINUX || (GPU_ENABLE_PAL != 0)) {
+        hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
+      }
       stream = nullptr;
     }
   }
 }
 
+// ================================================================================================
 hipStream_t stream_per_thread::get() {
   hip::Device* device = hip::getCurrentDevice();
   int currDev = device->deviceId();
@@ -246,12 +250,12 @@ hipStream_t stream_per_thread::get() {
   return m_streams[currDev];
 }
 
+// ================================================================================================
 void stream_per_thread::clear_spt() {
   if (!m_streams.empty()) {
     m_streams[getCurrentDevice()->deviceId()] = nullptr;
   }
 }
-
 
 // ================================================================================================
 void getStreamPerThread(hipStream_t& stream) {

@@ -91,7 +91,7 @@ static inline std::optional<T> read_scalar(Cursor& c) {
 
 template <class T>
 static inline std::optional<std::vector<T>> read_vector(Cursor& c, std::size_t count) {
-  
+
   static_assert(std::is_integral_v<T> && std::is_trivially_copyable_v<T>,
               "metrics expect integral element types");
 
@@ -224,31 +224,31 @@ auto AMDGpuDynamicMetrics_t::parse_from_buffer(const std::byte* data,
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_INT8: {
-          mv = read_metric_value<std::int8_t>(cur, instances); 
+          mv = read_metric_value<std::int8_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_UINT16: {
-          mv = read_metric_value<std::uint16_t>(cur, instances); 
+          mv = read_metric_value<std::uint16_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_INT16: {
-          mv = read_metric_value<std::int16_t>(cur, instances); 
+          mv = read_metric_value<std::int16_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_UINT32: {
-          mv = read_metric_value<std::uint32_t>(cur, instances); 
+          mv = read_metric_value<std::uint32_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_INT32: {
-          mv = read_metric_value<std::int32_t>(cur, instances); 
+          mv = read_metric_value<std::int32_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_UINT64: {
-          mv = read_metric_value<std::uint64_t>(cur, instances); 
+          mv = read_metric_value<std::uint64_t>(cur, instances);
           break;
         }
         case AMDGpuMetricAttributeType_t::TYPE_INT64: {
-          mv = read_metric_value<std::int64_t>(cur, instances); 
+          mv = read_metric_value<std::int64_t>(cur, instances);
           break;
         }
         default: return RSMI_STATUS_INSUFFICIENT_SIZE;
@@ -289,7 +289,7 @@ auto AMDGpuDynamicMetrics_t::parse_from_file(const std::string& metrics_file_pat
 rsmi_status_t read_dynamic_gpu_metrics_file(const std::string& metrics_file_path,
                                               const size_t read_size,
                                               AMDGPUMetricsDynDataBuffer_t& out) {
-    
+
   // Clear output buffer and open file stream
   out.clear();
   std::ifstream gpu_metrics_file(metrics_file_path, std::ios::binary);

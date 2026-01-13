@@ -28,6 +28,7 @@
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
 #include "core/debug.hpp"
+#include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
@@ -212,6 +213,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     auto        counters_v   = counter_vec_t{};
     const auto* tool_agent_v = data->get_gpu_tool_agent(agent_id);
 
+    // Check if agent info is available (may not be for unsupported architectures)
+    auto agent_info_it = data->agent_counter_info.find(agent_id);
+    if(agent_info_it == data->agent_counter_info.end())
+    {
+        ROCPROFSYS_WARNING_F(0,
+                             "Skipping GPU agent %lu (device %lu) due to unsupported "
+                             "architecture or missing counter info\n",
+                             agent_id.handle, tool_agent_v->device_id);
+        data->agent_counter_profiles.emplace(agent_id, profile);
+        return counter_vec_t{};
+    }
+
     constexpr auto device_qualifier = std::string_view{ ":device=" };
     for(const auto& itr : counters)
     {
@@ -262,7 +275,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         }
 
         // search the gpu agent counter info for a counter with a matching name
-        for(const auto& citr : data->agent_counter_info.at(agent_id))
+        for(const auto& citr : agent_info_it->second)
         {
             if(name_v == std::string_view{ citr.name })
             {
@@ -279,11 +292,34 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         auto found_counters =
             timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
 
-        ROCPROFSYS_ABORT_F(
-            "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
+        // Determine which counters were not found
+        auto missing_counters = std::vector<std::string>{};
+        for(const auto& counter : counters)
+        {
+            if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
+                missing_counters.emplace_back(counter);
+        }
+        auto missing_counters_str = timemory::join::join(
+            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+
+        // In production, warn and continue with available counters
+        ROCPROFSYS_WARNING_F(0,
+                             "Unable to find all counters for agent %i (gpu-%li, %s). "
+                             "Requested: %s. Found: %s. Missing: %s. Continuing with "
+                             "available counters.\n",
+                             tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                             tool_agent_v->agent->name.c_str(),
+                             requested_counters.c_str(), found_counters.c_str(),
+                             missing_counters_str.c_str());
+
+        // In CI, throw to catch issues early
+        ROCPROFSYS_CI_THROW(
+            true,
+            "Unable to find all counters for agent %i (gpu-%li, %s). Requested: %s. "
+            "Found: %s. Missing: %s",
             tool_agent_v->agent->node_id, tool_agent_v->device_id,
             tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
-            found_counters.c_str());
+            found_counters.c_str(), missing_counters_str.c_str());
     }
 
     if(!counters_v.empty())
@@ -335,8 +371,9 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*op
 {
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
-        _data->emplace_back(
-            argument_info{ arg_number, demangle(arg_type), arg_name, arg_value_str });
+        _data->emplace_back(argument_info{ arg_number,
+                                           rocprofsys::utility::demangle(arg_type),
+                                           arg_name, arg_value_str });
     return 0;
 }
 
@@ -388,8 +425,8 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
                 (_linfo && _linfo.line > 0)
                            ? join("", _linfo.line)
                            : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry                              = join("", demangle(*_func), " @ ",
-                                                            join(':', ::basename(_loc->c_str()), _line));
+            auto _entry = join("", rocprofsys::utility::demangle(*_func), " @ ",
+                               join(':', ::basename(_loc->c_str()), _line));
             backtrace[join("", "frame#", _bt_cnt++)] = _entry;
         }
     }
@@ -531,12 +568,22 @@ void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
              const rocprofiler_timestamp_t end_timestamp, const std::string& call_stack,
-             const std::string& args_str, const std::string& category)
+             const std::string& args_str, const std::string& category,
+             std::string_view name = {})
 
 {
-    auto callback_tracing_info =
-        trace_cache::get_metadata_registry().get_callback_tracing_info();
-    auto _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    // Use provided name if available, otherwise fall back to API operation name
+    std::string _name;
+    if(name.empty())
+    {
+        auto callback_tracing_info =
+            trace_cache::get_metadata_registry().get_callback_tracing_info();
+        _name = std::string{ callback_tracing_info.at(record->kind, record->operation) };
+    }
+    else
+    {
+        _name = std::string{ name };
+    }
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
         record->thread_id, _name.c_str(), record->correlation_id.internal,
@@ -771,7 +818,7 @@ tool_tracing_callback_stop(
                                              : ((itr.lineno == 0) ? std::string{ "?" }
                                                                   : join("", itr.lineno));
                             auto _entry =
-                                join("", demangle(*_func), " @ ",
+                                join("", rocprofsys::utility::demangle(*_func), " @ ",
                                      join(':', ::basename(_loc->c_str()), _line));
                             if(_bt_cnt < 10)
                             {
@@ -812,7 +859,7 @@ tool_tracing_callback_stop(
         cache_add_thread_info(record.thread_id);
         std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
-                     trait::name<CategoryT>::value);
+                     trait::name<CategoryT>::value, _name);
     }
 }
 
@@ -1139,12 +1186,13 @@ ompt_tracing_callback_stop(
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
                                 : ((itr.location.empty()) ? &_unk : &itr.location);
-                        auto _line  = (_linfo && _linfo.line > 0)
-                                          ? join("", _linfo.line)
-                                          : ((itr.lineno == 0) ? std::string{ "?" }
-                                                               : join("", itr.lineno));
-                        auto _entry = join("", demangle(*_func), " @ ",
-                                           join(':', ::basename(_loc->c_str()), _line));
+                        auto _line = (_linfo && _linfo.line > 0)
+                                         ? join("", _linfo.line)
+                                         : ((itr.lineno == 0) ? std::string{ "?" }
+                                                              : join("", itr.lineno));
+                        auto _entry =
+                            join("", rocprofsys::utility::demangle(*_func), " @ ",
+                                 join(':', ::basename(_loc->c_str()), _line));
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero
@@ -1570,13 +1618,13 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 const auto* _kern_sym_data =
                     get_kernel_symbol_info(record->dispatch_info.kernel_id);
 
-                auto        _name     = tim::demangle(_kern_sym_data->kernel_name);
-                auto        _stack_id = record->correlation_id.internal;
-                auto        _beg_ns   = record->start_timestamp;
-                auto        _end_ns   = record->end_timestamp;
-                auto        _agent_id = record->dispatch_info.agent_id;
-                auto        _queue_id = record->dispatch_info.queue_id;
-                const auto* _agent    = tool_data->get_gpu_tool_agent(_agent_id);
+                auto _name = rocprofsys::utility::demangle(_kern_sym_data->kernel_name);
+                auto _stack_id     = record->correlation_id.internal;
+                auto _beg_ns       = record->start_timestamp;
+                auto _end_ns       = record->end_timestamp;
+                auto _agent_id     = record->dispatch_info.agent_id;
+                auto _queue_id     = record->dispatch_info.queue_id;
+                const auto* _agent = tool_data->get_gpu_tool_agent(_agent_id);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)

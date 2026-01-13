@@ -28,9 +28,9 @@ bool operator==(const HipAPIGroup& l_hip_api_group, const HipAPIGroup& r_hip_api
 
 HipAPIGroup::HipAPIGroup(std::string group_name, std::vector<HipAPI>& hip_apis)
     : group_name{group_name},
+      total_number_of_apis{0},
       number_of_api_calls{0},
       percentage_of_called_apis{0.f},
-      total_number_of_apis{0},
       number_of_test_cases{0} {
   std::vector<TestCaseOccurrence> test_cases;
   for (auto const& hip_api : hip_apis) {
@@ -85,7 +85,7 @@ int HipAPIGroup::getNumberOfDeprecatedAPIs() const { return deprecated_apis.size
 float HipAPIGroup::getPercentageOfCalledAPIs() const { return percentage_of_called_apis; }
 
 bool HipAPIGroup::isDeprecated() const {
-  return (deprecated_apis.size() == total_number_of_apis) ? true : false;
+  return (static_cast<int>(deprecated_apis.size()) == total_number_of_apis) ? true : false;
 }
 
 std::string HipAPIGroup::getBasicStatsXML() const {

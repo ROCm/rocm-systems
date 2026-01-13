@@ -146,6 +146,7 @@ Device::Device(hsa_agent_t bkendDevice)
       preferred_numa_node_(0),
       maxSdmaReadMask_(0),
       maxSdmaWriteMask_(0),
+      sdma_engine_allocator_(*this),
       cpu_agent_info_(nullptr) {
   group_segment_.handle = 0;
   gpuvm_segment_.handle = 0;
@@ -441,7 +442,11 @@ bool Device::init() {
     if (amd::IS_HIP && ROC_GLOBAL_CU_MASK[0] != '\0') {
       roc_device->getGlobalCUMask(ROC_GLOBAL_CU_MASK);
     }
-
+    // Note: for now disable HSA path by default except for gfx942
+    if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
+        (std::strcmp(roc_device->info().name_, "gfx942") != 0)) {
+      return false;
+    }
     roc_device.release()->registerDevice();
   }
 
@@ -992,6 +997,15 @@ bool Device::populateOCLDeviceConstants() {
       info_.uuid_[i] = unique_id[i + 4];
     }
   }
+
+  hsa_luid_t localUID = {0};
+  if (HSA_STATUS_SUCCESS ==
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                          &localUID)) {
+    info_.luidLowPart_ = localUID.low;
+    info_.luidHighPart_ = localUID.high;
+  }
+
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           (amd::IS_HIP)
@@ -1617,6 +1631,13 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AMD_AGENT_INFO_NUM_XCC query failed.");
   }
 
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PM4_EMULATION),
+                          &pm4_emulation_)) {
+    LogError("HSA_AMD_AGENT_INFO_PM4_EMULATION query failed.");
+  }
+
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),
           isa().versionMinor(), isa().versionStepping());
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
@@ -1743,53 +1764,33 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
   return true;
 }
 
+// ================================================================================================
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
-#if defined(_WIN32)
-  return false;
-#else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
-  MesaInterop::MESA_INTEROP_KIND kind = MesaInterop::MESA_INTEROP_NONE;
-  MesaInterop::DisplayHandle display;
-  MesaInterop::ContextHandle context;
-
-  if ((flags & amd::Context::EGLDeviceKhr) != 0) {
-    kind = MesaInterop::MESA_INTEROP_EGL;
-    display.eglDisplay = reinterpret_cast<EGLDisplay>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
-    context.eglContext = reinterpret_cast<EGLContext>(gfxContext);
-  } else {
-    kind = MesaInterop::MESA_INTEROP_GLX;
-    display.glxDisplay = reinterpret_cast<Display*>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
-    context.glxContext = reinterpret_cast<GLXContext>(gfxContext);
-  }
-
-  mesa_glinterop_device_info info;
-  info.version = MESA_GLINTEROP_DEVICE_INFO_VERSION;
-  if (!MesaInterop::Init(kind)) {
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
+    LogError("Failed GlInterop::glAssociate()");
     return false;
   }
 
-  if (!MesaInterop::GetInfo(info, kind, display, context)) {
-    return false;
-  }
-
-  return info_.deviceTopology_.pcie.bus == info.pci_bus &&
-         info_.deviceTopology_.pcie.device == info.pci_device &&
-         info_.deviceTopology_.pcie.function == info.pci_function &&
-         info_.vendorId_ == info.vendor_id && pciDeviceId_ == info.device_id;
-
-#endif
+  return true;
 }
 
+// ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
-#if defined(_WIN32)
-  return false;
-#else
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
+
+  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+  if (glDevice != nullptr) {
+    if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
+      LogWarning("Failed GlInterop::glDissociate()");
+      return false;
+    }
+  }
   return true;
-#endif
 }
 
 amd::Memory* Device::findMapTarget(size_t size) const {
@@ -2514,8 +2515,8 @@ bool Device::SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvi
 // ================================================================================================
 bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
                               size_t num_attributes, const void* dev_ptr, size_t count) const {
+  amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
   if (settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) {
-    amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
         // Validate the range of provided memory
         ((svm_mem->getSize() - (reinterpret_cast<const_address>(dev_ptr) -
@@ -2546,6 +2547,14 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
         } else if (ptr_info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) {
           *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
+        }
+      }
+      // If coherency is still indeterminate
+      if (ptr_info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM) {
+        if (svm_mem != nullptr && (svm_mem->getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER)) {
+          *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED;
+        } else {
+          *reinterpret_cast<uint32_t*>(data[i]) = HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED;
         }
       }
     }
@@ -2588,7 +2597,10 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
           break;
       }
     }
-
+    // Only call svm_attributes_get if there are SVM attributes to query
+    if (attr.empty()) {
+      return true;
+    }
     hsa_status_t status =
         Hsa::svm_attributes_get(const_cast<void*>(dev_ptr), count, attr.data(), attr.size());
     if (status != HSA_STATUS_SUCCESS) {
@@ -3498,9 +3510,143 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
 }
 
 // ================================================================================================
-void Device::getSdmaRWMasks(uint32_t* readMask, uint32_t* writeMask) const {
-  *readMask = maxSdmaReadMask_;
-  *writeMask = maxSdmaWriteMask_;
+uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
+                                                      hsa_agent_t dstAgent, hsa_agent_t srcAgent) {
+  amd::ScopedLock lock(lock_);
+
+  // Get valid engine mask based on operation type (read vs write)
+  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaRead)
+                              ? device_.maxSdmaReadMask_
+                              : device_.maxSdmaWriteMask_;
+
+  // Simple round-robin path if all engines have equal bandwidth
+  // Disabled by default - use preferred engine logic for current GPUs
+  constexpr bool kUseSimpleRR = false;
+
+  if (kUseSimpleRR) {
+    // Simple round-robin: just cycle through valid engines
+    // This will be enabled for future GPUs where engine selection doesn't matter
+    if (validEngineMask == 0) {
+      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+              "No valid SDMA engines for VirtualGPU %p", vgpu);
+      return 0;
+    }
+
+    // Cycle through bit positions, find next valid engine
+    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
+    uint32_t selected_mask = 0;
+
+    // Try up to 32 positions to find a valid engine
+    for (uint32_t i = 0; i < 32; ++i) {
+      uint32_t bit = (start_bit + i) % 32;
+      uint32_t mask = 1u << bit;
+      if (validEngineMask & mask) {
+        selected_mask = mask;
+        break;
+      }
+    }
+
+    vgpu_to_engine_[vgpu] = selected_mask;
+
+    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
+            vgpu, selected_mask, engine_type);
+
+    return selected_mask;
+  }
+
+  // Current path: Query HSA for engine status and preferences
+  uint32_t freeEngineMask = 0;
+  uint32_t preferredMask = 0;
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+
+  // Query current engine status
+  status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+  if (status == HSA_STATUS_SUCCESS) {
+    // Query preferred (high-bandwidth) engines
+    status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &preferredMask);
+  }
+
+  // Constrain to valid engines
+  freeEngineMask &= validEngineMask;
+  preferredMask &= validEngineMask;
+
+  ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+          "Engine query for VirtualGPU %p: status=%x, free_mask=0x%x, preferred_mask=0x%x, "
+          "valid_mask=0x%x, engine_type=%d",
+          vgpu, status, freeEngineMask, preferredMask, validEngineMask, engine_type);
+
+  uint32_t candidate_mask = 0;
+  uint32_t allocated_mask = 0;
+
+  // For inter-GPU copies, strongly prefer the recommended engines
+  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaInter);
+
+  if (is_inter_gpu && (preferredMask != 0)) {
+    // Inter-GPU: prioritize preferredMask, even if engines are already allocated
+    candidate_mask = validEngineMask & preferredMask;
+
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "Inter-GPU copy for VirtualGPU %p: prioritizing preferred engines, "
+            "candidate_mask=0x%x",
+            vgpu, candidate_mask);
+  } else {
+    // Regular read/write/intra: enforce exclusivity (don't share engines)
+    // Build a mask of engines already allocated to other VirtualGPUs
+    for (const auto& pair : vgpu_to_engine_) {
+      allocated_mask |= pair.second;
+    }
+
+    uint32_t available_mask = validEngineMask & ~allocated_mask;
+
+    if (available_mask == 0) {
+      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+              "No unallocated SDMA engines available for VirtualGPU %p, engine_type=%d "
+              "(valid_mask=0x%x, allocated_mask=0x%x)",
+              vgpu, engine_type, validEngineMask, allocated_mask);
+      return 0;
+    }
+
+    // Prefer high-bandwidth (recommended) engines if available
+    candidate_mask = available_mask & preferredMask;
+    if (candidate_mask == 0) {
+      candidate_mask = available_mask;
+    }
+  }
+
+  if (candidate_mask == 0) {
+    ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+            "No candidate SDMA engines for VirtualGPU %p, engine_type=%d",
+            vgpu, engine_type);
+    return 0;
+  }
+
+  // Select the lowest bit (first available engine)
+  uint32_t selected_mask = candidate_mask & (~candidate_mask + 1);
+
+  // Update the map
+  vgpu_to_engine_[vgpu] = selected_mask;
+
+  ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+          "Assigned SDMA engine to VirtualGPU %p: mask=0x%x, engine_type=%d, "
+          "valid_mask=0x%x, preferred_mask=0x%x, allocated_mask=0x%x, is_inter_gpu=%d",
+          vgpu, selected_mask, engine_type, validEngineMask, preferredMask,
+          allocated_mask, is_inter_gpu);
+
+  return selected_mask;
+}
+
+// ================================================================================================
+void Device::SdmaEngineAllocator::ReleaseEngine(VirtualGPU* vgpu) {
+  amd::ScopedLock lock(lock_);
+
+  auto it = vgpu_to_engine_.find(vgpu);
+  if (it != vgpu_to_engine_.end()) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "Released SDMA engine for VirtualGPU %p: mask=0x%x",
+            vgpu, it->second);
+    vgpu_to_engine_.erase(it);
+  }
 }
 
 // ================================================================================================

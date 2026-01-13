@@ -181,9 +181,6 @@ public:
 
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
-  /// @brief Returns the size of the system memory heap in bytes.
-  static uint64_t GetSystemMemoryByteSize();
-
   /// @brief Returns the size of the dev heap in bytes.
   static uint64_t GetDevHeapByteSize();
 
@@ -225,6 +222,7 @@ public:
                    size_t size, hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
                      size_t size) override;
+  hsa_status_t GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.
