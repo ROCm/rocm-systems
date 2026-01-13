@@ -237,7 +237,7 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   static constexpr int MaxMetadataSizeDwords = 64;
   amdImageDesc_ =
-      reinterpret_cast<hsa_amd_image_descriptor_t*>(new int[MaxMetadataSizeDwords + 2]());
+      reinterpret_cast<hsa_amd_image_descriptor_t*>(new char[(MaxMetadataSizeDwords + 2) * sizeof(int)]());
   if (amdImageDesc_ == nullptr) {
     return false;
   }
