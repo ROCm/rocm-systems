@@ -405,10 +405,6 @@ class OmniAnalyze_Base:
                     "Please choose a different name."
                 )
 
-        if args.gpu_kernel and args.gpu_dispatch_id:
-            console_warning(f"Ignoring kernel filter {args.gpu_kernel} since dispatch filter {args.gpu_dispatch_id} is already provided")
-            args.gpu_kernel = []
-
         # Check if any kernel's counters are missing due to iteration multiplexing
         if (
             profiling_config.get("iteration_multiplexing") is not None

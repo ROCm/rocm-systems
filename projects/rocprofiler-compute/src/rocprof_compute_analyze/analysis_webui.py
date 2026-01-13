@@ -152,11 +152,6 @@ class webui_analysis(OmniAnalyze_Base):
             console_debug("analysis", f"gui gpu filter is {gcd_filter}")
             console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-            # Ignore kernel filtering if dispatch filtering is provided
-            if kernel_filter and disp_filt:
-                console_warning(f"Ignoring kernel filter {kernel_filter} since dispatch filter {disp_filt} is already provided")
-                kernel_filter = []
-
             base_data[base_run].filter_kernel_ids = (
                 [str(k) for k in kernel_filter] if kernel_filter else []
             )
