@@ -190,7 +190,7 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path, pd.DataFrame()
                 ).itertuples()
             }
-            metric_objs: dict[tuple[str, str], orm.Metric] = {}
+            metric_objs: dict[str, orm.MetricDefinition] = {}
 
             for value in self._values_data_per_workload.get(
                 workload_path, pd.DataFrame()
@@ -204,8 +204,7 @@ class db_analysis(OmniAnalyze_Base):
                     continue
 
                 # Create or reuse metric object
-                key = (value.kernel_name, value.metric_id)
-                if key not in metric_objs:
+                if value.metric_id not in metric_objs:
                     # Fetch metric info
                     if value.metric_id not in metrics_info_dict:
                         console_warning(
@@ -214,21 +213,22 @@ class db_analysis(OmniAnalyze_Base):
                         )
                         continue
                     metric_info = metrics_info_dict[value.metric_id]
-                    metric_objs[key] = orm.Metric(
+                    metric_objs[value.metric_id] = orm.MetricDefinition(
                         name=metric_info.name,
                         metric_id=metric_info.metric_id,
                         description=metric_info.description,
                         unit=metric_info.unit,
                         table_name=metric_info.table_name,
                         sub_table_name=metric_info.sub_table_name,
-                        kernel=kernel_objs[value.kernel_name],
+                        workload=workload_obj,
                     )
-                    Database.get_session().add(metric_objs[key])
+                    Database.get_session().add(metric_objs[value.metric_id])
 
                 # Add value
                 Database.get_session().add(
-                    orm.Value(
-                        metric=metric_objs[key],
+                    orm.MetricValue(
+                        metric=metric_objs[value.metric_id],
+                        kernel=kernel_objs[value.kernel_name],
                         value_name=value.value_name,
                         value=value.value,
                     )
