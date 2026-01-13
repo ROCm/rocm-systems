@@ -8,19 +8,29 @@ on:
     branches: [ develop ]
     paths:
       - 'projects/rocprofiler-sdk/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
-      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

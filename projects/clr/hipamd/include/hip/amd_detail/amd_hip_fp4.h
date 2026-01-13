@@ -39,9 +39,9 @@ typedef __hip_fp8_storage_t __hip_fp4_storage_t;
 typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
 typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
 
-static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(uint32_t));
-static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(uint32_t));
+static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(uint32_t), "");
+static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(uint32_t), "");
 
 enum __hip_fp4_interpretation_t {
   __HIP_E2M1 = 0,
@@ -278,7 +278,7 @@ struct __hip_fp4_e2m1 {
   }
 
   __FP4_HOST_DEVICE__ operator __hip_bfloat16_raw() const {
-    static_assert(sizeof(__hip_bfloat16_raw[2]) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat16_raw[2]) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat16_raw bf16_raw[2];
       __amd_bf16x2_storage_t bf16x2;
@@ -336,7 +336,7 @@ struct __hip_fp4x2_e2m1 {
   }
 
   __FP4_HOST_DEVICE__ operator __hip_bfloat162_raw() const {
-    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t));
+    static_assert(sizeof(__hip_bfloat162_raw) == sizeof(__amd_bf16x2_storage_t), "");
     union {
       __hip_bfloat162_raw bf162_raw;
       __amd_bf16x2_storage_t bf16x2;
