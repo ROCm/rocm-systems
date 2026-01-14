@@ -918,7 +918,7 @@ class AMDSMICommands():
                         f"{p['policy_id']}:{p['policy_description']}"
                         for p in policy_info.get('policies', [])
                     ) or 'N/A'
-                    
+
                     static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
                     static_dict['current_id'] = policy_info.get('current_id', 'N/A')
                     static_dict['policies'] = policies_str
@@ -938,7 +938,7 @@ class AMDSMICommands():
                         f"{p['policy_id']}:{p['policy_description']}"
                         for p in policy_info.get('policies', [])
                     ) or 'N/A'
-                    
+
                     static_dict['num_supported'] = policy_info.get('num_supported', 'N/A')
                     static_dict['current_id'] = policy_info.get('current_id', 'N/A')
                     static_dict['policies'] = policies_str
@@ -1592,7 +1592,8 @@ class AMDSMICommands():
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
                 xgmi_err=None, energy=None, mem_usage=None, voltage=None, schedule=None,
                 guard=None, guest_data=None, fb_usage=None, xgmi=None, throttle=None,
-                base_board=None, gpu_board=None):
+                base_board=None, gpu_board=None, gpu_metrics_ver=None, gpu_metrics_table=None,
+                gpu_partition_metrics=None):
         """Get Metric information for target gpu
 
         Args:
@@ -1713,6 +1714,14 @@ class AMDSMICommands():
             current_platform_args += ["schedule", "guard", "guest_data", "fb_usage", "xgmi"]
             current_platform_values += [args.schedule, args.guard, args.guest_data,
                                         args.fb_usage, args.xgmi]
+
+        # Handle GPU Metrics Arguments
+        if gpu_metrics_ver:
+            args.gpu_metrics_ver = gpu_metrics_ver
+        if gpu_metrics_table:
+            args.gpu_metrics_table = gpu_metrics_table
+        if gpu_partition_metrics:
+            args.gpu_partition_metrics = gpu_partition_metrics
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -2766,6 +2775,31 @@ class AMDSMICommands():
                         elif value != "N/A":
                             throttle_status[key] = self.helpers.unit_format(self.logger, value, activity_unit)
                 values_dict['throttle'] = throttle_status
+
+        # Handle GPU Metrics specific options
+        if hasattr(args, 'gpu_metrics_ver') and args.gpu_metrics_ver:
+            try:
+                gpu_metrics_version = amdsmi_interface.amdsmi_get_gpu_metrics_header_info(args.gpu)
+                values_dict['gpu_metrics_version'] = gpu_metrics_version
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                values_dict['gpu_metrics_version'] = "N/A"
+                logging.debug("Failed to get GPU metrics version for gpu %s | %s", gpu_id, e.get_error_info())
+
+        if hasattr(args, 'gpu_metrics_table') and args.gpu_metrics_table:
+            try:
+                gpu_metrics_raw = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+                values_dict['gpu_metrics_raw'] = gpu_metrics_raw
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                values_dict['gpu_metrics_raw'] = "N/A"
+                logging.debug("Failed to get GPU metrics table for gpu %s | %s", gpu_id, e.get_error_info())
+
+        if hasattr(args, 'gpu_partition_metrics') and args.gpu_partition_metrics:
+            try:
+                partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
+                values_dict['partition_metrics'] = partition_metrics
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                values_dict['partition_metrics'] = "N/A"
+                logging.debug("Failed to get GPU partition metrics for gpu %s | %s", gpu_id, e.get_error_info())
 
         # Store timestamp first if watching_output is enabled
         if watching_output:
@@ -6998,7 +7032,7 @@ class AMDSMICommands():
                     output_file.write(legend_output + '\n')
 
 
-    def partition(self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None):
+    def partition(self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None, metrics=None):
         """ Display parition information for the target GPU
         param:
             args - argparser args to pass to subcommand
@@ -7023,6 +7057,8 @@ class AMDSMICommands():
             args.memory = memory
         if accelerator:
             args.accelerator = accelerator
+        if metrics:
+            args.metrics = metrics
 
         if not self.group_check_printed:
             self.helpers.check_required_groups(check_render=True, check_video=False)
@@ -7032,7 +7068,7 @@ class AMDSMICommands():
         # amd-smi partition (no args)             #
         ###########################################
         # if no args are present, then everything should be displayed
-        if not args.current and not args.memory and not args.accelerator:
+        if not args.current and not args.memory and not args.accelerator and not getattr(args, 'metrics', False):
             args.current = True
             args.memory = True
             args.accelerator = True
@@ -7342,6 +7378,67 @@ class AMDSMICommands():
                 else:
                     with self.logger.destination.open('a', encoding="utf-8") as output_file:
                         output_file.write(legend_output + '\n')
+
+        ###########################################
+        # amd-smi partition --metrics             #
+        ###########################################
+        if hasattr(args, 'metrics') and args.metrics:
+            self.logger.table_header = ''.rjust(7)
+            metrics_header = "GPU_ID".ljust(8) + \
+                           "PARTITION_ID".ljust(14) + \
+                           "GFX_ACTIVITY".ljust(15) + \
+                           "UMC_ACTIVITY".ljust(15) + \
+                           "MM_ACTIVITY".ljust(15) + \
+                           "THROTTLE_STATUS".ljust(17)
+            self.logger.table_header = metrics_header + self.logger.table_header.strip()
+
+            tabular_output = []
+            for gpu in args.gpu:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
+                try:
+                    partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(gpu)
+
+                    # Extract partition utilization metrics
+                    gfx_activity = partition_metrics.get('current_gfxclk_utilization', 'N/A')
+                    umc_activity = partition_metrics.get('current_uclk_utilization', 'N/A')
+                    mm_activity = partition_metrics.get('average_mm_activity', 'N/A')
+
+                    # Check if throttled
+                    throttle_status = "None"
+                    if partition_metrics.get('throttle_status_bitmask', 0) != 0:
+                        throttle_status = "Throttled"
+
+                    tabular_output_dict = {
+                        "gpu_id": gpu_id,
+                        "partition_id": 0,  # Default partition
+                        "gfx_activity": f"{gfx_activity}%" if gfx_activity != 'N/A' else 'N/A',
+                        "umc_activity": f"{umc_activity}%" if umc_activity != 'N/A' else 'N/A',
+                        "mm_activity": f"{mm_activity}%" if mm_activity != 'N/A' else 'N/A',
+                        "throttle_status": throttle_status
+                    }
+
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    tabular_output_dict = {
+                        "gpu_id": gpu_id,
+                        "partition_id": 0,
+                        "gfx_activity": "N/A",
+                        "umc_activity": "N/A",
+                        "mm_activity": "N/A",
+                        "throttle_status": "N/A"
+                    }
+                    logging.debug("Failed to get partition metrics for gpu %s | %s", gpu_id, e.get_error_info())
+
+                tabular_output.append(tabular_output_dict)
+
+            self.logger.multiple_device_output = tabular_output
+            self.logger.table_title = "\nPARTITION_UTILIZATION_METRICS"
+            if self.logger.is_json_format():
+                self.logger.store_partition_metrics_json_output.extend(tabular_output)
+            else:
+                self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
+            self.logger.clear_multiple_devices_output()
 
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
