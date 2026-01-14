@@ -1878,6 +1878,119 @@ int main() {
                   << "\n\n";
       }  // END GPU METRICS OUTPUTS
 
+      /// Get GPU Partition Metrics info
+      std::cout << "\n\n";
+      amdsmi_gpu_metrics_t partition_smu;
+      ret = amdsmi_get_gpu_partition_metrics_info(processor_handles[device_index], &partition_smu);
+      if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\tamdsmi_get_gpu_partition_metrics_info(): not supported on this device.\n";
+      } else {  // START PARTITION METRICS OUTPUTS
+        CHK_AMDSMI_RET(ret)
+        printf("    Output of amdsmi_get_gpu_partition_metrics_info:\n");
+        printf(
+            "\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
+            static_cast<uint64_t>(bdf.domain_number), static_cast<uint32_t>(bdf.bus_number),
+            static_cast<uint32_t>(bdf.device_number), static_cast<uint32_t>(bdf.function_number));
+
+        std::cout << "PARTITION METRIC TABLE HEADER:\n";
+        std::cout << "structure_size=" << std::dec
+                  << static_cast<uint16_t>(partition_smu.common_header.structure_size) << "\n";
+        std::cout << "\tformat_revision=" << std::dec
+                  << static_cast<uint16_t>(partition_smu.common_header.format_revision) << "\n";
+        std::cout << "\tcontent_revision=" << std::dec
+                  << static_cast<uint16_t>(partition_smu.common_header.content_revision) << "\n";
+
+        std::cout << "\nNUMBER OF PARTITIONS: " << partition_smu.num_partition << "\n";
+
+        // Display XCP partition metrics if available
+        if (partition_smu.num_partition > 0) {
+          std::cout << "\nXCP PARTITION METRICS:\n";
+          for (uint32_t xcp_idx = 0;
+               xcp_idx < partition_smu.num_partition && xcp_idx < AMDSMI_MAX_NUM_XCP; ++xcp_idx) {
+            std::cout << "\tXCP[" << xcp_idx << "] Metrics:\n";
+            const auto& xcp_stat = partition_smu.xcp_stats[xcp_idx];
+
+            std::cout << "\t\tgfx_busy_inst = [";
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+              std::cout << xcp_stat.gfx_busy_inst[i];
+              if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+            }
+            std::cout << "]\n";
+
+            std::cout << "\t\tjpeg_busy = [";
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++i) {
+              std::cout << xcp_stat.jpeg_busy[i];
+              if (i < AMDSMI_MAX_NUM_JPEG_ENG_V1 - 1) std::cout << ", ";
+            }
+            std::cout << "]\n";
+
+            std::cout << "\t\tvcn_busy = [";
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_VCN; ++i) {
+              std::cout << xcp_stat.vcn_busy[i];
+              if (i < AMDSMI_MAX_NUM_VCN - 1) std::cout << ", ";
+            }
+            std::cout << "]\n";
+
+            std::cout << "\t\tgfx_busy_acc = [";
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+              std::cout << xcp_stat.gfx_busy_acc[i];
+              if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+            }
+            std::cout << "]\n";
+
+            // Show v1.8+ features if available
+            if (partition_smu.common_header.content_revision >= 8) {
+              std::cout << "\t\tgfx_below_host_limit_ppt_acc = [";
+              for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                std::cout << xcp_stat.gfx_below_host_limit_ppt_acc[i];
+                if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+              }
+              std::cout << "]\n";
+
+              std::cout << "\t\tgfx_below_host_limit_thm_acc = [";
+              for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                std::cout << xcp_stat.gfx_below_host_limit_thm_acc[i];
+                if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+              }
+              std::cout << "]\n";
+
+              std::cout << "\t\tgfx_low_utilization_acc = [";
+              for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                std::cout << xcp_stat.gfx_low_utilization_acc[i];
+                if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+              }
+              std::cout << "]\n";
+
+              std::cout << "\t\tgfx_below_host_limit_total_acc = [";
+              for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                std::cout << xcp_stat.gfx_below_host_limit_total_acc[i];
+                if (i < AMDSMI_MAX_NUM_XCC - 1) std::cout << ", ";
+              }
+              std::cout << "]\n";
+            }
+            std::cout << "\n";
+          }
+        } else {
+          std::cout << "\tNo XCP partitions detected on this device\n";
+        }
+
+        std::cout << "\n\t ** -> Testing partition metrics API changes ** "
+                  << "\n";
+        constexpr uint16_t kPARTITION_TEST_ITER = 5;
+        amdsmi_gpu_metrics_t partition_metrics_check = {};
+        for (auto idx = uint16_t(1); idx <= kPARTITION_TEST_ITER; ++idx) {
+          amdsmi_get_gpu_partition_metrics_info(processor_handles[device_index],
+                                               &partition_metrics_check);
+          std::cout << "\t\t -> partition firmware_timestamp [" << idx << "/"
+                    << kPARTITION_TEST_ITER
+                    << "]: " << partition_metrics_check.firmware_timestamp << "\n";
+        }
+
+        std::cout << "\n";
+        std::cout << " ** Note: Partition metrics show XCP-specific utilization data ** "
+                  << "\n\n";
+      }  // END PARTITION METRICS OUTPUTS
+
       // Get nearest GPUs
       const char* topology_link_type_str[] = {
           "AMDSMI_LINK_TYPE_INTERNAL",       "AMDSMI_LINK_TYPE_PCIE",    "AMDSMI_LINK_TYPE_XGMI",
