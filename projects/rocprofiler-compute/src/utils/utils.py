@@ -786,6 +786,7 @@ def run_prof(
     mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
+    torch_operators_enabled: bool,
     retain_rocpd_output: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
@@ -818,8 +819,6 @@ def run_prof(
         and profiler_options.get("ROCPROF_ATTACH_PID") is not None
     )
 
-    torch_operators_enabled = False
-
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
@@ -829,15 +828,6 @@ def run_prof(
                 app_cmd_list = list(raw_app_cmd)
             else:
                 app_cmd_list = shlex.split(str(raw_app_cmd))
-            if "--torch-operators" in app_cmd_list:
-                torch_operators_enabled = True
-                app_cmd_list = [opt for opt in app_cmd_list if opt != "--torch-operators"]
-                options["ROCPROF_MARKER_API_TRACE"] = "1"
-            if torch_operators_enabled and ("python3" in app_cmd_list or "python" in app_cmd_list):
-                python_idx = app_cmd_list.index("python3") if "python3" in app_cmd_list else app_cmd_list.index("python")
-                inject_script = str(config.rocprof_compute_home / "utils"/ "inject_roctx.py")
-                if inject_script not in app_cmd_list:
-                    app_cmd_list.insert(python_idx + 1, inject_script)
             options["APP_CMD"] = app_cmd_list
 
         if multiple_files:
@@ -857,21 +847,6 @@ def run_prof(
         default_options = ["-i", fnames]
         options = default_options + cast(list[str], profiler_options)
         options = ["-A", "absolute"] + options
-
-        if "--torch-operators" in options:
-            torch_operators_enabled = True
-
-        if "--" in options:
-            separator_idx = options.index("--")
-            app_cmd_list = options[separator_idx + 1 :]
-            options = [opt if opt != "--torch-operators" else "--marker-trace" for opt in options ]
-            if torch_operators_enabled and ("python3" in app_cmd_list or "python" in app_cmd_list):
-                python_idx = app_cmd_list.index("python3") if "python3" in app_cmd_list else app_cmd_list.index("python")
-                inject_script = str(config.rocprof_compute_home / "utils" / "inject_roctx.py")
-                if inject_script not in app_cmd_list:
-                    app_cmd_list.insert(python_idx + 1, inject_script)
-            options = options[: separator_idx + 1] + app_cmd_list
-
 
     new_env = os.environ.copy()
 
@@ -930,13 +905,11 @@ def run_prof(
                 app_cmd, new_env=new_env, profileMode=True
             )
     else:
-        # Filter out --torch-operators (internal flag) before passing to rocprofv3
-        rocprof_options = [opt if opt != "--torch-operators" else "--marker-trace" for opt in options]
         # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + rocprof_options)}")
+        console_debug(f"rocprof command: {shlex.join([rocprof_cmd] + options)}")
         # profile the app
         success, output = capture_subprocess_output(
-            [rocprof_cmd] + rocprof_options, new_env=new_env, profileMode=True
+            [rocprof_cmd] + options, new_env=new_env, profileMode=True
         )
 
     time_2 = time.time()
@@ -1045,7 +1018,7 @@ def run_prof(
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
             
-            if "--torch-operators" in options:
+            if torch_operators_enabled:
                 process_torch_trace_output(workload_dir, fbase)
 
         # Combine results into single CSV file

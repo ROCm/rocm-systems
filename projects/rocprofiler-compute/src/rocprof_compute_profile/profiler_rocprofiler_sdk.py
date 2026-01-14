@@ -54,23 +54,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
-        if args.torch_operators:
-            # Verify torch installation if --torch-operators is used
-            try:
-                import torch
-            except ImportError:
-                console_error(
-                    "PyTorch is not installed or not properly configured.\n"
-                    "The --torch-operators option requires a valid PyTorch installation.\n"
-                    "Please install PyTorch and try again."
-                )
-                import sys
-                sys.exit(1)
-
-            if "--torch-operators" not in app_cmd:
-                app_cmd.append("--torch-operators")
-
-
         ld_preload = [args.rocprofiler_sdk_tool_path]
         if native_tool_path:
             # Use native tool to collect counters
@@ -89,6 +72,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
         })
 
+        if args.torch_operators:
+            options["ROCPROF_MARKER_API_TRACE"] = "1"
         # Create folder pointed by ROCPROF_OUTPUT_PATH
         Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
 

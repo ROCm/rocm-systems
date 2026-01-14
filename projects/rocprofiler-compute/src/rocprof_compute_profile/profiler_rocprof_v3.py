@@ -49,23 +49,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def get_profiler_options(self) -> list[str]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
-
-        if args.torch_operators:
-            # Verify torch installation if --torch-operators is used
-            try:
-                import torch
-            except ImportError:
-                console_error(
-                    "PyTorch is not installed or not properly configured.\n"
-                    "The --torch-operators option requires a valid PyTorch installation.\n"
-                    "Please install PyTorch and try again."
-                )
-                import sys
-                sys.exit(1)
-
-            if "--torch-operators" not in app_cmd:
-                app_cmd.append("--torch-operators")
-
+    
         if args.kokkos_trace:
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -77,10 +61,11 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         elif args.hip_trace:
             trace_option = "--hip-trace"
         elif args.torch_operators:
-            trace_option = "--torch-operators"
+            trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
 
+        
         profiling_options = [
             # v3 requires output directory argument
             "-d",

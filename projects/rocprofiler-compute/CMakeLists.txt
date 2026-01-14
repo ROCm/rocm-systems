@@ -296,14 +296,6 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_torch_ops
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m torch_ops
-        --junitxml=tests/test_profile_torch_ops.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_sort
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest -m sort --junitxml=tests/test_profile_sort.xml

@@ -50,7 +50,17 @@ for candidate in candidate_paths:
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
 
-import torch
+try:
+    import torch
+except ImportError:
+    console_error(
+        "PyTorch is not installed or not properly configured.\n"
+        "The --torch-operators option requires a valid PyTorch installation.\n"
+        "Please install PyTorch and try again."
+    )
+    import sys
+    sys.exit(1)
+
 import torch.nn.functional as F
 from roctx import rangePush, rangePop
 from functools import wraps
