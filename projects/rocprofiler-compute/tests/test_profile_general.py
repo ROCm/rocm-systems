@@ -2864,29 +2864,30 @@ if __name__ == "__main__":
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
     
     # 2. Check torch trace output
-    torch_trace_csvs = glob(workload_dir+"/*_torch_trace.csv")
+    torch_trace_csvs = list(Path(workload_dir).glob("*_torch_trace.csv"))
     assert len(torch_trace_csvs) in [13,20], "Torch trace CSV files are less than expected."
-    torch_trace_csv = Path(random.choice(torch_trace_csvs))
-    assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
+    torch_trace_paths = [Path(p) for p in sorted(torch_trace_csvs)]
     
     # 3. Check torch operators directory
     torch_operators_dir = Path(workload_dir) / "torch_operators"
     assert torch_operators_dir.exists(), "torch_operators directory not created"
     assert torch_operators_dir.is_dir(), "torch_operators is not a directory"
     
-    # 4. Verify torch trace CSV has expected columns
-    torch_trace_df = pd.read_csv(torch_trace_csv)
+    # 4-6. Verify each torch trace CSV has expected structure and valid data
     required_columns = ["Function", "Kernel_Name", "Counter_Name", "Counter_Value"]
-    for col in required_columns:
-        assert col in torch_trace_df.columns, f"Required column '{col}' missing from torch trace"
-    
-    # 5. Verify torch trace has data
-    assert len(torch_trace_df) > 0, "Torch trace CSV is empty"
-    
-    # 6. Verify counter values are valid (non-negative)
-    counter_values = torch_trace_df["Counter_Value"]
-    assert all(counter_values >= 0), "Found negative counter values"
-    assert not all(counter_values == 0), "All counter values are zero"
+    for torch_trace_csv in torch_trace_paths:
+        assert torch_trace_csv.exists(), f"Torch trace CSV not found: {torch_trace_csv}"
+        torch_trace_df = pd.read_csv(torch_trace_csv)
+        for col in required_columns:
+            assert col in torch_trace_df.columns, f"Required column '{col}' missing from torch trace {torch_trace_csv.name}"
+        
+        # Verify torch trace has data
+        assert len(torch_trace_df) > 0, f"Torch trace CSV {torch_trace_csv.name} is empty"
+        
+        # Verify counter values are valid (non-negative)
+        counter_values = torch_trace_df["Counter_Value"]
+        assert all(counter_values >= 0), f"Found negative counter values in {torch_trace_csv.name}"
+        assert not all(counter_values == 0), f"All counter values are zero in {torch_trace_csv.name}"
     
     # 7. Check per-operator CSV files exist
     operator_csv_files = list(torch_operators_dir.glob("*.csv"))
@@ -2899,6 +2900,6 @@ if __name__ == "__main__":
         assert "Context_Id" in op_df.columns, f"Context_Id missing in {op_csv.name}"
         assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
     
-    
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
     

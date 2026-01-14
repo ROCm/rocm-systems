@@ -145,13 +145,13 @@ class RocProfCompute_Base:
                     args.torch_operators = False
 
 
-            if args.format_rocprof_output == "rocpd" and getattr(args, 'torch_operators', False):
-                args.format_rocprof_output = "csv"
-                args.retain_rocpd_output = True
-                console_warning(
-                    "Changed rocprof output format to 'csv' for torch operator profiling.\n"
-                    "Enabled retention of 'rocpd' output in accordance with user input."
-                )
+            # if args.format_rocprof_output == "rocpd" and getattr(args, 'torch_operators', False):
+            #     args.format_rocprof_output = "csv"
+            #     args.retain_rocpd_output = True
+            #     console_warning(
+            #         "Changed rocprof output format to 'csv' for torch operator profiling.\n"
+            #         "Enabled retention of 'rocpd' output in accordance with user input."
+            #     )
 
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
@@ -505,7 +505,7 @@ class RocProfCompute_Base:
                         f'passes. Please use "--block" or "--set" '
                         f"to adjust or reduce the requested performance metrics!"
                     )
-            console_log(f'Sending profiler options to run_prof: {options}')
+            console_debug(f'Sending profiler options to run_prof: {options}')
 
             run_prof(
                 fnames=str_fnames,

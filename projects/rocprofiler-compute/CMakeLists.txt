@@ -596,7 +596,6 @@ install(
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
 install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT main)
-
 # src/rocprof_compute_soc
 install(
     DIRECTORY src/rocprof_compute_soc

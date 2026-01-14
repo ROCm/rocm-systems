@@ -688,7 +688,6 @@ Requirements
 
 * Valid PyTorch installation in the profiling environment
 * PyTorch application must be run as a Python script or Python command
-* Compatible with ROCm Compute Profiler's native counter collection tool
 
 Usage
 -----
@@ -747,8 +746,7 @@ their performance counters:
    performance counters for that specific operator. Columns include:
 
    * ``Operator_Name`` - PyTorch operator name
-   * ``Context_Id`` - Source location where operator was called (e.g., ``10@conv.py:543``)
-   * ``Kernel_Name`` - GPU kernel dispatched by this operator invocation
+   * ``Context_Id`` - Source location where operator was called (e.g., ``conv2d:10@conv.py:543``)
    * ``Counter_Name`` / ``Counter_Value`` - Hardware counter measurements
    * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator timing
    * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel timing

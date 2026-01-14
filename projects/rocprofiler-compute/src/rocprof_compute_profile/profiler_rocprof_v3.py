@@ -49,7 +49,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def get_profiler_options(self) -> list[str]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
-    
         if args.kokkos_trace:
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -64,8 +63,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
-
-        
         profiling_options = [
             # v3 requires output directory argument
             "-d",

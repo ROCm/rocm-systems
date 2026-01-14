@@ -932,6 +932,135 @@ def run_prof(
 
     if format_rocprof_output == "rocpd":
         # If using native tool for counter collection
+                            # Add torch operator trace processing
+        # Extract marker_api_trace and counter_collection CSVs from db files
+        if torch_operators_enabled:
+            import sqlite3
+            from contextlib import closing
+            
+            # SQL queries for extraction
+            MARKER_API_TRACE_QUERY = """
+            SELECT
+                R.id,
+                R.guid,
+                P.pid,
+                T.tid,
+                E.correlation_id as Correlation_Id,
+                S.string as Function,
+                '' as category,
+                R.start as Start_Timestamp,
+                R.end as End_Timestamp,
+                (R.end - R.start) as duration
+            FROM rocpd_region R
+                INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid
+                INNER JOIN rocpd_info_thread T ON T.id = R.tid AND T.guid = R.guid
+                INNER JOIN rocpd_info_process P ON P.id = T.pid AND P.guid = R.guid
+                INNER JOIN rocpd_string S ON S.id = R.name_id AND S.guid = R.guid
+            ORDER BY R.start
+            """            
+            COUNTERS_COLLECTION_QUERY = """
+            SELECT
+                agent_id as GPU_ID,
+                dispatch_id as Dispatch_ID,
+                pid as PID,
+                grid_size as Grid_Size,
+                workgroup_size as Workgroup_Size,
+                lds_block_size as LDS_Per_Workgroup,
+                scratch_size as Scratch_Per_Workitem,
+                vgpr_count as Arch_VGPR,
+                accum_vgpr_count as Accum_VGPR,
+                sgpr_count as SGPR,
+                kernel_name as Kernel_Name,
+                start as Start_Timestamp,
+                end as End_Timestamp,
+                correlation_id as Correlation_Id,
+                kernel_id as Kernel_ID,
+                counter_name as Counter_Name,
+                value as Counter_Value
+            FROM counters_collection
+            """
+            console_log("Extracting counters and markers from rocpd database: ")
+            console_log(glob.glob(workload_dir + "/out/pmc_1/*/*.db"))
+            
+            for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
+                pid = Path(db_path).stem.split("_")[0]
+                import socket
+                output_path = Path(workload_dir + "/out/pmc_1")
+                hostname = socket.gethostname()
+                hostname_output_path = output_path / hostname
+                hostname_output_path.mkdir(parents=True, exist_ok=True)
+                console_debug("Created hostname output path: ", hostname_output_path," to support torch operator trace extraction.")
+                try:
+                    # Extract marker API trace
+                    with closing(sqlite3.connect(db_path)) as conn:
+                        marker_df = pd.read_sql_query(MARKER_API_TRACE_QUERY, conn)
+                        marker_csv = f"{hostname_output_path}/{pid}_marker_api_trace.csv"
+                        if not marker_df.empty:
+                            marker_df.to_csv(marker_csv, index=False)
+                            console_debug(f"Extracted marker data from rocpd: {marker_csv}")
+                        else:
+                            console_warning(f"No marker API trace data found in {db_path}.")
+
+                        # Extract counter collection
+                        counter_df = pd.read_sql_query(COUNTERS_COLLECTION_QUERY, conn)
+                        counter_csv = f"{hostname_output_path}/{pid}_counter_collection.csv"
+                        if not counter_df.empty:
+                            counter_df.to_csv(counter_csv, index=False)
+                            console_debug(f"Extracted counter collection data from rocpd: {counter_csv}")
+                        elif options["ROCPROF_COUNTER_COLLECTION"] == "0":
+                            KERNEL_TRACE_QUERY = """
+                            SELECT
+                                category as Kind,
+                                agent_abs_index as Agent_Id,
+                                queue_id as Queue_Id,
+                                stream_id as Stream_Id,
+                                tid as Thread_Id,
+                                dispatch_id as Dispatch_Id,
+                                kernel_id as Kernel_Id,
+                                name as Kernel_Name,
+                                corr_id as Correlation_Id,
+                                start as Start_Timestamp,
+                                end as End_Timestamp,
+                                lds_size as LDS_Block_Size,
+                                scratch_size as Scratch_Size,
+                                vgpr_count as VGPR_Count,
+                                accum_vgpr_count as Accum_VGPR_Count,
+                                sgpr_count as SGPR_Count,
+                                workgroup_x as Workgroup_Size_X,
+                                workgroup_y as Workgroup_Size_Y,
+                                workgroup_z as Workgroup_Size_Z,
+                                grid_x as Grid_Size_X,
+                                grid_y as Grid_Size_Y,
+                                grid_z as Grid_Size_Z
+                            FROM kernels
+                            ORDER BY start
+                            """
+                            # Extract kernel trace  
+                            kernel_df = pd.read_sql_query(KERNEL_TRACE_QUERY, conn)
+                            kernel_csv = f"{hostname_output_path}/{pid}_kernel_trace.csv"
+                            if not kernel_df.empty:
+                                kernel_df.to_csv(kernel_csv, index=False)
+                                print(kernel_df.columns)
+                                console_debug(f"Extracted kernel trace data from rocpd: {kernel_csv}")
+                            else:
+                                console_warning(f"No kernel trace data found in {db_path}.")
+
+                            # Extract native counter collection CSV
+                            try:
+                                convert_native_counter_collection_csv(workload_dir)
+                                console_log(f"Extracted counter collection data from native tool: {counter_csv}")
+                            except Exception as e:
+                                console_error(f"Failed to convert native counter collection CSV: {e}")
+                        else:
+                            console_warning(f"No counter collection data found in {db_path}.")
+                
+                except sqlite3.Error as e:
+                    console_error(f"Failed to extract data from {db_path}: {e}")
+                except Exception as e:
+                    console_error(f"Unexpected error extracting from {db_path}: {e}")
+            process_torch_trace_output(workload_dir, fbase)
+            console_log("Completed extraction of torch operator traces.")
+
         if (
             rocprof_cmd == "rocprofiler-sdk"
             and options["ROCPROF_COUNTER_COLLECTION"] == "0"
@@ -1017,7 +1146,6 @@ def run_prof(
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
-            
             if torch_operators_enabled:
                 process_torch_trace_output(workload_dir, fbase)
 
@@ -1190,8 +1318,11 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             how="inner",
         )
 
+        console_log(merged_data.columns,"merged_data.columns")
+        console_log(len(merged_data),"len(merged_data)")
+
         rocprofv3_counter_data = pd.DataFrame({
-            "Correlation_Id": merged_data["dispatch_id"],
+            "Correlation_Id": merged_data["Correlation_Id"],
             "Dispatch_Id": merged_data["dispatch_id"],
             "Agent_Id": merged_data["Agent_Id"],
             "Queue_Id": merged_data["Queue_Id"],
@@ -1221,6 +1352,10 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
             index=False,
         )
+        console_log(
+            f"Converted native counter collection csv to "
+            f"rocprofiler-sdk format: "
+            f"{kernel_data_filename.replace('kernel_trace', 'counter_collection')}")
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
@@ -1280,10 +1415,23 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
 @demarcate
 def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
+    """
+    Joins *_marker_api_trace.csv and *_counter_collection.csv based on correlation_id.
+    Saves to *_torch_trace.csv file in workloads directory.
+    """
+    console_log("Processing torch operator trace output...")
+    console_log(glob.glob(
+        f"{workload_dir}/out/pmc_1/*.csv"
+    ))
+    console_log(glob.glob(
+        f"{workload_dir}/out/pmc_1/*/*.csv"
+    ))
+
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
         f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
     )
+
     existing_marker_files_csv = [
         markers_file for markers_file in marker_api_trace_csvs 
         if Path(markers_file).is_file() and 
@@ -1310,6 +1458,9 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         [pd.read_csv(f) for f in counter_files], ignore_index=True
     )
 
+    console_log(combined_counters.columns,"combined_counters.columns")
+    console_log(combined_markers.columns,"combined_markers.columns")
+
     # Merge markers with counters on Correlation_Id
     merged_results = pd.merge(
         combined_markers,
@@ -1320,17 +1471,10 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
     )
     # Save merged results
     merged_results.to_csv(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_torch_trace.csv",
+        f"{workload_dir}/{fbase}_torch_trace.csv",
         index=False,
     )
-
-    if Path(f"{workload_dir}/out").exists():
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_torch_trace.csv",
-            f"{workload_dir}/{fbase}_torch_trace.csv",
-        )
-        console_log('Copied torch trace csv to workload directory.')
-        console_log('')
+    console_log('Created ',f"{workload_dir}/{fbase}_torch_trace.csv")
 
 @demarcate
 def consolidate_torch_trace_output(workload_dir: str) -> None:

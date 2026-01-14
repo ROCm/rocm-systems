@@ -58,7 +58,6 @@ except ImportError:
         "The --torch-operators option requires a valid PyTorch installation.\n"
         "Please install PyTorch and try again."
     )
-    import sys
     sys.exit(1)
 
 import torch.nn.functional as F
@@ -135,10 +134,9 @@ def inject_roctx_into_torch():
     # torch.fft.* functions (FFT operations)
     try:
         all_operations.update(auto_discover_torch_functions(torch.fft, 'torch.fft'))
-    except:
+    except Exception as e:
         console_warning(type(e))
-        console_warning(f"Could not access torch.fft")
-    
+        console_warning(f"Could not access torch.fft: {e}")
     console_log(f"Found {len(all_operations)} operations to wrap")
     console_log("Injecting ROCTX markers into PyTorch operations...")
     
