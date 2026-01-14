@@ -295,7 +295,10 @@ class Roofline:
         )
 
         self.__ai_data = calc_ai_profile(
-            self.__mspec, self.__run_parameters.get("sort_type"), ret_df
+            self.__mspec,
+            self.__run_parameters.get("sort_type"),
+            ret_df,
+            self.__args.iteration_multiplexing,
         )
 
         msg = "AI at each mem level:"
