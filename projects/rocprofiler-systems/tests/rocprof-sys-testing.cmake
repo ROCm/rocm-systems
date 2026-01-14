@@ -186,13 +186,14 @@ set(_attach_environment
 
 set(_rccl_environment
     "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_TRACE_LEGACY=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_USE_RCCLP=ON"
-    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rccl_api"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
