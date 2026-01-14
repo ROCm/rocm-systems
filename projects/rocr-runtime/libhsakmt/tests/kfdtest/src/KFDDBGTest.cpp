@@ -492,7 +492,9 @@ exit:
 
 TEST_F(KFDDBGTest, HitMemoryViolation) {
     TEST_START(TESTPROFILE_RUNALL)
-    if (m_FamilyId >= FAMILY_AI) {
+    if (m_FamilyId >= FAMILY_AI && m_FamilyId != FAMILY_NV) {
+        // GFX10 (FAMILY_NV) does not have per-VMID support, skip the test also
+        // Check kfd_dbg_is_per_vmid_supported function in kfd_debug.h
 
         int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
 
