@@ -771,8 +771,6 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
     mipmap_array->tile_mode = Image::TileMode::TILED;
   }
 
-  debug_print("Tile mode = %u (0: LINEAR, 1: TILED)", mipmap_array->tile_mode);
-
   // Initialize the mipmapped array object
   mipmap_array->component = component;
   mipmap_array->data = const_cast<void*>(image_data);
@@ -782,15 +780,18 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandle(
   mipmap_array->flags = 0;
 
   manager->PopulateMipmapSrd(*mipmap_array);
-  debug_print("Populating mipmapped array SRD...");
-  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
-    mipmap_array->printSRD();
-    manager->printSRDDetailed(mipmap_array->srd);
-  }
 
   // assert(mipmap_array->size == required_size);
   image_handle.handle = mipmap_array->Convert();
-  debug_print("output handle = %lu", image_handle.handle);
+
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
+    debug_print("Tile mode = %u (0: LINEAR, 1: TILED)", mipmap_array->tile_mode);
+    debug_print("Populating mipmapped array SRD...");
+    mipmap_array->printSRD();
+    manager->printSRDDetailed(mipmap_array->srd);
+    debug_print("output handle = %lu", image_handle.handle);
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -842,8 +843,10 @@ hsa_status_t ImageRuntime::GetMipmapArrayLevelHandle(
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  debug_print("Creating mip level %u view for %u level mipmap\n",
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
+    debug_print("Creating mip level %u view for %u level mipmap\n",
               mip_level, array->num_levels);
+  }
 
   // Create a view that references the parent mipmap array
   MipmappedArray* level_view = MipmappedArray::Create(component);

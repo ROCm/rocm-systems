@@ -25,24 +25,6 @@
 #include "hip_conversions.hpp"
 #include "platform/sampler.hpp"
 
-void printSRD(const uint32_t* srd, const int size,const char* whoes) {
-  if (srd == nullptr) return;
-  fprintf(stderr, "\n%s:", whoes);
-  for (int i = 0; i < size; i++) {
-    fprintf(stderr, " %08X,", srd[i]);
-  }
-  fprintf(stderr, "\n");
-}
-
-void printImage(std::string& cs, const int levels, const int level = -1) {
-  cs += "levels=";
-  cs +=std::to_string(levels);
-  if (level >= 0) {
-    cs +=",level=";
-    cs += std::to_string(level);
-  }
-}
-
 struct __hip_texture {
   uint32_t imageSRD[HIP_IMAGE_OBJECT_SIZE_DWORD];
   uint32_t samplerSRD[HIP_SAMPLER_OBJECT_SIZE_DWORD];
@@ -67,8 +49,6 @@ struct __hip_texture {
 
     device::Sampler* samplerMem = sampler->getDeviceSampler(device);
     std::memcpy(samplerSRD, samplerMem->hwState(), sizeof(samplerSRD));
-    printSRD(imageSRD, HIP_IMAGE_OBJECT_SIZE_DWORD, "imageSRD");
-    printSRD(samplerSRD, HIP_SAMPLER_OBJECT_SIZE_DWORD, "samplerSRD");
   }
 };
 

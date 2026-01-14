@@ -1022,7 +1022,9 @@ hsa_status_t ImageManagerAi::PopulateMipLevelSrd(
   word3->f.base_level = mip_level;
   word3->f.last_level = mip_level;
 
-  debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  if (core::Runtime::runtime_singleton_->flag().image_print_srd()) {
+    debug_print("Set SRD mip selection: BASE_LEVEL=%u, LAST_LEVEL=%u", mip_level, mip_level);
+  }
 
   return HSA_STATUS_SUCCESS;
 }

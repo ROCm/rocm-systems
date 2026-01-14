@@ -43,9 +43,6 @@
 #include <iostream>
 #include <cmath>
 
-extern void printSRD(const uint32_t* srd, const int size,const char* whoes);
-extern void printImage(std::string& cs, const int levels, const int level = -1);
-
 namespace amd::pal {
 
 // ================================================================================================
@@ -519,7 +516,6 @@ void Resource::memTypeToHeap(Pal::GpuMemoryCreateInfo* createInfo) {
 
 // ================================================================================================
 bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
-  std::string whoes="Pal CreateImage:";
   Pal::Result result;
   Pal::SubresId ImgSubresId = {0, 0, 0};
   Pal::SubresRange ImgSubresRange = {ImgSubresId, 1, 1, 1};
@@ -577,7 +573,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     hwState_[9] = GetHSAImageOrderType(desc().format_);
     hwState_[10] = static_cast<uint32_t>(desc().width_);
     hwState_[11] = 0;  // one extra reserved field in the argument
-    printSRD(hwState_, 12, "pal createimage: CL_MEM_OBJECT_IMAGE1D_BUFFER SRD");
     return true;
   }
 
@@ -621,10 +616,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     ImgSubresRange.startSubres.arraySlice = imageView->layer_;
     viewOwner_ = imageView->resource_;
     image_ = viewOwner_->image_;
-    whoes += "ImageView:";
-   // auto res = imageView->resource_;
-    printImage(whoes, desc().mipLevels_, imageView->level_);
-    
   } else if (memoryType() == ImageBuffer || memoryType() == ImageExternalBuffer) {
     ImageBufferParams* imageBuffer = reinterpret_cast<ImageBufferParams*>(params);
     viewOwner_ = imageBuffer->resource_;
@@ -647,8 +638,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     imgCreateInfo.fragments = 1;
     Pal::ImageTiling tiling = forceLinear ? Pal::ImageTiling::Linear : Pal::ImageTiling::Optimal;
     uint32_t rowPitch = 0;
-    whoes += "Image:";
-    printImage(whoes, desc().mipLevels_);
     if (memoryType() == ImageBuffer) {
       tiling = Pal::ImageTiling::Linear;
     } else if (memoryType() == ImageExternalBuffer) {
@@ -755,8 +744,6 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   hwState_[9] = GetHSAImageOrderType(desc().format_);
   hwState_[10] = static_cast<uint32_t>(desc().width_);
   hwState_[11] = 0;  // one extra reserved field in the argument
-  whoes += ",SRD:";
-  printSRD(hwState_, 12, whoes.c_str());
   desc_.tiled_ = (Pal::ImageTiling::Linear == image_->GetImageCreateInfo().tiling) ? false : true;
   return true;
 }
