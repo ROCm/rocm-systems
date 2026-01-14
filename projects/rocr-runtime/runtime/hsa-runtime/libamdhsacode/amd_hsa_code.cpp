@@ -1742,19 +1742,19 @@ namespace code {
       return false;
     }
 
-      const std::shared_ptr<AmdHsaCode>& AmdHsaCodeManager::FromHandle(hsa_code_object_t c)
+      AmdHsaCode* AmdHsaCodeManager::FromHandle(hsa_code_object_t c)
       {
         CodeMap::iterator i = codeMap.find(c.handle);
         if (i == codeMap.end()) {
-          std::shared_ptr<AmdHsaCode> code = std::make_shared<AmdHsaCode>();
+          std::unique_ptr<AmdHsaCode> code = std::make_unique<AmdHsaCode>();
           const void* buffer = reinterpret_cast<const void*>(c.handle);
           if (!code->InitAsBuffer(buffer, 0)) {
-            return 0;
+            return nullptr;
           }
-          codeMap[c.handle] = code;
-          return code;
+          auto res = codeMap.emplace(c.handle, std::move(code));
+          return res.first->second.get();
         }
-        return i->second;
+        return i->second.get();
       }
 
       bool AmdHsaCodeManager::Destroy(hsa_code_object_t c)

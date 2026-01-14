@@ -83,6 +83,7 @@
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
+#include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -132,6 +133,12 @@ static void RunGenericTest(TestBase *test) {
 TEST(rocrtst, Test_Example) {
   TestExample tst;
 
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_Example_InterruptDisabled) {
+  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+  TestExample tst;
   RunGenericTest(&tst);
 }
 

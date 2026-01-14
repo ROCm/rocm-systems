@@ -3810,11 +3810,13 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                             reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
-        return HSA_STATUS_ERROR;
-      }
+#if defined(__linux__)
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+#endif
+
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
+                            reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+      return HSA_STATUS_ERROR;
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
@@ -3829,12 +3831,11 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
+#if defined(__linux__)
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
+#endif
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
-      if (!rocr::os::UnmapMemory(va, size)) {
-        return HSA_STATUS_ERROR;
-      }
-      if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mappedHandle->drm_fd,
-                                reinterpret_cast<uint64_t>(mappedHandle->drm_cpu_addr))) {
+      if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
         return HSA_STATUS_ERROR;
       }
       permissions = perms;
@@ -3855,17 +3856,19 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
 {
   /* Create a CPU mapping with PROT_NONE */
   #if defined(__linux__)
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
+  #endif
+
   auto cpu_agent = static_cast<AMD::GpuAgent*>(agentOwner())->GetNearestCpuAgent();
   auto agentPermsIt = allowed_agents.emplace(std::piecewise_construct,
-                       std::forward_as_tuple(cpu_agent),
-                       std::forward_as_tuple(this, cpu_agent, va,
-                                             size, HSA_ACCESS_PERMISSION_NONE))
+                      std::forward_as_tuple(cpu_agent),
+                      std::forward_as_tuple(this, cpu_agent, va,
+                                            size, HSA_ACCESS_PERMISSION_NONE))
                       .first;
 
   auto ret = agentPermsIt->second.EnableAccess(HSA_ACCESS_PERMISSION_NONE);
   if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(ret, "Failed to create default CPU mapping");
-  #endif
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
