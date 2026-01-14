@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-videodecode-example LANGUAGES CXX)
@@ -179,12 +182,12 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
     if(ROCPROFSYS_INSTALL_EXAMPLES)
         install(
             TARGETS videodecode
-            DESTINATION bin
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
         install(
-            FILES ${CMAKE_BINARY_DIR}/videos
-            DESTINATION share/rocprofiler-systems/tests/videos
+            DIRECTORY ${CMAKE_BINARY_DIR}/videos/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/videos
             COMPONENT rocprofiler-systems-examples
         )
     endif()
