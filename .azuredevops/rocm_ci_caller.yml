@@ -66,15 +66,17 @@ jobs:
           #     docs/**
           #     *.md
           #     *.rtf
+          #     *.rst
           #
           #     projects/*/docs/**
           #     **/.markdownlint-ci2.yaml
           #     **/.readthedocs.yaml
           #     **/.spellcheck.local.yaml
           #     **/.wordlist.txt
-          if [[ "${file}" == "docs/*" || \
-                "${file}" == "*.md" || \
-                "${file}" == "*.rtf"
+          if [[ "${file}" == docs/* || \
+                "${file}" == *.md || \
+                "${file}" == *.rtf || \
+                "${file}" == *.rst
              ]] || \
              grep --quiet --extended-regexp '^projects/[^/.]+/docs/.*$' <<< "${file}" || \
              grep --quiet --extended-regexp '^([^/.]+/)*.markdownlint-ci2.yaml$' <<< "${file}" || \
