@@ -85,6 +85,80 @@ finally:
         print(e)
 ```
 
+## GPU metrics version detection
+
+The AMD SMI Python interface supports different GPU metrics versions (v1.x, v1.8, v3.x) with automatic version detection:
+
+```python
+import amdsmi
+
+# Initialize library
+amdsmi.amdsmi_init()
+
+# Get GPU handles
+gpu_handles = amdsmi.amdsmi_get_processor_handles()
+
+# Get GPU metrics version information
+for gpu in gpu_handles:
+    try:
+        # Get GPU metrics header with version info
+        metrics_header = amdsmi.amdsmi_get_gpu_metrics_header_info(gpu)
+        print(f"GPU Metrics Version: {metrics_header['format_revision']}")
+        print(f"Content Revision: {metrics_header['content_revision']}")
+
+        # Get GPU metrics data (version-aware)
+        metrics_info = amdsmi.amdsmi_get_gpu_metrics_info(gpu)
+
+        # Display core utilization (available in all versions)
+        if 'average_gfx_activity' in metrics_info:
+            print(f"GFX Activity: {metrics_info['average_gfx_activity']}%")
+
+        # Display XCP partition data (v1.8+ and v3.x)
+        if 'current_gfxclk_utilization' in metrics_info:
+            print(f"Current GFXCLK Utilization: {metrics_info['current_gfxclk_utilization']}%")
+
+    except amdsmi.AmdSmiException as e:
+        print(f"Error getting metrics: {e}")
+
+amdsmi.amdsmi_shut_down()
+```
+
+## XCP partition metrics
+
+For systems with Graphics Cluster Partitioning (XCP), you can access partition-specific metrics:
+
+```python
+import amdsmi
+
+# Initialize library
+amdsmi.amdsmi_init()
+
+# Get GPU handles
+gpu_handles = amdsmi.amdsmi_get_processor_handles()
+
+for gpu in gpu_handles:
+    try:
+        # Get partition-specific metrics
+        partition_metrics = amdsmi.amdsmi_get_gpu_partition_metrics_info(gpu)
+
+        print("XCP Partition Metrics:")
+        print(f"  GFX Utilization: {partition_metrics.get('current_gfxclk_utilization', 'N/A')}%")
+        print(f"  UMC Utilization: {partition_metrics.get('current_uclk_utilization', 'N/A')}%")
+        print(f"  MM Activity: {partition_metrics.get('average_mm_activity', 'N/A')}%")
+
+        # Check throttling status
+        throttle_mask = partition_metrics.get('throttle_status_bitmask', 0)
+        if throttle_mask != 0:
+            print(f"  Throttle Status: Active (0x{throttle_mask:x})")
+        else:
+            print("  Throttle Status: None")
+
+    except amdsmi.AmdSmiException as e:
+        print(f"Error getting partition metrics: {e}")
+
+amdsmi.amdsmi_shut_down()
+```
+
 (py_lib_fs)=
 ### Folder structure
 

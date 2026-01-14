@@ -1819,6 +1819,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         cpu_sdps_limit_help = "Displays CPU SDPS limit for the selected CPU socket in Watts"
 
+        # Help text for GPU metrics options
+        gpu_metrics_ver_help = "Displays GPU metrics version information"
+        gpu_metrics_table_help = "Displays raw GPU metrics table data"
+        gpu_partition_metrics_help = "Displays XCP partition utilization metrics"
+
         # Help text for core options
         core_energy_help = "Displays core energy for the selected core"
         core_boost_limit_help = "Get boost limit for the selected cores"
@@ -1956,6 +1961,24 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument(
                     "-m", "--xgmi", action="store_true", required=False, help=xgmi_help
                 )
+
+            # Optional Args for GPU Metrics
+            gpu_group = metric_parser.add_argument_group("GPU Metrics Arguments")
+            gpu_group.add_argument(
+                "--gpu-metrics-ver", action="store_true", required=False, help=gpu_metrics_ver_help
+            )
+            gpu_group.add_argument(
+                "--gpu-metrics-table",
+                action="store_true",
+                required=False,
+                help=gpu_metrics_table_help,
+            )
+            gpu_group.add_argument(
+                "--gpu-partition-metrics",
+                action="store_true",
+                required=False,
+                help=gpu_partition_metrics_help,
+            )
 
         if self.helpers.is_amd_hsmp_initialized():
             # Optional Args for CPUs
@@ -3074,6 +3097,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         current_help = "display the current partition information"
         memory_help = "display the current memory partition mode and capabilities"
         accelerator_help = "display accelerator partition information"
+        partition_metrics_help = "display XCP partition utilization and throttling metrics"
 
         # Create partition subparser
         partition_parser = subparsers.add_parser(
@@ -3092,6 +3116,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         partition_parser.add_argument(
             "-a", "--accelerator", action="store_true", required=False, help=accelerator_help
+        )
+        partition_parser.add_argument(
+            "--metrics", action="store_true", required=False, help=partition_metrics_help
         )
 
         # Add Universal Arguments
