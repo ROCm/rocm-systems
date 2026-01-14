@@ -3785,8 +3785,8 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * HSA_QUEUE_INFO_USE_COUNT.
  * 
  * Counted queues have restrictions:
- * - hsa_amd_queue_set_priority() cannot be used on counted queue to change priority. 
- * - hsa_amd_queue_cu_set_mask() cannot be used on counted queue to set CU masking. 
+ * hsa_amd_queue_set_priority() cannot be used on counted queue to change priority. 
+ * hsa_amd_queue_cu_set_mask() cannot be used on counted queue to set CU masking. 
  *
  * @param[in] agent Agent where to create the queue
  *
