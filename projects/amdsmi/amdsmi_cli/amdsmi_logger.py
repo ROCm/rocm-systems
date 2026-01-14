@@ -1042,8 +1042,13 @@ class AMDSMILogger():
         print(default_line_1)
         # Split the version line into 3 lines, each wrapping to the same width
         print("| AMD-SMI          {0:40s} {1:19s}|".format(amd_smi_version.ljust(40), ""))
+
+        # Print amdgpu or kernel version based on availability, if neither then don't print
         if amdgpu_version.strip() != "N/A":
             print("| amdgpu Version:  {0:40s} {1:19s}|".format(amdgpu_version, ""))
+        elif kernel_version.strip() != "N/A":
+            print("| OS kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
+
         if rocm_version != "N/A":
             print("| ROCm Version:    {0:40s} {1:19s}|".format(rocm_version, ""))
 
@@ -1052,7 +1057,6 @@ class AMDSMILogger():
             print("| VBIOS Version:   {0:22s}  {1:35s} |".format(vbios_version, ""))
         if fw_pldm_version != "N/A":
             print("| FW PLDM:         {0:15s}  {1:42s} |".format(fw_pldm_version, ""))
-        print("| kernel Version:  {0:40s} {1:19s}|".format(kernel_version, ""))
 
         print("| Platform:        {0:25.25s} {1:34s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
