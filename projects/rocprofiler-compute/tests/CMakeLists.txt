@@ -1,3 +1,5 @@
+find_package(MPI COMPONENTS CXX)
+
 set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler" FORCE)
 if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR CMAKE_HIP_COMPILER_ID STREQUAL "ROCMClang")
     message(STATUS "Using ${CMAKE_HIP_COMPILER} to build for amdgpu backend")
@@ -52,7 +54,7 @@ set_target_properties(
 )
 
 set(DYNAMIC_SHARED_SOURCES ../sample/dynamic_shared/dynamic_shared.hip)
-set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
+set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP MPI_COMPILE_FLAGS "-I${MPI_CXX_INCLUDE_DIRS}")
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
 target_include_directories(hip_dynamic_shared PRIVATE ../sample/dynamic_shared)
 set_target_properties(

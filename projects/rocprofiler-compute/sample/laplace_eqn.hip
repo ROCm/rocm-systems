@@ -27,10 +27,11 @@
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <vector>
-#ifdef MPI_VERSION
+#ifdef MPI_CXX_COMPILER
 #include <mpi.h>
-#define USING_MPI
-#endif // MPI_VERSION
+#define USE_MPI 1
+#pragma message("Included MPI support")
+#endif // MPI_CXX_COMPILER
 
 // Helper macro for HIP error checking
 #define HIP_CHECK(call)                                                        \
@@ -44,6 +45,18 @@
   } while (0)
 
 void initialize(float *U, int N) {
+  #ifdef USE_MPI
+    #pragma message("Compiling with MPI")
+    // Get the number of processes
+    int num_procs;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+
+    // Get the rank of the process
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  #endif // USE_MPI
+
+  // The grid is partitioned among MPI processes in the horizontal direction
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       float x = 2.0f * (float)i / (float)N - 1.0f;
@@ -104,21 +117,28 @@ __global__ void jacobi_iteration(float *__restrict__ U_new,
 }
 
 int main(int argc, char *argv[]) {
-  #ifdef USING_MPI
+  #ifdef USE_MPI
     // Initialize MPI 
     MPI_Init(&argc, &argv);
+
+    // Get the number of processes
+    int num_procs;
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
 
     // Get the rank of the process
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  #endif // USING_MPI
+  #else
+    int num_procs = 1;
+    int rank = 0;
+  #endif // USE_MPI
 
   int iter = 1000;
   std::vector<int> launch_order;
 
-  #ifdef USING_MPI
+  #ifdef USE_MPI
     if (rank == 0) {
-  #endif // USING_MPI
+  #endif // USE_MPI
       // Parse command-line arguments
       for (int i = 0; i < argc; i++) {
         if (std::string(argv[i]) == "-i" && i + 1 < argc) {
@@ -145,7 +165,7 @@ int main(int argc, char *argv[]) {
       if (launch_order.empty()) {
         launch_order = {0, 1, 2};
       }
-  #ifdef USING_MPI
+  #ifdef USE_MPI
     }
 
     // Broadcast number of iterations to all processes
@@ -159,7 +179,7 @@ int main(int argc, char *argv[]) {
       launch_order.resize(order_size);
 
     MPI_Bcast(launch_order.data(), order_size, MPI_INT, 0, MPI_COMM_WORLD);
-  #endif // USING_MPI
+  #endif // USE_MPI
 
 
   // Problem size
@@ -177,6 +197,15 @@ int main(int argc, char *argv[]) {
   dim3 blockSize_large(32, 32);
   dim3 gridSize_large((n_large + blockSize_large.x - 1) / blockSize_large.x,
                       (n_large + blockSize_large.y - 1) / blockSize_large.y);
+
+  #ifdef USE_MPI
+    // Set device based on rank
+    HIP_CHECK(hipSetDevice(rank % hipGetDeviceCount()));
+
+    n_small += 2;
+    n_mid += 2;
+    n_large += 2;
+  #endif // USE_MPI
 
   // Host memory pointers
   float *h_U_small = new float[n_small * n_small];
@@ -220,6 +249,11 @@ int main(int argc, char *argv[]) {
   std::vector<float *> d_U_olds = {d_U_small_old, d_U_mid_old, d_U_large_old};
   std::vector<int> n_sizes = {n_small, n_mid, n_large};
 
+  #ifdef USE_MPI
+    int left = 0 ? num_procs - 1 : rank - 1;
+    int right = (rank + 1) % num_procs;
+  #endif // USE_MPI
+
   // Perform Jacobi iterations
   for (int it = 0; it < iter; ++it) {
     int i = launch_order[it % launch_order.size()];
@@ -229,7 +263,7 @@ int main(int argc, char *argv[]) {
                                             n_sizes[i]);
 
     HIP_CHECK(hipDeviceSynchronize());
-
+    
     // Swap pointers
     std::swap(d_U_news[i], d_U_olds[i]);
   }
@@ -246,10 +280,10 @@ int main(int argc, char *argv[]) {
   delete[] h_U_mid;
   delete[] h_U_large;
 
-  #ifdef USING_MPI
+  #ifdef USE_MPI
     // Finalize MPI
     MPI_Finalize();
-  #endif // USING_MPI
+  #endif // USE_MPI
 
   return 0;
 }
