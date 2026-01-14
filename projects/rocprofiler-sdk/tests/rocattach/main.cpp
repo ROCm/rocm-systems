@@ -109,12 +109,12 @@ main(int argc, char** argv)
         int pid2status = 0;
         waitpid(pid2, &pid2status, 0);
 
-        if (pid1status != 0)
+        if(pid1status != 0)
         {
             std::cout << "error in pid1, returned non-zero status: " << pid1status;
             return 1;
         }
-        if (pid2status != 0)
+        if(pid2status != 0)
         {
             std::cout << "error in pid2, returned non-zero status: " << pid2status;
             return 1;
