@@ -227,6 +227,8 @@ release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
         "Enable blit kernel arguments optimization")                          \
+release(bool, HIP_DEBUG_USE_BLITNT, false,                                    \
+        "Use non-temporal blit kernel for buffer copies")                          \
 release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \

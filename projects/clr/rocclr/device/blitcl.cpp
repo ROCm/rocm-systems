@@ -144,6 +144,38 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    // Non-temporal copy buffer kernel - uses non-temporal stores for streaming writes
+    // This avoids polluting the cache when the destination data won't be reused soon
+    __kernel void __amd_rocclr_copyBufferNT(__global uchar* src, __global uchar* dst, ulong size,
+                                            uint remainder, uint aligned_size, ulong end_ptr,
+                                            uint next_chunk, uint workgroup_size) {
+      uint l = __builtin_amdgcn_workitem_id_x();
+      uint g = __builtin_amdgcn_workgroup_id_x();
+      ulong id = (g * workgroup_size + l);
+      ulong id_remainder = id;
+
+      if (aligned_size == sizeof(ulong)) {
+        __global ulong* srcD = (__global ulong*)(src);
+        __global ulong* dstD = (__global ulong*)(dst);
+        while ((ulong)(&dstD[id]) < end_ptr) {
+          __builtin_nontemporal_store(srcD[id], &dstD[id]);
+          id += next_chunk;
+        }
+      } else {
+        __global uint* srcD = (__global uint*)(src);
+        __global uint* dstD = (__global uint*)(dst);
+        while ((ulong)(&dstD[id]) < end_ptr) {
+          __builtin_nontemporal_store(srcD[id], &dstD[id]);
+          id += next_chunk;
+        }
+      }
+      if ((remainder != 0) && (id_remainder == 0)) {
+        for (ulong i = size - remainder; i < size; ++i) {
+          dst[i] = src[i];
+        }
+      }
+    }
+
     __kernel void __amd_rocclr_copyBufferAligned(__global uint* src, __global uint* dst,
                                                  ulong srcOrigin, ulong dstOrigin, ulong size,
                                                  uint alignment) {

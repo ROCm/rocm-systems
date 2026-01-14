@@ -275,6 +275,7 @@ class KernelBlitManager : public DmaBlitManager {
     FillBufferAligned = 0,
     FillBufferAligned2D,
     BlitCopyBuffer,
+    BlitCopyBufferNT,  // Non-temporal copy buffer kernel
     BlitCopyBufferAligned,
     BlitCopyBufferRect,
     BlitCopyBufferRectAligned,
@@ -580,8 +581,9 @@ class KernelBlitManager : public DmaBlitManager {
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillBufferAligned2D",
-    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferAligned",
-    "__amd_rocclr_copyBufferRect",    "__amd_rocclr_copyBufferRectAligned",
+    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferNT",
+    "__amd_rocclr_copyBufferAligned", "__amd_rocclr_copyBufferRect",
+    "__amd_rocclr_copyBufferRectAligned",
     "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
     "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",
     "__amd_rocclr_initHeap",          "__amd_rocclr_batchMemOp",

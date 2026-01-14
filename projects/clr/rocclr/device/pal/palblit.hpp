@@ -261,6 +261,7 @@ class KernelBlitManager : public DmaBlitManager {
     BlitCopyBufferRect,
     BlitCopyBufferRectAligned,
     BlitCopyBuffer,
+    BlitCopyBufferNT,  // Non-temporal copy buffer kernel
     BlitCopyBufferAligned,
     FillBufferAligned,
     FillImage,
@@ -525,11 +526,11 @@ static const char* BlitName[KernelBlitManager::BlitTotal] = {
     "__amd_rocclr_copyImage",         "__amd_rocclr_copyImage1DA",
     "__amd_rocclr_copyImageToBuffer", "__amd_rocclr_copyBufferToImage",
     "__amd_rocclr_copyBufferRect",    "__amd_rocclr_copyBufferRectAligned",
-    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferAligned",
-    "__amd_rocclr_fillBufferAligned", "__amd_rocclr_fillImage",
-    "__amd_rocclr_scheduler",         "__amd_rocclr_gwsInit",
-    "__amd_rocclr_streamOpsWrite",    "__amd_rocclr_streamOpsWait",
-    "__amd_rocclr_initHeap"};
+    "__amd_rocclr_copyBuffer",        "__amd_rocclr_copyBufferNT",
+    "__amd_rocclr_copyBufferAligned", "__amd_rocclr_fillBufferAligned",
+    "__amd_rocclr_fillImage",         "__amd_rocclr_scheduler",
+    "__amd_rocclr_gwsInit",           "__amd_rocclr_streamOpsWrite",
+    "__amd_rocclr_streamOpsWait",     "__amd_rocclr_initHeap"};
 
 /*@}*/  // namespace amd::pal
 }  // namespace amd::pal

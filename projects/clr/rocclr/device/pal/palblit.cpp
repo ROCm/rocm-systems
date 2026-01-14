@@ -24,6 +24,7 @@
 #include "device/pal/palmemory.hpp"
 #include "device/pal/palvirtual.hpp"
 #include "utils/debug.hpp"
+#include "utils/flags.hpp"
 #include <algorithm>
 
 namespace amd::pal {
@@ -2235,7 +2236,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   bool result = false;
 
   if (!gpuMem(srcMemory).isHostMemDirectAccess() && !gpuMem(dstMemory).isHostMemDirectAccess()) {
-    constexpr uint32_t kBlitType = BlitCopyBuffer;
+    // Select between temporal and non-temporal copy buffer kernel based on flag
+    const uint32_t kBlitType = HIP_DEBUG_USE_BLITNT ? BlitCopyBufferNT : BlitCopyBuffer;
     constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
     amd::Coord3D size(sizeIn[0]);
 
