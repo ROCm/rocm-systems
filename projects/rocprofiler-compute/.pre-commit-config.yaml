@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/config_management/hash_checker.py'
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 src/utils/hash_checker.py'
         language: system
         pass_filenames: false
         stages: [pre-commit]

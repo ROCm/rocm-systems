@@ -187,6 +187,11 @@ enum DevInfoTypes {
    * Possible xcp config resources end
    */
 
+  // PTL
+  kDevPtlSupported,
+  kDevPtlStatus,
+  kDevPtlFormat,
+
   // The information read from pci core sysfs
   kDevPCieTypeStart = 1000,
   kDevPCieVendorID = kDevPCieTypeStart,
@@ -271,6 +276,7 @@ class Device {
     auto dev_copy_internal_to_external_metrics(DevInfoTypes type = DevInfoTypes::kDevGpuMetrics)
         -> AMGpuMetricsPublicLatestTupl_t;
 
+    __attribute__((visibility("hidden")))
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
     void set_smi_device_id(uint32_t device_id) { m_device_id = device_id; }
     void set_smi_partition_id(uint32_t partition_id) { m_partition_id = partition_id; }

@@ -10,10 +10,28 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-ghcr.yml'
       - 'projects/rocprofiler-systems/docker/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 jobs:
   prepare_matrix_ci:
@@ -79,7 +97,7 @@ jobs:
             DOCKER_FILE=Dockerfile.${{ matrix.system.distro }}.ci
           fi
           echo "docker_file=${DOCKER_FILE}" >> $GITHUB_OUTPUT
-      
+
       - name: Get the latest build of The Rock tarball
         id: therock
         run: |
@@ -95,7 +113,7 @@ jobs:
           KEY=${KEY//\"/}
           test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
-      
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.7.9

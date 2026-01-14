@@ -4,6 +4,33 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+
+### Added
+
+- Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
+
+### Changed
+
+- `ROCPROFSYS_TRACE` now controls whether perfetto tracing is enabled (default: true when tracing mode).
+- `ROCPROFSYS_TRACE_LEGACY` controls whether to use legacy direct mode (true) or cached mode (false, default).
+- By default, tracing uses deferred trace generation (cached mode) for improved performance and minimal runtime overhead.
+- `--trace` / `-T` CLI flag enables tracing with cached mode by default.
+- `--trace-legacy` / `-L` CLI flag enables legacy direct mode for tracing.
+- Changed thread storage allocation from a hard-coded 4096-element array to a compile-time computed size derived from the ROCPROFSYS_MAX_THREADS configuration flag.
+
+### Resolved issues
+
+- Fixed application termination with segfault when thread creation surpasses ROCPROFSYS_MAX_THREADS configuration.
+
+### Removed
+
+- `ROCPROFSYS_TRACE_CACHED` environment variable (tracing now uses cached mode by default when `ROCPROFSYS_TRACE_LEGACY=false`).
+
+### Deprecated
+
+- `ROCPROFSYS_USE_PERFETTO` environment variable (use `ROCPROFSYS_TRACE`).
+
 ## ROCm Systems Profiler 1.3.0 for ROCm 7.2.0
 
 ### Added

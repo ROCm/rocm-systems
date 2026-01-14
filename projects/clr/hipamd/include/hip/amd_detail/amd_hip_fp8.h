@@ -114,9 +114,9 @@
 #if !defined(__HIPCC_RTC__)
 static_assert(CHAR_BIT == 8, "byte size should be of 8 bits");
 #endif
-static_assert(sizeof(unsigned char) == 1);
-static_assert(sizeof(unsigned short int) == 2);
-static_assert(sizeof(unsigned int) == 4);
+static_assert(sizeof(unsigned char) == 1, "");
+static_assert(sizeof(unsigned short int) == 2, "");
+static_assert(sizeof(unsigned int) == 4, "");
 
 /**
  * \brief Describes FP8 interpretation

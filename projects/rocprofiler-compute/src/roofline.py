@@ -184,7 +184,8 @@ class Roofline:
         df_list = df_pmc["Kernel_Name"].tolist()
 
         for idx in range(len(df_list)):
-            if df_list[idx].split("(")[0] not in args.kernel:
+            # If there is no any kernel match, drop the row
+            if not any([kernel in df_list[idx] for kernel in args.kernel]):
                 df_filtered.drop(index=idx, inplace=True)
 
         # Verify that final filtered kernel df matches the kernel list requested
@@ -375,7 +376,7 @@ class Roofline:
                 all_flops_ceiling_data[str(dt)] = self.__ceiling_data
 
         # Output will be different depending on interaction type:
-        # Save PDFs if we're in "standalone roofline" mode,
+        # Save HTMLs if we're in "standalone roofline" mode,
         # otherwise return HTML to be used in GUI outputif flops_figure:
 
         if self.__run_parameters["is_standalone"]:
@@ -385,28 +386,16 @@ class Roofline:
                     kernel_list += "_" + name
 
             if ops_figure:
-                actual_height = int(ops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                ops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                ops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.html"
                 )
 
             if flops_figure:
-                actual_height = int(flops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                flops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                flops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.html"
                 )
 
-            console_log("roofline", "Empirical Roofline PDFs saved!")
+            console_log("roofline", "Empirical Roofline HTML file saved!")
         else:
             # Create HTML output for GUI mode.
             ops_graph = (
@@ -577,6 +566,15 @@ class Roofline:
             ai_data=self.__ai_data,
         )
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
+
+        if all(
+            v is None or all(x is None for x in v) for v in self.__ceiling_data.values()
+        ):
+            console_warning(
+                "Unable to generate roofline plot due to missing or corrupted "
+                "benchmark data. Returning empty figure."
+            )
+            return fig if fig is not None else go.Figure()
 
         ops_flops = "OP" if dtype.startswith("I") else "FLOP"
         subplot_kwargs = {"row": subplot_row, "col": 1} if subplot_row else {}
@@ -1193,6 +1191,15 @@ class Roofline:
             console_log("roofline", f"{roofline_csv} does not exist")
             return
 
+        if (
+            workload
+            and hasattr(workload, "roofline_peaks")
+            and workload.roofline_peaks.empty
+        ):
+            # CSV validation failed earlier, skip plot generation
+            console_warning("roofline", "Skipping plot generation")
+            return None
+
         # if workload is detected, utilize Roofline yamls.
         # If not, fallback to legacy calc_ai
         if workload and config and arch_config:
@@ -1224,9 +1231,6 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters, dtype=dtype
         )
-
-        console_debug(f"AI data: {self.__ai_data}")
-        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
         self.roof_setup()
 

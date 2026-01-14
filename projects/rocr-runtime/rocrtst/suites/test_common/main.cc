@@ -79,8 +79,10 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
+#include "suites/functional/filter_devices.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
+#include "common/os.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -130,6 +132,12 @@ static void RunGenericTest(TestBase *test) {
 TEST(rocrtst, Test_Example) {
   TestExample tst;
 
+  RunGenericTest(&tst);
+}
+
+TEST(rocrtst, Test_Example_InterruptDisabled) {
+  rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+  TestExample tst;
   RunGenericTest(&tst);
 }
 
@@ -472,11 +480,30 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.MemoryAccountingTest();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
     RunCustomTestProlog(&vmt);
     RunCustomTestEpilog(&vmt);
+  );
+}
+
+TEST(rocrtstFunc, Filter_Devices_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    FilterDevicesTest fd;
+    RunCustomTestProlog(&fd);
+    fd.TestRocrVisibleDevicesFiltering();
+    RunCustomTestEpilog(&fd);
   );
 }
 

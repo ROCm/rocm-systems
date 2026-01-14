@@ -51,48 +51,6 @@ void getGranularity(size_t* granularity, hipMemAllocationGranularity_flags optio
  * Test Description
  * ------------------------
  *    - Functional Test to get granularity size for
- * hipMemAllocationGranularityMinimum option.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemGetAllocationGranularity.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 6.1
- */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_MinGranularity") {
-  HIP_CHECK(hipFree(0));
-  size_t granularity = 0;
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
-  getGranularity(&granularity, hipMemAllocationGranularityMinimum, 0);
-  REQUIRE(granularity > 0);
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Functional Test to get granularity size for
- * hipMemAllocationGranularityRecommended option.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemGetAllocationGranularity.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 6.1
- */
-TEST_CASE("Unit_hipMemGetAllocationGranularity_RecommendedGranularity") {
-  HIP_CHECK(hipFree(0));
-  size_t granularity = 0;
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
-  getGranularity(&granularity, hipMemAllocationGranularityRecommended, 0);
-  REQUIRE(granularity > 0);
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Functional Test to get granularity size for
  * hipMemAllocationGranularityMinimum option for all GPUs.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemGetAllocationGranularity.cc
@@ -105,12 +63,21 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_AllGPUs") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
-    size_t granularity = 0;
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, dev));
     checkVMMSupported(device);
-    getGranularity(&granularity, hipMemAllocationGranularityRecommended, dev);
-    REQUIRE(granularity > 0);
+
+    size_t min_granularity = 0;
+    size_t recommended_granularity = 0;
+
+    getGranularity(&min_granularity, hipMemAllocationGranularityMinimum, dev);
+    REQUIRE(min_granularity >= 1024);
+
+    getGranularity(&recommended_granularity, hipMemAllocationGranularityRecommended, dev);
+    REQUIRE(recommended_granularity >= 1024);
+
+    // Check the recommended_granularity is greater than or equal to the minimum
+    REQUIRE(recommended_granularity >= min_granularity);
   }
 }
 

@@ -26,15 +26,10 @@
 import csv
 import re
 import subprocess
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
 import test_utils
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]

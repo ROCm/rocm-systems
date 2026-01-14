@@ -16,7 +16,7 @@ LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 constexpr int GLOBAL_BUF_SIZE = 2048;
 
 __device__ float deviceGlobalFloat;
