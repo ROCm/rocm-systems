@@ -3783,10 +3783,10 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  *
  * For each successful call, hsa_amd_counted_queue_release should be called to release the
  * HSA_QUEUE_INFO_USE_COUNT.
- * 
+ *
  * Counted queues have restrictions:
- * hsa_amd_queue_set_priority() cannot be used on counted queue to change priority. 
- * hsa_amd_queue_cu_set_mask() cannot be used on counted queue to set CU masking. 
+ * hsa_amd_queue_set_priority() cannot be used on counted queue to change priority.
+ * hsa_amd_queue_cu_set_mask() cannot be used on counted queue to set CU masking.
  *
  * @param[in] agent Agent where to create the queue
  *
@@ -3815,7 +3815,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION The @p type is not HSA_QUEUE_TYPE_MULTI.
- * 
+ *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
  */
 hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
@@ -3826,25 +3826,25 @@ hsa_status_t hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t t
 
 /**
  * @brief Release a counted queue and decrement its use count.
- * 
+ *
  * Releases a queue that was previously acquired using ::hsa_amd_counted_queue_acquire.
- * Each call to this API decrements the internal use count (HSA_QUEUE_INFO_USE_COUNT) 
+ * Each call to this API decrements the internal use count (HSA_QUEUE_INFO_USE_COUNT)
  * of the underlying hardware. After this call, the queue handle becomes invalid and
- * must not be used. Once created, the hardware queue is retained until hsa_shutdown() 
- * is called to avoid the costly overhead of repeatedly creating new hardware queues, 
+ * must not be used. Once created, the hardware queue is retained until hsa_shutdown()
+ * is called to avoid the costly overhead of repeatedly creating new hardware queues,
  * allowing them to be reused.
  *
- * @param[in] queue Counted queue handle returned from ::hsa_amd_counted_queue_acquire. 
+ * @param[in] queue Counted queue handle returned from ::hsa_amd_counted_queue_acquire.
  * Must not be NULL.
  *
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
- * 
+ *
  * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA Runtime has not been initialized.
- * 
- * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The @p queue is NULL or previously been released. 
- * 
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent. 
- * 
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The @p queue is NULL or previously been released.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
+ *
  * @retval ::HSA_STATUS_ERROR Queue handle was not created using ::hsa_amd_counted_queue_acquire.
  */
 hsa_status_t hsa_amd_counted_queue_release(hsa_queue_t* queue);
