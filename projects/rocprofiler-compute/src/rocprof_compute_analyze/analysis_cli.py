@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+from pathlib import Path
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -43,11 +44,18 @@ class cli_analysis(OmniAnalyze_Base):
             console_error("--gui flag is required to enable --random-port")
 
         for path_info in args.path:
-            workload = self._runs[path_info[0]]
+            data_dir = path_info[0]
+            if args.nodes or args.spatial_multiplexing:
+                if args.nodes:
+                    data_dir = str(Path(path_info[0]) / args.nodes[0])
+                else:
+                    data_dir = file_io.find_1st_sub_dir(path_info[0])
+
+            workload = self._runs[data_dir]
 
             # create 'mega dataframe'
             workload.raw_pmc = file_io.create_df_pmc(
-                path_info[0],
+                data_dir,
                 args.nodes,
                 args.spatial_multiplexing,
                 args.kernel_verbose,
@@ -68,7 +76,7 @@ class cli_analysis(OmniAnalyze_Base):
 
             file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
-                raw_data_dir=path_info[0],
+                raw_data_dir=data_dir,
                 filter_gpu_ids=workload.filter_gpu_ids,
                 filter_dispatch_ids=workload.filter_dispatch_ids,
                 filter_nodes=workload.filter_nodes,
@@ -82,7 +90,7 @@ class cli_analysis(OmniAnalyze_Base):
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
-                dir_path=path_info[0],
+                dir_path=data_dir,
                 is_gui=False,
                 args=args,
                 config=self._profiling_config,

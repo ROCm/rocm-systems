@@ -416,7 +416,13 @@ class OmniAnalyze_Base:
             self._output = sys.stdout
 
         # Read profiling config
-        self._profiling_config = file_io.load_profiling_config(args.path[0][0])
+        data_dir = args.path[0][0]
+        if args.nodes or args.spatial_multiplexing:
+            if len(args.nodes) > 0:
+                data_dir = str(Path(args.path[0][0]) / args.nodes[0])
+            else:
+                data_dir = file_io.find_1st_sub_dir(args.path[0][0])
+        self._profiling_config = file_io.load_profiling_config(data_dir)
 
         # Check dispatch filtering isn't used with iteration multiplexing
         if (

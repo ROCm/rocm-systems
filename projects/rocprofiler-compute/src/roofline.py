@@ -116,6 +116,8 @@ class Roofline:
             hasattr(self.__args, "gpu_kernel") and self.__args.gpu_kernel
         ):
             self.__run_parameters["kernel_filter"] = True
+        if hasattr(self.__args, "nodes"):
+            self.__run_parameters["nodes"] = self.__args.nodes
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -1198,6 +1200,14 @@ class Roofline:
             base_dir = workload_dir
 
         base_path = Path(base_dir)
+        if self.__args.mode == "analyze" and (self.__args.nodes or self.__args.spatial_multiplexing):
+            if self.__args.nodes:
+                base_path = base_path / self.__args.nodes[0]
+            else:
+                sub_dir = file_io.find_1st_sub_dir(str(base_path))
+                if sub_dir is not None:
+                    base_path = Path(sub_dir)
+
         roofline_csv = base_path / "roofline.csv"
         if not roofline_csv.is_file():
             console_log("roofline", f"{roofline_csv} does not exist")
@@ -1231,7 +1241,13 @@ class Roofline:
             t_df = OrderedDict()
             t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
 
-            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
+            config_path = self.__args.path[0][0]
+            if self.__args.mode == "analyze" and (self.__args.nodes or self.__args.spatial_multiplexing):
+                if len(self.__args.nodes) > 0:
+                    config_path = str(Path(self.__args.path[0][0]) / self.__args.nodes[0])
+                else:
+                    config_path = file_io.find_1st_sub_dir(self.__args.path[0][0])
+            profiling_config = file_io.load_profiling_config(config_path)
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 

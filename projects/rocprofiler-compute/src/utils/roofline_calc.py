@@ -30,7 +30,7 @@ from typing import Any, Optional, Union
 
 import pandas as pd
 
-from utils import schema
+from utils import file_io, schema
 from utils.logger import console_debug, console_error, console_warning
 from utils.parser import apply_filters, eval_metric
 from utils.specs import MachineSpecs
@@ -875,6 +875,15 @@ def construct_roof(
         )
     else:
         base_dir = workload_dir
+
+    nodes = roofline_parameters.get("nodes")
+    if nodes is not None:
+        if len(nodes) > 0:
+            base_dir = str(Path(base_dir) / nodes[0])
+        else:
+            sub_dir = file_io.find_1st_sub_dir(base_dir)
+            if sub_dir is not None:
+                    base_dir = Path(sub_dir)
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 
