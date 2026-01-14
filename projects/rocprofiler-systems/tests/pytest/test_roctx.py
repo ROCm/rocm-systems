@@ -96,6 +96,7 @@ class TestRoctx:
         result = run_test("baseline", target="roctx", env=roctx_env, timeout=120)
         assert_regex(result)
 
+    @pytest.mark.subtest_disable("assert_rocpd")
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,

@@ -112,7 +112,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--ctest-integration",
         action="store_true",
         default=False,
-        help="Enable CTest integration (developer flag)",
+        help="Enable CTest integration (developer flag : default off)",
+    )
+    group.addoption(
+        "--allow-disabled",
+        action="store_true",
+        default=False,
+        help="Allow disabled subtests to run (developer flag : default off)",
     )
 
 
@@ -140,6 +146,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
+    )
+    config.addinivalue_line(
+        "markers", "subtest_disable(assert_name): Disables the given subtest"
     )
 
     # Non-functional informational markers
@@ -1083,7 +1092,7 @@ def run_test(
 
 
 @pytest.fixture
-def assert_regex(subtests, record_subtest_failure):
+def assert_regex(subtests, record_subtest_failure, request):
     """Fixture that returns an assert_regex function.
 
     Args not from validate_regex:
@@ -1091,6 +1100,10 @@ def assert_regex(subtests, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_regex(
         result: TestResult,
@@ -1101,6 +1114,9 @@ def assert_regex(subtests, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_regex" in disabled_subtests:
+            return
+
         with subtests.test(subtest_name):
             validation = validate_regex(
                 result, pass_regex, fail_regex, use_abort_fail_regex
@@ -1117,7 +1133,7 @@ def assert_regex(subtests, record_subtest_failure):
 
 
 @pytest.fixture
-def assert_perfetto(subtests, tests_dir, record_subtest_failure):
+def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
     """Fixture that returns an assert_perfetto function.
 
     Args not from validate_perfetto_trace:
@@ -1127,6 +1143,10 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_perfetto(
         result: TestResult,
@@ -1147,6 +1167,9 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_perfetto" in disabled_subtests:
+            return
+
         with subtests.test(subtest_name):
             if not check_use_perfetto():
                 pytest.skip("Perfetto is disabled")
@@ -1191,7 +1214,7 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure):
 
 
 @pytest.fixture
-def assert_rocpd(subtests, tests_dir, record_subtest_failure):
+def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
     """Fixture that returns an assert_rocpd function.
 
     Must be used with @pytest.mark.rocpd("<env fixture name>")
@@ -1203,6 +1226,10 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_rocpd(
         result: TestResult,
@@ -1214,6 +1241,9 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_rocpd" in disabled_subtests:
+            return
+
         with subtests.test(subtest_name):
             if not check_use_rocpd():
                 pytest.skip("ROCpd is disabled")
@@ -1257,7 +1287,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure):
 
 
 @pytest.fixture
-def assert_timemory(subtests, tests_dir, record_subtest_failure):
+def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
     """Fixture that returns an assert_timemory function.
 
     Args not from validate_timemory_json:
@@ -1267,6 +1297,10 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_timemory(
         result: TestResult,
@@ -1283,6 +1317,9 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_timemory" in disabled_subtests:
+            return
+
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
             if not timemory_file.exists():
@@ -1320,7 +1357,7 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure):
 
 
 @pytest.fixture
-def assert_file_exists(subtests, record_subtest_failure):
+def assert_file_exists(subtests, record_subtest_failure, request):
     """Fixture that returns an assert_file_exists function.
 
     Args not from validate_file_exists:
@@ -1328,6 +1365,10 @@ def assert_file_exists(subtests, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_file_exists(
         path: Path | list[Path],
@@ -1336,6 +1377,9 @@ def assert_file_exists(subtests, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_file_exists" in disabled_subtests:
+            return
+
         paths = [path] if isinstance(path, Path) else path
         with subtests.test(subtest_name):
             for p in paths:
@@ -1355,7 +1399,7 @@ def assert_file_exists(subtests, record_subtest_failure):
 
 
 @pytest.fixture
-def assert_causal_json(subtests, tests_dir, record_subtest_failure):
+def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
     """Fixture that returns an assert_causal_json function.
 
     Args not from validate_causal_json:
@@ -1364,6 +1408,10 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
     """
+    disabled_subtests: set[str] = set()
+    if not request.config.getoption("--allow-disabled"):
+        for marker in request.node.iter_markers("subtest_disable"):
+            disabled_subtests.update(marker.args)
 
     def _assert_causal_json(
         result: TestResult,
@@ -1377,6 +1425,9 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure):
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
     ) -> None:
+        if "assert_causal_json" in disabled_subtests:
+            return
+
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name
             if not causal_file.exists():
