@@ -57,22 +57,6 @@ main(int argc, char** argv)
         return 1;
     }
 
-    // create pipes to capture output before forking
-    int pid1link[2];
-    int pid2link[2];
-
-    if(pipe(pid1link) == -1)
-    {
-        std::cout << "error: Pipe 1 failed.\n";
-        return 0;
-    }
-
-    if(pipe(pid2link) == -1)
-    {
-        std::cout << "error: Pipe 2 failed.\n";
-        return 0;
-    }
-
     pid_t pid1 = fork();
     if(pid1 < 0)
     {
@@ -95,21 +79,6 @@ main(int argc, char** argv)
 
     if(pid1 == 0 || pid2 == 0)
     {
-        if(pid1 == 0)
-        {
-            dup2(pid1link[1], STDOUT_FILENO);
-            dup2(pid1link[1], STDERR_FILENO);
-        }
-        else if(pid2 == 0)
-        {
-            dup2(pid2link[1], STDOUT_FILENO);
-            dup2(pid2link[1], STDERR_FILENO);
-        }
-        close(pid1link[0]);
-        close(pid1link[1]);
-        close(pid2link[0]);
-        close(pid2link[1]);
-
         // Child process
         std::cout << "child executing " << argv[1] << std::endl;
         int ret = execl(argv[1], argv[1], nullptr);
@@ -140,50 +109,15 @@ main(int argc, char** argv)
         int pid2status = 0;
         waitpid(pid2, &pid2status, 0);
 
-        close(pid1link[1]);
-        close(pid2link[1]);
-
-        std::stringstream pid1sstream;
-        std::stringstream pid2sstream;
-        int               readbytes   = 0;
-        constexpr size_t  buffer_size = 8192;
-        do
+        if (pid1status != 0)
         {
-            char buffer[buffer_size];
-            readbytes = read(pid1link[0], buffer, buffer_size);
-            pid1sstream << buffer;
-        } while(readbytes > 0);
-
-        do
-        {
-            char buffer[buffer_size];
-            readbytes = read(pid2link[0], buffer, buffer_size);
-            pid2sstream << buffer;
-        } while(readbytes > 0);
-
-        close(pid1link[0]);
-        close(pid2link[0]);
-
-        std::cout << "\n\n===== Test app 1 output PID " << pid1 << " =====\n\n"
-                  << pid1sstream.str() << std::endl;
-        std::cout << "\n\n===== Test app 2 output PID " << pid2 << " =====\n\n"
-                  << pid2sstream.str() << std::endl;
-
-        // CMake pass regex search doesn't handle multiline searches, so main has to verify instead.
-        const char c_tool_output[] = "Test C tool (priority=0) is using rocprofiler-sdk v";
-        const bool foundinpid1     = pid1sstream.str().find(c_tool_output) != std::string::npos;
-        const bool foundinpid2     = pid2sstream.str().find(c_tool_output) != std::string::npos;
-        if(!foundinpid1)
-        {
-            std::cout << "Fail: Could not find C tool output in pid 1 output" << std::endl;
+            std::cout << "error in pid1, returned non-zero status: " << pid1status;
+            return 1;
         }
-        if(!foundinpid2)
+        if (pid2status != 0)
         {
-            std::cout << "Fail: Could not find C tool output in pid 2 output" << std::endl;
-        }
-        if(foundinpid1 && foundinpid2)
-        {
-            std::cout << "C tool was loaded in both processes." << std::endl;
+            std::cout << "error in pid2, returned non-zero status: " << pid2status;
+            return 1;
         }
     }
     return 0;

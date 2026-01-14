@@ -168,21 +168,17 @@ find_library(void*& addr, int inpid, const std::string& library)
     }
 
     std::string line;
-    std::string temp_line;
-    while(std::getline(maps, temp_line))
+    while(std::getline(maps, line))
     {
-        if(temp_line.find(library) != std::string::npos)
+        if(line.find(library) != std::string::npos)
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Entry in pid " << inpid
-                       << " maps file is: " << temp_line;
-            if (line.empty())
-            {
-                line = temp_line;
-            }
+                       << " maps file is: " << line;
+            break;
         }
     }
 
-    if(line.empty())
+    if(!maps)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library << " in "
                    << filename.str();

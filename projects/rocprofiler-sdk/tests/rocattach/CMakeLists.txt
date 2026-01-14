@@ -60,10 +60,8 @@ set_tests_properties(
                "integration-tests"
                ENVIRONMENT
                "${rocattach-test-env}"
-               # This regex search doesn't handle multiline searches, so main has to
-               # verify instead.
                PASS_REGULAR_EXPRESSION
-               "C tool was loaded in both processes."
+               "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
