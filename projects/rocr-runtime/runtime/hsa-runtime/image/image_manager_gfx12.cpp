@@ -1061,7 +1061,7 @@ hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     // For 1d, 2d and 2d-msaa, fields DEPTH+PITCH_MSB encode pitch-1
     if (!mipmap_array && !mipmap_3d) {
-      uint32_t encPitch = out.pitch - 1;
+      uint32_t encPitch = 0;  // mipmap dosesn't support custom pitch, so set it as 0
       word4.f.DEPTH = encPitch & 0x3fff;           // first 14 bits
       word4.f.PITCH_MSB = (encPitch >> 14) & 0x3;  // last 2 bits
     } else {

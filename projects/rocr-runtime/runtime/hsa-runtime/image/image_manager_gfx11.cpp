@@ -934,9 +934,8 @@ hsa_status_t ImageManagerGfx11::PopulateMipmapSrd(MipmappedArray& mipmap) const 
 
     // For 1d, 2d and 2d-msaa in gfx11 this is pitch-1
     if (!mipmap_array && !mipmap_3d) {
-      word4.f.PITCH = out.pitch - 1;
+      word4.f.PITCH = 0; // mipmap dosesn't support custom pitch, so set it as 0
     }
-
     word5.val = 0;
     word6.val = 0;
     word7.val = 0;

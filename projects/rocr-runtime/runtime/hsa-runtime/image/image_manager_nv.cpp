@@ -933,7 +933,7 @@ hsa_status_t ImageManagerNv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
     uint32_t minor_ver = MinorVerFromDevID(chip_id_);
     // For 1d, 2d and 2d-msaa in gfx1030 and beyond this is pitch-1
     if ((minor_ver >= 3) && !mipmap_array && !mipmap_3d)
-      word4.f.PITCH = out.pitch - 1;
+      word4.f.PITCH = 0;  // mipmap dosesn't support custom pitch, so set it as 0
 
     word5.val = 0;
     word5.f.MAX_MIP = mipmap.num_levels - 1;

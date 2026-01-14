@@ -74,6 +74,7 @@ TEST_CASE("Unit_hipMipmappedArrayGetLevel_Negative_Parameters") {
   }
 
   HIP_CHECK(hipMipmappedArrayDestroy(array));
+  (void)hipGetLastError();
 }
 
 /**
