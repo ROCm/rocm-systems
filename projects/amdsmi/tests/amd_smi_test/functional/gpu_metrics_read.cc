@@ -388,9 +388,47 @@ void TestGpuMetricsRead::Run(void) {
                     << "]: " << gpu_metrics_check.system_clock_counter << "\n";
         }
 
-        std::cout << "\n";
-        std::cout << " ** Note: Values MAX'ed out "
-                  << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
+          // Test GPU metrics version compatibility
+          std::cout << "\n";
+          std::cout << "\t ** -> Testing GPU Metrics Version Support ** " << "\n";
+          std::cout << "\t\t -> Header Format Revision: "
+                    << static_cast<uint16_t>(smu.common_header.format_revision) << "\n";
+          std::cout << "\t\t -> Header Content Revision: "
+                    << static_cast<uint16_t>(smu.common_header.content_revision) << "\n";
+
+          // Test for version-specific features
+          if (smu.common_header.format_revision >= 1) {
+            std::cout << "\t\t -> GPU Metrics v1.x features available\n";
+
+            if (smu.common_header.content_revision >= 8) {
+              std::cout << "\t\t -> GPU Metrics v1.8 XCP features available\n";
+              // Test newer XCP metrics fields that were added in v1.8
+              bool has_new_xcp_fields = false;
+              for (const auto& xcp_stat : smu.xcp_stats) {
+                if (xcp_stat.gfx_below_host_limit_ppt_acc[0] != UINT64_MAX ||
+                    xcp_stat.gfx_below_host_limit_thm_acc[0] != UINT64_MAX ||
+                    xcp_stat.gfx_low_utilization_acc[0] != UINT64_MAX ||
+                    xcp_stat.gfx_below_host_limit_total_acc[0] != UINT64_MAX) {
+                  has_new_xcp_fields = true;
+                  break;
+                }
+              }
+              std::cout << "\t\t -> New XCP metrics fields populated: "
+                        << (has_new_xcp_fields ? "Yes" : "No") << "\n";
+            }
+          }
+
+          if (smu.common_header.format_revision >= 2) {
+            std::cout << "\t\t -> GPU Metrics v2.x features available\n";
+          }
+
+          if (smu.common_header.format_revision >= 3) {
+            std::cout << "\t\t -> GPU Metrics v3.x features available\n";
+          }
+
+          std::cout << "\n";
+          std::cout << " ** Note: Values MAX'ed out "
+                    << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }
     }
 

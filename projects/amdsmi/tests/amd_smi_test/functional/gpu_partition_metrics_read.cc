@@ -402,8 +402,8 @@ void TestGpuPartitionMetricsRead::Run(void) {
         }
 
         std::cout << "\n\n";
-        std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
-        constexpr uint16_t kMAX_ITER_TEST = 10;
+          std::cout << "\t ** -> Checking partition metrics with constant changes ** " << "\n";
+          constexpr uint16_t kMAX_ITER_TEST = 10;
         amdsmi_gpu_metrics_t gpu_xcp_metrics_check = {};
         for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
           amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_xcp_metrics_check);
@@ -411,12 +411,63 @@ void TestGpuPartitionMetricsRead::Run(void) {
                     << "]: " << gpu_xcp_metrics_check.firmware_timestamp << "\n";
         }
 
-        std::cout << "\n";
-        for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-          amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &gpu_xcp_metrics_check);
-          std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST
-                    << "]: " << gpu_xcp_metrics_check.system_clock_counter << "\n";
-        }
+          std::cout << "\n";
+          for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+            amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &gpu_xcp_metrics_check);
+            std::cout << "\t\t -> partition system_clock_counter [" << idx << "/" << kMAX_ITER_TEST
+                      << "]: " << gpu_xcp_metrics_check.system_clock_counter << "\n";
+          }
+
+          // Test partition metrics version compatibility
+          std::cout << "\n";
+          std::cout << "\t ** -> Testing Partition Metrics Version Support ** " << "\n";
+          std::cout << "\t\t -> Header Format Revision: "
+                    << static_cast<uint16_t>(smu.common_header.format_revision) << "\n";
+          std::cout << "\t\t -> Header Content Revision: "
+                    << static_cast<uint16_t>(smu.common_header.content_revision) << "\n";
+
+          // Test XCP partition-specific functionality
+          std::cout << "\t\t -> Number of XCP partitions detected: " << smu.num_partition << "\n";
+          if (smu.num_partition > 0) {
+            std::cout << "\t\t -> XCP partition metrics available\n";
+
+            // Check if XCP stats contain valid data
+            bool xcp_has_data = false;
+            for (uint32_t xcp_idx = 0; xcp_idx < smu.num_partition && xcp_idx < AMDSMI_MAX_NUM_XCP; ++xcp_idx) {
+              const auto& xcp_stat = smu.xcp_stats[xcp_idx];
+              for (uint32_t xcc = 0; xcc < AMDSMI_MAX_NUM_XCC; ++xcc) {
+                if (xcp_stat.gfx_busy_inst[xcc] != 0 || xcp_stat.gfx_busy_acc[xcc] != 0) {
+                  xcp_has_data = true;
+                  break;
+                }
+              }
+              if (xcp_has_data) break;
+            }
+            std::cout << "\t\t -> XCP partition metrics contain valid data: "
+                      << (xcp_has_data ? "Yes" : "No") << "\n";
+
+            // Test v1.8 specific XCP features
+            if (smu.common_header.content_revision >= 8) {
+              std::cout << "\t\t -> XCP Metrics v1.8 advanced throttling features available\n";
+              bool has_throttling_data = false;
+              for (uint32_t xcp_idx = 0; xcp_idx < smu.num_partition && xcp_idx < AMDSMI_MAX_NUM_XCP; ++xcp_idx) {
+                const auto& xcp_stat = smu.xcp_stats[xcp_idx];
+                for (uint32_t xcc = 0; xcc < AMDSMI_MAX_NUM_XCC; ++xcc) {
+                  if (xcp_stat.gfx_below_host_limit_ppt_acc[xcc] != UINT64_MAX ||
+                      xcp_stat.gfx_below_host_limit_thm_acc[xcc] != UINT64_MAX ||
+                      xcp_stat.gfx_low_utilization_acc[xcc] != UINT64_MAX) {
+                    has_throttling_data = true;
+                    break;
+                  }
+                }
+                if (has_throttling_data) break;
+              }
+              std::cout << "\t\t -> Advanced throttling metrics populated: "
+                        << (has_throttling_data ? "Yes" : "No") << "\n";
+            }
+          } else {
+            std::cout << "\t\t -> No XCP partitions detected on this device\n";
+          }
 
         std::cout << "\n";
         std::cout << " ** Note: Values MAX'ed out "
