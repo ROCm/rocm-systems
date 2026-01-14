@@ -53,6 +53,7 @@ from utils.roofline_calc import (
     construct_roof,
 )
 from utils.specs import MachineSpecs
+from utils.utils import impute_counters_iteration_multiplex
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
@@ -1223,6 +1224,13 @@ class Roofline:
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
+            # Data imputation for iteration multiplexing
+            if profiling_config.get("iteration_multiplexing") is not None:
+                t_df["pmc_perf"] = impute_counters_iteration_multiplex(
+                    pd.concat(t_df, keys=t_df.keys(), axis=1, copy=False),
+                    policy=profiling_config["iteration_multiplexing"],
+                )["pmc_perf"]
+
             t_df = self.validate_apply_kernel_filter(df=t_df, path_str=str(base_path))
             self.__ai_data = calc_ai_profile(
                 self.__mspec, self.__run_parameters["sort_type"], t_df
@@ -1424,6 +1432,13 @@ class Roofline:
         profiling_config = file_io.load_profiling_config(self.__args.path)
         if profiling_config.get("format_rocprof_output") == "rocpd":
             t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
+
+        # Data imputation for iteration multiplexing
+        if profiling_config.get("iteration_multiplexing") is not None:
+            t_df["pmc_perf"] = impute_counters_iteration_multiplex(
+                pd.concat(t_df, keys=t_df.keys(), axis=1, copy=False),
+                policy=profiling_config["iteration_multiplexing"],
+            )["pmc_perf"]
 
         self.empirical_roofline(ret_df=t_df)
 

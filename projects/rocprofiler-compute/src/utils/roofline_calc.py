@@ -505,6 +505,14 @@ def calc_ai_profile(
         next_kernel_name = df["Kernel_Name"][idx + 1] if not at_end else ""
         kernel_name = df["Kernel_Name"][idx]
 
+        # If any of the columns in idx row in df is missing or NaN, skip that row
+        if df.loc[idx].isnull().any():
+            console_debug(
+                "roofline",
+                f"{kernel_name[:35]}: Skipped row at index {idx} due to missing data",
+            )
+            continue
+
         try:
             total_flops += (
                 (
@@ -741,6 +749,31 @@ def calc_ai_profile(
             ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = (
                 avgDuration
             ) = 0.0
+
+    # Handle case where last kernel data hasn't been added
+    # yet (e.g., loop ended on skipped row)
+    if sort_type == "kernels" and calls > 0:
+        my_list.append(
+            AI_Data(
+                kernel_name,
+                calls,
+                total_flops / calls,
+                valu_flops / calls,
+                mfma_flops_f6f4 / calls,
+                mfma_flops_f8 / calls,
+                mfma_flops_f16 / calls,
+                mfma_flops_bf16 / calls,
+                mfma_flops_f32 / calls,
+                mfma_flops_f64 / calls,
+                mfma_iops_i8 / calls,
+                lds_data / calls,
+                L1cache_data / calls,
+                L2cache_data / calls,
+                hbm_data / calls,
+                totalDuration,
+                avgDuration / calls,
+            )
+        )
 
     my_list.sort(key=lambda x: x.totalDuration, reverse=True)
 
