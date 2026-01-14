@@ -638,6 +638,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
     imgCreateInfo.fragments = 1;
     Pal::ImageTiling tiling = forceLinear ? Pal::ImageTiling::Linear : Pal::ImageTiling::Optimal;
     uint32_t rowPitch = 0;
+
     if (memoryType() == ImageBuffer) {
       tiling = Pal::ImageTiling::Linear;
     } else if (memoryType() == ImageExternalBuffer) {
@@ -744,6 +745,7 @@ bool Resource::CreateImage(CreateParams* params, bool forceLinear) {
   hwState_[9] = GetHSAImageOrderType(desc().format_);
   hwState_[10] = static_cast<uint32_t>(desc().width_);
   hwState_[11] = 0;  // one extra reserved field in the argument
+
   desc_.tiled_ = (Pal::ImageTiling::Linear == image_->GetImageCreateInfo().tiling) ? false : true;
   return true;
 }

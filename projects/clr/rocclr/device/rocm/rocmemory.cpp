@@ -1224,6 +1224,7 @@ void Image::populateImageDescriptor() {
       break;
     }
   }
+
   permission_ = GetHsaAccessPermission(owner()->getMemFlags());
 }
 
@@ -1343,6 +1344,7 @@ bool Image::create(bool alloc_local) {
 
   status = Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
                              permission_, &hsaImageObject_);
+
   if (status != HSA_STATUS_SUCCESS) {
     LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
     return false;
