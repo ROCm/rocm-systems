@@ -32,6 +32,7 @@ class RocprofsysConfig:
             In build mode, this is the root of the build directory.
             In install mode, this is the examples/ directory.
         - rocprofsys_tests_dir: Path to rocprofsys tests directory
+        - test_output_dir: Path to test output directory
         - rocpd_validation_rules: Path to rocprofiler-systems rocpd validation rules directory
         - mpiexec: Path to MPI launcher executable
         - is_installed: Whether this is an installed configuration
@@ -281,6 +282,7 @@ def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
 
 def discover_install_config(
     install_dir: Optional[Path] = None,
+    output_dir: Optional[Path] = None,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems installation configuration.
 
@@ -346,7 +348,12 @@ def discover_install_config(
         username = getpass.getuser()
     except Exception:
         username = str(os.getuid())
-    output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
+
+    if output_dir is None:
+        output_dir = Path(tempfile.gettempdir()) / username / "rocprof-sys-pytest-output"
+    else:
+        output_dir = Path(output_dir)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rocm_path = _find_rocm_path()
@@ -397,6 +404,7 @@ def discover_install_config(
 
 def discover_build_config(
     build_dir: Optional[Path] = None,
+    output_dir: Optional[Path] = None,
 ) -> RocprofsysConfig:
     """Discover rocprofiler-systems build configuration.
 
@@ -408,7 +416,6 @@ def discover_build_config(
 
     Args:
         build_dir: Explicit build directory path
-        source_dir: Explicit source directory path
 
     Returns:
         RocprofsysConfig with discovered paths
@@ -419,7 +426,7 @@ def discover_build_config(
 
     # Explicit install directory check
     if os.environ.get("ROCPROFSYS_INSTALL_DIR"):
-        return discover_install_config()
+        return discover_install_config(output_dir=output_dir)
 
     # When running from pyz package (extracted to /tmp), fall back to install config
     # The pyz extracts to paths like /tmp/rocprofsys-tests-*/tests/rocprofsys/config.py
@@ -473,6 +480,11 @@ def discover_build_config(
 
     share_path = build_dir / "share" / "rocprofiler-systems"
 
+    if output_dir is None:
+        output_dir = build_dir / "rocprof-sys-pytest-output"
+    else:
+        output_dir = Path(output_dir)
+
     return RocprofsysConfig(
         rocprofsys_build_dir=build_dir,
         rocprofsys_instrument=rocprof_instrument,
@@ -486,7 +498,7 @@ def discover_build_config(
         rocprofsys_examples_dir=build_dir,  # Example binaries are (almost always) in root of build directory
         rocprofsys_tests_dir=share_path / "tests",
         rocpd_validation_rules=share_path / "tests" / "rocpd-validation-rules",
-        test_output_dir=build_dir / "rocprof-sys-pytest-output",
+        test_output_dir=output_dir,
         mpiexec=mpiexec,
         rocm_version=_get_rocm_version(),
         is_installed=False,

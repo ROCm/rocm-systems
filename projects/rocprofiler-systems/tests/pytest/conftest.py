@@ -85,10 +85,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Show the test configuration at the beginning of the session",
     )
     group.addoption(
+        "--output-dir",
+        action="store",
+        default=None,
+        help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
+    )
+    group.addoption(
         "--output-log",
         action="store",
-        default="@test_output_dir@/pytest-output.txt",
-        help="Write log output to the specified file",
+        default="@output_dir@/pytest-output.txt",
+        help="Write log output to the specified file (use 'none' to disable)",
     )
     group.addoption(
         "--print-env",
@@ -193,31 +199,34 @@ def pytest_sessionstart(session):
 
     # Log file path config - use function, not fixture (fixtures don't work in hooks)
     rocprof_config = get_rocprof_config()
-    log_file = config.getoption(
-        "--output-log", default="@test_output_dir@/pytest-output.txt"
-    )
-    log_file = log_file.replace("@test_output_dir@", str(rocprof_config.test_output_dir))
-    config._output_log_path = Path(log_file)
+    log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
 
-    log_path = config._output_log_path
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    config._log_file_handle = open(log_path, "w")
+    if log_file.lower() == "none":
+        config._output_log_path = None
+        config._log_file_handle = None
+    else:
+        log_file = log_file.replace("@output_dir@", str(rocprof_config.test_output_dir))
+        config._output_log_path = Path(log_file)
 
-    terminal = config.pluginmanager.get_plugin("terminalreporter")
-    if terminal:
-        tw = terminal._tw
-        file_handle = config._log_file_handle
+        log_path = config._output_log_path
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        config._log_file_handle = open(log_path, "w")
 
-        # Wrap write method to redirect to file
-        # (line and sep internally call write, so we only need to wrap write)
-        original_write = tw.write
+        terminal = config.pluginmanager.get_plugin("terminalreporter")
+        if terminal:
+            tw = terminal._tw
+            file_handle = config._log_file_handle
 
-        def redirect_to_file(s, **kwargs):
-            original_write(s, **kwargs)
-            file_handle.write(str(s))
-            file_handle.flush()
+            # Wrap write method to redirect to file
+            # (line and sep internally call write, so we only need to wrap write)
+            original_write = tw.write
 
-        tw.write = redirect_to_file
+            def redirect_to_file(s, **kwargs):
+                original_write(s, **kwargs)
+                file_handle.write(str(s))
+                file_handle.flush()
+
+            tw.write = redirect_to_file
 
 
 def pytest_report_header(config) -> list[str]:
@@ -264,39 +273,42 @@ def pytest_report_header(config) -> list[str]:
         "=" * 70,
         "Test Configuration:",
         "=" * 70,
-        f"  ROCm version:   {rocm_version}",
-        f"  ROCm path:      {rocprof_config.rocm_path}",
-        f"  Is installed:   {rocprof_config.is_installed}",
+        f"  ROCm version:      {rocm_version}",
+        f"  ROCm path:         {rocprof_config.rocm_path}",
+        f"  Is installed:      {rocprof_config.is_installed}",
+        f"  Output dir:        {rocprof_config.test_output_dir}",
+        f"  Log file:          {getattr(config, '_output_log_path', None) or 'Disabled'}",
+        f"  Validate ROCPD:    {check_use_rocpd()}",
+        f"  Validate Perfetto: {check_use_perfetto()}",
         "-" * 70,
         "GPU Information:",
-        f"  Available:      {gpuInfo.available}",
-        f"  Architectures:  {gpuInfo.architectures}",
-        f"  Device count:   {gpuInfo.device_count}",
-        f"  Categories:     {gpuInfo.categories}",
+        f"  Available:         {gpuInfo.available}",
+        f"  Architectures:     {gpuInfo.architectures}",
+        f"  Device count:      {gpuInfo.device_count}",
+        f"  Categories:        {gpuInfo.categories}",
         "-" * 70,
         "Directories:",
-        f"  Build dir:      {rocprof_config.rocprofsys_build_dir}",
-        f"  Lib dir:        {rocprof_config.rocprofsys_lib_dir}",
-        f"  Bin dir:        {rocprof_config.rocprofsys_bin_dir}",
-        f"  Tests dir:      {rocprof_config.rocprofsys_tests_dir}",
-        f"  Examples dir:   {rocprof_config.rocprofsys_examples_dir}",
-        f"  Output dir:     {rocprof_config.test_output_dir}",
-        f"  Validation dir: {rocprof_config.rocpd_validation_rules}",
+        f"  Build dir:         {rocprof_config.rocprofsys_build_dir}",
+        f"  Lib dir:           {rocprof_config.rocprofsys_lib_dir}",
+        f"  Bin dir:           {rocprof_config.rocprofsys_bin_dir}",
+        f"  Tests dir:         {rocprof_config.rocprofsys_tests_dir}",
+        f"  Examples dir:      {rocprof_config.rocprofsys_examples_dir}",
+        f"  Validation dir:    {rocprof_config.rocpd_validation_rules}",
         "-" * 70,
         "Executables:",
-        f"  Instrument:     {rocprof_config.rocprofsys_instrument}",
-        f"  Run:            {rocprof_config.rocprofsys_run}",
-        f"  Sample:         {rocprof_config.rocprofsys_sample}",
-        f"  Avail:          {rocprof_config.rocprofsys_avail}",
-        f"  Causal:         {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:       {rocprof_config.mpiexec}",
-        f"  Offload tool:   {offload_msg}",
+        f"  Instrument:        {rocprof_config.rocprofsys_instrument}",
+        f"  Run:               {rocprof_config.rocprofsys_run}",
+        f"  Sample:            {rocprof_config.rocprofsys_sample}",
+        f"  Avail:             {rocprof_config.rocprofsys_avail}",
+        f"  Causal:            {rocprof_config.rocprofsys_causal}",
+        f"  MPI exec:          {rocprof_config.mpiexec}",
+        f"  Offload tool:      {offload_msg}",
         "-" * 70,
         "System Environment:",
     ]
     fundamental_env = rocprof_config.get_fundamental_environment()
     for key, value in sorted(fundamental_env.items()):
-        lines.append(f"  {key}={value}")
+        lines.append(f"  {key}:{' ' * (17 - len(key))}{value}")
     lines.extend(["=" * 70, ""])
     return lines
 
@@ -493,8 +505,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 def pytest_unconfigure(config):
     """Clean up resources at end of session."""
-    if hasattr(config, "_log_file_handle"):
-        config._log_file_handle.close()
+    log_handle = getattr(config, "_log_file_handle", None)
+    if log_handle:
+        log_handle.close()
 
 
 # ============================================================================
@@ -545,7 +558,14 @@ def check_use_perfetto() -> bool:
 def get_rocprof_config() -> RocprofsysConfig:
     """Return the rocprofiler-systems configuration."""
     try:
-        return discover_build_config()
+        pytest_config = getattr(pytest, "_config_ref", None)
+        custom_output_dir = None
+        if pytest_config:
+            custom_output_dir = pytest_config.getoption("--output-dir", default=None)
+
+        return discover_build_config(
+            output_dir=Path(custom_output_dir) if custom_output_dir else None
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")
 
@@ -735,13 +755,13 @@ def gpu_info() -> GPUInfo:
 
 
 @pytest.fixture(scope="session")
-def tests_dir(rocprof_config: RocprofsysConfig) -> Path:
+def tests_dir(rocprof_config) -> Path:
     """Path to tests directory."""
     return rocprof_config.rocprofsys_tests_dir
 
 
 @pytest.fixture(scope="session")
-def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
+def validation_rules_dir(rocprof_config) -> Path:
     """Path to validation rules directory."""
     return rocprof_config.rocpd_validation_rules
 
@@ -752,7 +772,7 @@ def validation_rules_dir(rocprof_config: RocprofsysConfig) -> Path:
 
 
 @pytest.fixture(scope="module")
-def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
+def test_output_base(rocprof_config) -> Path:
     """Base directory for test outputs (module-scoped).
 
     All test outputs for a module are stored under this directory.
@@ -764,7 +784,7 @@ def test_output_base(rocprof_config: RocprofsysConfig) -> Path:
 
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_module_temp_files(
-    rocprof_config: RocprofsysConfig, request: pytest.FixtureRequest, is_xdist_used
+    rocprof_config, request: pytest.FixtureRequest, is_xdist_used
 ):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
@@ -890,7 +910,7 @@ def apply_rocpd_marker(request):
 
 @pytest.fixture
 def cleanup_instrumented_binary(
-    rocprof_config: RocprofsysConfig,
+    rocprof_config,
     test_output_dir: Path,
 ) -> Generator[None, None, None]:
     """Function-scoped cleanup for instrumented binaries.
