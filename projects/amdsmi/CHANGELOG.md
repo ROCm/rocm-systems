@@ -55,6 +55,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed column alignment for EVICT in `amd-smi monitor -q` process table output**.  
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
 - N/A
 
 ## amd_smi_lib for ROCm 7.2.0

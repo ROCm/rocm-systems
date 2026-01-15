@@ -253,7 +253,7 @@ class AMDSMILogger():
                             elif process_key == "cu_occupancy":
                                 table_values += string_process_value.rjust(9)
                             elif process_key == "evicted_time":
-                                table_values += string_process_value.rjust(9)
+                                table_values += string_process_value.rjust(10)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
                                 if stored_timestamp:
