@@ -48,7 +48,6 @@ class TestAmdSmiCli(unittest.TestCase):
         self.Debug = False
         self.ReduceCmds = True
         self.PrintCmdsOnly = False
-        self.PrintCmdsOnly = True # jcnii
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
