@@ -3823,12 +3823,21 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
                                            void* data, uint64_t flags, hsa_queue_t** queue);
 
 /**
- * @brief Release a counted queue
+ * @brief Release a counted queue and decrements its use count.
+ * 
+ * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT 
+ * of the underlying hardware. After this call, queue handle is invalid and must not be used.
+ * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused. 
+ * 
  *
- * @param[in] queue handle
+ * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
+ * Must not be NULL.
  *
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
- * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released
+ * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
