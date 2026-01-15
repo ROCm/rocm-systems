@@ -22,7 +22,6 @@
 
 #include "library/causal/components/unblocking_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/delay.hpp"

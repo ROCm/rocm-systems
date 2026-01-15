@@ -25,7 +25,6 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"

@@ -22,7 +22,6 @@
 
 #include "library/rocm.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "library/amd_smi.hpp"
