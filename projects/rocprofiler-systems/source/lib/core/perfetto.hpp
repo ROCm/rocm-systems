@@ -25,14 +25,14 @@
 #include "categories.hpp"
 #include "common.hpp"
 
+#include "config.hpp"
+
 #if defined(TIMEMORY_USE_PERFETTO)
 #    include <timemory/components/perfetto/backends.hpp>
 #else
 #    include <perfetto.h>
 PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #endif
-
-#include "debug.hpp"
 
 #include <timemory/process/process.hpp>
 
@@ -42,6 +42,8 @@ PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -144,12 +146,11 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                 std::stringstream _css{};
                 for(auto&& eitr : _curr)
                     _css << " " << std::hex << std::setw(12) << std::left << eitr;
-                ROCPROFSYS_THROW("perfetto_counter_track emplace method for '%s' (%p) "
-                                 "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
-                                 _v.c_str(), (void*) _name->c_str(),
-                                 std::get<0>(itr).c_str(),
-                                 (void*) std::get<0>(itr).c_str(), "previous",
-                                 _pss.str().c_str(), "current", _css.str().c_str());
+                throw std::runtime_error(fmt::format(
+                    "perfetto_counter_track emplace method for '{}' ({:p}) "
+                    "invalidated C-string '{}' ({p}).\nprevious: {}\ncurrent: {}\n",
+                    _v, (void*) _name->c_str(), std::get<0>(itr),
+                    (void*) std::get<0>(itr).c_str(), _pss.str(), _css.str()));
             }
         }
     }

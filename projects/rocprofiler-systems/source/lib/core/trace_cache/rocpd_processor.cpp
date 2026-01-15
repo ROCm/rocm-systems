@@ -24,7 +24,6 @@
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
@@ -33,6 +32,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/thread_info.hpp"
+#include "logger/debug.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -607,13 +607,17 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 void
 rocpd_processor_t::prepare_for_processing()
 {
+    LOG_DEBUG("Preparing rocpd processor for processing");
     post_process_metadata();
+    LOG_TRACE("Rocpd processor prepared for processing");
 }
 
 void
 rocpd_processor_t::finalize_processing()
 {
+    LOG_DEBUG("Finalizing rocpd processor");
     m_data_processor->flush();
+    LOG_INFO("Rocpd processor finalized successfully");
 }
 
 void
@@ -622,9 +626,10 @@ rocpd_processor_t::post_process_metadata()
 #if ROCPROFSYS_USE_ROCM > 0
     if(!get_use_rocpd())
     {
+        LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
         return;
     }
-    ROCPROFSYS_DEBUG("Post processing metadata..\n");
+    LOG_DEBUG("Post-processing metadata for rocpd");
     auto n_info = node_info::get_instance();
 
     m_data_processor->insert_node_info(
