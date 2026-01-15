@@ -21,7 +21,7 @@ set(CMAKE_BUILD_TYPE "Debug")
 add_executable(rewrite-caller rewrite-caller.cpp)
 target_compile_options(rewrite-caller PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET rewrite-caller)
     install(
         TARGETS rewrite-caller
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

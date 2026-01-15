@@ -27,7 +27,7 @@ target_link_libraries(
     PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
 )
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET user-api)
     install(
         TARGETS user-api
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

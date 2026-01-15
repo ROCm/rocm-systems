@@ -137,7 +137,7 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     target_compile_options(jpegdecode PRIVATE ${_FLAGS})
     copy_image_files_and_make_copies()
 
-    if(ROCPROFSYS_INSTALL_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_EXAMPLES and TARGET jpegdecode)
         install(
             TARGETS jpegdecode
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

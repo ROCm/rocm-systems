@@ -123,7 +123,7 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transferBench)
 endif()
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET transferBench)
     install(
         TARGETS transferBench
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

@@ -179,7 +179,7 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
         target_compile_definitions(videodecode PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
     endif()
 
-    if(ROCPROFSYS_INSTALL_EXAMPLES)
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET videodecode)
         install(
             TARGETS videodecode
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

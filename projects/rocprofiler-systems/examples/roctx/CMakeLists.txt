@@ -94,7 +94,7 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
 endif()
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES and TARGET roctx)
     install(
         TARGETS roctx
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

@@ -21,7 +21,7 @@ set(CMAKE_BUILD_TYPE "Debug")
 add_executable(trace-time-window trace-time-window.cpp)
 target_compile_options(trace-time-window PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET trace-time-window)
     install(
         TARGETS trace-time-window
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples

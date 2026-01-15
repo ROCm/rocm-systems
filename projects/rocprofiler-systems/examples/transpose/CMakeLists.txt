@@ -96,7 +96,7 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
 endif()
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET transpose)
     install(
         TARGETS transpose
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
