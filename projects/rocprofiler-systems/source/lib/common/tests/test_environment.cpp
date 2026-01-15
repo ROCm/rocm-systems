@@ -23,13 +23,8 @@
 #include "common/environment.hpp"
 
 #include <gtest/gtest.h>
-#include <string>
 
 using namespace rocprofsys::common;
-
-//------------------------------------------------------------------------------
-// Tests for is_python_interpreter()
-//------------------------------------------------------------------------------
 
 class IsPythonInterpreterTest : public ::testing::Test
 {};
@@ -37,33 +32,17 @@ class IsPythonInterpreterTest : public ::testing::Test
 TEST_F(IsPythonInterpreterTest, RecognizesPython)
 {
     EXPECT_TRUE(is_python_interpreter("python"));
-}
-
-TEST_F(IsPythonInterpreterTest, RecognizesPython3)
-{
     EXPECT_TRUE(is_python_interpreter("python3"));
-}
-
-TEST_F(IsPythonInterpreterTest, RecognizesPython3WithMinorVersion)
-{
     EXPECT_TRUE(is_python_interpreter("python3.8"));
     EXPECT_TRUE(is_python_interpreter("python3.9"));
     EXPECT_TRUE(is_python_interpreter("python3.10"));
     EXPECT_TRUE(is_python_interpreter("python3.11"));
     EXPECT_TRUE(is_python_interpreter("python3.12"));
-}
-
-TEST_F(IsPythonInterpreterTest, RecognizesFullPathPython)
-{
     EXPECT_TRUE(is_python_interpreter("/usr/bin/python"));
     EXPECT_TRUE(is_python_interpreter("/usr/bin/python3"));
     EXPECT_TRUE(is_python_interpreter("/usr/bin/python3.10"));
     EXPECT_TRUE(is_python_interpreter("/home/user/venv/bin/python"));
     EXPECT_TRUE(is_python_interpreter("/opt/conda/bin/python3.11"));
-}
-
-TEST_F(IsPythonInterpreterTest, RejectsNonPythonExecutables)
-{
     EXPECT_FALSE(is_python_interpreter("bash"));
     EXPECT_FALSE(is_python_interpreter("sh"));
     EXPECT_FALSE(is_python_interpreter("ruby"));
@@ -71,32 +50,30 @@ TEST_F(IsPythonInterpreterTest, RejectsNonPythonExecutables)
     EXPECT_FALSE(is_python_interpreter("java"));
     EXPECT_FALSE(is_python_interpreter("/usr/bin/bash"));
     EXPECT_FALSE(is_python_interpreter("./my_app"));
-}
-
-TEST_F(IsPythonInterpreterTest, RejectsPythonLikeNames)
-{
-    // Names that contain "python" but aren't Python interpreters
     EXPECT_FALSE(is_python_interpreter("pythonista"));
     EXPECT_FALSE(is_python_interpreter("python_script.py"));
     EXPECT_FALSE(is_python_interpreter("mypython"));
-    EXPECT_FALSE(is_python_interpreter("python2"));  // We only support python3
-}
-
-TEST_F(IsPythonInterpreterTest, RejectsInvalidVersionFormats)
-{
+    EXPECT_FALSE(is_python_interpreter("python2"));
     EXPECT_FALSE(is_python_interpreter("python3."));
     EXPECT_FALSE(is_python_interpreter("python3.a"));
     EXPECT_FALSE(is_python_interpreter("python3.10a"));
     EXPECT_FALSE(is_python_interpreter("python3x10"));
-}
-
-TEST_F(IsPythonInterpreterTest, HandlesEmptyString)
-{
     EXPECT_FALSE(is_python_interpreter(""));
+    EXPECT_FALSE(is_python_interpreter("/usr/bin/"));
 }
 
-TEST_F(IsPythonInterpreterTest, HandlesPathsWithTrailingSlash)
+class DuplicatedEnvironmentEntriesTest : public ::testing::Test
+{};
+
+TEST_F(DuplicatedEnvironmentEntriesTest, DuplicateEnvironmentEntries)
 {
-    // Edge case: path ending with slash (invalid but should not crash)
-    EXPECT_FALSE(is_python_interpreter("/usr/bin/"));
+    std::vector<char*> env_vars = {
+        strdup("PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/bin2"),
+        strdup("PATH=/usr/local/bin:/usr/bin:/bin"),
+    };
+
+    consolidate_env_entries(env_vars);
+
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0], "PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/bin2");
 }

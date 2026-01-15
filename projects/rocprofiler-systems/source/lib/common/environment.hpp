@@ -461,5 +461,92 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }
 
+inline void
+consolidate_env_entries(std::vector<char*>& envp)
+{
+    constexpr char delim = ':';
+
+    struct key_data
+    {
+        std::vector<std::string>        parts;
+        std::unordered_set<std::string> seen;
+
+        void add_unique(std::string part)
+        {
+            if(!part.empty() && seen.insert(part).second)
+                parts.emplace_back(std::move(part));
+        }
+    };
+
+    auto parse_entry = [](std::string_view entry)
+        -> std::optional<std::pair<std::string_view, std::string_view>> {
+        auto eq_pos = entry.find('=');
+        if(eq_pos == std::string_view::npos) return std::nullopt;
+        return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
+    };
+
+    auto join_parts = [delim](std::string_view                key,
+                              const std::vector<std::string>& parts) {
+        std::string result;
+        result.reserve(key.size() + 1 + parts.size() * 16);
+        result.append(key);
+        result += '=';
+
+        for(const auto& part : parts)
+        {
+            if(part != parts.front()) result += delim;
+            result.append(part);
+        }
+        return result;
+    };
+
+    std::unordered_map<std::string_view, key_data> key_map;
+    std::vector<std::string_view>                  key_order;
+
+    for(auto* entry : envp)
+    {
+        if(!entry)
+        {
+            continue;
+        }
+
+        auto parsed = parse_entry(entry);
+        if(!parsed)
+        {
+            continue;
+        }
+
+        auto [key, value] = *parsed;
+
+        auto [it, inserted] = key_map.try_emplace(key);
+        if(inserted)
+        {
+            key_order.emplace_back(key);
+        }
+
+        auto&              data = it->second;
+        std::istringstream stream{ std::string{ value } };
+        for(std::string part; std::getline(stream, part, delim);)
+        {
+            data.add_unique(part);
+        }
+    }
+
+    std::vector<char*> result;
+    result.reserve(key_order.size());
+
+    for(auto key : key_order)
+    {
+        result.emplace_back(strdup(join_parts(key, key_map[key].parts).c_str()));
+    }
+
+    for(auto* entry : envp)
+    {
+        free(entry);
+    }
+
+    envp = std::move(result);
+}
+
 }  // namespace common
 }  // namespace rocprofsys
