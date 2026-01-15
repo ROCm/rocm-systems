@@ -272,13 +272,12 @@ def extract_machine_info() -> dict[str, Any]:
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
     # Partition is only supported on >= MI 300 series
     # (gpu_arch should be gfx940 or higher for MI300+)
-    is_partition_supported = (
-        gpu_arch is not None
-        and gpu_arch.startswith("gfx")
-        and len(gpu_arch) >= 6
-        and gpu_arch[3:6].isdigit()
-        and int(gpu_arch[3:6]) >= 940
-    )
+    is_partition_supported = False
+    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
+        try:
+            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
+        except ValueError:
+            pass  # Invalid hex string, keep is_partition_supported as False
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
