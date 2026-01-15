@@ -933,3 +933,11 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
     return _outv;
 }
+
+void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
+                       bool _verbose)
+{
+    rocprofsys::common::add_torch_library_path(envp, argv, _verbose, updated_envs,
+                                               original_envs);
+}

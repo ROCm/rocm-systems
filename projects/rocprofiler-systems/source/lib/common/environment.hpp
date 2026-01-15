@@ -26,9 +26,11 @@
 
 #include "common/join.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -266,6 +268,85 @@ discover_llvm_libdir_for_ompt(bool verbose = false)
     return {};
 }
 
+inline bool
+is_python_interpreter(std::string_view executable)
+{
+    if(executable.empty()) return false;
+
+    // Extract basename from path
+    auto pos = executable.rfind('/');
+    auto basename =
+        (pos != std::string_view::npos) ? executable.substr(pos + 1) : executable;
+
+    if(basename == "python" || basename == "python3") return true;
+
+    if(basename.size() >= 9 && basename.substr(0, 7) == "python3")
+    {
+        auto version_part = basename.substr(7);
+        if(version_part.empty()) return true;
+        if(version_part[0] != '.') return false;
+
+        for(size_t i = 1; i < version_part.size(); ++i)
+        {
+            if(std::isdigit(static_cast<unsigned char>(version_part[i])) == 0)
+                return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+inline std::string
+discover_torch_libpath(const std::string& python_binary, bool verbose = false)
+{
+    if(python_binary.empty()) return {};
+
+    std::string cmd =
+        python_binary + " -c \"import torch; print(torch.__path__[0])\" 2>/dev/null";
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if(!pipe)
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "Failed to execute command: %s\n", cmd.c_str());
+        return {};
+    }
+
+    char        buffer[512];
+    std::string result;
+    if(fgets(buffer, sizeof(buffer), pipe)) result = buffer;
+
+    int status = pclose(pipe);
+
+    if(status != 0 || result.empty())
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "torch not found for Python interpreter: %s\n",
+                               python_binary.c_str());
+        return {};
+    }
+
+    while(!result.empty() &&
+          (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
+    {
+        result.pop_back();
+    }
+
+    if(result.empty()) return {};
+
+    std::string torch_libdir = result + "/lib";
+
+    if(!::tim::filepath::direxists(torch_libdir))
+    {
+        ROCPROFSYS_ENVIRON_LOG(verbose, "torch lib directory does not exist: %s\n",
+                               torch_libdir.c_str());
+        return {};
+    }
+
+    ROCPROFSYS_ENVIRON_LOG(verbose, "Discovered torch library path: %s\n",
+                           torch_libdir.c_str());
+    return torch_libdir;
+}
+
 enum class update_mode : uint8_t
 {
     REPLACE = 0,
@@ -341,6 +422,50 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         return;
     }
     _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
+}
+
+template <typename UpdatedEnvsT, typename OriginalEnvsT>
+inline void
+add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
+                       bool verbose, UpdatedEnvsT& updated_envs,
+                       const OriginalEnvsT& original_envs)
+{
+    (void) original_envs;
+
+    if(argv.empty() || argv.front() == nullptr) return;
+    if(!is_python_interpreter(argv.front())) return;
+
+    auto torch_libpath = discover_torch_libpath(argv.front(), verbose);
+    if(torch_libpath.empty()) return;
+
+    std::unordered_set<std::string> seen{ torch_libpath };
+    std::string                     result = torch_libpath;
+
+    constexpr std::string_view ld_prefix = "LD_LIBRARY_PATH=";
+
+    auto is_ld_path = [&](char* entry) {
+        return entry &&
+               std::string_view{ entry }.substr(0, ld_prefix.length()) == ld_prefix;
+    };
+
+    for(auto& entry : envp)
+    {
+        if(!is_ld_path(entry)) continue;
+
+        std::istringstream stream{ std::string{ entry + ld_prefix.length() } };
+        for(std::string path; std::getline(stream, path, ':');)
+        {
+            if(!path.empty() && seen.insert(path).second) result += ":" + path;
+        }
+
+        free(entry);
+        entry = nullptr;
+    }
+
+    envp.erase(std::remove(envp.begin(), envp.end(), nullptr), envp.end());
+    envp.emplace_back(strdup(join("", ld_prefix, result).c_str()));
+
+    updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }
 
 }  // namespace common
