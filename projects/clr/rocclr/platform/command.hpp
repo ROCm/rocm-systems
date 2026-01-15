@@ -1383,6 +1383,7 @@ class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
   std::vector<std::string> kernelNames_;
+  const std::vector<std::string>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
@@ -1394,9 +1395,9 @@ class AccumulateCommand : public Command {
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
 
-  //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<std::string>& kernelNames) {
-    kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
+  //! Set kernel names by reference
+  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+    kernelNamesRef_ = kernelNames;
   }
 
   //! Add kernel timestamp to the list if available
@@ -1405,7 +1406,9 @@ class AccumulateCommand : public Command {
   }
 
   //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const { return kernelNames_; }
+  const std::vector<std::string>& getKernelNames() const {
+    return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
+  }
 
   //! Return the kernel timestamps
   const std::vector<std::pair<uint64_t, uint64_t>>& getTimestamps() const { return tsList_; }
