@@ -10,7 +10,7 @@ MPI is unsupported for RCCL tests.
 from __future__ import annotations
 import pytest
 
-pytestmark = [pytest.mark.rccl]
+pytestmark = [pytest.mark.rccl, pytest.mark.disable("all")]
 
 # =============================================================================
 # RCCL fixtures

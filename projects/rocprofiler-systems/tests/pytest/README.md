@@ -96,7 +96,7 @@ pytest <build-dir>/share/rocprofiler-systems/tests/pytest/ -n 4     # Use 4 work
 | `--output-log=<path>` | Write pytest output to the specified file (default: `<output_dir>/pytest-output.txt`) |
 | `--print-env` | Prepend environment variables to runner output (tied to runner output) |
 | `--monochrome` | Disable colored output and set `ROCPROFSYS_MONOCHROME=ON` for runners |
-| `--allow-disabled` | Bypass `@pytest.mark.subtest_disable` markers (developer flag) |
+| `--allow-disabled` | Run tests with `@pytest.mark.disable` in CI mode (developer flag) |
 
 **Tip:** Use `--tb=short` to hide source code in tracebacks, or `--tb=no` for no output.
 
@@ -138,7 +138,7 @@ Then run pytest with the environment variable set.
 | `@pytest.mark.gpu_category_exclude(["category"])` | Exclude tests for specific GPU categories (e.g., `instinct`, `radeon`, `apu`). |
 | `@pytest.mark.rocm_min_version("X.Y.Z")` | Skip test if ROCm version is below the specified minimum. |
 | `@pytest.mark.rocpd("env_fixture")` | Injects `ROCPROFSYS_USE_ROCPD=ON` into the specified environment fixture. |
-| `@pytest.mark.subtest_disable("assert_name")` | Disables the specified assertion subtest (e.g., `assert_rocpd`, `assert_perfetto`). Bypass with `--allow-disabled`. |
+| `@pytest.mark.disable("name")` | **CI mode only.** Use `"all"` to deselect entire test, or assertion name (e.g., `"assert_rocpd"`) to skip that subtest. Ignored in normal runs; bypass in CI with `--allow-disabled`. |
 
 For the full list of markers (including informational labels like `mpi`, `slow`, `roctx`, etc.), see `pytest_configure()` in `conftest.py`.
 

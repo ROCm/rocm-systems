@@ -109,6 +109,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Runners use ROCPROFSYS_MONOCHROME=ON and pytest color output is disabled",
     )
     group.addoption(
+        "--ci-mode",
+        action="store_true",
+        default=False,
+        help="Enable CI mode (developer flag : default off)",
+    )
+    group.addoption(
         "--ctest-integration",
         action="store_true",
         default=False,
@@ -118,12 +124,23 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--allow-disabled",
         action="store_true",
         default=False,
-        help="Allow disabled subtests to run (developer flag : default off)",
+        help="Allow disabled subtests to run (CI mode only, developer flag : default off)",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and configure pytest"""
+
+    # Enable CI configuration
+    if config.getoption("--ci-mode", default=False):
+        config.option.output_log = "none"  # Already reported to dashboard
+        config.option.show_config = True
+        config.option.print_env = True
+        config.option.show_output_on_subtest_fail = True
+        config.option.verbose = max(config.option.verbose, 1)  # -v
+        config.option.tbstyle = "short"  # --tb=short
+        if "s" not in config.option.reportchars:  # -rs
+            config.option.reportchars += "s"
 
     is_monochrome = config.getoption("--monochrome", default=False)
     if is_monochrome:
@@ -148,7 +165,8 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     config.addinivalue_line(
-        "markers", "subtest_disable(assert_name): Disables the given subtest"
+        "markers",
+        "disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest (CI mode only).",
     )
 
     # Non-functional informational markers
@@ -382,6 +400,22 @@ def pytest_collection_modifyitems(config, items) -> None:
                         f"system has {system_categories}"
                     )
                 )
+
+    # Deselect tests marked with @pytest.mark.disable("all") (CI mode)
+    if config.getoption("--ci-mode", default=False) and not config.getoption(
+        "--allow-disabled", default=False
+    ):
+        selected = []
+        deselected = []
+        for item in items:
+            marker = item.get_closest_marker("disable")
+            if marker and "all" in marker.args:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
 
 
 # ----------------------------------------------------------------------------
@@ -1101,8 +1135,10 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_regex(
@@ -1144,8 +1180,10 @@ def assert_perfetto(subtests, tests_dir, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_perfetto(
@@ -1227,8 +1265,10 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_rocpd(
@@ -1298,8 +1338,10 @@ def assert_timemory(subtests, tests_dir, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_timemory(
@@ -1366,8 +1408,10 @@ def assert_file_exists(subtests, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_file_exists(
@@ -1409,8 +1453,10 @@ def assert_causal_json(subtests, tests_dir, record_subtest_failure, request):
         fail_message: Custom message for failure (defaults to validation message)
     """
     disabled_subtests: set[str] = set()
-    if not request.config.getoption("--allow-disabled"):
-        for marker in request.node.iter_markers("subtest_disable"):
+    if request.config.getoption(
+        "--ci-mode", default=False
+    ) and not request.config.getoption("--allow-disabled", default=False):
+        for marker in request.node.iter_markers("disable"):
             disabled_subtests.update(marker.args)
 
     def _assert_causal_json(
