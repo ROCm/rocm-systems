@@ -582,6 +582,83 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_get_gfx_archs()
+# If a regex is provided, it will be used to filter the architectures.
+# Otherwise, all architectures will be returned.
+# Uses rocm_agent_enumerator to detect GPU architectures.
+#
+# Arguments:
+#   _VAR      - Output variable to store detected architectures
+#   ECHO      - If present, print detected architectures to console
+#   PREFIX    - Prefix for echo message (default: [${PROJECT_NAME}])
+#   DELIM     - Delimiter between architectures (default: ", ")
+#   GFX_MATCH - Regex to filter architectures
+#
+function(ROCPROFILER_SYSTEMS_GET_GFX_ARCHS _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX;DELIM;GFX_MATCH" "" ${ARGN})
+
+    if(NOT DEFINED ARG_DELIM)
+        set(ARG_DELIM ", ")
+    endif()
+
+    if(NOT DEFINED ARG_PREFIX)
+        set(ARG_PREFIX "[${PROJECT_NAME}] ")
+    endif()
+
+    find_program(
+        rocm_agent_enumerator_EXECUTABLE
+        NAMES rocm_agent_enumerator
+        HINTS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATHS ${ROCM_PATH} ${ROCmVersion_DIR} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+
+    if(rocm_agent_enumerator_EXECUTABLE)
+        execute_process(
+            COMMAND ${rocm_agent_enumerator_EXECUTABLE}
+            RESULT_VARIABLE enumerator_RET
+            OUTPUT_VARIABLE enumerator_OUTPUT
+            ERROR_VARIABLE enumerator_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+
+        if(enumerator_RET EQUAL 0)
+            string(REPLACE "\n" ";" enumerator_GFXINFO "${enumerator_OUTPUT}")
+            # gfx000 is the cpu, remove it
+            list(REMOVE_ITEM enumerator_GFXINFO "gfx000")
+            list(REMOVE_DUPLICATES enumerator_GFXINFO)
+            set(${_VAR} "${enumerator_GFXINFO}" PARENT_SCOPE)
+
+            if(ARG_ECHO)
+                string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${enumerator_GFXINFO}")
+                message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
+            endif()
+
+            # Filter the architectures if a regex is provided
+            if(ARG_GFX_MATCH)
+                string(REGEX MATCH "${ARG_GFX_MATCH}" _GFX_MATCH "${enumerator_GFXINFO}")
+                list(REMOVE_DUPLICATES _GFX_MATCH)
+                set(${_VAR} "${_GFX_MATCH}" PARENT_SCOPE)
+
+                if(ARG_ECHO)
+                    string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${_GFX_MATCH}")
+                    message(
+                        STATUS
+                        "${ARG_PREFIX}System architectures (filtered: ${ARG_GFX_MATCH}): ${_GFXINFO_ECHO}"
+                    )
+                endif()
+            endif()
+        else()
+            message(
+                AUTHOR_WARNING
+                "${rocm_agent_enumerator_EXECUTABLE} failed with error code ${enumerator_RET}\nstderr:\n${enumerator_ERROR}\nstdout:\n${enumerator_OUTPUT}"
+            )
+        endif()
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
 # this function is provided to easily select which files use alternative compiler:
 #
 # GLOBAL      --> all files TARGET      --> all files in a target SOURCE      --> specific
@@ -1001,6 +1078,76 @@ function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
     else()
         set(${_OUTPUT} "-1" PARENT_SCOPE)
     endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# function rocprofiler_systems_lookup_gfx()
+# Classifies AMD GPU architectures (gfx IDs) into instinct, radeon, and apu.
+#
+# ARGS:
+#   _TARGET: The gfx ID to classify
+#   _OUTPUT_LIST: The list of categories the target belongs to
+#                 (instinct, radeon, apu)
+#
+# Note: If architecture is unknown, defaults to instinct
+#
+function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
+    set(INSTINCT_LIST
+        "gfx900"
+        "gfx906" # MI50/MI60
+        "gfx908"
+        "gfx90a"
+        "gfx942"
+        "gfx950"
+    )
+
+    # Also includes PRO GPUs
+    # We ignore Radeon VII (gfx906)
+    set(RADEON_LIST
+        "gfx1012"
+        "gfx1011"
+        "gfx1010"
+        "gfx1032"
+        "gfx1031"
+        "gfx1030"
+        "gfx1102"
+        "gfx1101"
+        "gfx1100"
+        "gfx1200"
+        "gfx1201"
+        "gfx1202"
+    )
+
+    set(APU_LIST
+        "gfx1035"
+        "gfx1036"
+        "gfx1103"
+        "gfx1151"
+        "gfx1152"
+        "gfx1153"
+    )
+
+    set(_CATEGORIES "")
+
+    if(_TARGET IN_LIST INSTINCT_LIST)
+        list(APPEND _CATEGORIES "instinct")
+    endif()
+    if(_TARGET IN_LIST RADEON_LIST)
+        list(APPEND _CATEGORIES "radeon")
+    endif()
+    if(_TARGET IN_LIST APU_LIST)
+        list(APPEND _CATEGORIES "apu")
+    endif()
+
+    if(_CATEGORIES STREQUAL "")
+        rocprofiler_systems_message(
+            AUTHOR_WARNING
+            "Unknown GFX target: ${_TARGET}. Defaulting to instinct"
+        )
+        list(APPEND _CATEGORIES "instinct")
+    endif()
+
+    set(${_OUTPUT_LIST} "${_CATEGORIES}" PARENT_SCOPE)
 endfunction()
 
 cmake_policy(POP)

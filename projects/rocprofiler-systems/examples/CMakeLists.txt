@@ -58,6 +58,29 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     include(GNUInstallDirs)
 endif()
 
+# GPU architectures to compile for
+# If not set, auto-detects from system GPU (or empty if no GPU present)
+if(
+    NOT DEFINED ROCPROFSYS_GFX_TARGETS
+    OR ROCPROFSYS_GFX_TARGETS STREQUAL ""
+    OR ROCPROFSYS_GFX_TARGETS STREQUAL "default"
+)
+    rocprofiler_systems_get_gfx_archs(ROCPROFSYS_GFX_TARGETS)
+endif()
+
+set(ROCPROFSYS_GFX_TARGETS
+    "${ROCPROFSYS_GFX_TARGETS}"
+    CACHE STRING
+    "GPU architectures to compile for (semicolon-separated)"
+    FORCE
+)
+
+if(ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_message(STATUS "GPU targets: ${ROCPROFSYS_GFX_TARGETS}")
+else()
+    rocprofiler_systems_message(STATUS "No GPU targets detected/set")
+endif()
+
 set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
