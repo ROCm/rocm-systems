@@ -1410,10 +1410,10 @@ class Roofline:
     @abstractmethod
     def post_processing(
         self,
-        workload: schema.Workload,
+        filtered_pmc: pd.DataFrame,
     ) -> None:
         if self.__run_parameters["is_standalone"]:
-            self.standalone_roofline(workload)
+            self.standalone_roofline(filtered_pmc)
 
     def get_dtype(self) -> list[str]:
         return self.__run_parameters["roofline_data_type"]
