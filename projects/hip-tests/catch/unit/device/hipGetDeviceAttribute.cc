@@ -179,6 +179,7 @@ TEST_CASE("Unit_hipGetDeviceAttribute_CheckAttrValues") {
   HIP_CHECK(
       test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeManagedMemory, props.managedMemory));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeNumberOfXccs));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeExpertSchedMode));
 #endif
 
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxPitch, props.memPitch));
@@ -356,7 +357,7 @@ constexpr AttributeToStringMap<33> kCudaOnlyAttributes{
 #endif
 
 #if HT_AMD
-constexpr AttributeToStringMap<18> kAmdOnlyAttributes{{
+constexpr AttributeToStringMap<19> kAmdOnlyAttributes{{
     {hipDeviceAttributeClockInstructionRate, "hipDeviceAttributeClockInstructionRate"},
     {hipDeviceAttributeUnused3, "hipDeviceAttributeUnused3"},
     {hipDeviceAttributeMaxSharedMemoryPerMultiprocessor,
@@ -380,7 +381,8 @@ constexpr AttributeToStringMap<18> kAmdOnlyAttributes{{
     {hipDeviceAttributePhysicalMultiProcessorCount,
      "hipDeviceAttributePhysicalMultiProcessorCount"},
     {hipDeviceAttributeFineGrainSupport, "hipDeviceAttributeFineGrainSupport"},
-    {hipDeviceAttributeNumberOfXccs, "hipDeviceAttributeNumberOfXccs"}
+    {hipDeviceAttributeNumberOfXccs, "hipDeviceAttributeNumberOfXccs"},
+    {hipDeviceAttributeExpertSchedMode, "hipDeviceAttributeExpertSchedMode"}
     // {hipDeviceAttributeWallClockRate, "hipDeviceAttributeWallClockRate"}
 }};
 #endif

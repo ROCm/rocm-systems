@@ -1,7 +1,7 @@
 {
   "archs": {
     "gfx908": {
-      "delta_hash": "4e73f98539f6073929e612ec915d8981",
+      "delta_hash": "c79d278b54a112f55b45b30edd7dfc0b",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -24,7 +24,7 @@
       }
     },
     "gfx90a": {
-      "delta_hash": "3913dcc751a55b09d4addc2aefe5db18",
+      "delta_hash": "9d4cab247c1e08fed26fb0101d709a3f",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -47,7 +47,7 @@
       }
     },
     "gfx940": {
-      "delta_hash": "d2b35843f4b0174b8df3e7e447d33723",
+      "delta_hash": "8fe8453c8a7c7081be8b537b91fce353",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -70,7 +70,7 @@
       }
     },
     "gfx941": {
-      "delta_hash": "d32ffa0dba46e2c53ec345aa673ba09a",
+      "delta_hash": "ce64827a06cf5480db3cad1fefb058b5",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -93,7 +93,7 @@
       }
     },
     "gfx942": {
-      "delta_hash": "e83bee0c013f2cfda2407e9aac3650ad",
+      "delta_hash": "1ef733f7dae6dce194d7ddf9281a39de",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -127,7 +127,7 @@
         "0600_workgroup_manager_spi.yaml": "e6546a92d283fed5a5dc6df203efb670",
         "0700_wavefront.yaml": "330468fd711057b422de9b952c5cfe69",
         "1000_compute_units_instruction_mix.yaml": "c8bbdde1f29c9548a8e0ed7fcdd9ae04",
-        "1100_compute_units_compute_pipeline.yaml": "92d7fe1b952281ae33d141bf4708e740",
+        "1100_compute_units_compute_pipeline.yaml": "dd30b9df35bcde98925421e25f349661",
         "1200_local_data_share_lds.yaml": "0e57c559dbcd5526e2e8006a47a69f4b",
         "1300_instruction_cache.yaml": "4b7696d75c93e55f7877e07770beda2d",
         "1400_scalar_l1_data_cache.yaml": "ea6d0cdb6c34f574248f09554e976599",

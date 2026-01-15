@@ -81,6 +81,10 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
     from .amdsmi_interface import amdsmi_get_cpu_handles
+    from .amdsmi_interface import amdsmi_get_dfc_ctrl
+    from .amdsmi_interface import amdsmi_set_dfc_ctrl
+    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy
 except AttributeError:
     pass
 

@@ -20,33 +20,29 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
 ##############################################################################
 
-from pathlib import Path
-from typing import Optional, Union
-
-import yaml
+from textual.message import Message
+from textual.widgets import Button
 
 
-def str_representer(dumper, data):
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=">")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+class InstantButton(Button):
+    """
+    A button that fires exactly once per *click* using Textual's press semantics.
+    """
 
+    class InstantPressed(Message):
+        """Custom message fired once for each successful button press."""
 
-yaml.add_representer(str, str_representer)
+        def __init__(self, button: "InstantButton") -> None:
+            super().__init__()
+            self.button = button  # the button that was pressed
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Translate Textual's `Button.Pressed` into `InstantPressed`."""
+        if event.button is not self:
+            return
 
-def load_yaml(filepath: Union[str, Path]) -> dict:
-    with open(filepath) as f:
-        return yaml.safe_load(f) or {}
+        event.stop()
 
-
-def save_yaml(
-    data: dict, filepath: Union[str, Path], header: Optional[str] = None
-) -> None:
-    with open(filepath, "w") as f:
-        if header:
-            f.write(header)
-        yaml.dump(data, f, sort_keys=False)
+        self.post_message(self.InstantPressed(self))

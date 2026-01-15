@@ -139,7 +139,7 @@ set(_lock_environment
     "ROCPROFSYS_COUT_OUTPUT=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_TIMELINE_PROFILE=OFF"
-    "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "${_test_library_path}"
 )
 
@@ -223,7 +223,9 @@ set(_window_environment
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_FILE_OUTPUT=ON"
+    # TODO: Deprecate ROCPROFSYS_VERBOSE
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
@@ -402,6 +404,7 @@ function(ROCPROFILER_SYSTEMS_WRITE_TEST_CONFIG _FILE _ENV)
 # default values
 ROCPROFSYS_CI                     = ON
 ROCPROFSYS_VERBOSE                = 1
+ROCPROFSYS_LOG_LEVEL              = info
 ROCPROFSYS_DL_VERBOSE             = 1
 ROCPROFSYS_SAMPLING_FREQ          = 300
 ROCPROFSYS_SAMPLING_DELAY         = 0.05
@@ -1020,6 +1023,7 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                 "ROCPROFSYS_USE_PID=OFF"
                 "ROCPROFSYS_THREAD_POOL_SIZE=0"
                 "ROCPROFSYS_VERBOSE=1"
+                "ROCPROFSYS_LOG_LEVEL=info"
                 "ROCPROFSYS_DL_VERBOSE=0"
                 "ROCPROFSYS_DEBUG_SETTINGS=0"
                 "${TEST_ENVIRONMENT}"
@@ -1329,6 +1333,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         )
     endif()
 
+    set(_EXIST_FILES_TESTS "")
     foreach(_FILE ${TEST_EXIST_FILES})
         add_test(
             NAME validate-${TEST_NAME}-${_FILE}-exists
@@ -1337,6 +1342,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
         )
+        list(APPEND _EXIST_FILES_TESTS "validate-${TEST_NAME}-${_FILE}-exists")
     endforeach()
 
     if(TEST_TIMEMORY_FILE)
@@ -1430,6 +1436,18 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
                 REQUIRED_FILES "${TEST_FILE}"
                 FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
                 ${TEST_PROPERTIES}
+        )
+    endforeach()
+
+    # Set properties for file existence validation tests
+    foreach(_TEST ${_EXIST_FILES_TESTS})
+        set_tests_properties(
+            ${_TEST}
+            PROPERTIES
+                TIMEOUT ${TEST_TIMEOUT}
+                LABELS "${TEST_LABELS}"
+                DEPENDS "${TEST_DEPENDS};${TEST_NAME}"
+                FIXTURES_REQUIRED "${_VALIDATION_FIXTURES}"
         )
     endforeach()
 endfunction()

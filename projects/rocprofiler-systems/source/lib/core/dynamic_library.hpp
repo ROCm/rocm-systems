@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "defines.hpp"
+#include "logger/debug.hpp"
 
 #include <dlfcn.h>
 #include <string>
@@ -77,8 +77,7 @@ dynamic_library::invoke(std::string_view _name, RetT (*&_func)(Args...), Args...
         }
         else
         {
-            fprintf(stderr, "[rocprof-sys][pid=%i]> %s :: %s\n", getpid(), _name.data(),
-                    dlerror());
+            LOG_WARNING("[rocprof-sys][pid={}]> {} :: {}", getpid(), _name, dlerror());
         }
     }
     return RetT{};

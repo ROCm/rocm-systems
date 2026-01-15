@@ -57,7 +57,7 @@ rocprofiler_add_integration_validate_test(
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-trace)
 
 rocprofiler_add_integration_execute_test(
@@ -69,7 +69,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-trace-input-json
     FAIL_REGULAR_EXPRESSION

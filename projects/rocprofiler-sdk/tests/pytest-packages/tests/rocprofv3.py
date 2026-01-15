@@ -232,6 +232,23 @@ def test_rocpd_data(
             _js_data
         ), f"query: {_rpd_query}\n{rpd_category} ({len(_rpd_data)}):\n\t{_rpd_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"
 
+    # if duplicate entries exist from double buffering synchronization issues, there will be duplicate start and end times
+    for itr in ["regions", "kernels", "memory_copies", "memory_allocations"]:
+        _num_rpd_tot = rocpd_data.execute(f"SELECT COUNT(*) FROM {itr}").fetchone()[0]
+        _num_rpd_start = rocpd_data.execute(
+            f"SELECT COUNT(DISTINCT(start)) FROM {itr}"
+        ).fetchone()[0]
+        _num_rpd_end = rocpd_data.execute(
+            f"SELECT COUNT(DISTINCT(end)) FROM {itr}"
+        ).fetchone()[0]
+
+        assert _num_rpd_tot == _num_rpd_start == _num_rpd_end, (
+            f"Duplicate records check failed for {itr}: total {itr}={_num_rpd_tot}, "
+            f"unique starts={_num_rpd_start}, unique ends={_num_rpd_end}. In rocprofv3, "
+            "this likely means the double buffering scheme updated a buffer with new "
+            "records while it was being processed in a buffer flush"
+        )
+
 
 def _perform_time_sanity_checks(data):
     """Helper function to perform time sanity checks on data."""

@@ -22,12 +22,13 @@
 
 #include "constraint.hpp"
 #include "config.hpp"
-#include "debug.hpp"
 #include "state.hpp"
 #include "utility.hpp"
 
 #include <timemory/units.hpp>
 #include <timemory/utility/delimit.hpp>
+
+#include "logger/debug.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -101,9 +102,10 @@ find_clock_identifier(const Tp& _v)
         }
     }
 
-    ROCPROFSYS_THROW("Unknown clock id %s: %s. Valid choices: %s\n", _descript,
-                     timemory::join::join("", _v).c_str(),
-                     timemory::join::join("", accepted_clock_ids).c_str());
+    throw std::runtime_error(
+        fmt::format("Unknown clock id {}: {}. Valid choices: {}", _descript,
+                    timemory::join::join("", _v).c_str(),
+                    timemory::join::join("", accepted_clock_ids).c_str()));
 }
 
 void
@@ -267,12 +269,10 @@ spec::operator()(const stages& _stages) const
             return _ret;
         };
 
-        ROCPROFSYS_VERBOSE(2,
-                           "Executing constraint spec %lu of %lu :: delay: %6.3f, "
-                           "duration: %6.3f, clock: %s\n",
-                           i, _spec.repeat, _spec.delay, _spec.duration,
-                           _spec.clock_id.as_string().c_str());
-
+        LOG_DEBUG("Executing constraint spec {} of {} :: delay: {:.3f}, "
+                  "duration: {:.3f}, clock: {}",
+                  i, _spec.repeat, _spec.delay, _spec.duration,
+                  _spec.clock_id.as_string());
         if(_stages.init(_spec) && _wait(_stages.wait, _spec.delay) &&
            _stages.start(_spec) && _wait(_stages.collect, _spec.duration) &&
            _stages.stop(_spec))

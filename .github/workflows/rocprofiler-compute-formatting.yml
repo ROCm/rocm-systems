@@ -10,6 +10,15 @@ on:
     paths:
       - '.github/workflows/rocprofiler-compute-formatting.yml'
       - 'projects/rocprofiler-compute/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!docs/**'
+      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

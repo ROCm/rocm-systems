@@ -33,6 +33,7 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <unistd.h>
 #include <cstdint>
