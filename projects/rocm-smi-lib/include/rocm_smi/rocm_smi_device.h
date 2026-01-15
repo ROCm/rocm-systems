@@ -244,7 +244,7 @@ class Device {
     rsmi_status_t dev_log_gpu_metrics(std::ostringstream& outstream_metrics);
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
-    static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
+
     void set_smi_device_id(uint32_t i) { m_device_id = i; }
     void set_smi_partition_id(uint32_t i) { m_partition_id = i; }
     static const char* get_type_string(DevInfoTypes type);
