@@ -294,21 +294,47 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
-    parser.add_argument({ "--debug" }, "Debug output")
+
+    parser.add_argument({ "--log-level" }, "Log level")
+        .max_count(1)
+        .dtype("string")
+        .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
+
+    parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
+
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug",
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
-    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+    parser
+        .add_argument({ "-v", "--verbose" },
+                      "[DEPRECATED Use --log-level=trace] Verbose output")
         .count(1)
         .action([&](parser_t& p) {
             auto _v = p.get<int>("verbose");
             verbose = _v;
+
             rocprofsys::common::update_env(_env, "ROCPROFSYS_VERBOSE", _v,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
+
+            constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
+                                                                "debug", "trace" };
+
+            auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
+            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL",
+                                           log_levels[index], update_mode::REPLACE, ":",
+                                           updated_envs, original_envs);
         });
 
     parser.start_group("GENERAL OPTIONS",
