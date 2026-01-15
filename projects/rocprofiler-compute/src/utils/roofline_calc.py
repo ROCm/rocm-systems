@@ -469,7 +469,7 @@ def calc_ai_profile(
     mspec: MachineSpecs,
     sort_type: str,
     ret_df: dict[str, pd.DataFrame],
-    iteration_multiplexing: Optional[str] = None,
+    iteration_multiplexing: str,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.
@@ -508,7 +508,7 @@ def calc_ai_profile(
         next_kernel_name = df["Kernel_Name"][idx + 1] if not at_end else ""
         kernel_name = df["Kernel_Name"][idx]
 
-        if iteration_multiplexing and not df.iloc[idx].isna().any():
+        if iteration_multiplexing is None or not df.iloc[idx].isna().any():
             try:
                 total_flops += (
                     (

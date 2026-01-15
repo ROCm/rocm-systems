@@ -95,6 +95,7 @@ class Roofline:
                 "is_standalone": False,
                 "roofline_data_type": ["FP32"],  # default to FP32
                 "kernel_filter": False,
+                "iteration_multiplexing": None,
             }
         )
         self.__ai_data: Optional[dict[str, Any]] = None
@@ -115,6 +116,13 @@ class Roofline:
             hasattr(self.__args, "gpu_kernel") and self.__args.gpu_kernel
         ):
             self.__run_parameters["kernel_filter"] = True
+        if (
+            hasattr(self.__args, "iteration_multiplexing")
+            and self.__args.iteration_multiplexing != None
+        ):
+            self.__run_parameters["iteration_multiplexing"] = (
+                self.__args.iteration_multiplexing
+            )
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -298,7 +306,7 @@ class Roofline:
             self.__mspec,
             self.__run_parameters.get("sort_type"),
             ret_df,
-            self.__args.iteration_multiplexing,
+            self.__run_parameters["iteration_multiplexing"],
         )
 
         msg = "AI at each mem level:"
