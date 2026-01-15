@@ -1269,6 +1269,10 @@ hsaKmtModelEnabled(
     bool* enable // OUT
 );
 
+
+/**
+ *  Experimental APIs to abstract DRM calls to thunk
+*/
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleImport(

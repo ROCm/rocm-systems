@@ -390,6 +390,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)dlsym(thunk_handle, "hsaKmtAisReadWriteFile");
       if (HSAKMT_PFN(hsaKmtAisReadWriteFile) == nullptr) goto ERROR;
 
+      HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
+      if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == nullptr) goto ERROR;
+
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)dlsym(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto ERROR;
 
@@ -407,9 +410,6 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)dlsym(thunk_handle, "hsaKmtMemoryCpuMap");
       if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == nullptr) goto ERROR;
-
-      HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
-      if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == nullptr) goto ERROR;
 
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(thunk_handle, "amdgpu_device_deinitialize");
       if (DRM_PFN(amdgpu_device_deinitialize) == nullptr) goto ERROR;

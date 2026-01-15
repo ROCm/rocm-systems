@@ -941,8 +941,8 @@ hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
 	CHECK_KFD_OPEN();
 
 	return HSAKMT_STATUS_NOT_SUPPORTED;
+}
 
-// Experimental APIs to abstract DRM calls to thunk
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
     					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
