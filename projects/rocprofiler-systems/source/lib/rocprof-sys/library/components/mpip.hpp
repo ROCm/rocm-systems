@@ -35,6 +35,8 @@
 #include <timemory/utility/demangle.hpp>
 #include <timemory/variadic/types.hpp>
 
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <set>
 #include <string>
@@ -189,7 +191,7 @@ rocprofsys::component::activate_mpip()
                << rocprofsys::utility::demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Adding cleanup for %s", _label.c_str());
+        LOG_DEBUG("Adding cleanup for {}", _label);
         tim::manager::instance()->add_cleanup(_label, cleanup_functor);
         return 1;
     }
@@ -214,7 +216,7 @@ rocprofsys::component::deactivate_mpip(uint64_t id)
                << rocprofsys::utility::demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Removing cleanup for %s", _label.c_str());
+        LOG_DEBUG("Removing cleanup for {}", _label);
         tim::manager::instance()->cleanup(_label);
         return 0;
     }

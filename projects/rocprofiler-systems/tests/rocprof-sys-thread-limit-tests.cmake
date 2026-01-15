@@ -37,6 +37,7 @@ set(_thread_limit_environment
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_SAMPLING_FREQ=250"
     "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
 )
 
