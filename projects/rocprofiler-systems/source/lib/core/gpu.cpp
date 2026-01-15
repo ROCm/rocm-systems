@@ -35,7 +35,6 @@
 #    define ROCPROFSYS_USE_ROCM 0
 #endif
 
-#include "debug.hpp"
 #include "defines.hpp"
 #include "gpu.hpp"
 
@@ -52,6 +51,8 @@
 #    include <rocprofiler-sdk/cxx/serialization.hpp>
 #    include <rocprofiler-sdk/fwd.h>
 #endif
+
+#include "logger/debug.hpp"
 
 namespace rocprofsys
 {
@@ -70,12 +71,14 @@ check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
     const char* _msg = nullptr;
     auto        _err = amdsmi_status_code_to_string(_code, &_msg);
     if(_err != AMDSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW(
+    {
+        throw std::runtime_error(fmt::format(
             "amdsmi_status_code_to_string failed. No error message available. "
-            "Error code %i originated at %s:%i\n",
-            static_cast<int>(_code), _file, _line);
-    ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
-                     _msg);
+            "Error code {} originated at {}:{}",
+            static_cast<int>(_code), _file, _line));
+    }
+    throw std::runtime_error(fmt::format("[{}:{}] Error code {} :: {}", _file, _line,
+                                         static_cast<int>(_code), _msg));
 }
 
 // Ensures initialization happens only once
@@ -114,8 +117,7 @@ amdsmi_init()
             prevent_amdsmi_library_unload();
         } catch(std::exception& _e)
         {
-            ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown initializing amd-smi: %s\n",
-                                     _e.what());
+            LOG_ERROR("Exception thrown initializing amd-smi: {}", _e.what());
             _amdsmi_is_initialized() = false;  // Mark as not initialized
             return false;
         }
@@ -165,9 +167,8 @@ query_rocm_agents()
                                            sizeof(rocprofiler_agent_v0_t), nullptr);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            1, "Exception thrown getting the rocm agents: %s. _dev_cnt=%ld\n", _e.what(),
-            _dev_cnt);
+        LOG_ERROR("Exception thrown getting the rocm agents: {}. _dev_cnt={}", _e.what(),
+                  _dev_cnt);
     }
     _dev_cnt = get_agent_manager_instance().get_gpu_agents_count();
 #endif
@@ -230,8 +231,7 @@ add_device_metadata(ArchiveT& ar)
                                            sizeof(rocprofiler_agent_v0_t), &_agents_vec);
     } catch(std::exception& _e)
     {
-        ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown getting the rocm agents: %s.\n",
-                                 _e.what());
+        LOG_ERROR("Exception thrown getting the rocm agents: {}", _e.what());
     }
 
     ar(make_nvp("rocm_agents", _agents_vec));
@@ -251,7 +251,7 @@ add_device_metadata()
             add_device_metadata(ar);
         } catch(std::runtime_error& _e)
         {
-            ROCPROFSYS_VERBOSE(2, "%s\n", _e.what());
+            LOG_ERROR("Exception thrown adding device metadata: {}", _e.what());
         }
     });
 }
@@ -309,8 +309,7 @@ get_processor_handles()
             ret = amdsmi_get_processor_type(processor, &processor_type);
             if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             {
-                ROCPROFSYS_THROW("Not AMD_GPU device type!");
-                return;
+                throw std::runtime_error("Not AMD_GPU device type!");
             }
             processors::processors_list.push_back(processor);
 
