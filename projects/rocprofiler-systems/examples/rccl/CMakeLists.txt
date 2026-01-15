@@ -64,7 +64,8 @@ if(hip_FOUND AND rccl_FOUND)
         endif()
     endforeach()
     if(RCCL_GPU_TARGETS STREQUAL "")
-        set(RCCL_GPU_TARGETS "gfx906") # Dummy
+        message(AUTHOR_WARNING "rccl-tests skipped. No supported GPU targets found.")
+        return()
     endif()
 
     # Copy source to build directory

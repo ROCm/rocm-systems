@@ -23,7 +23,7 @@ target_compile_options(fork-example PRIVATE ${_FLAGS})
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS fork-example
-        DESTINATION share/rocprofiler-systems/examples
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )
 endif()
