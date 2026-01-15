@@ -224,7 +224,8 @@ def get_views() -> list[TextClause]:
         select(
             Kernel.kernel_name,
             (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
-            func.row_number()
+            func
+            .row_number()
             .over(
                 partition_by=Kernel.kernel_name,
                 order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
@@ -254,6 +255,9 @@ def get_views() -> list[TextClause]:
 
     views: dict[str, Select[Any]] = {
         "kernel_view": select(
+            Kernel.kernel_uuid.label("kernel_uuid"),
+            Kernel.workload_id.label("workload_id"),
+            Workload.name.label("workload_name"),
             Kernel.kernel_name,
             func.count(Dispatch.dispatch_id).label("dispatch_count"),
             func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
@@ -272,17 +276,24 @@ def get_views() -> list[TextClause]:
         )
         .select_from(Dispatch)
         .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
+        .join(Workload, Kernel.workload_id == Workload.workload_id)
         .join(median_calc.subquery(), Kernel.kernel_name == median_calc.c.kernel_name)
-        .group_by(Kernel.kernel_name),
+        .group_by(
+            Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
+        ),
         "metric_view": select(
+            Workload.workload_id.label("workload_id"),
             Workload.name.label("workload_name"),
+            Kernel.kernel_uuid.label("kernel_uuid"),
             Kernel.kernel_name,
+            MetricDefinition.metric_uuid.label("metric_uuid"),
             MetricDefinition.name.label("metric_name"),
             MetricDefinition.metric_id,
             MetricDefinition.description,
             MetricDefinition.table_name,
             MetricDefinition.sub_table_name,
             MetricDefinition.unit,
+            MetricValue.value_uuid.label("value_uuid"),
             MetricValue.value_name,
             MetricValue.value,
         )
