@@ -76,4 +76,7 @@ TEST_F(DuplicatedEnvironmentEntriesTest, DuplicateEnvironmentEntries)
 
     ASSERT_EQ(env_vars.size(), 1);
     EXPECT_STREQ(env_vars[0], "PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/bin2");
+
+    for(auto* entry : env_vars)
+        free(entry);
 }

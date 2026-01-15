@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -199,7 +200,7 @@ remove_env(std::vector<char*>& _environ, std::string_view _env_var,
     {
         if(match(itr))
         {
-            free(itr);
+            std::free(itr);
             itr = nullptr;
         }
     }
@@ -290,13 +291,40 @@ is_python_interpreter(std::string_view executable)
     const auto version_digits = basename.substr(python3_prefix.size());
 
     return std::all_of(version_digits.begin(), version_digits.end(),
-                       [](unsigned char c) { return std::isdigit(c) != 0; });
+                       [](unsigned char c) { return std::isdigit(c); });
 }
 
 inline std::string
 discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 {
     if(python_binary.empty()) return {};
+
+    const auto is_safe_executable_path = [](const std::string& path) {
+        // Allow only a conservative set of characters in the executable path to
+        // avoid injection when used in a shell command.
+        for(unsigned char c : path)
+        {
+            if(std::isalnum(c) != 0) continue;
+            switch(c)
+            {
+                case '/':
+                case '.':
+                case '_':
+                case '-':
+                case '+': break;
+                default: return false;
+            }
+        }
+        return true;
+    };
+
+    if(!is_safe_executable_path(python_binary))
+    {
+        ROCPROFSYS_ENVIRON_LOG(
+            verbose, "Unsafe characters detected in Python interpreter path: %s\n",
+            python_binary.c_str());
+        return {};
+    }
 
     const auto cmd = "\"" + python_binary +
                      "\" -c \"import torch; print(torch.__path__[0])\" 2>/dev/null";
@@ -308,9 +336,14 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
         return {};
     }
 
-    char        buffer[512];
+    char        buffer[1024];
     std::string result;
-    if(fgets(buffer, sizeof(buffer), pipe)) result = buffer;
+    while(fgets(buffer, sizeof(buffer), pipe))
+    {
+        result.append(buffer);
+        // stop if we've read the full line (torch path is printed on a single line)
+        if(!result.empty() && result.back() == '\n') break;
+    }
 
     int status = pclose(pipe);
 
@@ -412,7 +445,7 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         }
         else
         {
-            free(itr);
+            std::free(itr);
             itr = strdup(join('=', _env_var, _env_val_str).c_str());
         }
         return;
@@ -451,7 +484,7 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
             if(!path.empty() && seen.insert(path).second) result += ":" + path;
         }
 
-        free(entry);
+        std::free(entry);
         entry = nullptr;
     }
 
@@ -488,15 +521,26 @@ consolidate_env_entries(std::vector<char*>& envp)
     auto join_parts = [delim](std::string_view                key,
                               const std::vector<std::string>& parts) {
         std::string result;
-        result.reserve(key.size() + 1 + parts.size() * 16);
+
+        const auto total_parts_length = std::accumulate(
+            parts.begin(), parts.end(), 0,
+            [](std::size_t acc, const std::string& part) { return acc + part.size(); });
+
+        const auto delim_count       = parts.size() - 1;
+        const auto equal_sign_length = 1;
+
+        result.reserve(key.size() + equal_sign_length + total_parts_length + delim_count);
         result.append(key);
         result += '=';
 
-        for(const auto& part : parts)
-        {
-            if(part != parts.front()) result += delim;
-            result.append(part);
-        }
+        result =
+            std::accumulate(parts.begin(), parts.end(), std::move(result),
+                            [delim, &parts](std::string acc, const std::string& part) {
+                                if(part != parts.front()) acc += delim;
+                                acc.append(part);
+                                return acc;
+                            });
+
         return result;
     };
 
@@ -542,7 +586,8 @@ consolidate_env_entries(std::vector<char*>& envp)
 
     for(auto* entry : envp)
     {
-        free(entry);
+        std::free(entry);
+        entry = nullptr;
     }
 
     envp = std::move(result);
