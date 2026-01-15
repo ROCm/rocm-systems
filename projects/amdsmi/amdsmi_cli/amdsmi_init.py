@@ -31,8 +31,15 @@ from pathlib import Path
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.append(python_lib_path)
-# If the python library is installed, it will overwrite the path above
+sys.path.insert(0, python_lib_path)
+# Only fallback to the python library if its a compatible version
+# multiple amdsmi versions installed on the system could cause issues
+# TODO Add version checking & debug to check pathing
+# Ideally we want to identify if the installed python library is incompatible and log a solution to the user
+#   LD library config or reinstall, etc...
+# The problem is coming from the switch over between the post install and pypi
+
+
 
 try:
     from amdsmi import amdsmi_interface, amdsmi_exception
