@@ -46,14 +46,14 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common = common.Common(verbose)
         self.util = runcmd.Util('WARNING')
         self.Debug = False
+        self.ReduceCmds = True
         self.PrintCmdsOnly = False
-        self.PrintCmdsOnly = True
+        self.PrintCmdsOnly = True # jcnii
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
         self.AddWatchArgs = True
         self.AddLogLevel = '--loglevel DEBUG'
-        self.AddLogLevel = ''
 
         # Record starting values
         cmd = 'amd-smi metric --json'
@@ -323,6 +323,7 @@ class TestAmdSmiCli(unittest.TestCase):
             if list1_arg != 'pass':
                 cmds.append((f'{cmd} {list1_arg} {self.AddLogLevel}', self.PASS))
                 if not list1_arg:
+                    cmds.append((f'{cmd} --file {self.tmp_filename} {self.AddLogLevel}', self.PASS))
                     cmds.append((f'{cmd} {{json}} {self.AddLogLevel}', self.PASS))
                     cmds.append((f'{cmd} {{json_file}} {self.AddLogLevel}', self.PASS))
                     cmds.append((f'{cmd} {{json_file_append}} {self.AddLogLevel}', self.PASS))
@@ -346,9 +347,9 @@ class TestAmdSmiCli(unittest.TestCase):
                     for list4_arg in list4_args:
                         if list4_arg != 'pass':
                             cmds.append((f'{cmd} {list1_arg} {list2_arg} {list3_arg} {list4_arg} {self.AddLogLevel}', self.PASS))
-        print(f'jcnii Raw: len(cmds)={len(cmds)}')
 
         # Calculate and substitute in dependent values
+        # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
             while self.openCurlyBrace in cmd:
@@ -379,42 +380,31 @@ class TestAmdSmiCli(unittest.TestCase):
                 if nameStr == '{json}' or 'json_file' in nameStr or \
                    nameStr == '{csv}' or 'csv_file' in nameStr:
                     # For adding file options
-                    if False and not gpu_0:  # limit options jcnii
-                        # Remove all non-zero gpu
-                        cmd = ''
+                    if nameStr == '{json}':
+                        cmd = cmd.replace(nameStr, '--json', 1)
+                    elif nameStr == '{json_file}':
+                        cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename}', 1)
+                    elif nameStr == '{json_file_append}':
+                        cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --append', 1)
+                    elif nameStr == '{json_file_overwrite}':
+                        cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --overwrite', 1)
+                    elif nameStr == '{csv}':
+                        cmd = cmd.replace(nameStr, '--csv', 1)
+                    elif nameStr == '{csv_file}':
+                        cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename}', 1)
+                    elif nameStr == '{csv_file_append}':
+                        cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --append', 1)
+                    elif nameStr == '{csv_file_overwrite}':
+                        cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --overwrite', 1)
                     else:
-                        if nameStr == '{json}':
-                            cmd = cmd.replace(nameStr, '--json', 1)
-                        elif nameStr == '{json_file}':
-                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename}', 1)
-                        elif nameStr == '{json_file_append}':
-                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --append', 1)
-                        elif nameStr == '{json_file_overwrite}':
-                            cmd = cmd.replace(nameStr, f'--json --file {self.tmp_filename} --overwrite', 1)
-                        elif nameStr == '{csv}':
-                            cmd = cmd.replace(nameStr, '--csv', 1)
-                        elif nameStr == '{csv_file}':
-                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename}', 1)
-                        elif nameStr == '{csv_file_append}':
-                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --append', 1)
-                        elif nameStr == '{csv_file_overwrite}':
-                            cmd = cmd.replace(nameStr, f'--csv --file {self.tmp_filename} --overwrite', 1)
-                        else:
-                            print(f'Error: could not replace json/csv options, {nameStr}  cmd={cmd}')
-                            cmd = ''
+                        print(f'Error: could not replace json/csv options, {nameStr}  cmd={cmd}')
+                        cmd = ''
                 elif nameStr == '{watch_time}' or nameStr == '{watch_iterations}':
                     # For adding watch options
-                    if False and not gpu_0: # limit options jcnii
-                        # Remove all non-zero gpu watches
-                        cmd = ''
-                    elif False and ('append' in cmd or 'overwrite' in cmd):  # limit options jcnii
-                        # Remove watch with file append/overwrite combo
-                        cmd = ''
+                    if nameStr == '{watch_time}':
+                        cmd = cmd.replace(nameStr, '--watch 1 --watch_time 2', 1)
                     else:
-                        if nameStr == '{watch_time}':
-                            cmd = cmd.replace(nameStr, '--watch 1 --watch_time 2', 1)
-                        else:
-                            cmd = cmd.replace(nameStr, '--watch 1 --iterations 2', 1)
+                        cmd = cmd.replace(nameStr, '--watch 1 --iterations 2', 1)
                 elif nameStr == '{min_power}' or nameStr == '{avg_power}' or nameStr == '{max_power}':
                     # For setting --power-cap
                     # Find power_type
@@ -540,10 +530,67 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ''
             cmds[index] = (cmd, cond)
 
+
+        # Pare down commands
+        if self.ReduceCmds:
+            file_mods = ['--file', '--json', '--csv']
+            watch_mods = ['--watch', '--watch_time', '--iterations']
+
+            found_sub_arg = False
+            for index, cmd_cond in enumerate(cmds):
+                cmd, cond = cmd_cond
+                items = cmd.split()
+
+                if not found_sub_arg and len(items) >= 3:
+                    sub_arg = items[2]
+                    for mod in file_mods + ['--gpu']:
+                        if mod == sub_arg:
+                            sub_arg = ''
+                            break
+                    found_sub_arg = sub_arg
+
+                # No explicit gpu infers a gpu=0
+                gpu_index = '0'
+                if '--gpu' in cmd:
+                    try:
+                        i = items.index('--gpu')
+                        gpu_index = items[i+1]
+                    except ValueError as e:
+                        # condition where --gpu is not in the cmd
+                        # will get default gpu_index=0
+                        pass
+
+                # Remove all file and watch modifiers except for gpu 0
+                if gpu_index != '0':
+                    for mod in file_mods + watch_mods:
+                        if mod in cmd:
+                            cmd = ''
+                            break
+
+                # Remove all --file and --watch combinations
+                if cmd and '--file' in cmd and '--watch' in cmd:
+                    cmd = ''
+
+                # Remove all --watch mod for all sub_args except for the first sub_arg
+                if cmd and found_sub_arg and len(items) >= 3:
+                    sub_arg = items[2]
+                    if sub_arg != found_sub_arg:
+                        if '--watch' in cmd:
+                            cmd = ''
+
+                # Remove all file mod for all sub_args except for the first sub_arg
+                if cmd and found_sub_arg and len(items) >= 3:
+                    sub_arg = items[2]
+                    if sub_arg != found_sub_arg:
+                        for mod in file_mods:
+                            if mod in cmd:
+                                cmd = ''
+                                break
+
+                cmds[index] = (cmd, cond)
+
         # Remove empty (cmd,cond) arguments
-        print(f'jcnii Before: len(cmds)={len(cmds)}')
         cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != '']
-        print(f'jcnii After: len(cmds)={len(cmds)}')
 
         # Remove extra spaces between arguments
         for index, cmd_cond in enumerate(cmds):
@@ -551,11 +598,9 @@ class TestAmdSmiCli(unittest.TestCase):
             cmd = cmd.split()
             cmd = ' '.join(cmd).strip()
             cmds[index] = (cmd, cond)
-        if False:
-            if self.Debug:
-                print(f'cmds: {"*"*80}')
-                print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
-        print(f'jcnii End: len(cmds)={len(cmds)}')
+        if self.Debug:
+            print(f'cmds: {"*"*80}')
+            print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
     def RunCmds(self, cmds):
@@ -686,7 +731,6 @@ class TestAmdSmiCli(unittest.TestCase):
             ('amd-smi process --invalid', self.FAIL),
             ('amd-smi event --invalid', self.FAIL),
             ('amd-smi topology --invalid', self.FAIL),
-            ('amd-smi set', self.FAIL),
             ('amd-smi set --invalid', self.FAIL),
             ('amd-smi reset', self.FAIL),
             ('amd-smi reset --invalid', self.FAIL),
@@ -714,6 +758,7 @@ class TestAmdSmiCli(unittest.TestCase):
             ('amd-smi metric --loglevel DEBUGG', self.FAIL),
             ('amd-smi metric --loglevel BADLEVEL', self.FAIL),
             # Test invalid set options
+            ('amd-smi set', self.FAIL),
             ('amd-smi set --fan', self.FAIL),
             ('amd-smi set --fan 500', self.FAIL),
             ('amd-smi set --fan 150%', self.FAIL),
@@ -761,9 +806,10 @@ class TestAmdSmiCli(unittest.TestCase):
         ]
 
         for index, gpu in enumerate(self.common.processors):
-            cmds.append(('amd-smi set --power-cap --gpu {index}', self.FAIL))
+            # Test invalid power-cap values
+            cmds.append((f'amd-smi set --power-cap --gpu {index}', self.FAIL))
             for power_type in self.power_types:
-                cmds.append(('amd-smi set --power-cap {power_type} --gpu {index}', self.FAIL))
+                cmds.append((f'amd-smi set --power-cap {power_type} --gpu {index}', self.FAIL))
                 _power_type = self.static_data['gpu_data'][index]['limit'][power_type]
                 socket_power_limit = _power_type['socket_power_limit']
                 if socket_power_limit != 'N/A':
@@ -773,12 +819,14 @@ class TestAmdSmiCli(unittest.TestCase):
                     cmds.append((f'amd-smi set --power-cap {max_power + 1} {power_type} --gpu {index}', self.FAIL))
                     cmds.append((f'amd-smi set --power-cap {int(max_power * 1.10)} {power_type} --gpu {index}', self.FAIL))
 
+            # Test invalid soc-pstate values
             soc_pstate = self.static_data['gpu_data'][index]['soc_pstate']
             if soc_pstate != 'N/A':
                 cmds.append((f'amd-smi set --soc-pstate --gpu {index}', self.FAIL))
                 num_supported = int(soc_pstate['num_supported'])
                 cmds.append((f'amd-smi set --soc-pstate {num_supported} --gpu {index}', self.FAIL))
 
+            # Test invalid xgmi-plpd values
             xgmi_plpd = self.static_data['gpu_data'][index]['xgmi_plpd']
             if xgmi_plpd != 'N/A':
                 cmds.append((f'amd-smi set --xgmi-plpd --gpu {index}', self.FAIL))
@@ -877,6 +925,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi event'
         self.common.print(msg)
 
+        # TODO allow event commands to be executed
         if not self.PrintCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
                 msg = f'{self.tab}Needs input'
@@ -1096,11 +1145,13 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi ras'
         self.common.print(msg)
 
-        # TODO: Yazen
-        if self.common.TODO_SKIP_FAIL:
-            msg = f'{self.tab}Not Yet Implemented'
-            #self.common.print(msg)
-            self.skipTest(msg)
+        # TODO Yazen
+        # TODO allow event commands to be executed
+        if not self.PrintCmdsOnly:
+            if self.common.TODO_SKIP_FAIL:
+                msg = f'{self.tab}Not Yet Implemented'
+                #self.common.print(msg)
+                self.skipTest(msg)
 
         cmds = self.CreateCmds('ras', 'RAS arguments:', 'CPER Arguments', 'Device Arguments:', 'Command Modifiers:')
         self.RunCmds(cmds)
