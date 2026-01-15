@@ -61,7 +61,6 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha, void>
     template <typename... Args>
     static void audit(const gotcha_data& _data, audit::incoming, Args...)
     {
-        ROCPROFSYS_BASIC_DEBUG_F("%s(...)\n", _data.tool_id.c_str());
         category_region<category::ucx>::start(std::string_view{ _data.tool_id });
     }
 

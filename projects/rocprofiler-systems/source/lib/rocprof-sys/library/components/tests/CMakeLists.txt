@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 
 # Component Tests
-add_library(lib-components-tests OBJECT test_ucx_gotcha.cpp test_comm_data.cpp)
+add_library(lib-components-tests OBJECT test_ucx_gotcha.cpp)
 
 target_link_libraries(
     lib-components-tests
@@ -33,6 +33,7 @@ target_link_libraries(
         rocprofiler-systems-libva
         rocprofiler-systems-perfetto
         rocprofiler-systems-object-library
+        rocprofiler-systems-spdlog
 )
 
 target_include_directories(

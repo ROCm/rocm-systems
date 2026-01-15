@@ -612,7 +612,7 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_use_ucx())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up UCX traces...\n");
+        LOG_DEBUG("Setting up UCX traces...\n");
         component::ucx_gotcha::start();
     }
 
@@ -909,7 +909,7 @@ rocprofsys_finalize_hidden(void)
 
     if(get_use_ucx())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down UCX tracing...\n");
+        LOG_DEBUG("Shutting down UCX tracing...\n");
         component::ucx_gotcha::shutdown();
     }
 
