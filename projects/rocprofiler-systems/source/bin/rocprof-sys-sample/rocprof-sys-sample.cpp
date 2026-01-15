@@ -51,7 +51,7 @@ main(int argc, char** argv)
             _argv.emplace_back(argv[i]);
     }
 
-    add_torch_library_path(_env, _argv, false);
+    add_torch_library_path(_env, _argv);
 
     print_updated_environment(_env);
 

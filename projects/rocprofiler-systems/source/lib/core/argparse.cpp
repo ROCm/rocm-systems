@@ -172,7 +172,7 @@ parser_data&
 add_torch_library_path(parser_data& _data, bool verbose)
 {
     rocprofsys::common::add_torch_library_path(_data.current, _data.command, verbose,
-                                               _data.updated, _data.initial);
+                                               _data.updated);
     return _data;
 }
 

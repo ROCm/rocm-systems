@@ -273,28 +273,24 @@ is_python_interpreter(std::string_view executable)
 {
     if(executable.empty()) return false;
 
-    // Extract basename from path
-    auto pos = executable.rfind('/');
-    auto basename =
-        (pos != std::string_view::npos) ? executable.substr(pos + 1) : executable;
+    const auto slash_pos = executable.rfind('/');
+    const auto basename  = (slash_pos != std::string_view::npos)
+                               ? executable.substr(slash_pos + 1)
+                               : executable;
 
     if(basename == "python" || basename == "python3") return true;
 
-    if(basename.size() >= 9 && basename.substr(0, 7) == "python3")
-    {
-        auto version_part = basename.substr(7);
-        if(version_part.empty()) return true;
-        if(version_part[0] != '.') return false;
+    constexpr std::string_view python3_prefix = "python3.";
 
-        for(size_t i = 1; i < version_part.size(); ++i)
-        {
-            if(std::isdigit(static_cast<unsigned char>(version_part[i])) == 0)
-                return false;
-        }
-        return true;
-    }
+    const bool has_valid_prefix =
+        basename.size() > python3_prefix.size() &&
+        basename.substr(0, python3_prefix.size()) == python3_prefix;
+    if(!has_valid_prefix) return false;
 
-    return false;
+    const auto version_digits = basename.substr(python3_prefix.size());
+
+    return std::all_of(version_digits.begin(), version_digits.end(),
+                       [](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
 inline std::string
@@ -302,8 +298,8 @@ discover_torch_libpath(const std::string& python_binary, bool verbose = false)
 {
     if(python_binary.empty()) return {};
 
-    std::string cmd =
-        python_binary + " -c \"import torch; print(torch.__path__[0])\" 2>/dev/null";
+    const auto cmd = "\"" + python_binary +
+                     "\" -c \"import torch; print(torch.__path__[0])\" 2>/dev/null";
 
     FILE* pipe = popen(cmd.c_str(), "r");
     if(!pipe)
@@ -424,14 +420,11 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
 }
 
-template <typename UpdatedEnvsT, typename OriginalEnvsT>
+template <typename UpdatedEnvsT>
 inline void
 add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
-                       bool verbose, UpdatedEnvsT& updated_envs,
-                       const OriginalEnvsT& original_envs)
+                       bool verbose, UpdatedEnvsT& updated_envs)
 {
-    (void) original_envs;
-
     if(argv.empty() || argv.front() == nullptr) return;
     if(!is_python_interpreter(argv.front())) return;
 
