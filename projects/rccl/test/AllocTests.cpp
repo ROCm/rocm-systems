@@ -104,6 +104,9 @@ TEST(Alloc, NcclCudaMemcpy)
         "NcclCudaMemcpy",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             constexpr size_t N     = 128;
             float *          d_src = nullptr, *d_dst = nullptr;
             float            h_src[N], h_dst[N];
@@ -150,6 +153,9 @@ TEST(Alloc, ZeroElementMemcpy)
         "ZeroElementMemcpy",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             float *d_src = nullptr, *d_dst = nullptr;
             ASSERT_EQ(hipMalloc(&d_src, sizeof(float)), hipSuccess);
             ASSERT_EQ(hipMalloc(&d_dst, sizeof(float)), hipSuccess);
@@ -169,6 +175,9 @@ TEST(Alloc, MemcpyNullSrcOrDstPointer)
         "MemcpyNullSrcOrDstPointer",
         []()
         {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
             constexpr size_t N       = 16;
             float*           d_valid = nullptr;
             ASSERT_EQ(hipMalloc(&d_valid, N * sizeof(float)), hipSuccess);
