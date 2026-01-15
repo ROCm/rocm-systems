@@ -85,7 +85,7 @@ rocprofiler_systems_causal_example_executable(
     INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes
 )
 
-if(ROCPROFSYS_INSTALL_EXAMPLES and LULESH_BUILD_KOKKOS)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND LULESH_BUILD_KOKKOS)
     install(
         TARGETS kokkoscore kokkoscontainers kokkossimd
         LIBRARY

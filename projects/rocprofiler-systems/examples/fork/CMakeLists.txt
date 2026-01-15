@@ -90,7 +90,7 @@ if(HIPCC_EXECUTABLE)
             rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
         endif()
 
-        if(ROCPROFSYS_INSTALL_EXAMPLES and TARGET hipMallocConcurrencyMproc)
+        if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipMallocConcurrencyMproc)
             install(
                 TARGETS hipMallocConcurrencyMproc
                 DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
