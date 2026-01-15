@@ -3782,7 +3782,9 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * HSA_QUEUE_INFO_USE_COUNT will be returned.
  *
  * For each successful call, hsa_amd_counted_queue_release should be called to release the
- * HSA_QUEUE_INFO_USE_COUNT.
+ * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
+ * 
+ * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
  *
  * @param[in] agent Agent where to create the queue
  *
@@ -3808,10 +3810,11 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES There is failure to allocate the resources required
  * by the implementation.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p agent does not support queues of the given
- * type.
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
+ * 
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
                                            hsa_amd_queue_priority_t priority,
