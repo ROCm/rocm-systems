@@ -78,7 +78,6 @@ def binary_handler_profile_rocprof_compute(request):
         attach_detach_para=None,
         skip_app_name=False,
         default_workload_dir=None,
-        rank=None,
     ):
         if workload_dir is None and default_workload_dir is None:
             if check_success:
