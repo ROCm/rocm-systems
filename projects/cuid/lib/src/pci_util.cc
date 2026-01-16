@@ -21,12 +21,12 @@
  */
 
 #include "pci_util.h"
-#include "cuid.h"
+#include "include/amd_cuid.h"
 #include "cuid_util.h"
 #include "cuid_device.h"
+#include "cuid_device_manager.h"
 #include "cuid_gpu.h"
 #include "cuid_nic.h"
-#include "cuid_lib_loader.h"
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -36,13 +36,6 @@
 // Endianness conversion functions
 uint16_t PciUtil::le16_to_be16(uint16_t value) {
     return ((value & 0x00FF) << 8) | ((value & 0xFF00) >> 8);
-}
-
-uint32_t PciUtil::le32_to_be32(uint32_t value) {
-    return ((value & 0x000000FF) << 24) |
-           ((value & 0x0000FF00) << 8)  |
-           ((value & 0x00FF0000) >> 8)  |
-           ((value & 0xFF000000) >> 24);
 }
 
 uint64_t PciUtil::le64_to_be64(uint64_t value) {
@@ -69,7 +62,7 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t *buffer
     std::ifstream config_file(pci_config_path, std::ios::binary);
     if (!config_file){
         config_file.close();
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
+        return AMDCUID_STATUS_PCI_ERROR;
     }
 
     config_file.seekg(0, std::ios::end);
@@ -82,39 +75,17 @@ amdcuid_status_t PciUtil::read_pci_config_space(std::string bdf, uint8_t *buffer
     if (config_file.bad())
     {
         config_file.close();
-        return AMDCUID_STATUS_PCI_READ_FAILED;
+        return AMDCUID_STATUS_PCI_ERROR;
     }
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t PciUtil::get_pci_bdf_from_handle(amdcuid_handle handle, std::string &bdf) {
-    if (!handle.impl) return AMDCUID_STATUS_INVALID_ARGUMENT;
-    AmdCuidDevice* dev = static_cast<AmdCuidDevice*>(handle.impl);
-    if (!dev) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    amdcuid_device_type_t type = dev->type();
-    switch (type) {
-        case AMDCUID_DEVICE_TYPE_GPU: {
-            const amdcuid_gpu_info& info = static_cast<AmdCuidGpu*>(dev)->get_info();
-            if (info.bdf.empty()) {
-                bdf.clear();
-                return AMDCUID_STATUS_UNSUPPORTED;
-            }
-            bdf = info.bdf;
-            return AMDCUID_STATUS_SUCCESS;
-        }
-        case AMDCUID_DEVICE_TYPE_NIC: {
-            const amdcuid_nic_info& info = static_cast<AmdCuidNic*>(dev)->get_info();
-            if (info.bdf.empty()) {
-                bdf.clear();
-                return AMDCUID_STATUS_UNSUPPORTED;
-            }
-            bdf = info.bdf;
-            return AMDCUID_STATUS_SUCCESS;
-        }
-        default:
-            bdf.clear();
-            return AMDCUID_STATUS_UNSUPPORTED;
+// Helper to check if a handle has non-zero bytes
+static bool is_pci_handle_nonzero(const amdcuid_id_t& handle) {
+    for (int i = 0; i < 16; ++i) {
+        if (handle.bytes[i] != 0) return true;
     }
+    return false;
 }
 
 // iterate capabilities list to find the relevant capability

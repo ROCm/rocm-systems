@@ -20,30 +20,33 @@
  * THE SOFTWARE.
  */
 
-#ifndef HMAC_H
-#define HMAC_H
+#ifndef IPC_PROTOCOL_H
+#define IPC_PROTOCOL_H
 
-#include <openssl/hmac.h>
-#include <openssl/evp.h>
-#include <fstream>
-#include <iostream>
-#include "cuid.h"
+#include "include/amd_cuid.h"
+#include "src/cuid_device.h"
+#include <cstdint>
 
-class AMDCUID_HMAC
-{
-private:
-    EVP_MAC_CTX* ctx;
-    EVP_MAC* mac;
-    uint8_t* key;
-    size_t key_len;
-    bool valid;
+#define AMDCUID_SOCKET_PATH "/var/run/amdcuid_daemon.sock"
 
-public:
-    AMDCUID_HMAC(const std::string& key_file);
-    ~AMDCUID_HMAC();
-    bool is_valid() const { return valid; }
-    amdcuid_status_t generate_hmac_sha256(const uint8_t* data, size_t data_len, uint8_t* out_hash, size_t* out_len);
-    amdcuid_status_t set_hmac_algorithm(const EVP_MD* md);
+
+enum class IpcMessageType : uint8_t {
+    ADD_DEVICE = 1,
+    REMOVE_DEVICE = 2
 };
 
-#endif // HMAC_H
+struct IpcRequest
+{
+    IpcMessageType type;
+    char device_path[AMDCUID_MAX_QUERY_BUFFER_SIZE]; // used for ADD_DEVICE, empty otherwise
+    amdcuid_device_type_t device_type;
+    amdcuid_id_t handle; // used for REMOVE_DEVICE, 0 otherwise
+};
+
+struct IpcResponse
+{
+    amdcuid_status_t status;
+    DevicePtr device; // used for ADD_DEVICE, 0 otherwise
+};
+
+#endif // IPC_PROTOCOL_H

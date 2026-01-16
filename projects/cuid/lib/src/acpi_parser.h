@@ -23,7 +23,7 @@
 #ifndef ACPI_PARSER_H
 #define ACPI_PARSER_H
 
-#include "cuid.h"
+#include "include/amd_cuid.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -126,7 +126,7 @@ public:
      * 
      * @param cpu_info Output vector of CPU information structures
      * @return AMDCUID_STATUS_SUCCESS on success
-     *         AMDCUID_STATUS_FILE_NOT_FOUND if MADT table doesn't exist
+     *         AMDCUID_STATUS_ACPI_ERROR if MADT table doesn't exist
      *         AMDCUID_STATUS_PERMISSION_DENIED if access denied (need root)
      *         AMDCUID_STATUS_INVALID_FORMAT if table format is invalid
      */

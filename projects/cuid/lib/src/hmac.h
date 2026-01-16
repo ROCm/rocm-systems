@@ -20,39 +20,36 @@
  * THE SOFTWARE.
  */
 
-#ifndef CUID_NIC_H
-#define CUID_NIC_H
+#ifndef HMAC_H
+#define HMAC_H
 
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <fstream>
+#include <iostream>
+#include "include/amd_cuid.h"
 
-#include "cuid_device.h"
-#include "cuid.h"
-#include <vector>
-#include <memory>
-#include <string>
+#define key_length 32
 
-struct amdcuid_nic_info {
-    amdcuid_cuid_fields header;
-    std::string bdf;
-    std::string network_interface;
-};
-
-class AmdCuidNic : public AmdCuidDevice {
-public:
-    AmdCuidNic(const amdcuid_nic_info& i);
-    amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_NIC; }
-    amdcuid_status_t get_primary_cuid(amdcuid& id) const override;
-    amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
-    static amdcuid_status_t discover(std::vector<DevicePtr> &nics);
-    static amdcuid_status_t discover_single(amdcuid_nic_info* nic_info, const std::string& device_path);
-
-    // Virtual accessor overrides
-    amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const override;
-    amdcuid_status_t get_revision_id(uint8_t& revision_id) const override;
-    amdcuid_status_t get_bdf(std::string& bdf) const override;
-
-    const amdcuid_nic_info& get_info() const;
+class cuid_hmac
+{
 private:
-    amdcuid_nic_info m_info;
+    EVP_MAC_CTX* ctx;
+    EVP_MAC* mac;
+    uint8_t* key;
+    size_t key_len;
+    bool valid;
+
+public:
+    cuid_hmac();
+    ~cuid_hmac();
+    bool is_valid() const { return valid; }
+    amdcuid_status_t generate_hmac_sha256(const uint8_t* data, size_t data_len, uint8_t* out_hash, size_t* out_len);
+    amdcuid_status_t set_hmac_algorithm(const EVP_MD* md);
+    amdcuid_status_t set_hmac_key(const uint8_t (*key_data)[key_length]);
+    amdcuid_status_t generate_key(uint8_t (*key)[key_length]);
+
+    std::string key_file_path = "/opt/cuid/hmac_key.bin";
 };
 
-#endif // CUID_NIC_H
+#endif // HMAC_H

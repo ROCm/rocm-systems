@@ -33,14 +33,14 @@
 #include <sstream>
 #include <iostream>
 
-AmdCuidNic::AmdCuidNic(const amdcuid_nic_info& i)
+CuidNic::CuidNic(const amdcuid_nic_info& i)
     : m_info(i)
 {}
 
-amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
+amdcuid_status_t CuidNic::discover(std::vector<DevicePtr> &nics) {
     std::string nic_base_path = "/sys/class/net";
     DIR *dir = opendir(nic_base_path.c_str());
-    if (!dir) return AMDCUID_STATUS_FILE_NOT_FOUND;
+    if (!dir) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
@@ -50,7 +50,7 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
             std::string device_path = std::string(nic_base_path) + "/" + entry->d_name + "/device";
             discover_single(&info, device_path);
 
-            nics.emplace_back(std::make_shared<AmdCuidNic>(info));
+            nics.emplace_back(std::make_shared<CuidNic>(info));
         }
     }
     if (nics.size() == 0)
@@ -60,13 +60,13 @@ amdcuid_status_t AmdCuidNic::discover(std::vector<DevicePtr> &nics) {
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const std::string& device_path) {
+amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std::string& device_path) {
     amdcuid_nic_info info = {};
     info.header.device_type = AMDCUID_DEVICE_TYPE_NIC;
 
-    std::string bdf = AmdCuidUtilities::readlink_bdf(device_path);
+    std::string bdf = CuidUtilities::readlink_bdf(device_path);
 
-    std::string vendor = AmdCuidUtilities::read_sysfs_file(device_path + "/vendor");
+    std::string vendor = CuidUtilities::read_sysfs_file(device_path + "/vendor");
     if (vendor.empty() && !bdf.empty()){
         // if file read fails, attempt to get from pci config
         uint8_t vendor_id_bytes[2] = {0};
@@ -80,7 +80,7 @@ amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const s
         info.header.fields.nic.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
     }
 
-    std::string device = AmdCuidUtilities::read_sysfs_file(device_path + "/device");
+    std::string device = CuidUtilities::read_sysfs_file(device_path + "/device");
     if (device.empty() && !bdf.empty()){
         // if file read fails, attempt to get from pci config
         uint8_t device_id_bytes[2] = {0};
@@ -94,7 +94,7 @@ amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const s
         info.header.fields.nic.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
     }
 
-    std::string pci_class = AmdCuidUtilities::read_sysfs_file(device_path + "/class");
+    std::string pci_class = CuidUtilities::read_sysfs_file(device_path + "/class");
     uint32_t pci_class_integer = 0;
     if (pci_class.empty() && !bdf.empty()){
         // if file read fails, attempt to get from pci config
@@ -110,7 +110,7 @@ amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const s
     }
     info.header.fields.nic.pci_class = (pci_class_integer >> 8) & 0xFFFF;
 
-    std::string revision_id = AmdCuidUtilities::read_sysfs_file(device_path + "/revision");
+    std::string revision_id = CuidUtilities::read_sysfs_file(device_path + "/revision");
     if (revision_id.empty() && !bdf.empty()){
         // if file read fails, attempt to get from pci config
         uint8_t revision_id_bytes[2] = {0};
@@ -138,7 +138,7 @@ amdcuid_status_t AmdCuidNic::discover_single(amdcuid_nic_info* nic_info, const s
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const {
+amdcuid_status_t CuidNic::get_hardware_fingerprint(uint64_t& fingerprint) const {
     if (geteuid() != 0)
     {
         return AMDCUID_STATUS_PERMISSION_DENIED;
@@ -147,7 +147,7 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
     uint32_t cap_id = 0x3;
     uint16_t offset = 0;
     amdcuid_status_t status = PciUtil::get_pci_cap_offset(m_info.bdf, cap_id, offset);
-    if (status != AMDCUID_STATUS_FILE_NOT_FOUND)
+    if (status != AMDCUID_STATUS_UNSUPPORTED)
     {
         const uint8_t fingerprint_size = 8;
         uint8_t fingerprint_bytes[fingerprint_size] = {0};
@@ -160,7 +160,7 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
     }
     // pci config space file does not exist or read failed, so create fingerprint from MAC address
     std::string mac_path = m_info.network_interface + "/address";
-    std::string mac_address = AmdCuidUtilities::read_sysfs_file(mac_path);
+    std::string mac_address = CuidUtilities::read_sysfs_file(mac_path);
     if (!mac_address.empty())
     {
         // convert MAC address string to bytes
@@ -175,14 +175,14 @@ amdcuid_status_t AmdCuidNic::get_hardware_fingerprint(uint64_t& fingerprint) con
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
 }
 
-amdcuid_status_t AmdCuidNic::get_primary_cuid(amdcuid& id) const {
+amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
     if (geteuid() != 0)
     {
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
 
     // attempt to read the CUID from the file first
-    std::string cuid_file_path = "/tmp/priv_cuid";
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file;
     CuidFile primary_file(cuid_file_path, false);
     primary_file.load();
     std::vector<CuidFileEntry> entries = primary_file.get_entries();
@@ -190,18 +190,19 @@ amdcuid_status_t AmdCuidNic::get_primary_cuid(amdcuid& id) const {
     CuidFileEntry entry;
     amdcuid_status_t status =primary_file.find_by_device_node(m_info.network_interface, entry);
     if (status == AMDCUID_STATUS_SUCCESS) {
-        id = entry.primary_cuid;
+        id.UUIDv8_representation = entry.primary_cuid;
+        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
         return AMDCUID_STATUS_SUCCESS;
     }
 
     uint64_t fingerprint = 0;
     status = get_hardware_fingerprint(fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::memset(id.bytes, 0, sizeof(id.bytes));
+        std::memset(&id, 0, sizeof(id));
         return status;
     }
 
-    status = AmdCuidUtilities::generate_primary_cuid(
+    status = CuidUtilities::generate_primary_cuid(
         fingerprint, 
         0, 
         m_info.header.fields.nic.revision_id,
@@ -210,31 +211,49 @@ amdcuid_status_t AmdCuidNic::get_primary_cuid(amdcuid& id) const {
         static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_NIC), 
         &id);
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::memset(id.bytes, 0, sizeof(id.bytes));
+        std::memset(&id, 0, sizeof(id));
         return status;
     }
 
     return status;
 }
 
-const amdcuid_nic_info& AmdCuidNic::get_info() const {
+const amdcuid_nic_info& CuidNic::get_info() const {
     return m_info;
 }
 
-amdcuid_status_t AmdCuidNic::get_vendor_id(uint16_t& vendor_id) const {
+amdcuid_status_t CuidNic::get_vendor_id(uint16_t& vendor_id) const {
     vendor_id = m_info.header.fields.nic.vendor_id;
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidNic::get_revision_id(uint8_t& revision_id) const {
+amdcuid_status_t CuidNic::get_device_id(uint16_t& device_id) const {
+    device_id = m_info.header.fields.nic.device_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidNic::get_pci_class(uint16_t& pci_class) const {
+    pci_class = m_info.header.fields.nic.pci_class;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidNic::get_revision_id(uint8_t& revision_id) const {
     revision_id = m_info.header.fields.nic.revision_id;
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidNic::get_bdf(std::string& bdf) const {
+amdcuid_status_t CuidNic::get_bdf(std::string& bdf) const {
     if (m_info.bdf.empty()) {
         return AMDCUID_STATUS_UNSUPPORTED;
     }
     bdf = m_info.bdf;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidNic::get_device_path(std::string& path) const {
+    if (m_info.network_interface.empty()) {
+        return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    path = m_info.network_interface;
     return AMDCUID_STATUS_SUCCESS;
 }

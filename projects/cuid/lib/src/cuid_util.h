@@ -23,7 +23,8 @@
 #ifndef CUID_UTIL_H
 #define CUID_UTIL_H
 
-#include "cuid.h"
+#include "include/amd_cuid.h"
+#include "src/cuid_internal.h"
 #include "hmac.h"
 #include <vector>
 #include <memory>
@@ -59,16 +60,20 @@ private:
         Logger::instance().log(level, _log_stream_.str()); \
     } while (0)
 
-namespace AmdCuidUtilities {
+namespace CuidUtilities {
     std::string read_sysfs_file(const std::string &path);
     std::string readlink_bdf(const std::string &device_path);
-    amdcuid_status_t generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id, AMDCUID_HMAC* hmac);
+    amdcuid_status_t generate_secondary_cuid(const amdcuid_primary_id* primary_id, amdcuid_secondary_id* secondary_id, cuid_hmac* hmac);
     amdcuid_status_t generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
-                                 uint8_t component_type, amdcuid* id);
-    std::string get_cuid_as_string(const amdcuid *id);
+                                 uint8_t device_type, amdcuid_primary_id* primary_id);
+    void remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16]);
+    std::string get_cuid_as_string(const amdcuid_id_t *id);
     amdcuid_status_t uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid);
     std::string device_type_to_string(amdcuid_device_type_t type);
+
+    static const std::string cuid_file = "/tmp/cuid";
+    static const std::string priv_cuid_file = "/tmp/priv_cuid";
 }
 
 #endif

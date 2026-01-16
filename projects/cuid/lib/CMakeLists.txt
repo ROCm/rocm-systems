@@ -26,41 +26,46 @@ set(CMAKE_CXX_STANDARD 14)
 find_package(OpenSSL REQUIRED)
 
 set(CUID_SOURCES
-    cuid.cc
-    cuid_util.cc
-    cuid_device.cc
-    cuid_device_manager.cc
-    cuid_cpu.cc
-    cuid_gpu.cc
-    cuid_nic.cc
-    cuid_platform.cc
-    cuid_file.cc
-    hmac.cc
-    cuid_lib_loader.cc
-    pci_util.cc
-    acpi_parser.cc
-    smbios_util.cc
+    src/cuid.cc
+    src/cuid_util.cc
+    src/cuid_device.cc
+    src/cuid_device_manager.cc
+    src/cuid_cpu.cc
+    src/cuid_gpu.cc
+    src/cuid_nic.cc
+    src/cuid_platform.cc
+    src/cuid_file.cc
+    src/hmac.cc
+    src/pci_util.cc
+    src/acpi_parser.cc
+    src/smbios_util.cc
 )
 
 set(CUID_HEADERS
-    cuid.h
-    cuid_util.h
-    cuid_device.h
-    cuid_device_manager.h
-    cuid_cpu.h
-    cuid_gpu.h
-    cuid_nic.h
-    cuid_platform.h
-    cuid_file.h
-    hmac.h
-    cuid_lib_loader.h
-    pci_util.h
-    acpi_parser.h
-    smbios_util.h
+    src/cuid_util.h
+    src/cuid_device.h
+    src/cuid_device_manager.h
+    src/cuid_cpu.h
+    src/cuid_gpu.h
+    src/cuid_nic.h
+    src/cuid_platform.h
+    src/cuid_file.h
+    src/hmac.h
+    src/ipc_protocol.h
+    src/pci_util.h
+    src/acpi_parser.h
+    src/smbios_util.h
+    src/cuid_internal.h
 )
 
 add_library(cuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 add_library(cuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
-target_include_directories(cuid_static PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(cuid_shared PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(cuid_static 
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_include_directories(cuid_shared 
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)

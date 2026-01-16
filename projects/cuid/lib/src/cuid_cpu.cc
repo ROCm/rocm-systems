@@ -20,10 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include "cuid_cpu.h"
-#include "cuid_util.h"
-#include "acpi_parser.h"
-#include "cuid_file.h"
+#include "src/cuid_cpu.h"
+#include "src/cuid_util.h"
+#include "src/acpi_parser.h"
+#include "src/cuid_file.h"
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -35,7 +35,7 @@
 #include <cpuid.h>
 #endif
 
-AmdCuidCpu::AmdCuidCpu(const amdcuid_cpu_info& i)
+CuidCpu::CuidCpu(const amdcuid_cpu_info& i)
     : m_info(i)
 {}
 
@@ -117,7 +117,7 @@ struct ProcCpuInfo {
 static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
     std::ifstream cpuinfo("/proc/cpuinfo");
     if (!cpuinfo) {
-        return AMDCUID_STATUS_FILE_ERROR;
+        return AMDCUID_STATUS_CPUINFO_ERROR;
     }
     
     cpus.clear();
@@ -133,14 +133,14 @@ static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
             }
             continue;
         }
-        
+
         // Parse key : value
         size_t colon = line.find(':');
         if (colon == std::string::npos) continue;
-        
+
         std::string key = line.substr(0, colon);
         std::string value = line.substr(colon + 1);
-        
+
         // Trim whitespace
         while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) 
             key.pop_back();
@@ -166,16 +166,16 @@ static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
             current.apic_id = std::stoi(value);
         }
     }
-    
+
     // Don't forget the last entry
     if (current.processor >= 0) {
         cpus.push_back(current);
     }
-    
+
     if (cpus.empty()) {
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
+        return AMDCUID_STATUS_CPUINFO_ERROR;
     }
-    
+
     return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -186,7 +186,7 @@ static amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
  * The ACPI MADT parsing (which requires root) is moved to get_hardware_fingerprint()
  * where privileged operations are expected.
  */
-amdcuid_status_t AmdCuidCpu::discover(std::vector<DevicePtr> &cpus) {
+amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr> &cpus) {
     cpus.clear();
     
     // Parse /proc/cpuinfo - works without root
@@ -233,10 +233,68 @@ amdcuid_status_t AmdCuidCpu::discover(std::vector<DevicePtr> &cpus) {
         info.header.fields.cpu.core = static_cast<uint16_t>(proc_info.core_id);
         info.header.fields.cpu.physical_id = static_cast<uint16_t>(proc_info.physical_id);
         
-        auto cpu = std::make_shared<AmdCuidCpu>(info);
+        auto cpu = std::make_shared<CuidCpu>(info);
         cpus.emplace_back(cpu);
     }
     
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Discover a single CPU by its sysfs device path
+ * 
+ * Device path should be like /sys/devices/system/cpu/cpu0
+ * Reads topology info from sysfs and CPU info from CPUID.
+ */
+amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info, const std::string& device_path) {
+    if (!cpu_info) {
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Verify the path exists and extract CPU number
+    size_t cpu_pos = device_path.find("cpu");
+    if (cpu_pos == std::string::npos) {
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
+
+    // Read topology information from sysfs
+    std::string topology_path = device_path + "/topology";
+    
+    std::string physical_package_str = CuidUtilities::read_sysfs_file(topology_path + "/physical_package_id");
+    std::string core_id_str = CuidUtilities::read_sysfs_file(topology_path + "/core_id");
+    
+    if (physical_package_str.empty() || core_id_str.empty()) {
+        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    }
+
+    std::memset(cpu_info, 0, sizeof(amdcuid_cpu_info));
+    cpu_info->header.device_type = AMDCUID_DEVICE_TYPE_CPU;
+
+    // Get CPU info from CPUID instruction
+    uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
+    uint8_t stepping = 0;
+    if (get_cpuid_info(vendor_id, family, model, device_id, stepping)) {
+        cpu_info->header.fields.cpu.vendor_id = vendor_id;
+        cpu_info->header.fields.cpu.family = family;
+        cpu_info->header.fields.cpu.model = model;
+        cpu_info->header.fields.cpu.device_id = device_id;
+        cpu_info->header.fields.cpu.revision_id = stepping;
+    } else {
+        return AMDCUID_STATUS_CPUINFO_ERROR;
+    }
+
+    // Set topology fields from sysfs
+    cpu_info->header.fields.cpu.physical_id = static_cast<uint16_t>(std::stoi(physical_package_str));
+    cpu_info->header.fields.cpu.core = static_cast<uint16_t>(std::stoi(core_id_str));
+
+    // Try to get APIC ID for unit_id (optional, may not be available via sysfs)
+    // Extract CPU number from path for processor ID
+    size_t num_start = device_path.rfind("cpu") + 3;
+    if (num_start < device_path.length() && std::isdigit(device_path[num_start])) {
+        int processor_id = std::stoi(device_path.substr(num_start));
+        cpu_info->header.fields.cpu.unit_id = static_cast<uint16_t>(processor_id);
+    }
+
     return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -285,7 +343,7 @@ static bool try_read_ppin(uint64_t& ppin) {
  * - ACPI MADT parsing (for processor UID)
  * - PPIN reading (from MSR)
  */
-amdcuid_status_t AmdCuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
+amdcuid_status_t CuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
     if (geteuid() != 0) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
@@ -323,13 +381,13 @@ amdcuid_status_t AmdCuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) con
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidCpu::get_primary_cuid(amdcuid& id) const {
+amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id& id) const {
     if (geteuid() != 0) {
         return AMDCUID_STATUS_PERMISSION_DENIED;
     }
 
     // Attempt to read the CUID from the file first
-    std::string cuid_file_path = "/tmp/priv_cuid";
+    std::string cuid_file_path = CuidUtilities::priv_cuid_file;
     CuidFile primary_file(cuid_file_path, false);
     primary_file.load();
     std::vector<CuidFileEntry> entries = primary_file.get_entries();
@@ -339,22 +397,23 @@ amdcuid_status_t AmdCuidCpu::get_primary_cuid(amdcuid& id) const {
                                   ":" + std::to_string(m_info.header.fields.cpu.core);
     amdcuid_status_t status = primary_file.find_by_package_core_id(package_core_id, entry);
     if (status == AMDCUID_STATUS_SUCCESS) {
-        id = entry.primary_cuid;
+        id.UUIDv8_representation = entry.primary_cuid;
+        CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
         return AMDCUID_STATUS_SUCCESS;
     }
-    
+
     // Get hardware fingerprint (PPIN, ACPI UID, or fallback)
     uint64_t fingerprint = 0;
     status = get_hardware_fingerprint(fingerprint);
     if (status != AMDCUID_STATUS_SUCCESS) {
-        std::memset(id.bytes, 0, sizeof(id.bytes));
+        std::memset(&id, 0, sizeof(id));
         return status;
     }
-    
-    // Use AmdCuidUtilities::generate_primary_cuid to generate CUID
-    amdcuid result = {};
+
+    // Use CuidUtilities::generate_primary_cuid to generate CUID
+    amdcuid_primary_id result = {};
     const auto& h = m_info.header;
-    AmdCuidUtilities::generate_primary_cuid(
+    CuidUtilities::generate_primary_cuid(
         fingerprint,
         h.fields.cpu.unit_id,
         h.fields.cpu.revision_id,
@@ -363,21 +422,57 @@ amdcuid_status_t AmdCuidCpu::get_primary_cuid(amdcuid& id) const {
         static_cast<uint8_t>(AMDCUID_DEVICE_TYPE_CPU),
         &result
     );
-    
+
     id = result;
     return AMDCUID_STATUS_SUCCESS;
 }
 
-const amdcuid_cpu_info& AmdCuidCpu::get_info() const {
+const amdcuid_cpu_info& CuidCpu::get_info() const {
     return m_info;
 }
 
-amdcuid_status_t AmdCuidCpu::get_vendor_id(uint16_t& vendor_id) const {
+amdcuid_status_t CuidCpu::get_vendor_id(uint16_t& vendor_id) const {
     vendor_id = m_info.header.fields.cpu.vendor_id;
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AmdCuidCpu::get_revision_id(uint8_t& revision_id) const {
+amdcuid_status_t CuidCpu::get_family(uint16_t& family) const {
+    family = m_info.header.fields.cpu.family;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_model(uint16_t& model) const {
+    model = m_info.header.fields.cpu.model;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_device_id(uint16_t& device_id) const {
+    device_id = m_info.header.fields.cpu.device_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_revision_id(uint8_t& revision_id) const {
     revision_id = m_info.header.fields.cpu.revision_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_unit_id(uint16_t& unit_id) const {
+    unit_id = m_info.header.fields.cpu.unit_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_core(uint16_t& core) const {
+    core = m_info.header.fields.cpu.core;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_physical_id(uint16_t& physical_id) const {
+    physical_id = m_info.header.fields.cpu.physical_id;
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidCpu::get_device_path(std::string& path) const {
+    // Construct device path based on unit_id (APIC ID)
+    path = "/sys/devices/system/cpu/cpu" + std::to_string(m_info.header.fields.cpu.unit_id);
     return AMDCUID_STATUS_SUCCESS;
 }

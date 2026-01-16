@@ -49,7 +49,7 @@ void Logger::log(LogLevel level, const std::string& msg) const {
 
 
 // Helper to read a sysfs file into a string
-std::string AmdCuidUtilities::read_sysfs_file(const std::string &path) {
+std::string CuidUtilities::read_sysfs_file(const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open()) return "";
     std::stringstream ss;
@@ -61,7 +61,7 @@ std::string AmdCuidUtilities::read_sysfs_file(const std::string &path) {
 }
 
 // Helper to get BDF from symlink, filter out non-PCI BDFs (e.g., USB like 3-10.2:2.0)
-std::string AmdCuidUtilities::readlink_bdf(const std::string &device_path) {
+std::string CuidUtilities::readlink_bdf(const std::string &device_path) {
     char buf[256];
     ssize_t len = readlink(device_path.c_str(), buf, sizeof(buf)-1);
     if (len > 0) {
@@ -82,74 +82,82 @@ std::string AmdCuidUtilities::readlink_bdf(const std::string &device_path) {
 }
 
 
-amdcuid_status_t AmdCuidUtilities::generate_secondary_cuid(const amdcuid* primary_id, amdcuid* secondary_id, AMDCUID_HMAC* hmac) {
+amdcuid_status_t CuidUtilities::generate_secondary_cuid(const amdcuid_primary_id* primary_id, amdcuid_secondary_id* secondary_id, cuid_hmac* hmac) {
     if (!primary_id || !hmac) {
         // Return invalid on null input
-        amdcuid empty = {};
+        amdcuid_id_t empty = {};
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
     uint8_t hash[EVP_MAX_MD_SIZE];
     size_t hash_len = 0;
 
-    amdcuid_status_t status = static_cast<amdcuid_status_t>(hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->bytes), sizeof(primary_id->bytes), hash, &hash_len));
+    amdcuid_status_t status = static_cast<amdcuid_status_t>(hmac->generate_hmac_sha256(reinterpret_cast<const uint8_t*>(primary_id->raw_bits), sizeof(primary_id->raw_bits), hash, &hash_len));
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::cerr << "Error generating HMAC" << std::endl;
         return status;
     }
 
-    // Get the unit id parts from the primary ID
-    uint8_t unit_id_part1 = ((primary_id->bytes[8] & 0x3) << 6) | ((primary_id->bytes[9] & 0xFC) >> 2); // lower 2 bits of byte 8 and upper 6 bits of byte 9
-    uint8_t unit_id_part2 = ((primary_id->bytes[14] & 0x3) << 4) | ((primary_id->bytes[15] & 0xF0) >> 4); // lower 2 bits of byte 14 and upper 4 bits of byte 15 and 2 more leading bits of padding
+    // copy 110 LSB bits of hash to secondary_id->hash
+    // Using only first 14 bytes (112 bits) of hash, then will mask last 2 bits
+    memcpy(secondary_id->hash, hash, 14);
+    secondary_id->hash[13] &= 0xFC; // 11111100
 
+    // Get the unit id parts from the primary ID
+    uint8_t unit_id_part1 = primary_id->raw_bits[8];
+    uint8_t unit_id_part2 = primary_id->raw_bits[14] & 0xF0; // only upper 4 bits
     // Map the 256-bit hash to 122-bit CUID format
-    uint8_t id_bits[16] = {0}; // 128 bits total (104 bits of hash + 18 bits of unit ids  )
+    uint8_t id_bits[16] = {0};
 
     // Copy first 8 bytes (64 bits) from hash
-    memcpy(id_bits, hash, 8);
+    memcpy(id_bits, secondary_id->hash, 8);
 
     // insert unit id part 1 at bits 64-71
     id_bits[8] = unit_id_part1;
 
-    // copy next 5 bytes (40 bits) from hash to bits 72-111
-    memcpy(id_bits + 9, hash + 8, 5);
+    // copy next 6 bytes (46 bits) from hash and mask off last 2 bits for bits 72-117 
+    memcpy(id_bits + 9, secondary_id->hash + 8, 6);
+    id_bits[14] &= 0xFC;
 
-    // bits 112-117: UnitID part 2 (6 bits) + Bits 118-119: padding (2 bits)
-    id_bits[14] = unit_id_part2;
-    // last 8 bits are padding (bits 120-127)
-    id_bits[15] = 0;
+    // bits 118-121: UnitID part 2 (4 bits)
+    id_bits[14] |= (unit_id_part2 >> 2); // upper 2 bits of unit id part 2
+    id_bits[15] |= (unit_id_part2 & 0x03) << 6; // lower 2 bits of unit id part 2
+    // last 6 bits are padding (bits 122-127)
+    id_bits[15] &= 0xC0;
+
+    memcpy(secondary_id->raw_bits, id_bits, 16);
 
     // Apply UUIDv8 format according to RFC 9562
     // Bits 0-47: ID value part 1 (LSB)
-    secondary_id->bytes[0] = id_bits[0];
-    secondary_id->bytes[1] = id_bits[1];
-    secondary_id->bytes[2] = id_bits[2];
-    secondary_id->bytes[3] = id_bits[3];
-    secondary_id->bytes[4] = id_bits[4];
-    secondary_id->bytes[5] = id_bits[5];
+    secondary_id->UUIDv8_representation.bytes[0] = id_bits[0];
+    secondary_id->UUIDv8_representation.bytes[1] = id_bits[1];
+    secondary_id->UUIDv8_representation.bytes[2] = id_bits[2];
+    secondary_id->UUIDv8_representation.bytes[3] = id_bits[3];
+    secondary_id->UUIDv8_representation.bytes[4] = id_bits[4];
+    secondary_id->UUIDv8_representation.bytes[5] = id_bits[5];
 
     // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-    secondary_id->bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
-    secondary_id->bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
+    secondary_id->UUIDv8_representation.bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
+    secondary_id->UUIDv8_representation.bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
 
     // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-    secondary_id->bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
+    secondary_id->UUIDv8_representation.bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
     // everything past here is now shifted by 6 bits
-    secondary_id->bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
-    secondary_id->bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
-    secondary_id->bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
-    secondary_id->bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
-    secondary_id->bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
-    secondary_id->bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
-    secondary_id->bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
+    secondary_id->UUIDv8_representation.bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
 
     return AMDCUID_STATUS_SUCCESS;
 }
 
 
-amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
+amdcuid_status_t CuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
                                  uint8_t revision_id, uint16_t device_id, uint16_t vendor_id,
-                                 uint8_t component_type, amdcuid* id) {
+                                 uint8_t device_type, amdcuid_primary_id* primary_id) {
 
     // Build 122-bit value in little-endian order
     uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)
@@ -159,53 +167,84 @@ amdcuid_status_t AmdCuidUtilities::generate_primary_cuid(uint64_t serial_number,
 
     // Bits 0-63: Serial number (8 bytes)
     memcpy(id_bits, &serial_number, 8);
-    
+
     // Bits 64-71: UnitID part 1 (1 byte)
     id_bits[8] = unit_id_part1;
-    
+
     // Bits 72-79: RevisionID (1 byte) 
     id_bits[9] = revision_id;
-    
+
     // Bits 80-95: DeviceID (2 bytes); These format changes are necessary to make the final ID little Endian, as specified in the design
     id_bits[10] = device_id & 0xFF;
     id_bits[11] = (device_id >> 8) & 0xFF;
-    
+
     // Bits 96-111: VendorID (2 bytes)
     id_bits[12] = vendor_id & 0xFF;
     id_bits[13] = (vendor_id >> 8) & 0xFF;
-    
+
     // Bits 112-117: UnitID part 2 (6 bits) + Bits 118-121: Component Type (4 bits)
-    id_bits[14] = (unit_id_part2 << 2) | ((component_type & 0xC) >> 2);
-    id_bits[15] = (component_type & 0x3) << 6; // Last 6 bits are padding
-    
+    id_bits[14] = (unit_id_part2 << 2) | ((device_type & 0xC) >> 2);
+    id_bits[15] = (device_type & 0x3) << 6; // Last 6 bits are padding
+
+    memcpy(primary_id->raw_bits, id_bits, 16);
+
     // Apply UUIDv8 format according to RFC 9562
     // Bits 0-47: ID value part 1 (LSB)
-    id->bytes[0] = id_bits[0];
-    id->bytes[1] = id_bits[1]; 
-    id->bytes[2] = id_bits[2];
-    id->bytes[3] = id_bits[3];
-    id->bytes[4] = id_bits[4];
-    id->bytes[5] = id_bits[5];
+    primary_id->UUIDv8_representation.bytes[0] = id_bits[0];
+    primary_id->UUIDv8_representation.bytes[1] = id_bits[1]; 
+    primary_id->UUIDv8_representation.bytes[2] = id_bits[2];
+    primary_id->UUIDv8_representation.bytes[3] = id_bits[3];
+    primary_id->UUIDv8_representation.bytes[4] = id_bits[4];
+    primary_id->UUIDv8_representation.bytes[5] = id_bits[5];
     
     // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-    id->bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
-    id->bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
+    primary_id->UUIDv8_representation.bytes[6] = ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
+    primary_id->UUIDv8_representation.bytes[7] = ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
 
     // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-    id->bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
+    primary_id->UUIDv8_representation.bytes[8] = 0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
     // everything past here is now shifted by 6 bits
-    id->bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
-    id->bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
-    id->bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
-    id->bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
-    id->bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
-    id->bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
-    id->bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[9] = ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[10] = ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[11] = ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[12] = ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[13] = ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[14] = ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
+    primary_id->UUIDv8_representation.bytes[15] = ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
 
     return AMDCUID_STATUS_SUCCESS;
 }
 
-std::string AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
+void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t* id, uint8_t out_raw_bits[16]) {
+    if (!id || !out_raw_bits) {
+        return;
+    }
+
+    // Reverse the UUIDv8 formatting to get back the original raw bits
+    // Bits 0-47: ID value part 1 (LSB)
+    out_raw_bits[0] = id->bytes[0];
+    out_raw_bits[1] = id->bytes[1];
+    out_raw_bits[2] = id->bytes[2];
+    out_raw_bits[3] = id->bytes[3];
+    out_raw_bits[4] = id->bytes[4];
+    out_raw_bits[5] = id->bytes[5];
+
+    // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
+    out_raw_bits[6] = ((id->bytes[6] & 0x0F) << 4) | ((id->bytes[7] & 0xFC) >> 2);
+    out_raw_bits[7] = ((id->bytes[7] & 0x03) << 6) | ((id->bytes[8] & 0xFC) >> 2);
+
+    // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
+    out_raw_bits[8] = ((id->bytes[8] & 0x03) << 6) | ((id->bytes[9] & 0xFC) >> 2);
+    out_raw_bits[9] = ((id->bytes[9] & 0x03) << 6) | ((id->bytes[10] & 0xFC) >> 2);
+    out_raw_bits[10] = ((id->bytes[10] & 0x03) << 6) | ((id->bytes[11] & 0xFC) >> 2);
+    out_raw_bits[11] = ((id->bytes[11] & 0x03) << 6) | ((id->bytes[12] & 0xFC) >> 2);
+    out_raw_bits[12] = ((id->bytes[12] & 0x03) << 6) | ((id->bytes[13] & 0xFC) >> 2);
+    out_raw_bits[13] = ((id->bytes[13] & 0x03) << 6) | ((id->bytes[14] & 0xFC) >> 2);
+    out_raw_bits[14] = ((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2);
+    out_raw_bits[15] = (id->bytes[15] & 0x03) << 6; // last 6 bits are padding
+}
+
+std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t *id) {
     // Format as UUIDv8 string: 8-4-4-4-12 hex digits from id->bytes[16]
     // UUID: xxxxxxxx-xxxx-8xxx-yxxx-xxxxxxxxxxxx
     char uuid_str[37]; // 36 chars + null
@@ -221,7 +260,7 @@ std::string AmdCuidUtilities::get_cuid_as_string(const amdcuid *id) {
     return std::string(uuid_str);
 }
 
-amdcuid_status_t AmdCuidUtilities::uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid) {
+amdcuid_status_t CuidUtilities::uuid_string_to_uint8(const std::string& uuid_str, uint8_t* uuid) {
     if (!uuid) {
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
@@ -254,16 +293,12 @@ amdcuid_status_t AmdCuidUtilities::uuid_string_to_uint8(const std::string& uuid_
     return AMDCUID_STATUS_SUCCESS;
 }
 
-std::string AmdCuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
+std::string CuidUtilities::device_type_to_string(amdcuid_device_type_t type) {
     switch (type) {
         case AMDCUID_DEVICE_TYPE_PLATFORM: return "PLATFORM";
         case AMDCUID_DEVICE_TYPE_CPU: return "CPU";
         case AMDCUID_DEVICE_TYPE_GPU: return "GPU";
         case AMDCUID_DEVICE_TYPE_NIC: return "NIC";
-        case AMDCUID_DEVICE_TYPE_NPU: return "NPU";
-        case AMDCUID_DEVICE_TYPE_STORAGE: return "STORAGE";
-        case AMDCUID_DEVICE_TYPE_MEMORY: return "MEMORY";
-        case AMDCUID_DEVICE_TYPE_OTHER: return "OTHER";
         default: return "UNKNOWN";
     }
 }

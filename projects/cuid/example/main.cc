@@ -23,30 +23,13 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
-#include "cuid.h"
-
-inline const char* cuid_status_to_string(amdcuid_status_t status) {
-    switch (status) {
-        case AMDCUID_STATUS_SUCCESS: return "SUCCESS";
-        case AMDCUID_STATUS_FILE_NOT_FOUND: return "FILE_NOT_FOUND";
-        case AMDCUID_STATUS_DEVICE_NOT_FOUND: return "DEVICE_NOT_FOUND";
-        case AMDCUID_STATUS_INVALID_ARGUMENT: return "INVALID_ARGUMENT";
-        case AMDCUID_STATUS_PERMISSION_DENIED: return "PERMISSION_DENIED";
-        case AMDCUID_STATUS_UNSUPPORTED: return "UNSUPPORTED";
-        case AMDCUID_STATUS_WRONG_DEVICE_TYPE: return "WRONG_DEVICE_TYPE";
-        case AMDCUID_STATUS_INSUFFICIENT_SIZE: return "INSUFFICIENT_SIZE";
-        case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND: return "AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND";
-        case AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR: return "AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR";
-        case AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED: return "AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED";
-        default: return "UNKNOWN_ERROR";
-    }
-}
+#include "include/amd_cuid.h"
 
 int main() {
     amdcuid_status_t err;
     uint32_t gpu_count = 0;
     uint32_t available_gpu_count = 0;
-    std::vector<amdcuid_handle> gpu_handles;
+    std::vector<amdcuid_id_t> gpu_handles;
 
     // Retry until the available_gpu_count matches the gpu_count
     do {
@@ -59,7 +42,7 @@ int main() {
             &available_gpu_count);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get GPU handles. Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             return 1;
         }
     } while (gpu_count != available_gpu_count);
@@ -82,15 +65,15 @@ int main() {
         err = amdcuid_get_render_node(gpu_handles[i], device_node, &device_node_len);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get device node for GPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             device_node[0] = '\0';
         }
 
-        amdcuid secondary_id = {};
+        amdcuid_id_t secondary_id = {};
         err = amdcuid_get_secondary_cuid(gpu_handles[i], &secondary_id);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get secondary CUID for GPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
         }
 
         std::cout << "GPU #" << i
@@ -107,7 +90,7 @@ int main() {
     // Same as above but for CPUs
     uint32_t cpu_count = 0;
     uint32_t available_cpu_count = 0;
-    std::vector<amdcuid_handle> cpu_handles;
+    std::vector<amdcuid_id_t> cpu_handles;
 
     // Retry until the available_cpu_count matches the cpu_count
     do {
@@ -120,7 +103,7 @@ int main() {
             &available_cpu_count);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get CPU handles. Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             return 1;
         }
     } while (cpu_count != available_cpu_count);
@@ -132,7 +115,7 @@ int main() {
         err = amdcuid_get_vendor_id(cpu_handles[i], &vendor_id);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get vendor ID for CPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             vendor_id = 0;
         }
 
@@ -140,15 +123,15 @@ int main() {
         err = amdcuid_get_cpu_core(cpu_handles[i], &core);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get core for CPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             core = 0;
         }
 
-        amdcuid secondary_id = {};
+        amdcuid_id_t secondary_id = {};
         err = amdcuid_get_secondary_cuid(cpu_handles[i], &secondary_id);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get secondary CUID for CPU #" << i << ". Error code: " << err
-                      << " (" << cuid_status_to_string(err) << ")" << std::endl;
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
         }
 
         std::cout << "CPU #" << i

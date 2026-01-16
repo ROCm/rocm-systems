@@ -22,10 +22,14 @@
 
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <iostream>
+#include <cstring>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "hmac.h"
 
-AMDCUID_HMAC::AMDCUID_HMAC(const std::string& key_file)
+cuid_hmac::cuid_hmac()
     : ctx(nullptr), mac(nullptr), key(nullptr), key_len(0), valid(false)
 {
     mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
@@ -42,7 +46,7 @@ AMDCUID_HMAC::AMDCUID_HMAC(const std::string& key_file)
         return;
     }
 
-    std::ifstream key_file_stream(key_file, std::ios::binary);
+    std::ifstream key_file_stream(key_file_path, std::ios::binary);
     if (!key_file_stream.is_open()) {
         std::cerr << "Error opening key file" << std::endl;
         return;
@@ -57,14 +61,14 @@ AMDCUID_HMAC::AMDCUID_HMAC(const std::string& key_file)
     valid = true;
 }
 
-AMDCUID_HMAC::~AMDCUID_HMAC()
+cuid_hmac::~cuid_hmac()
 {
     if (ctx) EVP_MAC_CTX_free(ctx);
     if (mac) EVP_MAC_free(mac);
     if (key) delete[] key;
 }
 
-amdcuid_status_t AMDCUID_HMAC::generate_hmac_sha256(
+amdcuid_status_t cuid_hmac::generate_hmac_sha256(
     const uint8_t* data,
     size_t data_len,
     uint8_t* out_hash,
@@ -104,7 +108,7 @@ amdcuid_status_t AMDCUID_HMAC::generate_hmac_sha256(
     return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t AMDCUID_HMAC::set_hmac_algorithm(const EVP_MD* md)
+amdcuid_status_t cuid_hmac::set_hmac_algorithm(const EVP_MD* md)
 {
     if (!ctx) {
         std::cerr << "MAC context is not initialized" << std::endl;
@@ -122,6 +126,53 @@ amdcuid_status_t AMDCUID_HMAC::set_hmac_algorithm(const EVP_MD* md)
     if (!EVP_MAC_CTX_set_params(ctx, params)) {
         std::cerr << "Error setting HMAC algorithm" << std::endl;
         return AMDCUID_STATUS_HMAC_ERROR;
+    }
+
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t (*key_data)[key_length]) {
+    if (geteuid() != 0) {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    if (key) {
+        delete[] key;
+    }
+    key = new uint8_t[key_length];
+    std::memcpy(key, *key_data, key_length);
+
+    // if key_file exists, delete it first
+    if (std::remove(key_file_path.c_str()) != 0 && errno != ENOENT) {
+        // failed to delete existing file due to different permissions
+        return AMDCUID_STATUS_KEY_ERROR;
+    }
+
+    std::ofstream key_file(key_file_path, std::ios::out | std::ios::binary);
+    if (!key_file) {
+        return AMDCUID_STATUS_KEY_ERROR;
+    }
+    key_file.write(reinterpret_cast<const char*>(key), key_length);
+    if (!key_file) {
+        key_file.close();
+        return AMDCUID_STATUS_KEY_ERROR;
+    }
+    key_file.close();
+
+    // set permissions to read/write for owner only
+    if (chmod(key_file_path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+        return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+
+    return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t cuid_hmac::generate_key(uint8_t (*key)[key_length]) {
+    if (!key)
+        return AMDCUID_STATUS_INVALID_ARGUMENT;
+
+    if (RAND_bytes(*key, key_length) != 1) {
+        return AMDCUID_STATUS_KEY_ERROR;
     }
 
     return AMDCUID_STATUS_SUCCESS;

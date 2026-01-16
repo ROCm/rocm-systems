@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "acpi_parser.h"
+#include "src/acpi_parser.h"
 #include <fstream>
 #include <cstring>
 #include <sys/stat.h>
@@ -43,7 +43,7 @@ amdcuid_status_t AcpiParser::read_acpi_table(const char* table_name, std::vector
     struct stat st;
     if (stat(path.c_str(), &st) != 0) {
         if (errno == ENOENT) {
-            return AMDCUID_STATUS_FILE_NOT_FOUND;
+            return AMDCUID_STATUS_ACPI_ERROR;
         } else if (errno == EACCES) {
             return AMDCUID_STATUS_PERMISSION_DENIED;
         }

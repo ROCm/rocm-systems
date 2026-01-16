@@ -28,14 +28,14 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <errno.h>
-#include "cuid.h"
-#include "cuid_file.h"
-#include "cuid_device_manager.h"
-#include "cuid_device.h"
-#include "cuid_gpu.h"
-#include "cuid_cpu.h"
-#include "cuid_nic.h"
-#include "cuid_util.h"
+#include "include/amd_cuid.h"
+#include "src/cuid_file.h"
+#include "src/cuid_device_manager.h"
+#include "src/cuid_device.h"
+#include "src/cuid_gpu.h"
+#include "src/cuid_cpu.h"
+#include "src/cuid_nic.h"
+#include "src/cuid_util.h"
 
 /**
  * @file amdcuid_tool.cc
@@ -47,25 +47,10 @@
  * - Always reads from /tmp/cuid (or /tmp/priv_cuid with sudo for primary CUIDs)
  */
 
-inline const char* cuid_status_to_string(amdcuid_status_t status) {
-    switch (status) {
-        case AMDCUID_STATUS_SUCCESS: return "SUCCESS";
-        case AMDCUID_STATUS_FILE_NOT_FOUND: return "FILE_NOT_FOUND";
-        case AMDCUID_STATUS_DEVICE_NOT_FOUND: return "DEVICE_NOT_FOUND";
-        case AMDCUID_STATUS_INVALID_ARGUMENT: return "INVALID_ARGUMENT";
-        case AMDCUID_STATUS_PERMISSION_DENIED: return "PERMISSION_DENIED";
-        case AMDCUID_STATUS_UNSUPPORTED: return "UNSUPPORTED";
-        case AMDCUID_STATUS_WRONG_DEVICE_TYPE: return "WRONG_DEVICE_TYPE";
-        case AMDCUID_STATUS_INSUFFICIENT_SIZE: return "INSUFFICIENT_SIZE";
-        case AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND: return "AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND";
-        case AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR: return "AMDCUID_STATUS_HW_FINGERPRINT_FORMAT_ERROR";
-        case AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED: return "AMDCUID_STATUS_HW_FINGERPRINT_PERMISSION_DENIED";
-        default: return "UNKNOWN_ERROR";
-    }
-}
+
 // Default CUID file paths
-static const char* DEFAULT_CUID_FILE = "/tmp/cuid";
-static const char* DEFAULT_PRIV_CUID_FILE = "/tmp/priv_cuid";
+static const char* DEFAULT_CUID_FILE = CuidUtilities::cuid_file.c_str();
+static const char* DEFAULT_PRIV_CUID_FILE = CuidUtilities::priv_cuid_file.c_str();
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n";
@@ -122,10 +107,10 @@ amdcuid_device_type_t string_to_device_type(const std::string& type_str) {
     if (upper == "NPU") return AMDCUID_DEVICE_TYPE_NPU;
     if (upper == "STORAGE") return AMDCUID_DEVICE_TYPE_STORAGE;
     if (upper == "MEMORY") return AMDCUID_DEVICE_TYPE_MEMORY;
-    return AMDCUID_DEVICE_TYPE_UNKNOWN;
+    return AMDSMI_DEVICE_TYPE_NONE;
 }
 
-std::string cuid_to_string(const amdcuid& id) {
+std::string cuid_to_string(const amdcuid_id_t& id) {
     char uuid_str[37];
     snprintf(uuid_str, sizeof(uuid_str),
              "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
@@ -173,8 +158,8 @@ int generate_cuid_files(const std::string& key_file) {
     std::cout << "Generating CUID files...\n" << std::endl;
     
     // Initialize device manager and discover devices
-    auto& mgr = AmdCuidDeviceManager::instance();
-    amdcuid_status_t status = mgr.init(AMDCUID_DEVICE_TYPE_SET_ALL);
+    auto& mgr = CuidDeviceManager::instance();
+    amdcuid_status_t status = mgr.init();
     
     if (status != AMDCUID_STATUS_SUCCESS) {
         std::cerr << "Error: Failed to initialize device manager (status: " << status << ")" << std::endl;
@@ -245,10 +230,10 @@ int list_devices(bool show_primary, const std::string* filter_type) {
     }
     
     // Parse filter type if provided
-    amdcuid_device_type_t filter_device_type = AMDCUID_DEVICE_TYPE_UNKNOWN;
+    amdcuid_device_type_t filter_device_type = AMDSMI_DEVICE_TYPE_NONE;
     if (filter_type) {
         filter_device_type = string_to_device_type(*filter_type);
-        if (filter_device_type == AMDCUID_DEVICE_TYPE_UNKNOWN) {
+        if (filter_device_type == AMDSMI_DEVICE_TYPE_NONE) {
             std::cerr << "Error: Unknown device type '" << *filter_type << "'" << std::endl;
             std::cerr << "Valid types: platform, cpu, gpu, nic, npu, storage, memory" << std::endl;
             return 1;
@@ -290,9 +275,9 @@ int list_devices(bool show_primary, const std::string* filter_type) {
             }
             
             if (show_primary && cuid_file.is_privileged()) {
-                std::cout << "\n  Primary CUID:   " << AmdCuidUtilities::get_cuid_as_string(&entry.primary_cuid);
+                std::cout << "\n  Primary CUID:   " << CuidUtilities::get_cuid_as_string(&entry.primary_cuid);
             }
-            std::cout << "\n  CUID:           " << AmdCuidUtilities::get_cuid_as_string(&entry.secondary_cuid);
+            std::cout << "\n  CUID:           " << CuidUtilities::get_cuid_as_string(&entry.secondary_cuid);
             
             if (!entry.device_node.empty()) {
                 std::cout << "\n  Device Node:    " << entry.device_node;

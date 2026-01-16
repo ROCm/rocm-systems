@@ -20,38 +20,34 @@
  * THE SOFTWARE.
  */
 
-#ifndef CUID_DEVICE_H
-#define CUID_DEVICE_H
+#ifndef CUID_PLATFORM_H
+#define CUID_PLATFORM_H
 
-#include "cuid.h"
-#include "hmac.h"
+#include "cuid_device.h"
+#include "include/amd_cuid.h"
+#include "cuid_internal.h"
+#include <vector>
 #include <memory>
-#include <cstdint>
-#include <string>
 
-class AmdCuidDevice {
-public:
-    virtual ~AmdCuidDevice() = default;
-    virtual amdcuid_device_type_t type() const = 0;
-    virtual amdcuid_status_t get_primary_cuid(amdcuid& id) const = 0;
-    virtual amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const = 0;
-    amdcuid_status_t get_secondary_cuid(amdcuid& id, AMDCUID_HMAC * hmac = nullptr) const;
-
-    // Virtual accessors for common device properties with default unsupported implementations
-    virtual amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const {
-        (void)vendor_id;
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
-    virtual amdcuid_status_t get_revision_id(uint8_t& revision_id) const {
-        (void)revision_id;
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
-    virtual amdcuid_status_t get_bdf(std::string& bdf) const {
-        (void)bdf;
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
+struct amdcuid_platform_info {
+    amdcuid_cuid_public_fields header;
+    // Add more fields as needed
 };
 
-typedef std::shared_ptr<AmdCuidDevice> DevicePtr;
+class CuidPlatform : public CuidDevice {
+public:
+    CuidPlatform(const amdcuid_platform_info& i);
+    amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_PLATFORM; }
+    amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
+    amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
+    static amdcuid_status_t discover(std::vector<DevicePtr> &platforms);
 
-#endif // CUID_DEVICE_H
+    // Virtual accessor overrides
+    amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const override;
+
+    const amdcuid_platform_info& get_info() const;
+private:
+    amdcuid_platform_info m_info;
+};
+
+#endif // CUID_PLATFORM_H

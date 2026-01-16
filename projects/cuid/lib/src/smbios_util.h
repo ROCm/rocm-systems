@@ -23,7 +23,7 @@
 #ifndef SMBIOS_UTIL_H
 #define SMBIOS_UTIL_H
 
-#include "cuid.h"
+#include "include/amd_cuid.h"
 #include <iostream>
 
 class SmbiosUtil {
