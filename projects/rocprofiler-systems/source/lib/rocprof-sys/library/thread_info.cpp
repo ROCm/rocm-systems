@@ -24,7 +24,6 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -35,6 +34,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/process/threading.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdint>
 
@@ -80,31 +81,18 @@ init_index_data(int64_t _tid, bool _offset = false)
         threading::offset_this_id(_offset);
         itr = thread_index_data{};
 
-        ROCPROFSYS_CONDITIONAL_THROW(itr->internal_value != _tid,
-                                     "Error! thread_info::init_index_data was called for "
-                                     "thread %zi on thread %zi\n",
-                                     _tid, itr->internal_value);
+        if(itr->internal_value != _tid)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! thread_info::init_index_data was called for "
+                            "thread {} on thread {}\n",
+                            _tid, itr->internal_value));
+        }
 
-        int _verb = 2;
-        // if thread created using finalization, bump up the minimum verbosity level
-        if(get_state() >= State::Finalized && _offset) _verb += 2;
-        if(!config::settings_are_configured())
-        {
-            ROCPROFSYS_BASIC_VERBOSE_F(_verb,
-                                       "Thread %li on PID %i (rank: %i) assigned "
-                                       "rocprof-sys TID %li (internal: %li)\n",
-                                       itr->system_value, process::get_id(), dmp::rank(),
-                                       itr->sequent_value, itr->internal_value);
-        }
-        else
-        {
-            ROCPROFSYS_VERBOSE_F(
-                _verb,
-                "Thread %li on PID %i (rank: %i) assigned rocprof-sys TID "
-                "%li (internal: %li)\n",
-                itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value,
-                itr->internal_value);
-        }
+        LOG_TRACE("Thread {} on PID {} (rank: {}) assigned rocprof-sys TID {} "
+                  "(internal: {})",
+                  itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value,
+                  itr->internal_value);
     }
     return itr;
 }
@@ -125,8 +113,8 @@ std::string
 thread_index_data::as_string() const
 {
     auto _ss = std::stringstream{};
-    _ss << sequent_value << " [" << as_hex(system_value) << "] (#" << internal_value
-        << ")";
+    _ss << sequent_value << " [" << fmt::format("{:x}", system_value) << "] (#"
+        << internal_value << ")";
     return _ss.str();
 }
 
@@ -144,19 +132,16 @@ grow_data(int64_t _tid)
         // check again after locking
         if(_tid >= peak_num_threads)
         {
-            TIMEMORY_PRINTF_WARNING(
-                stderr, "[%li] Growing thread data from %li to %li...\n", _tid,
-                peak_num_threads, peak_num_threads + max_supported_threads);
-            fflush(stderr);
+            LOG_WARNING("[{}] Growing thread data from {} to {}...", _tid,
+                        peak_num_threads, peak_num_threads + max_supported_threads);
 
             for(auto itr : grow_functors())
             {
                 if(itr)
                 {
                     int64_t _new_capacity = (*itr)(_tid + 1);
-                    TIMEMORY_PRINTF_WARNING(stderr,
-                                            "[%li] Grew thread data from %li to %li...\n",
-                                            _tid, peak_num_threads, _new_capacity);
+                    LOG_WARNING("[{}] Grew thread data from {} to {}...", _tid,
+                                peak_num_threads, _new_capacity);
                 }
             }
             peak_num_threads += max_supported_threads;
@@ -243,7 +228,10 @@ thread_info::get(native_handle_t&& _tid)
         }
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    if(get_is_continuous_integration() && unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
     return unknown_thread;
 }
 
@@ -259,7 +247,11 @@ thread_info::get(std::thread::id _tid)
         }
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    if(get_is_continuous_integration() && unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
+
     return unknown_thread;
 }
 
@@ -294,16 +286,20 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
     }
     else if(_type == ThreadIdType::PthreadID)
     {
-        ROCPROFSYS_THROW("rocprof-sys does not support thread_info::get(int64_t, "
-                         "ThreadIdType) with ThreadIdType::PthreadID\n");
+        throw std::runtime_error("rocprof-sys does not support thread_info::get(int64_t, "
+                                 "ThreadIdType) with ThreadIdType::PthreadID");
     }
     else if(_type == ThreadIdType::StlThreadID)
     {
-        ROCPROFSYS_THROW("rocprof-sys does not support thread_info::get(int64_t, "
-                         "ThreadIdType) with ThreadIdType::StlThreadID\n");
+        throw std::runtime_error("rocprof-sys does not support thread_info::get(int64_t, "
+                                 "ThreadIdType) with ThreadIdType::StlThreadID");
     }
 
-    ROCPROFSYS_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    if(get_is_continuous_integration() && unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
+
     return unknown_thread;
 }
 
