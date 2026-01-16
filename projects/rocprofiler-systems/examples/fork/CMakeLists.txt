@@ -20,7 +20,7 @@ target_link_libraries(
 )
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
-if(ROCPROFSYS_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET fork-example)
     install(
         TARGETS fork-example
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
