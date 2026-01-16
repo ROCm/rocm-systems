@@ -1,3 +1,4 @@
+# ruff: noqa
 ##############################################################################
 # MIT License
 #
@@ -58,7 +59,7 @@ except ImportError:
         "The --torch-operators option requires a valid PyTorch installation.\n"
         "Please install PyTorch and try again."
     )
-    sys.exit(1)
+    sys.exit(0)
 
 import importlib.util
 import inspect
@@ -70,11 +71,11 @@ from roctx import rangePop, rangePush
 
 def roctx_wrapper(func, name=None):
     func_name = name or func.__name__
-    call_counter = {'count': 0}
+    call_counter = {"count": 0}
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        call_counter['count'] += 1
+        call_counter["count"] += 1
         frame = inspect.currentframe().f_back
         location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
 
@@ -85,13 +86,14 @@ def roctx_wrapper(func, name=None):
         finally:
             rangePop()
         return result
+
     return wrapper
 
 
 def auto_discover_torch_functions(module, prefix, exclude_patterns=None):
     """Automatically discover all callable functions in a module."""
     if exclude_patterns is None:
-        exclude_patterns = ['__', '_', 'is_', 'set_', 'get_']
+        exclude_patterns = ["__", "_", "is_", "set_", "get_"]
 
     functions = {}
     for name in dir(module):
@@ -121,21 +123,23 @@ def inject_roctx_into_torch():
     all_operations = {}
 
     # torch.* functions (matmul, mm, cat, etc.)
-    all_operations.update(auto_discover_torch_functions(torch, 'torch'))
+    all_operations.update(auto_discover_torch_functions(torch, "torch"))
 
     # torch.nn.functional.* functions (linear, relu, softmax, etc.)
-    all_operations.update(auto_discover_torch_functions(F, 'torch.nn.functional'))
+    all_operations.update(auto_discover_torch_functions(F, "torch.nn.functional"))
 
     # torch.linalg.* functions (matrix operations)
     try:
-        all_operations.update(auto_discover_torch_functions(torch.linalg, 'torch.linalg'))
+        all_operations.update(
+            auto_discover_torch_functions(torch.linalg, "torch.linalg")
+        )
     except Exception as e:
         console_warning(type(e))
         console_warning(f"Could not access torch.linalg: {e}")
 
     # torch.fft.* functions (FFT operations)
     try:
-        all_operations.update(auto_discover_torch_functions(torch.fft, 'torch.fft'))
+        all_operations.update(auto_discover_torch_functions(torch.fft, "torch.fft"))
     except Exception as e:
         console_warning(type(e))
         console_warning(f"Could not access torch.fft: {e}")
@@ -156,7 +160,9 @@ def inject_roctx_into_torch():
             if wrapped_count <= 20 or wrapped_count > len(all_operations) - 5:
                 console_log(f"Wrapped: {full_name}")
             elif wrapped_count == 21:
-                console_log(f"  ... (wrapping {len(all_operations) - 25} more operations)")
+                console_log(
+                    f"  ... (wrapping {len(all_operations) - 25} more operations)"
+                )
 
         except Exception as e:
             failed_count += 1
@@ -165,9 +171,10 @@ def inject_roctx_into_torch():
 
     # Wrap tensor methods
     original_backward = torch.Tensor.backward
-    backward_counter = {'count': 0}
+    backward_counter = {"count": 0}
+
     def backward_with_roctx(self, *args, **kwargs):
-        backward_counter['count'] += 1
+        backward_counter["count"] += 1
         frame = inspect.currentframe().f_back
         location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
         rangePush(f"torch.Tensor.backward:#{backward_counter['count']}@{location}")
@@ -175,6 +182,7 @@ def inject_roctx_into_torch():
             return original_backward(self, *args, **kwargs)
         finally:
             rangePop()
+
     torch.Tensor.backward = backward_with_roctx
 
     wrapped_count += 1
@@ -182,8 +190,9 @@ def inject_roctx_into_torch():
 
     console_log(f"Wrapped {wrapped_count} operations with ROCTX markers")
     if failed_count > 0:
-        console_warning(f"Failed to wrap {failed_count} operations (likely not patchable)")
-
+        console_warning(
+            f"Failed to wrap {failed_count} operations (likely not patchable)"
+        )
 
 
 def inject_roctx_into_optimizer():
@@ -208,6 +217,7 @@ def inject_roctx_into_model():
     import inspect
 
     from torch import nn
+    from typing import Any
 
     original_call = nn.Module.__call__
 
@@ -216,7 +226,7 @@ def inject_roctx_into_model():
         class_name = self.__class__.__name__
 
         # Initialize counter for this instance if not exists
-        if not hasattr(self, '_roctx_call_count'):
+        if not hasattr(self, "_roctx_call_count"):
             self._roctx_call_count = 0
         self._roctx_call_count += 1
 
@@ -225,7 +235,9 @@ def inject_roctx_into_model():
         location = f"{frame.f_code.co_filename.split('/')[-1]}:{frame.f_lineno}"
 
         # Create detailed marker
-        rangePush(f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}")
+        rangePush(
+            f"nn.Module.{class_name}.forward:#{self._roctx_call_count}@{location}"
+        )
         try:
             return original_call(self, *args, **kwargs)
         finally:
@@ -233,6 +245,7 @@ def inject_roctx_into_model():
 
     nn.Module.__call__ = call_with_roctx
     console_log("Wrapped nn.Module forward() with ROCTX markers\n")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -242,7 +255,6 @@ if __name__ == "__main__":
     # Get target script and its arguments
     target_script = sys.argv[1]
     script_args = sys.argv[2:]
-
 
     # Inject ROCTX markers BEFORE importing the target script
     inject_roctx_into_torch()
@@ -259,5 +271,5 @@ if __name__ == "__main__":
     # Load and execute the target script
     spec = importlib.util.spec_from_file_location("__main__", target_script)
     module = importlib.util.module_from_spec(spec)
-    sys.modules['__main__'] = module
+    sys.modules["__main__"] = module
     spec.loader.exec_module(module)

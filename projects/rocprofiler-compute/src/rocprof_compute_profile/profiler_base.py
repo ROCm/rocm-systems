@@ -104,7 +104,6 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
         if args.remaining:
@@ -116,9 +115,11 @@ class RocProfCompute_Base:
                 )
 
             # Appending a wrapper for injecting roctx-markers
-            if hasattr(args, 'torch_operators') and args.torch_operators:
+            if hasattr(args, "torch_operators") and args.torch_operators:
                 # Find the inject_roctx.py script in src/utils
-                inject_script = Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+                inject_script = (
+                    Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+                )
                 if not inject_script.exists():
                     console_error(
                         f"Cannot find inject_roctx.py at {inject_script}. "
@@ -126,21 +127,24 @@ class RocProfCompute_Base:
                     )
 
                 # Case 1: Explicit python command (python, python3, etc.)
-                if args.remaining[0].startswith('python'):
+                if args.remaining[0].startswith("python"):
                     # Insert inject_roctx.py after the python interpreter
                     args.remaining.insert(1, str(inject_script))
                     console_debug(f"Injected {inject_script} into command")
                     console_debug(f"New command: {' '.join(args.remaining)}")
                 # Case 2: Direct Python script execution (./main.py, /path/to/script.py)
-                elif args.remaining[0].endswith('.py'):
+                elif args.remaining[0].endswith(".py"):
                     # Use current Python interpreter
                     args.remaining.insert(0, str(inject_script))
                     args.remaining.insert(0, sys.executable)
-                    console_debug(f"Injected {inject_script} and {sys.executable} into command")
+                    console_debug(
+                        f"Injected {inject_script} and {sys.executable} into command"
+                    )
                     console_debug(f"New command: {' '.join(args.remaining)}")
                 else:
                     console_warning(
-                        "--torch-operators flag has no significance if not profiling a PyTorch application."
+                        "--torch-operators flag has no significance if not profiling",
+                        " a PyTorch application.",
                     )
                     args.torch_operators = False
             args.remaining = " ".join(args.remaining)
@@ -495,7 +499,7 @@ class RocProfCompute_Base:
                         f'passes. Please use "--block" or "--set" '
                         f"to adjust or reduce the requested performance metrics!"
                     )
-            console_debug(f'Sending profiler options to run_prof: {options}')
+            console_debug(f"Sending profiler options to run_prof: {options}")
 
             run_prof(
                 fnames=str_fnames,
@@ -504,7 +508,7 @@ class RocProfCompute_Base:
                 mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                torch_operators_enabled=getattr(args, 'torch_operators', False),
+                torch_operators_enabled=getattr(args, "torch_operators", False),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 

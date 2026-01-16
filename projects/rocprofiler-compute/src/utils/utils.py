@@ -967,9 +967,7 @@ def run_prof(
         combined_df = combined_df.drop(columns=["PID"])
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_operators_enabled:
-            # Extract marker_api_trace and counter_collection CSVs from db files
-            # If using native tool for counter collection, extract counter_collection.csv from native_counter_collection.csv
-            # Add torch operator trace processing
+            # Extract marker_api_trace and counter_collection CSVs
             import sqlite3
             from contextlib import closing
 
@@ -1012,6 +1010,7 @@ def run_prof(
             FROM counters_collection
             """
             import socket
+
             output_path = Path(workload_dir + "/out/pmc_1")
             hostname = socket.gethostname()
             hostname_output_path = output_path / hostname
@@ -1022,65 +1021,34 @@ def run_prof(
                     # Extract marker API trace
                     with closing(sqlite3.connect(db_path)) as conn:
                         marker_df = pd.read_sql_query(MARKER_API_TRACE_QUERY, conn)
-                        marker_csv = f"{hostname_output_path}/{pid}_marker_api_trace.csv"
+                        marker_csv = (
+                            f"{hostname_output_path}/{pid}_marker_api_trace.csv"
+                        )
                         if not marker_df.empty:
                             marker_df.to_csv(marker_csv, index=False)
-                            console_log(f"Extracted marker data from rocpd: {marker_csv}")
+                            console_log(
+                                f"Extracted marker data from rocpd: {marker_csv}"
+                            )
                         else:
-                            console_warning(f"No marker API trace data found in {db_path}.")
+                            console_warning(
+                                f"No marker API trace data found in {db_path}."
+                            )
 
                         # Extract counter collection
                         counter_df = pd.read_sql_query(COUNTERS_COLLECTION_QUERY, conn)
-                        counter_csv = f"{hostname_output_path}/{pid}_counter_collection.csv"
+                        counter_csv = (
+                            f"{hostname_output_path}/{pid}_counter_collection.csv"
+                        )
                         if not counter_df.empty:
                             counter_df.to_csv(counter_csv, index=False)
-                            console_debug(f"Extracted counter collection data from rocpd: {counter_csv}")
-                        # elif options["ROCPROF_COUNTER_COLLECTION"] == "0":
-                        #     KERNEL_TRACE_QUERY = """
-                        #     SELECT
-                        #         category as Kind,
-                        #         agent_abs_index as Agent_Id,
-                        #         queue_id as Queue_Id,
-                        #         stream_id as Stream_Id,
-                        #         tid as Thread_Id,
-                        #         dispatch_id as Dispatch_Id,
-                        #         kernel_id as Kernel_Id,
-                        #         name as Kernel_Name,
-                        #         corr_id as Correlation_Id,
-                        #         start as Start_Timestamp,
-                        #         end as End_Timestamp,
-                        #         lds_size as LDS_Block_Size,
-                        #         scratch_size as Scratch_Size,
-                        #         vgpr_count as VGPR_Count,
-                        #         accum_vgpr_count as Accum_VGPR_Count,
-                        #         sgpr_count as SGPR_Count,
-                        #         workgroup_x as Workgroup_Size_X,
-                        #         workgroup_y as Workgroup_Size_Y,
-                        #         workgroup_z as Workgroup_Size_Z,
-                        #         grid_x as Grid_Size_X,
-                        #         grid_y as Grid_Size_Y,
-                        #         grid_z as Grid_Size_Z
-                        #     FROM kernels
-                        #     ORDER BY start
-                        #     """
-                        #     # Extract kernel trace
-                        #     kernel_df = pd.read_sql_query(KERNEL_TRACE_QUERY, conn)
-                        #     kernel_csv = f"{hostname_output_path}/{pid}_kernel_trace.csv"
-                        #     if not kernel_df.empty:
-                        #         kernel_df.to_csv(kernel_csv, index=False)
-                        #         console_log(f"Extracted kernel trace data from rocpd: {kernel_csv}")
-                        #     else:
-                        #         console_error(f"No kernel trace data found in {db_path}.")
-
-                        #     # Extract native counter collection CSV
-                        #     try:
-                        #         convert_native_counter_collection_csv(workload_dir)
-                        #         console_log(f"Extracted counter collection data from native tool: {counter_csv}")
-                        #     except Exception as e:
-                        #         console_error(f"Failed to convert native counter collection CSV: {e}")
-                        # else:
-                        #     console_warning(f"No counter collection data found in {db_path}.")
-
+                            console_debug(
+                                "Extracted counter collection data from rocpd:",
+                                f"{counter_csv}",
+                            )
+                        else:
+                            console_warning(
+                                "No counter collection data found in ", f"{db_path}."
+                            )
                 except sqlite3.Error as e:
                     console_error(f"Failed to extract data from {db_path}: {e}")
                 except Exception as e:
@@ -1331,10 +1299,6 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
             kernel_data_filename.replace("kernel_trace", "counter_collection"),
             index=False,
         )
-        console_log(
-            f"Converted native counter collection csv to "
-            f"rocprofiler-sdk format: "
-            f"{kernel_data_filename.replace('kernel_trace', 'counter_collection')}")
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
@@ -1403,9 +1367,12 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         f"{workload_dir}/out/pmc_1/*/*_marker_api_trace.csv"
     )
     existing_marker_files_csv = [
-        markers_file for markers_file in marker_api_trace_csvs
-        if Path(markers_file).is_file() and
-        Path(markers_file.replace("_marker_api_trace.csv", "_counter_collection.csv")).is_file()
+        markers_file
+        for markers_file in marker_api_trace_csvs
+        if Path(markers_file).is_file()
+        and Path(
+            markers_file.replace("_marker_api_trace.csv", "_counter_collection.csv")
+        ).is_file()
     ]
     if not existing_marker_files_csv:
         console_warning(
@@ -1437,7 +1404,8 @@ def process_torch_trace_output(workload_dir: str, fbase: str) -> None:
         f"{workload_dir}/{fbase}_torch_trace.csv",
         index=False,
     )
-    console_log('Created ',f"{workload_dir}/{fbase}_torch_trace.csv")
+    console_log("Created ", f"{workload_dir}/{fbase}_torch_trace.csv")
+
 
 @demarcate
 def consolidate_torch_trace_output(workload_dir: str) -> None:
@@ -1472,7 +1440,8 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         except Exception as e:
             # Unexpected error; log full details for debugging
             console_warning(
-                f"Unexpected error while reading {trace_file}: {e}\n{traceback.format_exc()}"
+                f"Unexpected error while reading {trace_file}: {e}\n"
+                f"{traceback.format_exc()}"
             )
             continue
 
@@ -1483,9 +1452,7 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
             )
             continue
 
-        all_traces.append(
-            df[required_columns]
-        )
+        all_traces.append(df[required_columns])
     if not all_traces:
         console_warning("No valid torch trace data to consolidate.")
         return
@@ -1494,28 +1461,35 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
 
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
-    consolidated_df["Operator_Name"] = split_columns[0] if len(split_columns.columns) > 0 else None
-    consolidated_df["Context_Id"] = split_columns[1] if len(split_columns.columns) > 1 else None
+    consolidated_df["Operator_Name"] = (
+        split_columns[0] if len(split_columns.columns) > 0 else None
+    )
+    consolidated_df["Context_Id"] = (
+        split_columns[1] if len(split_columns.columns) > 1 else None
+    )
     consolidated_df.drop(columns=["Function"], inplace=True)
-    consolidated_df = consolidated_df[[
-        "Operator_Name",
-        "Context_Id",
-        "Kernel_Name",
-        "Counter_Name",
-        "Counter_Value",
-        "Start_Timestamp_function",
-        "End_Timestamp_function",
-        "Start_Timestamp_kernel",
-        "End_Timestamp_kernel",
-    ]]
+    consolidated_df = consolidated_df[
+        [
+            "Operator_Name",
+            "Context_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp_function",
+            "End_Timestamp_function",
+            "Start_Timestamp_kernel",
+            "End_Timestamp_kernel",
+        ]
+    ]
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
-        f = operator_name.replace("torch.","").replace(".", "_")
+        f = operator_name.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
-        os.makedirs(f"{workload_dir}/torch_operators", exist_ok=True)
+        Path(f"{workload_dir}/torch_operators").mkdir(parents=True, exist_ok=True)
         output_file = f"{workload_dir}/torch_operators/{f}.csv"
         group.to_csv(output_file, index=False)
         console_log(f"Saved consolidated trace for {f} to {output_file}")
+
 
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
@@ -1540,7 +1514,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
         )
-
 
 
 @demarcate

@@ -134,11 +134,11 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> None:
-    """Update pmc_event table in the given rocpd database path    
-       Maps dispatch_id from native counter collection to event_id in rocpd schema.
-       Native counter collection uses dispatch_id, but rocpd schema requires event_id
-       which must be obtained from rocpd_kernel_dispatch table to handle cases where
-       marker API events (e.g., PyTorch operators) offset the event_id sequence.
+    """Updates pmc_event table in the given rocpd database path.
+    Maps dispatch_id from native counter collection to event_id in rocpd schema.
+    Native counter collection uses dispatch_id, but rocpd schema requires event_id
+    which must be obtained from rocpd_kernel_dispatch table to handle cases where
+    marker API events (e.g., PyTorch operators) offset the event_id sequence.
     """
     try:
         with closing(sqlite3.connect(rocpd_db_path)) as conn:
@@ -161,7 +161,7 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
             )
 
             # Map dispatch_id to event_id from rocpd_kernel_dispatch
-            # Native counter collection CSV has dispatch_id, but rocpd schema needs event_id
+            # Native counter collection CSV has dispatch_id, but schema needs event_id
             # event_id may differ from dispatch_id when marker API tracing is enabled
             dispatch_to_event_query = """
                 SELECT DISTINCT dispatch_id, event_id, guid
@@ -188,7 +188,9 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
 
             # Map dispatch_id to event_id for counter data
             counter_info = counter_info.copy()
-            counter_info["event_id"] = counter_info["dispatch_id"].map(dispatch_to_event)
+            counter_info["event_id"] = counter_info["dispatch_id"].map(
+                dispatch_to_event
+            )
 
             # Check for unmapped dispatch IDs
             unmapped = counter_info["event_id"].isna()
@@ -200,7 +202,9 @@ def update_rocpd_pmc_events(counter_info: pd.DataFrame, rocpd_db_path: str) -> N
                 # Drop unmapped rows
                 counter_info = counter_info[~unmapped]
             if counter_info.empty:
-                console_error("No valid counter data to insert after dispatch_id mapping")
+                console_error(
+                    "No valid counter data to insert after dispatch_id mapping"
+                )
                 return
             columns = ("guid", "event_id", "pmc_id", "value")
             values = list(
